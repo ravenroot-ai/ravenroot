@@ -18,11 +18,33 @@ import java.util.Optional;
  * @param createdAt time this business history was first established
  * @param updatedAt time of the latest recorded change; pagination does not depend on this value
  * @param expiresAt retention deadline for the represented history
+ * @param closureSignal explicit pending/final authored closure request and original causal coordinates, absent when no signal exists
  */
 public record BusinessHistory(BusinessScope scope, String applicationCorrelationId, Optional<String> publicReference,
                                Lifecycle lifecycle, long revision, long runningTraversals,
                                long completedTraversals, long failedTraversals, long cancelledTraversals,
-                               boolean incompleteHistory, Instant createdAt, Instant updatedAt, Instant expiresAt) {
+                               boolean incompleteHistory, Instant createdAt, Instant updatedAt, Instant expiresAt, BusinessClosureSignal closureSignal) {
+    /** Creates a summary with no explicit authored close signal.
+     * @param scope exact business scope
+     * @param applicationCorrelationId established business identity
+     * @param publicReference optional public exact reference
+     * @param lifecycle current explicit lifecycle
+     * @param revision current revision
+     * @param runningTraversals admitted unsettled traversals
+     * @param completedTraversals successful traversals
+     * @param failedTraversals failed traversals
+     * @param cancelledTraversals cancelled traversals
+     * @param incompleteHistory historical completeness flag
+     * @param createdAt original admission time
+     * @param updatedAt latest update
+     * @param expiresAt retention deadline
+     */
+    public BusinessHistory(BusinessScope scope, String applicationCorrelationId, Optional<String> publicReference,
+            Lifecycle lifecycle, long revision, long runningTraversals, long completedTraversals, long failedTraversals,
+            long cancelledTraversals, boolean incompleteHistory, Instant createdAt, Instant updatedAt, Instant expiresAt) {
+        this(scope, applicationCorrelationId, publicReference, lifecycle, revision, runningTraversals, completedTraversals,
+                failedTraversals, cancelledTraversals, incompleteHistory, createdAt, updatedAt, expiresAt, null);
+    }
     /** Explicit closure authority; tombstones never silently reopen. */
     public enum Lifecycle {
         /** Awaiting an explicit business closure; quiet periods do not complete it. */
@@ -42,6 +64,8 @@ public record BusinessHistory(BusinessScope scope, String applicationCorrelation
         RUNNING,
         /** No traversal is running, and the business history remains explicitly open. */
         AWAITING_EXTERNAL_EVENT,
+        /** An explicit close barrier is waiting for already-admitted causal work. */
+        CLOSING,
         /** Explicit business completion with no retained failure. */
         COMPLETED,
         /** Failure is retained; later quietness does not erase it. */
@@ -62,6 +86,8 @@ public record BusinessHistory(BusinessScope scope, String applicationCorrelation
                 || runningTraversals < 0 || completedTraversals < 0 || failedTraversals < 0 || cancelledTraversals < 0)
             throw new IllegalArgumentException("invalid business history");
         publicReference = publicReference == null ? Optional.empty() : publicReference;
+        if (closureSignal != null && (!closureSignal.scope().equals(scope) || !closureSignal.applicationCorrelationId().equals(applicationCorrelationId)))
+            throw new IllegalArgumentException("business close signal scope mismatch");
     }
     /** Derives observation without erasing an earlier failure or inferring closure from quietness.
  * @return honest observation state derived from explicit closure and retained traversal results
@@ -72,6 +98,7 @@ public record BusinessHistory(BusinessScope scope, String applicationCorrelation
         if (lifecycle == Lifecycle.FAILED) return State.FAILED;
         if (failedTraversals > 0) return completedTraversals > 0 ? State.PARTIAL : State.FAILED;
         if (runningTraversals > 0) return State.RUNNING;
+        if (closureSignal != null && lifecycle == Lifecycle.OPEN) return State.CLOSING;
         if (lifecycle == Lifecycle.COMPLETED) return State.COMPLETED;
         return State.AWAITING_EXTERNAL_EVENT;
     }

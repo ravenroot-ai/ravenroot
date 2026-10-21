@@ -283,6 +283,11 @@ class SourceLocalTraversalTest {
     }
     static DefaultGraphDeployment deployment(SameThreadExecutionEngine engine, ExecutionStore store,
             Map<String, InboundSourceContext> contexts, List<String> effects, ExecutionMonitor monitor, String graph, Clock clock) {
+        return deployment(engine, store, contexts, effects, monitor, graph, clock, registry -> registry);
+    }
+    static DefaultGraphDeployment deployment(SameThreadExecutionEngine engine, ExecutionStore store,
+            Map<String, InboundSourceContext> contexts, List<String> effects, ExecutionMonitor monitor, String graph, Clock clock,
+            java.util.function.UnaryOperator<BehaviorRegistry> customize) {
         var source = new NodeBehavior() {
             @Override public NodeTypeDescriptor descriptor() {
                 return new NodeTypeDescriptor("source", "Source", "Test", "Source", "actor", false,
@@ -316,7 +321,7 @@ class SourceLocalTraversalTest {
                     effects.add(message.nodeId() + ":" + message.payload());
                     return CompletableFuture.completedFuture(NodeResult.continueWith(message.payload()));
                 });
-        return new DefaultGraphDeployment(DeploymentId.of("source-local"), engine, registry, monitor,
+        return new DefaultGraphDeployment(DeploymentId.of("source-local"), engine, customize.apply(registry), monitor,
                 ExecutionIdentitySource.randomUuids(), graph.getBytes(StandardCharsets.UTF_8),
                 DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY, store,
                 DefaultGraphDeployment.DEFAULT_INBOX_RETENTION, "source-local-test", Duration.ofSeconds(30),

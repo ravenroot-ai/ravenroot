@@ -18,12 +18,31 @@ import java.util.UUID;
  * @param startedAt time the original traversal was admitted under its established application context
  * @param updatedAt time of the latest recorded change; pagination does not depend on this value
  * @param endedAt recorded traversal end time, present exactly for terminal traversals
+ * @param derivation original causal coordinates for an explicit context derivation, absent for other entry causes
  */
 public record CorrelatedTraversal(BusinessScope scope, ApplicationCorrelationContext context,
                                    UUID processInstanceId, UUID traversalId, String entryNodeId,
                                    Cause cause, TraversalStatus status,
                                    ExecutionTerminationReason terminationReason,
-                                   Instant startedAt, Instant updatedAt, Instant endedAt) {
+                                   Instant startedAt, Instant updatedAt, Instant endedAt, CorrelationDerivation derivation) {
+    /** Creates a traversal relation without explicit context derivation ancestry.
+     * @param scope exact tenant, deployment and graph version
+     * @param context established immutable business identity
+     * @param processInstanceId original owning process
+     * @param traversalId actual traversal
+     * @param entryNodeId admitted entry
+     * @param cause entry cause
+     * @param status actual lifecycle
+     * @param terminationReason optional terminal classification
+     * @param startedAt original admission time
+     * @param updatedAt latest update
+     * @param endedAt terminal time, absent while running
+     */
+    public CorrelatedTraversal(BusinessScope scope, ApplicationCorrelationContext context, UUID processInstanceId,
+            UUID traversalId, String entryNodeId, Cause cause, TraversalStatus status, ExecutionTerminationReason terminationReason,
+            Instant startedAt, Instant updatedAt, Instant endedAt) {
+        this(scope, context, processInstanceId, traversalId, entryNodeId, cause, status, terminationReason, startedAt, updatedAt, endedAt, null);
+    }
     /** Entry cause, independent from transport message IDs and retry attempts. */
     public enum Cause {
         /** Original initial START admitted for the logical deployment. */
@@ -43,6 +62,7 @@ public record CorrelatedTraversal(BusinessScope scope, ApplicationCorrelationCon
         Objects.requireNonNull(startedAt, "startedAt"); Objects.requireNonNull(updatedAt, "updatedAt");
         if (entryNodeId == null || entryNodeId.isBlank() || entryNodeId.length() > 4096)
             throw new IllegalArgumentException("invalid entry node");
+        if ((cause == Cause.DERIVED_CONTEXT) != (derivation != null)) throw new IllegalArgumentException("explicit context derivation requires original ancestry");
         if (status.terminal() != (endedAt != null)) throw new IllegalArgumentException("terminal traversal requires end time");
     }
 }

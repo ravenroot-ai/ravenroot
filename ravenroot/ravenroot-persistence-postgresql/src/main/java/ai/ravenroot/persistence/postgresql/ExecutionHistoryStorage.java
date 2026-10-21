@@ -108,7 +108,7 @@ final class ExecutionHistoryStorage {
         var context = BusinessHistoryStorage.traversal(db, key.tenantId(), key.processInstanceId(), traversal);
         return new TraversalSummary(key.processInstanceId(), traversal, entry, TraversalStatus.valueOf(status),
                 reason == null ? null : ExecutionTerminationReason.valueOf(reason), visits,
-                context.map(CorrelatedTraversal::context).orElse(null), context.map(CorrelatedTraversal::cause).orElse(null));
+                context.map(CorrelatedTraversal::context).orElse(null), context.map(CorrelatedTraversal::cause).orElse(null), context.map(CorrelatedTraversal::derivation).orElse(null));
     }
     static HistoryPage<NodeVisitSummary> visits(Connection db, ExecutionKey key, UUID traversal,
             Optional<String> node, Optional<String> cursor, int limit, int maximum) throws SQLException {

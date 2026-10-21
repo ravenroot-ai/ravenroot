@@ -36,6 +36,8 @@ final class DeploymentEntryStorage {
         if (proposed.checkpoint() != null) throw new BusinessHistoryException(INVALID_REQUEST);
         if (proposed.input().size() > policy.maxPendingEntryBytesPerScope()) throw new BusinessHistoryException(RESOURCE_LIMIT);
         PayloadJson.read(proposed.input().bytes(), policy.selection().input());
+        if (!(PayloadJson.read(proposed.attributes().bytes(), policy.selection().input()) instanceof ai.ravenroot.api.payload.PayloadValue.MapValue))
+            throw new BusinessHistoryException(INVALID_REQUEST);
         try (var insert = db.prepareStatement("INSERT INTO business_scope (tenant_id, deployment_id, graph_version) VALUES (?, ?, ?) ON CONFLICT DO NOTHING")) {
             bindScope(insert, 1, scope); insert.executeUpdate();
         }
@@ -51,7 +53,8 @@ final class DeploymentEntryStorage {
         if (prior.isPresent()) {
             var original = prior.orElseThrow();
             if (!original.scope().equals(scope) || !original.context().equals(proposed.context())
-                    || !original.entryNodeId().equals(proposed.entryNodeId()) || original.cause() != proposed.cause())
+                    || !original.entryNodeId().equals(proposed.entryNodeId()) || original.cause() != proposed.cause()
+                    || !Objects.equals(original.derivation(), proposed.traversal().derivation()))
                 throw new BusinessHistoryException(CONTEXT_CONFLICT);
             return new DeploymentEntryAdmission(original.status().terminal() ? DeploymentEntryAdmission.Outcome.SETTLED
                     : DeploymentEntryAdmission.Outcome.INPUT_UNAVAILABLE, Optional.empty());
@@ -69,7 +72,7 @@ final class DeploymentEntryStorage {
         if (lifetime.compareTo(policy.historyRetention()) > 0) lifetime = policy.historyRetention();
         var accepted = new DeploymentEntryIntent(scope, proposed.processInstanceId(), proposed.traversalId(), proposed.entryNodeId(),
                 proposed.context(), proposed.identity(), proposed.input(), now, now.plus(lifetime), proposed.cause(),
-                proposed.derivedFrom(), proposed.derivationReason(), null);
+                proposed.derivedFrom(), proposed.derivationReason(), null, proposed.attributes(), proposed.command());
         byte[] encoded = DeploymentEntryCodec.encode(accepted);
         try (var count = db.prepareStatement("SELECT COUNT(*), COALESCE(SUM(retained_bytes), 0) FROM deployment_entry_intent WHERE " + SCOPE)) {
             bindScope(count, 1, scope);

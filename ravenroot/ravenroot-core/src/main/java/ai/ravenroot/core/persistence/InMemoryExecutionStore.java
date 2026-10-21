@@ -324,7 +324,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 // says and what this adapter still does not say.
                 StoreCapability.EXECUTION_RESULTS, StoreCapability.RUNNER_JOBS,
                 StoreCapability.DURABLE_SAGAS, StoreCapability.SELECTIVE_REPLAY_EVIDENCE,
-                StoreCapability.FLOW_INVOCATIONS, StoreCapability.INITIAL_START_ADMISSION, StoreCapability.DEPLOYMENT_ENTRY_CUSTODY, StoreCapability.BUSINESS_HISTORIES, StoreCapability.CORRELATED_JOINS, StoreCapability.EXECUTION_HISTORY);
+                StoreCapability.FLOW_INVOCATIONS, StoreCapability.INITIAL_START_ADMISSION, StoreCapability.DEPLOYMENT_ENTRY_CUSTODY, StoreCapability.BUSINESS_HISTORIES, StoreCapability.BUSINESS_CLOSURE_SIGNALS, StoreCapability.CORRELATED_JOINS, StoreCapability.EXECUTION_HISTORY);
     }
 
     @Override
@@ -613,6 +613,16 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 dropAcknowledgementsForRescheduledWork(next);
 
                 var projectedEntry = deploymentEntries.projected(batch, folded);
+                var preparedClosures = businessHistories.prepareClosureSignals(batch, folded);
+                InMemoryDeploymentEntries.AdmissionPlan preparedHandoff = null;
+                if (batch.derivedEntryHandoff().isPresent()) {
+                    var handoff = batch.derivedEntryHandoff().orElseThrow(); var proposed = handoff.intent();
+                    if (proposed.input().size() > maxPayloadBytes() || proposed.attributes().size() > maxPayloadBytes())
+                        throw failure(new ExecutionStoreFailure.PayloadTooLarge(Math.max(proposed.input().size(), proposed.attributes().size()), maxPayloadBytes()));
+                    handoff.requireAuthority(batch, folded, businessHistories.traversal(key.tenantId(), key.processInstanceId(),
+                            proposed.derivedFrom().traversalId()).orElse(null));
+                    preparedHandoff = deploymentEntries.prepareAdmission(proposed, handoff.mode(), businessHistoryPolicy());
+                }
                 var sagaReplacements = validateSagaWrites(key, batch, now);
                 var outboxInserts = validateSagaCommands(key, batch, now);
                 var outboxRearms = validateSagaCommandRearms(key, batch);
@@ -634,6 +644,8 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                         && start.processInstanceId().equals(key.processInstanceId())
                         ? new ai.ravenroot.api.persistence.InitialStartRecord(start.deploymentId(), start.graphVersion(),
                                 start.identity(), start.input(), start.acceptedAt(), true) : start);
+                if (preparedHandoff != null) deploymentEntries.publishAdmission(preparedHandoff);
+                businessHistories.publishClosureSignals(preparedClosures);
                 for (var traversal : folded.traversals().values()) {
                     if (traversal.status().terminal()) businessHistories.settle(key.tenantId(),
                             key.processInstanceId(), traversal.traversalId(), traversal.status(),
@@ -3562,6 +3574,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
             Optional<LeaseHandle> derivingFence) {
         return completeBusiness(() -> {
             if (proposed.input().size() > maxPayloadBytes()) throw failure(new ExecutionStoreFailure.PayloadTooLarge(proposed.input().size(), maxPayloadBytes()));
+            if (proposed.attributes().size() > maxPayloadBytes()) throw failure(new ExecutionStoreFailure.PayloadTooLarge(proposed.attributes().size(), maxPayloadBytes()));
             if (proposed.cause() == ai.ravenroot.api.correlation.CorrelatedTraversal.Cause.DERIVED_CONTEXT) {
                 var fence = derivingFence.orElseThrow(() -> new IllegalArgumentException("derived entry requires original lease"));
                 if (!fence.key().equals(new ExecutionKey(proposed.scope().tenantId(), proposed.derivedFrom().processInstanceId())))

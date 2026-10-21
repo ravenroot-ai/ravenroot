@@ -195,7 +195,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
             StoreCapability.DURABLE,
             StoreCapability.TRANSACTIONAL_BATCH,
             StoreCapability.INITIAL_START_ADMISSION,
-            StoreCapability.DEPLOYMENT_ENTRY_CUSTODY, StoreCapability.BUSINESS_HISTORIES, StoreCapability.CORRELATED_JOINS, StoreCapability.EXECUTION_HISTORY,
+            StoreCapability.DEPLOYMENT_ENTRY_CUSTODY, StoreCapability.BUSINESS_HISTORIES, StoreCapability.BUSINESS_CLOSURE_SIGNALS, StoreCapability.CORRELATED_JOINS, StoreCapability.EXECUTION_HISTORY,
             StoreCapability.CROSS_PROCESS_LEASE,
             StoreCapability.IDEMPOTENCY_PURGE,
             StoreCapability.EVENT_JOURNAL,
@@ -549,6 +549,15 @@ public final class SqliteExecutionStore implements ExecutionStore {
                 now, createdAt, generation, origin, retainedUntil);
         AggregateStorage.write(connection, key, folded);
         DeploymentEntryStorage.project(connection, batch, folded);
+        BusinessHistoryStorage.writeClosureSignals(connection, batch, folded, now);
+        if (batch.derivedEntryHandoff().isPresent()) {
+            var handoff = batch.derivedEntryHandoff().orElseThrow(); var proposed = handoff.intent();
+            if (proposed.input().size() > maxPayloadBytes() || proposed.attributes().size() > maxPayloadBytes())
+                throw failure(new ExecutionStoreFailure.PayloadTooLarge(Math.max(proposed.input().size(), proposed.attributes().size()), maxPayloadBytes()));
+            handoff.requireAuthority(batch, folded, BusinessHistoryStorage.traversal(connection, key.tenantId(), key.processInstanceId(),
+                    proposed.derivedFrom().traversalId()).orElse(null));
+            DeploymentEntryStorage.admit(connection, proposed, handoff.mode(), businessHistoryPolicy(), now);
+        }
         // The business summary is a projection of this same committed lifecycle, never a
         // completion callback that a process crash could omit after effects have finished.
         for (var traversal : folded.traversals().values()) {
@@ -5692,6 +5701,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
         Objects.requireNonNull(proposed); Objects.requireNonNull(derivingFence);
         return async(() -> inWriteTransaction(proposed.key(), () -> {
             if (proposed.input().size() > maxPayloadBytes()) throw failure(new ExecutionStoreFailure.PayloadTooLarge(proposed.input().size(), maxPayloadBytes()));
+            if (proposed.attributes().size() > maxPayloadBytes()) throw failure(new ExecutionStoreFailure.PayloadTooLarge(proposed.attributes().size(), maxPayloadBytes()));
             if (proposed.cause() == ai.ravenroot.api.correlation.CorrelatedTraversal.Cause.DERIVED_CONTEXT) {
                 var fence = derivingFence.orElseThrow(() -> new IllegalArgumentException("derived entry requires original lease"));
                 if (!fence.key().equals(new ExecutionKey(proposed.scope().tenantId(), proposed.derivedFrom().processInstanceId())))

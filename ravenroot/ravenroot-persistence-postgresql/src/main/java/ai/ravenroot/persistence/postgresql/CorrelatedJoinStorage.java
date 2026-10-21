@@ -96,6 +96,7 @@ final class CorrelatedJoinStorage {
             }
             cancelPending(db, key.scope(), key.applicationCorrelationId(), now);
         }
+        BusinessHistoryStorage.finishRequestedClosure(db, key.scope(), key.applicationCorrelationId(), now);
         return desired;
     }
     static void cancelPending(Connection db, BusinessScope scope, String applicationId, Instant now) throws SQLException {

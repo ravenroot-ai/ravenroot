@@ -18,15 +18,18 @@ final class InMemoryBusinessHistories {
     InMemoryBusinessHistories(Clock clock, BusinessHistoryPolicy policy) { this.clock = clock; this.policy = policy; }
     BusinessHistoryPolicy policy() { return policy; }
 
+    record AdmissionPlan(BusinessHistory history, CorrelatedTraversal traversal) { }
     synchronized BusinessHistory admit(CorrelatedTraversal proposed, CorrelationMapping.Mode mode) {
+        var plan = prepareAdmission(proposed, mode); publishAdmission(plan); return plan.history();
+    }
+    synchronized AdmissionPlan prepareAdmission(CorrelatedTraversal proposed, CorrelationMapping.Mode mode) {
         var key = new Key(proposed.scope(), policy.selection().requireId(proposed.context().applicationCorrelationId(), "applicationCorrelationId"));
         var traversalKey = new TraversalKey(key.scope.tenantId(), proposed.processInstanceId(), proposed.traversalId());
         var prior = traversals.get(traversalKey);
         if (prior != null) {
             if (!sameAdmission(prior, proposed)) throw new BusinessHistoryException(CONTEXT_CONFLICT);
-            return histories.get(key);
+            return new AdmissionPlan(histories.get(key), null);
         }
-        expire(key.scope);
         var group = histories.get(key);
         Instant now = Instant.ofEpochMilli(clock.instant().toEpochMilli());
         if (group == null) {
@@ -36,18 +39,28 @@ final class InMemoryBusinessHistories {
             group = new BusinessHistory(key.scope, key.id, proposed.context().publicReference(), BusinessHistory.Lifecycle.OPEN,
                     1, 0, 0, 0, 0, false, now, now, now.plus(policy.historyRetention()));
         }
-        if (group.lifecycle() == BusinessHistory.Lifecycle.EXPIRED) throw new BusinessHistoryException(EXPIRED_HISTORY);
-        if (group.lifecycle() != BusinessHistory.Lifecycle.OPEN) throw new BusinessHistoryException(CLOSED_HISTORY);
+        if (group.lifecycle() == BusinessHistory.Lifecycle.EXPIRED || !now.isBefore(group.expiresAt())) throw new BusinessHistoryException(EXPIRED_HISTORY);
+        boolean readyContinuation = proposed.cause() == CorrelatedTraversal.Cause.JOIN_CONTINUATION && joins.values().stream()
+                .anyMatch(join -> join.phase() == CorrelatedJoinRecord.Phase.READY && join.key().scope().equals(proposed.scope())
+                        && join.key().applicationCorrelationId().equals(proposed.context().applicationCorrelationId())
+                        && join.key().nodeId().equals(proposed.entryNodeId()) && join.key().roundId().equals(proposed.context().roundId())
+                        && join.key().continuationProcessId().equals(proposed.processInstanceId()) && join.key().continuationTraversalId().equals(proposed.traversalId()));
+        if (group.lifecycle() != BusinessHistory.Lifecycle.OPEN || group.closureSignal() != null && !readyContinuation)
+            throw new BusinessHistoryException(CLOSED_HISTORY);
         if (group.publicReference().isPresent() && proposed.context().publicReference().isPresent()
                 && !group.publicReference().equals(proposed.context().publicReference())) throw new BusinessHistoryException(CONTEXT_CONFLICT);
         group = new BusinessHistory(group.scope(), group.applicationCorrelationId(),
                 group.publicReference().or(proposed.context()::publicReference), group.lifecycle(), group.revision() + 1,
                 group.runningTraversals() + 1, group.completedTraversals(), group.failedTraversals(), group.cancelledTraversals(),
-                group.incompleteHistory(), group.createdAt(), now, group.expiresAt());
-        histories.put(key, group);
-        traversals.put(traversalKey, new CorrelatedTraversal(proposed.scope(), proposed.context(), proposed.processInstanceId(),
-                proposed.traversalId(), proposed.entryNodeId(), proposed.cause(), TraversalStatus.ACCEPTED, null, now, now, null));
-        return group;
+                group.incompleteHistory(), group.createdAt(), now, group.expiresAt(), group.closureSignal());
+        return new AdmissionPlan(group, new CorrelatedTraversal(proposed.scope(), proposed.context(), proposed.processInstanceId(),
+                proposed.traversalId(), proposed.entryNodeId(), proposed.cause(), TraversalStatus.ACCEPTED, null, now, now, null, proposed.derivation()));
+    }
+    synchronized void publishAdmission(AdmissionPlan plan) {
+        if (plan.traversal() == null) return;
+        var relation = plan.traversal();
+        histories.put(new Key(relation.scope(), relation.context().applicationCorrelationId()), plan.history());
+        traversals.put(new TraversalKey(relation.scope().tenantId(), relation.processInstanceId(), relation.traversalId()), relation);
     }
 
     synchronized Optional<BusinessHistory> history(BusinessScope scope, String id) {
@@ -102,25 +115,71 @@ final class InMemoryBusinessHistories {
         }
         Instant now = Instant.ofEpochMilli(clock.instant().toEpochMilli());
         traversals.put(key, new CorrelatedTraversal(prior.scope(), prior.context(), process, traversal,
-                prior.entryNodeId(), prior.cause(), status, reason, prior.startedAt(), now, now));
+                prior.entryNodeId(), prior.cause(), status, reason, prior.startedAt(), now, now, prior.derivation()));
         var groupKey = new Key(prior.scope(), prior.context().applicationCorrelationId()); var group = histories.get(groupKey);
         boolean cancelled = reason == ExecutionTerminationReason.CANCELLED;
         histories.put(groupKey, new BusinessHistory(group.scope(), group.applicationCorrelationId(), group.publicReference(),
                 group.lifecycle(), group.revision() + 1, group.runningTraversals() - 1,
                 group.completedTraversals() + (!cancelled && status == TraversalStatus.COMPLETED ? 1 : 0),
                 group.failedTraversals() + (!cancelled && status == TraversalStatus.FAILED ? 1 : 0),
-                group.cancelledTraversals() + (cancelled ? 1 : 0), group.incompleteHistory(), group.createdAt(), now, group.expiresAt()));
+                group.cancelledTraversals() + (cancelled ? 1 : 0), group.incompleteHistory(), group.createdAt(), now, group.expiresAt(), group.closureSignal()));
+        finishRequestedClosure(prior.scope(), prior.context().applicationCorrelationId(), now);
+    }
+    synchronized List<BusinessClosureSignal> prepareClosureSignals(ai.ravenroot.api.persistence.ExecutionBatch batch,
+            ProcessInstance folded) {
+        var prepared = new LinkedHashMap<Key, BusinessClosureSignal>();
+        Instant now = Instant.ofEpochMilli(clock.instant().toEpochMilli());
+        for (var proposed : batch.businessClosureSignals()) {
+            var relation = traversals.get(new TraversalKey(batch.key().tenantId(), batch.key().processInstanceId(), proposed.traversalId()));
+            proposed.requireAuthority(batch, folded, relation);
+            var key = new Key(proposed.scope(), proposed.applicationCorrelationId()); var current = histories.get(key);
+            if (current == null) throw new BusinessHistoryException(UNKNOWN_HISTORY);
+            var existing = prepared.getOrDefault(key, current.closureSignal());
+            if (existing != null) {
+                if (!existing.sameRequest(proposed)) throw new BusinessHistoryException(CONTEXT_CONFLICT);
+                continue;
+            }
+            if (current.lifecycle() != BusinessHistory.Lifecycle.OPEN || !now.isBefore(current.expiresAt())) throw new BusinessHistoryException(CLOSED_HISTORY);
+            prepared.put(key, proposed.at(now));
+        }
+        return List.copyOf(prepared.values());
+    }
+    synchronized void publishClosureSignals(List<BusinessClosureSignal> prepared) {
+        for (var signal : prepared) {
+            var key = new Key(signal.scope(), signal.applicationCorrelationId()); var current = histories.get(key);
+            histories.put(key, new BusinessHistory(current.scope(), current.applicationCorrelationId(), current.publicReference(),
+                    current.lifecycle(), current.revision() + 1, current.runningTraversals(), current.completedTraversals(),
+                    current.failedTraversals(), current.cancelledTraversals(), current.incompleteHistory(), current.createdAt(), signal.requestedAt(),
+                    current.expiresAt(), signal));
+            finishRequestedClosure(signal.scope(), signal.applicationCorrelationId(), signal.requestedAt());
+        }
+    }
+    private void finishRequestedClosure(BusinessScope scope, String id, Instant now) {
+        var key = new Key(scope, id); var current = histories.get(key);
+        if (current == null || current.lifecycle() != BusinessHistory.Lifecycle.OPEN || current.closureSignal() == null || current.runningTraversals() != 0) return;
+        var pending = joins.values().stream().filter(join -> join.key().scope().equals(scope) && join.key().applicationCorrelationId().equals(id)).toList();
+        if (pending.stream().anyMatch(join -> join.phase() == CorrelatedJoinRecord.Phase.READY)) return;
+        boolean missing = pending.stream().anyMatch(join -> join.phase() == CorrelatedJoinRecord.Phase.OPEN);
+        var requested = current.closureSignal().requested();
+        var outcome = requested == BusinessHistory.Lifecycle.COMPLETED && (missing || current.failedTraversals() > 0 || current.cancelledTraversals() > 0)
+                ? BusinessHistory.Lifecycle.FAILED : requested;
+        histories.put(key, new BusinessHistory(current.scope(), current.applicationCorrelationId(), current.publicReference(), outcome,
+                current.revision() + 1, current.runningTraversals(), current.completedTraversals(), current.failedTraversals(), current.cancelledTraversals(),
+                missing || current.incompleteHistory(), current.createdAt(), now, current.expiresAt(), current.closureSignal()));
+        joins.replaceAll((joinKey, join) -> joinKey.scope().equals(scope) && joinKey.applicationCorrelationId().equals(id)
+                && join.phase() == CorrelatedJoinRecord.Phase.OPEN ? join.terminate(outcome == BusinessHistory.Lifecycle.CANCELLED
+                        ? CorrelatedJoinRecord.Phase.CANCELLED : CorrelatedJoinRecord.Phase.FAILED, now) : join);
     }
     synchronized BusinessHistory close(BusinessScope scope, String id, long revision, BusinessHistory.Lifecycle closure) {
         if (closure == null || closure == BusinessHistory.Lifecycle.OPEN || closure == BusinessHistory.Lifecycle.EXPIRED)
             throw new BusinessHistoryException(INVALID_REQUEST);
         var key = new Key(scope, id); var group = history(scope, id).orElseThrow(() -> new BusinessHistoryException(UNKNOWN_HISTORY));
-        if (group.lifecycle() != BusinessHistory.Lifecycle.OPEN || group.revision() != revision
+        if (group.lifecycle() != BusinessHistory.Lifecycle.OPEN || group.closureSignal() != null || group.revision() != revision
                 || (closure == BusinessHistory.Lifecycle.COMPLETED && (group.runningTraversals() > 0
                 || group.failedTraversals() > 0 || group.cancelledTraversals() > 0))) throw new BusinessHistoryException(REVISION_CONFLICT);
         var closed = new BusinessHistory(scope, id, group.publicReference(), closure, revision + 1,
                 group.runningTraversals(), group.completedTraversals(), group.failedTraversals(), group.cancelledTraversals(),
-                group.incompleteHistory(), group.createdAt(), Instant.ofEpochMilli(clock.instant().toEpochMilli()), group.expiresAt());
+                group.incompleteHistory(), group.createdAt(), Instant.ofEpochMilli(clock.instant().toEpochMilli()), group.expiresAt(), group.closureSignal());
         histories.put(key, closed); cancelPending(scope, id, clock.instant()); return closed;
     }
     private final Map<CorrelatedJoinKey, CorrelatedJoinRecord> joins = new HashMap<>();
@@ -173,10 +232,11 @@ final class InMemoryBusinessHistories {
                 histories.put(groupKey, new BusinessHistory(current.scope(), current.applicationCorrelationId(), current.publicReference(),
                         lifecycle, current.revision() + 1, current.runningTraversals(), current.completedTraversals(),
                         current.failedTraversals(), current.cancelledTraversals(), desired.phase() == CorrelatedJoinRecord.Phase.EXPIRED,
-                        current.createdAt(), now, current.expiresAt()));
+                        current.createdAt(), now, current.expiresAt(), current.closureSignal()));
             }
             cancelPending(key.scope(), key.applicationCorrelationId(), now);
         }
+        finishRequestedClosure(key.scope(), key.applicationCorrelationId(), now);
         return desired;
     }
     synchronized CorrelatedJoinPage joins(BusinessScope scope, String applicationId,
@@ -229,7 +289,7 @@ final class InMemoryBusinessHistories {
         histories.replaceAll((key, group) -> key.scope.equals(scope) && group.lifecycle() == BusinessHistory.Lifecycle.OPEN
                 && !now.isBefore(group.expiresAt()) ? new BusinessHistory(scope, key.id, group.publicReference(),
                 BusinessHistory.Lifecycle.EXPIRED, group.revision() + 1, group.runningTraversals(), group.completedTraversals(),
-                group.failedTraversals(), group.cancelledTraversals(), true, group.createdAt(), now, group.expiresAt()) : group);
+                group.failedTraversals(), group.cancelledTraversals(), true, group.createdAt(), now, group.expiresAt(), group.closureSignal()) : group);
         var iterator = joins.entrySet().iterator();
         while (iterator.hasNext()) {
             var entry = iterator.next(); var key = entry.getKey();
@@ -252,6 +312,6 @@ final class InMemoryBusinessHistories {
     private static boolean sameAdmission(CorrelatedTraversal left, CorrelatedTraversal right) {
         return left.scope().equals(right.scope()) && left.context().equals(right.context())
                 && left.processInstanceId().equals(right.processInstanceId()) && left.traversalId().equals(right.traversalId())
-                && left.entryNodeId().equals(right.entryNodeId()) && left.cause() == right.cause();
+                && left.entryNodeId().equals(right.entryNodeId()) && left.cause() == right.cause() && Objects.equals(left.derivation(), right.derivation());
     }
 }

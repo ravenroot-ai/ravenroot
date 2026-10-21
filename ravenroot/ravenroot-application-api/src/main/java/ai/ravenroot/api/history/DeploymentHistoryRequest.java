@@ -73,14 +73,14 @@ public final class DeploymentHistoryRequest {
                 yield page(page.items().stream().map(row -> map("processInstanceId", row.processInstanceId(), "traversalId", row.traversalId(),
                         "entryNodeId", row.entryNodeId(), "status", row.status(), "terminationReason", row.terminationReason(),
                         "cause", row.cause(), "startedAt", row.startedAt(), "updatedAt", row.updatedAt(), "endedAt", row.endedAt(),
-                        "applicationContext", context(row.context()))).toList(), page.nextCursor(), "AVAILABLE");
+                        "applicationContext", context(row.context()), "derivation", derivation(row.derivation()))).toList(), page.nextCursor(), "AVAILABLE");
             }
             case "process-traversals", "uncorrelated-traversals" -> {
                 var page = view.equals("uncorrelated-traversals") ? reader.uncorrelatedTraversals(cursor, limit)
                         : reader.processTraversals(uuid("processInstanceId"), cursor, limit);
                 yield page(page.items().stream().map(row -> map("processInstanceId", row.processInstanceId(), "traversalId", row.traversalId(),
                         "entryNodeId", row.entryNodeId(), "status", row.status(), "terminationReason", row.terminationReason(),
-                        "cause", row.cause(), "visitCount", row.visitCount(), "applicationContext", context(row.applicationCorrelation()))).toList(), page.nextCursor(), page.availability());
+                        "cause", row.cause(), "visitCount", row.visitCount(), "applicationContext", context(row.applicationCorrelation()), "derivation", derivation(row.derivation()))).toList(), page.nextCursor(), page.availability());
             }
             case "visits" -> {
                 var page = reader.visits(uuid("processInstanceId"), uuid("traversalId"), optional("nodeId"), cursor, limit);
@@ -149,7 +149,16 @@ public final class DeploymentHistoryRequest {
         return map("applicationCorrelationId", row.applicationCorrelationId(), "publicReference", row.publicReference(), "lifecycle", row.lifecycle(),
                 "state", row.state(), "revision", row.revision(), "runningTraversals", row.runningTraversals(), "completedTraversals", row.completedTraversals(),
                 "failedTraversals", row.failedTraversals(), "cancelledTraversals", row.cancelledTraversals(), "incompleteHistory", row.incompleteHistory(),
-                "createdAt", row.createdAt(), "updatedAt", row.updatedAt(), "expiresAt", row.expiresAt());
+                "createdAt", row.createdAt(), "updatedAt", row.updatedAt(), "expiresAt", row.expiresAt(), "closureSignal", closure(row.closureSignal()));
+    }
+    private static Map<String, Object> derivation(CorrelationDerivation value) {
+        return value == null ? null : map("processInstanceId", value.processInstanceId(), "traversalId", value.traversalId(),
+                "invocationId", value.invocationId(), "attemptId", value.attemptId(), "auditReason", value.auditReason());
+    }
+    private static Map<String, Object> closure(BusinessClosureSignal value) {
+        return value == null ? null : map("requested", value.requested(), "auditReason", value.auditReason(),
+                "processInstanceId", value.processInstanceId(), "traversalId", value.traversalId(), "invocationId", value.invocationId(),
+                "attemptId", value.attemptId(), "requestedAt", value.requestedAt());
     }
     private static Map<String, Object> context(ApplicationCorrelationContext value) {
         return value == null ? null : map("applicationCorrelationId", value.applicationCorrelationId(), "contributionId", value.contributionId(),

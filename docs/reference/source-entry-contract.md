@@ -59,3 +59,6 @@ atomic input/business admission, immutable duplicate input and target, explicit 
 concurrent scope quotas, scalar keyset paging, original causal checkpoints, terminal retirement, and
 strict versioned encoding. Memory does not claim durable reopen. Connector tests additionally exercise
 each transport's verification, acknowledgement, cursor and backpressure rules.
+
+Explicit business close barriers and computed context derivation are described in
+[Business context operations](business-correlation-operations.md).

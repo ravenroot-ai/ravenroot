@@ -32,7 +32,7 @@ final class InMemoryExecutionHistory {
         var relation = context.apply(value.traversalId());
         return new TraversalSummary(key.processInstanceId(), value.traversalId(), value.ingressNodeId(), value.status(),
                 value.terminationReason(), value.invocations().size(), relation == null ? null : relation.context(),
-                relation == null ? null : relation.cause());
+                relation == null ? null : relation.cause(), relation == null ? null : relation.derivation());
     }
     static HistoryPage<NodeVisitSummary> visits(ExecutionKey key, ProcessInstance state, UUID traversal,
             List<JournalRecord> journal, Optional<String> node, Optional<String> cursor, int limit, int maximum) {

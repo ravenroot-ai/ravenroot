@@ -218,6 +218,10 @@ public final class GraphRunner implements AutoCloseable {
     /** Validated fan-in configuration, one entry per join node. Fixed for this runner's lifetime. */
     private final Map<String, JoinSpec> joinSpecs;
     private java.util.function.BiConsumer<ai.ravenroot.api.correlation.CorrelatedJoinRecord, UUID> correlatedJoinRelease;
+    private java.util.function.BiConsumer<ai.ravenroot.api.persistence.DeploymentEntryIntent, UUID> derivedEntryRelease;
+    void bindDerivedEntryRelease(java.util.function.BiConsumer<ai.ravenroot.api.persistence.DeploymentEntryIntent, UUID> release) {
+        this.derivedEntryRelease = java.util.Objects.requireNonNull(release);
+    }
 
     void bindCorrelatedJoinRelease(java.util.function.BiConsumer<ai.ravenroot.api.correlation.CorrelatedJoinRecord, UUID> release) {
         this.correlatedJoinRelease = java.util.Objects.requireNonNull(release);
@@ -1224,6 +1228,13 @@ public final class GraphRunner implements AutoCloseable {
         if (!entry.scope().graphVersion().equals(graphVersion) || !entry.scope().deploymentId().equals(deploymentId)
                 || !entry.processInstanceId().equals(recorder.processInstanceId()) || !entry.scope().tenantId().equals(recorder.tenantId()))
             throw new IllegalArgumentException("retained SOURCE scope mismatch");
+        if (entry.cause() == ai.ravenroot.api.correlation.CorrelatedTraversal.Cause.DERIVED_CONTEXT) {
+            if (entry.checkpoint() != null) return CompletableFuture.failedFuture(new RetainedEntryPendingException());
+            @SuppressWarnings("unchecked") var attributes = (Map<String, Object>) ai.ravenroot.api.payload.PayloadJson.read(entry.attributes().bytes(), limits.payload()).toJava();
+            return executeStartingAt(entry.identity(), entry.processInstanceId(), entry.traversalId(), entry.entryNodeId(), null,
+                    ai.ravenroot.api.payload.PayloadJson.read(entry.input().bytes(), limits.payload()).toJava(), attributes, entry.command(),
+                    graphVersion, deploymentId, entry.traversalId().toString(), recorder, policy, limits, null, false, null);
+        }
         if (entry.checkpoint() == null) return executeIngress(entry.identity(), entry.processInstanceId(), entry.traversalId(),
                 entry.entryNodeId(), ai.ravenroot.api.payload.PayloadJson.read(entry.input().bytes(), limits.payload()).toJava(),
                 graphVersion, deploymentId, entry.traversalId().toString(), recorder, policy, limits);
@@ -3113,6 +3124,51 @@ public final class GraphRunner implements AutoCloseable {
                 .whenComplete((ignored, error) -> hop.close());
     }
 
+    private ai.ravenroot.api.persistence.DerivedEntryHandoff derivedEntryHandoff(GraphNode node, NodeMessage delivered,
+            NodeResult result, ExecutionMonitor.ExecutionIdentity identity, ExecutionState state) {
+        if (state.recorder == null || identity.applicationCorrelation() == null || identity.deploymentId() == null)
+            throw new IllegalStateException("explicit context derivation requires durable original business context");
+        var deliveries = targetDeliveries(graph.nextEdges(node.id(), "continue"), delivered.command());
+        if (deliveries.size() != 1) throw new IllegalArgumentException("context derivation requires exactly one authored continue successor");
+        var target = deliveries.getFirst(); var targetDefinition = runtimeDefinitions.get(target.targetId());
+        if (targetDefinition == null || graph.node(target.targetId()).kind() == NodeKind.START || authoredBypassNodes.contains(target.targetId()) || targetDefinition.nature() == NodeRuntimeNature.SOURCE
+                || joinSpecs.containsKey(target.targetId()) && !CorrelatedJoinConfiguration.enabled(graph.node(target.targetId())))
+            throw new IllegalArgumentException("context derivation target must be an enabled non-source entry outside an ordinary join");
+        var policy = state.recorder.businessHistoryPolicy();
+        var mapping = ai.ravenroot.api.correlation.CorrelationMappingProperties.read(node.properties(), policy.selection());
+        String stable = identity.security().tenantId() + "\0" + identity.deploymentId() + "\0" + identity.graphVersion()
+                + "\0" + identity.processInstanceId() + "\0" + identity.traversalId() + "\0" + delivered.invocationId();
+        var input = ai.ravenroot.api.payload.PayloadValue.fromJava(result.payload(), policy.selection().input());
+        var context = mapping.extract(input, () -> UUID.nameUUIDFromBytes(("business-context/derived/v1\0" + stable).getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        if (context.applicationCorrelationId().equals(identity.applicationCorrelation().applicationCorrelationId()))
+            throw new IllegalArgumentException("explicit context derivation requires a distinct application identity");
+        var now = clock.instant();
+        var cause = new ai.ravenroot.api.correlation.JoinCause(identity.processInstanceId(), identity.traversalId(),
+                delivered.invocationId(), delivered.attemptId(), identity.security());
+        var intent = new ai.ravenroot.api.persistence.DeploymentEntryIntent(
+                new ai.ravenroot.api.correlation.BusinessScope(identity.security().tenantId(), identity.deploymentId(), identity.graphVersion()),
+                UUID.nameUUIDFromBytes(("business-context/process/v1\0" + stable).getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+                UUID.nameUUIDFromBytes(("business-context/traversal/v1\0" + stable).getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+                target.targetId(), context, identity.security(), OpaquePayload.of(ai.ravenroot.api.payload.PayloadJson.write(input).getBytes(java.nio.charset.StandardCharsets.UTF_8), "application/json"),
+                now, now.plus(policy.historyRetention()), ai.ravenroot.api.correlation.CorrelatedTraversal.Cause.DERIVED_CONTEXT,
+                cause, ai.ravenroot.api.correlation.CorrelationOperationProperties.auditReason(node.properties()), null,
+                OpaquePayload.of(ai.ravenroot.api.payload.PayloadJson.write(ai.ravenroot.api.payload.PayloadValue.fromJava(result.attributes(), policy.selection().input()))
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8), "application/json"), target.command());
+        return new ai.ravenroot.api.persistence.DerivedEntryHandoff(intent, mapping.mode());
+    }
+
+    private ai.ravenroot.api.correlation.BusinessClosureSignal businessCloseSignal(GraphNode node, NodeMessage delivered,
+            ExecutionMonitor.ExecutionIdentity identity) {
+        if (identity.deploymentId() == null || delivered.applicationCorrelation() == null)
+            throw new IllegalStateException("business close requires an authorized deployment history");
+        return new ai.ravenroot.api.correlation.BusinessClosureSignal(new ai.ravenroot.api.correlation.BusinessScope(
+                identity.security().tenantId(), identity.deploymentId(), identity.graphVersion()),
+                delivered.applicationCorrelation().applicationCorrelationId(),
+                ai.ravenroot.api.correlation.CorrelationOperationProperties.disposition(node.properties()),
+                ai.ravenroot.api.correlation.CorrelationOperationProperties.auditReason(node.properties()),
+                identity.processInstanceId(), identity.traversalId(), delivered.invocationId(), delivered.attemptId(), clock.instant());
+    }
+
     /**
      * How many runtime instances of {@code nodeId}'s actor are alive right now — the number the elastic
      * view shows.
@@ -3576,16 +3632,30 @@ public final class GraphRunner implements AutoCloseable {
                     // successful attempt is recorded or any downstream work can be allocated.
                     NodeResult routed;
                     long routedBytes;
+                    ai.ravenroot.api.persistence.DerivedEntryHandoff handoff = null;
+                    ai.ravenroot.api.correlation.BusinessClosureSignal closureSignal = null;
                     try {
                         routed = markSyntheticProvenance(node, delivered, result);
                         routedBytes = measure(routed, state.limits);
+                        if (!bypassed && ai.ravenroot.api.correlation.CorrelationOperationProperties.DERIVE.equals(node.behavior()))
+                            handoff = derivedEntryHandoff(node, delivered, routed, identity, state);
+                        if (!bypassed && ai.ravenroot.api.correlation.CorrelationOperationProperties.CLOSE.equals(node.behavior()))
+                            closureSignal = businessCloseSignal(node, delivered, identity);
                         // STRICT output persistence is the boundary between a node effect and the
                         // runtime claiming completion or making that content visible downstream.
                         activityCapture.output(captureContext, routed).toCompletableFuture().join();
                     } catch (RuntimeException rejectedOutput) {
-                        state.nodeFailed(invocationId, attemptId, startedEventId);
+                        UUID failed = state.nodeFailed(invocationId, attemptId, startedEventId);
                         monitor.nodeFailed(identity, node.id(), invocationId, attemptId, rejectedOutput,
                                 liveInstances(node.id(), definition.nature()));
+                        if (Set.of(ai.ravenroot.api.correlation.CorrelationOperationProperties.CLOSE,
+                                ai.ravenroot.api.correlation.CorrelationOperationProperties.DERIVE).contains(node.behavior())
+                                && !graph.failureEdges(node.id()).isEmpty()) {
+                            completedEventId.set(failed);
+                            var failureResult = new NodeResult(GraphEdge.DEFAULT_OUTCOME,
+                                    NodeFailurePayload.of(node.id(), rejectedOutput, delivered.payload()), delivered.attributes());
+                            return NodeOutcome.failedRouted(failureResult, graph.failureEdges(node.id()), measure(failureResult, state.limits));
+                        }
                         throw rejectedOutput;
                     }
                     // `fallback` now reaches the journal as well as the monitor, read from
@@ -3597,7 +3667,8 @@ public final class GraphRunner implements AutoCloseable {
                     // in its Javadoc; this path neither widens nor narrows it.
                     completedEventId.set(state.nodeCompleted(invocationId, attemptId, startedEventId,
                             bypassed, fallback, null, node.id(), parentInvocationIds, command,
-                            routed, iteration));
+                            routed, iteration, closureSignal, handoff));
+                    if (handoff != null && derivedEntryRelease != null) derivedEntryRelease.accept(handoff.intent(), identity.traversalId());
                     int stillAlive = liveInstances(node.id(), definition.nature());
                     if (bypassed) {
                         state.bypassedNodes.add(node.id());
@@ -3637,6 +3708,12 @@ public final class GraphRunner implements AutoCloseable {
                     // retaining every ancestor until the entire downstream subtree completes. A
                     // retry keeps the same visit reservation until one attempt finally settles.
                     hop.close();
+                    if (!outcome.failureRouted() && delivered.command().directive() != NodeDirective.PASSTHROUGH
+                            && !authoredBypassNodes.contains(node.id())
+                            && ai.ravenroot.api.correlation.CorrelationOperationProperties.DERIVE.equals(node.behavior())) {
+                        state.recordDanglingTerminal(result.payload());
+                        return allOrFirstFailure(state.liveness.reportUntaken(node.id(), List.of(), coordinator, iteration));
+                    }
                     if (outcome.failureRouted()) {
                         // Handled failure: the failed attempt and invocation stay FAILED,
                         // recorded above unconditionally -- handled routing changes what happens
@@ -6660,6 +6737,20 @@ public final class GraphRunner implements AutoCloseable {
                                                 boolean bypassed, boolean defaulted, UUID assignedEventId,
                                                 String nodeId, Set<UUID> parents, NodeCommand command,
                                                 NodeResult result, IterationContext iteration) {
+            return nodeCompleted(invocationId, attemptId, startedEventId, bypassed, defaulted, assignedEventId,
+                    nodeId, parents, command, result, iteration, null);
+        }
+        private UUID nodeCompleted(UUID invocationId, UUID attemptId, UUID startedEventId,
+                boolean bypassed, boolean defaulted, UUID assignedEventId, String nodeId, Set<UUID> parents,
+                NodeCommand command, NodeResult result, IterationContext iteration,
+                ai.ravenroot.api.correlation.BusinessClosureSignal closureSignal) {
+            return nodeCompleted(invocationId, attemptId, startedEventId, bypassed, defaulted, assignedEventId,
+                    nodeId, parents, command, result, iteration, closureSignal, null);
+        }
+        private UUID nodeCompleted(UUID invocationId, UUID attemptId, UUID startedEventId,
+                boolean bypassed, boolean defaulted, UUID assignedEventId, String nodeId, Set<UUID> parents,
+                NodeCommand command, NodeResult result, IterationContext iteration,
+                ai.ravenroot.api.correlation.BusinessClosureSignal closureSignal, ai.ravenroot.api.persistence.DerivedEntryHandoff handoff) {
             stateLock.lock();
             try {
                 if (terminal) {
@@ -6682,7 +6773,12 @@ public final class GraphRunner implements AutoCloseable {
                         : List.of(new PublishedEvent(completionType, completedEventId,
                                 ai.ravenroot.api.persistence.NodeOutcomeEventData.of(result == null ? null : result.outcome())));
                 var evidence = replayEvidence(invocationId, attemptId, nodeId, parents, command, result, iteration);
-                record(transitions, events(published, startedEventId, invocationId, attemptId), evidence);
+                if (closureSignal == null && handoff == null) record(transitions, events(published, startedEventId, invocationId, attemptId), evidence);
+                else {
+                    if (recorder == null) throw new IllegalStateException("business close requires durable history custody");
+                    recorder.record(transitions, events(published, startedEventId, invocationId, attemptId), List.of(), evidence,
+                            entryRuntimeState(), closureSignal == null ? List.of() : List.of(closureSignal), handoff);
+                }
                 lifecycle = fold(lifecycle, transitions);
                 return completedEventId;
             } finally {

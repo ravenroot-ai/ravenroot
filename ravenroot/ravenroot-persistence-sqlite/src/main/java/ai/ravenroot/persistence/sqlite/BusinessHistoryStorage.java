@@ -51,14 +51,16 @@ final class BusinessHistoryStorage {
         }
         BusinessHistory group = existing.orElseThrow();
         if (group.lifecycle() == BusinessHistory.Lifecycle.EXPIRED) throw new BusinessHistoryException(EXPIRED_HISTORY);
-        if (group.lifecycle() != BusinessHistory.Lifecycle.OPEN) throw new BusinessHistoryException(CLOSED_HISTORY);
+        boolean causalContinuation = readyContinuation(db, proposed);
+        if (group.lifecycle() != BusinessHistory.Lifecycle.OPEN || group.closureSignal() != null
+                && !causalContinuation) throw new BusinessHistoryException(CLOSED_HISTORY);
         if (group.publicReference().isPresent() && proposed.context().publicReference().isPresent()
                 && !group.publicReference().equals(proposed.context().publicReference())) throw new BusinessHistoryException(CONTEXT_CONFLICT);
         int inserted;
         try (var insert = db.prepareStatement("INSERT INTO correlated_traversal (tenant_id, process_id, traversal_id, "
                 + "deployment_id, graph_version, application_id, contribution_id, contribution_kind, round_id, "
-                + "public_reference, entry_node_id, cause, status, termination_reason, started_ms, updated_ms, ended_ms) "
-                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACCEPTED', NULL, ?, ?, NULL) ON CONFLICT DO NOTHING")) {
+                + "public_reference, entry_node_id, cause, status, termination_reason, started_ms, updated_ms, ended_ms, derived_process_id, derived_traversal_id, derived_invocation_id, derived_attempt_id, derivation_reason) "
+                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACCEPTED', NULL, ?, ?, NULL, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING")) {
             insert.setString(1, scope.tenantId()); insert.setString(2, proposed.processInstanceId().toString());
             insert.setString(3, proposed.traversalId().toString()); insert.setString(4, scope.deploymentId());
             insert.setString(5, scope.graphVersion()); insert.setString(6, id);
@@ -68,12 +70,19 @@ final class BusinessHistoryStorage {
             insert.setString(10, proposed.context().publicReference().orElse(null));
             insert.setString(11, proposed.entryNodeId()); insert.setString(12, proposed.cause().name());
             insert.setLong(13, now.toEpochMilli()); insert.setLong(14, now.toEpochMilli());
+            var lineage = proposed.derivation();
+            insert.setString(15, lineage == null ? null : lineage.processInstanceId().toString());
+            insert.setString(16, lineage == null ? null : lineage.traversalId().toString());
+            insert.setString(17, lineage == null ? null : lineage.invocationId().toString());
+            insert.setString(18, lineage == null ? null : lineage.attemptId().toString());
+            insert.setString(19, lineage == null ? null : lineage.auditReason());
             inserted = insert.executeUpdate();
         }
         if (inserted != 0) {
             try (var update = db.prepareStatement("UPDATE business_history SET running_count = running_count + 1, "
                     + "revision = revision + 1, updated_ms = ?, public_reference = COALESCE(public_reference, ?) WHERE "
-                    + SCOPE + " AND application_id = ? AND lifecycle = 'OPEN'")) {
+                    + SCOPE + " AND application_id = ? AND lifecycle = 'OPEN'"
+                    + (causalContinuation ? "" : " AND requested_closure IS NULL"))) {
                 update.setLong(1, now.toEpochMilli()); update.setString(2, proposed.context().publicReference().orElse(null));
                 int at = bindScope(update, 3, scope); update.setString(at, id);
                 if (update.executeUpdate() == 0) throw new BusinessHistoryException(CLOSED_HISTORY);
@@ -81,6 +90,17 @@ final class BusinessHistoryStorage {
         } else if (!sameAdmission(traversal(db, scope.tenantId(), proposed.processInstanceId(),
                 proposed.traversalId()).orElseThrow(), proposed)) throw new BusinessHistoryException(CONTEXT_CONFLICT);
         return history(db, scope, id).orElseThrow();
+    }
+
+    private static boolean readyContinuation(Connection db, CorrelatedTraversal proposed) throws SQLException {
+        if (proposed.cause() != CorrelatedTraversal.Cause.JOIN_CONTINUATION) return false;
+        try (var statement = db.prepareStatement("SELECT 1 FROM correlated_business_join WHERE " + SCOPE
+                + " AND application_id = ? AND node_id = ? AND round_id = ? AND phase = 'READY' AND continuation_process_id = ? AND continuation_traversal_id = ?")) {
+            int at = bindScope(statement, 1, proposed.scope()); statement.setString(at++, proposed.context().applicationCorrelationId());
+            statement.setString(at++, proposed.entryNodeId()); statement.setString(at++, proposed.context().roundId());
+            statement.setString(at++, proposed.processInstanceId().toString()); statement.setString(at, proposed.traversalId().toString());
+            try (var rows = statement.executeQuery()) { return rows.next(); }
+        }
     }
 
     static Optional<BusinessHistory> history(Connection db, BusinessScope scope, String id) throws SQLException {
@@ -190,6 +210,62 @@ final class BusinessHistoryStorage {
             update.setLong(1, now.toEpochMilli()); int at = bindScope(update, 2, prior.scope());
             update.setString(at, prior.context().applicationCorrelationId()); update.executeUpdate();
         }
+        finishRequestedClosure(db, prior.scope(), prior.context().applicationCorrelationId(), now);
+    }
+
+    static void writeClosureSignals(Connection db, ai.ravenroot.api.persistence.ExecutionBatch batch,
+            ai.ravenroot.api.application.ProcessInstance folded, Instant now) throws SQLException {
+        for (var proposed : batch.businessClosureSignals()) {
+            var relation = traversal(db, batch.key().tenantId(), batch.key().processInstanceId(), proposed.traversalId()).orElse(null);
+            proposed.requireAuthority(batch, folded, relation);
+            try (var lock = db.prepareStatement("UPDATE business_history SET revision = revision WHERE " + SCOPE + " AND application_id = ?")) {
+                int at = bindScope(lock, 1, proposed.scope()); lock.setString(at, proposed.applicationCorrelationId());
+                if (lock.executeUpdate() == 0) throw new BusinessHistoryException(UNKNOWN_HISTORY);
+            }
+            var current = history(db, proposed.scope(), proposed.applicationCorrelationId()).orElseThrow();
+            if (current.closureSignal() != null) {
+                if (!current.closureSignal().sameRequest(proposed)) throw new BusinessHistoryException(CONTEXT_CONFLICT);
+                continue;
+            }
+            if (current.lifecycle() != BusinessHistory.Lifecycle.OPEN || !now.isBefore(current.expiresAt())) throw new BusinessHistoryException(CLOSED_HISTORY);
+            try (var update = db.prepareStatement("UPDATE business_history SET requested_closure = ?, closure_reason = ?, closure_process_id = ?, "
+                    + "closure_traversal_id = ?, closure_invocation_id = ?, closure_attempt_id = ?, closure_requested_ms = ?, revision = revision + 1, updated_ms = ? "
+                    + "WHERE " + SCOPE + " AND application_id = ? AND lifecycle = 'OPEN' AND requested_closure IS NULL")) {
+                update.setString(1, proposed.requested().name()); update.setString(2, proposed.auditReason());
+                update.setString(3, proposed.processInstanceId().toString()); update.setString(4, proposed.traversalId().toString());
+                update.setString(5, proposed.invocationId().toString()); update.setString(6, proposed.attemptId().toString());
+                update.setLong(7, now.toEpochMilli()); update.setLong(8, now.toEpochMilli()); int at = bindScope(update, 9, proposed.scope());
+                update.setString(at, proposed.applicationCorrelationId());
+                if (update.executeUpdate() != 1) throw new BusinessHistoryException(REVISION_CONFLICT);
+            }
+            finishRequestedClosure(db, proposed.scope(), proposed.applicationCorrelationId(), now);
+        }
+    }
+
+    static void finishRequestedClosure(Connection db, BusinessScope scope, String id, Instant now) throws SQLException {
+        var group = history(db, scope, id).orElse(null);
+        if (group == null || group.lifecycle() != BusinessHistory.Lifecycle.OPEN || group.closureSignal() == null || group.runningTraversals() != 0) return;
+        boolean missing;
+        try (var count = db.prepareStatement("SELECT SUM(CASE WHEN phase = 'READY' THEN 1 ELSE 0 END), SUM(CASE WHEN phase = 'OPEN' THEN 1 ELSE 0 END) "
+                + "FROM correlated_business_join WHERE " + SCOPE + " AND application_id = ?")) {
+            int at = bindScope(count, 1, scope); count.setString(at, id);
+            try (var rows = count.executeQuery()) { rows.next(); if (rows.getLong(1) != 0) return; missing = rows.getLong(2) != 0; }
+        }
+        var requested = group.closureSignal().requested();
+        var outcome = requested == BusinessHistory.Lifecycle.COMPLETED && (missing || group.failedTraversals() > 0 || group.cancelledTraversals() > 0)
+                ? BusinessHistory.Lifecycle.FAILED : requested;
+        try (var update = db.prepareStatement("UPDATE business_history SET lifecycle = ?, incomplete = ?, revision = revision + 1, updated_ms = ? "
+                + "WHERE " + SCOPE + " AND application_id = ? AND lifecycle = 'OPEN' AND running_count = 0")) {
+            update.setString(1, outcome.name()); update.setInt(2, missing || group.incompleteHistory() ? 1 : 0); update.setLong(3, now.toEpochMilli());
+            int at = bindScope(update, 4, scope); update.setString(at, id); update.executeUpdate();
+        }
+        // Scalar terminal state overlays the retained snapshot in load(); received/missing member
+        // metadata and original contribution payload availability are preserved.
+        try (var update = db.prepareStatement("UPDATE correlated_business_join SET phase = ?, revision = revision + 1, updated_ms = ? "
+                + "WHERE " + SCOPE + " AND application_id = ? AND phase = 'OPEN'")) {
+            update.setString(1, outcome == BusinessHistory.Lifecycle.CANCELLED ? "CANCELLED" : "FAILED"); update.setLong(2, now.toEpochMilli());
+            int at = bindScope(update, 3, scope); update.setString(at, id); update.executeUpdate();
+        }
     }
 
     static BusinessHistory close(Connection db, BusinessScope scope, String id, long revision,
@@ -198,7 +274,7 @@ final class BusinessHistoryStorage {
             throw new BusinessHistoryException(INVALID_REQUEST);
         expire(db, scope, now);
         try (var update = db.prepareStatement("UPDATE business_history SET lifecycle = ?, revision = revision + 1, updated_ms = ? "
-                + "WHERE " + SCOPE + " AND application_id = ? AND revision = ? AND lifecycle = 'OPEN' "
+                + "WHERE " + SCOPE + " AND application_id = ? AND revision = ? AND lifecycle = 'OPEN' AND requested_closure IS NULL "
                 + (closure == BusinessHistory.Lifecycle.COMPLETED ? "AND running_count = 0 AND failed_count = 0 AND cancelled_count = 0" : ""))) {
             update.setString(1, closure.name()); update.setLong(2, now.toEpochMilli()); int at = bindScope(update, 3, scope);
             update.setString(at++, id); update.setLong(at, revision);
@@ -231,7 +307,11 @@ final class BusinessHistoryStorage {
                 rows.getLong("running_count"), rows.getLong("completed_count"), rows.getLong("failed_count"),
                 rows.getLong("cancelled_count"), rows.getInt("incomplete") != 0,
                 Instant.ofEpochMilli(rows.getLong("created_ms")), Instant.ofEpochMilli(rows.getLong("updated_ms")),
-                Instant.ofEpochMilli(rows.getLong("expires_ms")));
+                Instant.ofEpochMilli(rows.getLong("expires_ms")), rows.getString("requested_closure") == null ? null
+                        : new BusinessClosureSignal(scope, rows.getString("application_id"), BusinessHistory.Lifecycle.valueOf(rows.getString("requested_closure")),
+                                rows.getString("closure_reason"), UUID.fromString(rows.getString("closure_process_id")), UUID.fromString(rows.getString("closure_traversal_id")),
+                                UUID.fromString(rows.getString("closure_invocation_id")), UUID.fromString(rows.getString("closure_attempt_id")),
+                                Instant.ofEpochMilli(rows.getLong("closure_requested_ms"))));
     }
     private static CorrelatedTraversal readTraversal(ResultSet rows) throws SQLException {
         String reason = rows.getString("termination_reason"); long end = rows.getLong("ended_ms");
@@ -242,7 +322,9 @@ final class BusinessHistoryStorage {
                 UUID.fromString(rows.getString("process_id")), UUID.fromString(rows.getString("traversal_id")), rows.getString("entry_node_id"),
                 CorrelatedTraversal.Cause.valueOf(rows.getString("cause")), TraversalStatus.valueOf(rows.getString("status")),
                 reason == null ? null : ExecutionTerminationReason.valueOf(reason), Instant.ofEpochMilli(rows.getLong("started_ms")),
-                Instant.ofEpochMilli(rows.getLong("updated_ms")), ended);
+                Instant.ofEpochMilli(rows.getLong("updated_ms")), ended, rows.getString("derived_process_id") == null ? null
+                        : new CorrelationDerivation(UUID.fromString(rows.getString("derived_process_id")), UUID.fromString(rows.getString("derived_traversal_id")),
+                                UUID.fromString(rows.getString("derived_invocation_id")), UUID.fromString(rows.getString("derived_attempt_id")), rows.getString("derivation_reason")));
     }
     private static int bindScope(PreparedStatement statement, int at, BusinessScope scope) throws SQLException {
         statement.setString(at++, scope.tenantId()); statement.setString(at++, scope.deploymentId());
@@ -251,7 +333,7 @@ final class BusinessHistoryStorage {
     private static boolean sameAdmission(CorrelatedTraversal left, CorrelatedTraversal right) {
         return left.scope().equals(right.scope()) && left.context().equals(right.context())
                 && left.processInstanceId().equals(right.processInstanceId()) && left.traversalId().equals(right.traversalId())
-                && left.entryNodeId().equals(right.entryNodeId()) && left.cause() == right.cause();
+                && left.entryNodeId().equals(right.entryNodeId()) && left.cause() == right.cause() && Objects.equals(left.derivation(), right.derivation());
     }
     private static void requirePage(int limit, BusinessHistoryPolicy policy) {
         if (limit < 1 || limit > policy.maxPageSize()) throw new BusinessHistoryException(INVALID_REQUEST);

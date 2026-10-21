@@ -207,6 +207,9 @@ public enum StoreCapability {
     /** Durable scoped application histories and immutable traversal relations. */
     BUSINESS_HISTORIES,
 
+    /** Fenced authored close barriers atomically linked to original visit completions. */
+    BUSINESS_CLOSURE_SIGNALS,
+
     /** Cross-traversal contribution CAS and atomic continuation outbox. */
     CORRELATED_JOINS,
 

@@ -13,15 +13,16 @@ public final class DeploymentEntryCodec {
     private DeploymentEntryCodec() { }
     /** Encodes one validated original input-custody record.
      * @param value immutable original admission and its runtime-owned checkpoint
-     * @return bounded version-one binary record
+     * @return bounded version-two binary record
      */
     public static byte[] encode(DeploymentEntryIntent value) {
         try {
             var bytes = new ByteArrayOutputStream();
             try (var out = new DataOutputStream(bytes)) {
-                out.writeInt(1); text(out, value.scope().tenantId()); text(out, value.scope().deploymentId()); text(out, value.scope().graphVersion());
+                out.writeInt(2); text(out, value.scope().tenantId()); text(out, value.scope().deploymentId()); text(out, value.scope().graphVersion());
                 uuid(out, value.processInstanceId()); uuid(out, value.traversalId()); text(out, value.entryNodeId());
                 context(out, value.context()); security(out, value.identity()); payload(out, value.input(), 64 * 1024 * 1024);
+                payload(out, value.attributes(), 64 * 1024 * 1024); text(out, value.command().name());
                 time(out, value.acceptedAt()); time(out, value.expiresAt()); text(out, value.cause().name());
                 out.writeBoolean(value.derivedFrom() != null);
                 if (value.derivedFrom() != null) {
@@ -42,16 +43,18 @@ public final class DeploymentEntryCodec {
         } catch (IOException impossible) { throw new IllegalArgumentException("invalid entry encoding", impossible); }
     }
     /** Decodes exact bounded original input and causal identities without instantiating arbitrary classes.
-     * @param encoded bounded version-one custody record
+     * @param encoded bounded version-one or version-two custody record
      * @return validated immutable original entry
      */
     public static DeploymentEntryIntent decode(byte[] encoded) {
         if (encoded == null || encoded.length > MAX_BYTES) throw invalid();
         try (var in = new DataInputStream(new ByteArrayInputStream(encoded))) {
-            if (in.readInt() != 1) throw invalid();
+            int version = in.readInt(); if (version != 1 && version != 2) throw invalid();
             var scope = new BusinessScope(text(in), text(in), text(in));
             UUID process = uuid(in), traversal = uuid(in); String entry = text(in);
             var context = context(in); var identity = security(in); var payload = payload(in, 64 * 1024 * 1024);
+            var attributes = version == 1 ? OpaquePayload.of(new byte[]{'{', '}'}, "application/json") : payload(in, 64 * 1024 * 1024);
+            var command = version == 1 ? ai.ravenroot.api.execution.NodeCommand.PROCESS : ai.ravenroot.api.execution.NodeCommand.parse(text(in));
             Instant accepted = time(in), expires = time(in); var cause = CorrelatedTraversal.Cause.valueOf(text(in));
             var original = in.readBoolean() ? new JoinCause(uuid(in), uuid(in), uuid(in), uuid(in), security(in)) : null;
             String reason = text(in); DeploymentEntryCheckpoint checkpoint = null;
@@ -63,7 +66,7 @@ public final class DeploymentEntryCodec {
             }
             if (in.available() != 0) throw invalid();
             return new DeploymentEntryIntent(scope, process, traversal, entry, context, identity, payload,
-                    accepted, expires, cause, original, reason, checkpoint);
+                    accepted, expires, cause, original, reason, checkpoint, attributes, command);
         } catch (IOException invalid) { throw new IllegalArgumentException("invalid entry encoding", invalid); }
     }
     private static void text(DataOutputStream out, String text) throws IOException {

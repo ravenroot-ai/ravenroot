@@ -1465,6 +1465,30 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
             for (var node : openedManager.definition().nodes()) {
                 var descriptor = node.kind() == NodeKind.BEHAVIOR
                         ? behaviors.descriptor(node.behavior()).orElse(null) : null;
+                if (ai.ravenroot.api.correlation.CorrelationOperationProperties.CLOSE.equals(node.behavior())
+                        && !ai.ravenroot.api.catalog.NodeBypassProperty.isBypassed(node.properties())) {
+                    ai.ravenroot.api.correlation.CorrelationOperationProperties.auditReason(node.properties());
+                    ai.ravenroot.api.correlation.CorrelationOperationProperties.disposition(node.properties());
+                    if (executionStore == null || !executionStore.supports(ai.ravenroot.api.persistence.StoreCapability.DURABLE)
+                            || !executionStore.supports(ai.ravenroot.api.persistence.StoreCapability.BUSINESS_CLOSURE_SIGNALS))
+                        throw new IllegalArgumentException("authored business close requires a durable supporting execution store");
+                }
+                if (ai.ravenroot.api.correlation.CorrelationOperationProperties.DERIVE.equals(node.behavior())
+                        && !ai.ravenroot.api.catalog.NodeBypassProperty.isBypassed(node.properties())) {
+                    ai.ravenroot.api.correlation.CorrelationOperationProperties.auditReason(node.properties());
+                    ai.ravenroot.api.correlation.CorrelationMappingProperties.read(node.properties(), correlationLimits);
+                    if (executionStore == null || !executionStore.supports(ai.ravenroot.api.persistence.StoreCapability.DURABLE)
+                            || !executionStore.supports(ai.ravenroot.api.persistence.StoreCapability.DEPLOYMENT_ENTRY_CUSTODY))
+                        throw new IllegalArgumentException("explicit context derivation requires a durable supporting execution store");
+                    var edges = openedManager.definition().nextEdges(node.id(), "continue");
+                    if (edges.size() != 1) throw new IllegalArgumentException("context derivation requires one authored continue edge");
+                    var target = openedManager.definition().node(edges.getFirst().target());
+                    if (target.kind() == NodeKind.START || ai.ravenroot.api.catalog.NodeBypassProperty.isBypassed(target.properties())
+                            || JoinSpec.validate(openedManager.definition()).containsKey(target.id()) && !CorrelatedJoinConfiguration.enabled(target)
+                            || ai.ravenroot.api.catalog.NodeRuntimeNatureProperty.effectiveNature(target.kind() == NodeKind.BEHAVIOR
+                                    ? behaviors.descriptor(target.behavior()).orElse(null) : null, target.properties()) == ai.ravenroot.api.catalog.NodeRuntimeNature.SOURCE)
+                        throw new IllegalArgumentException("derived target must be an enabled non-source entry");
+                }
                 if (node.kind() == NodeKind.START || ai.ravenroot.api.catalog.NodeRuntimeNatureProperty.effectiveNature(
                         descriptor, node.properties()) == ai.ravenroot.api.catalog.NodeRuntimeNature.SOURCE) {
                     var mapping = ai.ravenroot.api.correlation.CorrelationMappingProperties.read(node.properties(), correlationLimits);
@@ -1481,12 +1505,18 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
                     if (executionStore == null || !executionStore.supports(ai.ravenroot.api.persistence.StoreCapability.CORRELATED_JOINS)
                             || !executionStore.supports(ai.ravenroot.api.persistence.StoreCapability.DURABLE))
                         throw new IllegalArgumentException("correlated joins require a durable supporting execution store");
+                    var producerGraph = openedManager.definition();
                     for (String producer : configuration.trustedProducerEntries()) {
                         var source = openedManager.definition().node(producer);
+                        boolean derivedEntry = producerGraph.nodes().stream().anyMatch(candidate ->
+                                ai.ravenroot.api.correlation.CorrelationOperationProperties.DERIVE.equals(candidate.behavior())
+                                        && !ai.ravenroot.api.catalog.NodeBypassProperty.isBypassed(candidate.properties())
+                                        && producerGraph.nextEdges(candidate.id(), "continue").size() == 1
+                                        && producerGraph.nextEdges(candidate.id(), "continue").getFirst().target().equals(producer));
                         if (source.kind() != NodeKind.START && ai.ravenroot.api.catalog.NodeRuntimeNatureProperty.effectiveNature(
                                 source.kind() == NodeKind.BEHAVIOR ? behaviors.descriptor(source.behavior()).orElse(null) : null,
-                                source.properties()) != ai.ravenroot.api.catalog.NodeRuntimeNature.SOURCE)
-                            throw new IllegalArgumentException("correlated join producer must name a pinned START or SOURCE entry");
+                                source.properties()) != ai.ravenroot.api.catalog.NodeRuntimeNature.SOURCE && !derivedEntry)
+                            throw new IllegalArgumentException("correlated join producer must name a pinned START, SOURCE or explicit derivation entry");
                     }
                 }
             }
@@ -1521,6 +1551,11 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
             builtRunner.bindCorrelatedJoinRelease((record, triggerTraversal) -> {
                 Long admittedGeneration = admitted.get(triggerTraversal);
                 if (admittedGeneration != null) signalJoinContinuation(record, admittedGeneration);
+            });
+            builtRunner.bindDerivedEntryRelease((entry, triggerTraversal) -> {
+                Long admittedGeneration = admitted.get(triggerTraversal);
+                if (admittedGeneration != null) VIRTUAL_THREADS.execute(() -> recoverEntry(
+                        ai.ravenroot.api.persistence.DeploymentEntrySummary.of(entry), admittedGeneration));
             });
             startedSources = startSources(security, openedManager, generation);
             // Capture from the manager already opened for this successful startup. This is after all
@@ -3060,7 +3095,7 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
             var key = new ai.ravenroot.api.persistence.ExecutionKey(summary.scope().tenantId(), summary.processInstanceId());
             var entry = awaitStore(executionStore.deploymentEntry(key), deadline, "original source custody").orElse(null);
             if (entry == null || !entry.scope().equals(summary.scope()) || !entry.entryNodeId().equals(summary.entryNodeId())) return;
-            var target = runtimeDefinitionsForEntry(entry.entryNodeId());
+            var target = runtimeDefinitionsForEntry(entry);
             if (!target) return;
             try {
                 var stored = awaitStore(executionStore.load(key), deadline, "retained source lifecycle");
@@ -3113,9 +3148,15 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
         }
     }
 
-    private boolean runtimeDefinitionsForEntry(String nodeId) {
-        try { return nodeId.equals(ingressEntry(IngressTarget.node(nodeId))); }
-        catch (IllegalArgumentException invalid) { return false; }
+    private boolean runtimeDefinitionsForEntry(ai.ravenroot.api.persistence.DeploymentEntryIntent entry) {
+        try {
+            if (entry.cause() == ai.ravenroot.api.correlation.CorrelatedTraversal.Cause.SOURCE_EVENT)
+                return entry.entryNodeId().equals(ingressEntry(IngressTarget.node(entry.entryNodeId())));
+            var node = manager.definition().node(entry.entryNodeId());
+            return !ai.ravenroot.api.catalog.NodeBypassProperty.isBypassed(node.properties())
+                    && ai.ravenroot.api.catalog.NodeRuntimeNatureProperty.effectiveNature(node.kind() == NodeKind.BEHAVIOR
+                            ? behaviors.descriptor(node.behavior()).orElse(null) : null, node.properties()) != ai.ravenroot.api.catalog.NodeRuntimeNature.SOURCE;
+        } catch (IllegalArgumentException invalid) { return false; }
     }
 
     private void armInitialRecovery(SecurityContext security, long generation) {

@@ -11,7 +11,24 @@ import java.util.UUID;
  * @param visitCount number of actual node invocations in this traversal, including repeated loop visits
  * @param applicationCorrelation established application context, absent for legacy uncorrelated records
  * @param cause recorded entry cause, absent for legacy records that contain no such evidence
+ * @param derivation immutable original causal coordinates and authored reason for an explicit derived context
  */
 public record TraversalSummary(UUID processInstanceId, UUID traversalId, String entryNodeId,
         TraversalStatus status, ExecutionTerminationReason terminationReason, long visitCount,
-        ApplicationCorrelationContext applicationCorrelation, CorrelatedTraversal.Cause cause) { }
+        ApplicationCorrelationContext applicationCorrelation, CorrelatedTraversal.Cause cause, CorrelationDerivation derivation) {
+    /** Creates a traversal summary without explicit derivation lineage.
+     * @param processInstanceId original owning process
+     * @param traversalId actual traversal identity
+     * @param entryNodeId actual admitted entry
+     * @param status recorded lifecycle
+     * @param terminationReason recorded terminal reason
+     * @param visitCount actual visit count
+     * @param applicationCorrelation immutable business context, absent for old records
+     * @param cause recorded entry cause, absent for old records
+     */
+    public TraversalSummary(UUID processInstanceId, UUID traversalId, String entryNodeId, TraversalStatus status,
+            ExecutionTerminationReason terminationReason, long visitCount, ApplicationCorrelationContext applicationCorrelation,
+            CorrelatedTraversal.Cause cause) {
+        this(processInstanceId, traversalId, entryNodeId, status, terminationReason, visitCount, applicationCorrelation, cause, null);
+    }
+}

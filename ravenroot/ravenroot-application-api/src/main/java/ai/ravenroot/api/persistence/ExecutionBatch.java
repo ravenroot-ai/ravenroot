@@ -43,9 +43,13 @@ public final class ExecutionBatch {
     private final DerivedExecutionAncestry derivedAncestry;
     private final ReplaySourceSettlement replaySourceExpectation;
     private final DeploymentEntryRuntimeState deploymentEntryRuntimeState;
+    private final DerivedEntryHandoff derivedEntryHandoff;
+    private final List<ai.ravenroot.api.correlation.BusinessClosureSignal> businessClosureSignals;
 
     private ExecutionBatch(Builder builder) {
         this.deploymentEntryRuntimeState = builder.deploymentEntryRuntimeState;
+        this.derivedEntryHandoff = builder.derivedEntryHandoff;
+        this.businessClosureSignals = List.copyOf(builder.businessClosureSignals);
         this.runnerOperations = List.copyOf(builder.runnerOperations);
         this.key = builder.key;
         this.expectation = builder.expectation;
@@ -86,7 +90,7 @@ public final class ExecutionBatch {
                 && executionPausesToRegister.isEmpty() && executionPauseTransitions.isEmpty()
                 && sagaWrites.isEmpty() && sagaCommands.isEmpty() && sagaCommandsToRearm.isEmpty()
                 && agentBudgetOperations.isEmpty() && runnerOperations.isEmpty()
-                && replayEvidence.isEmpty() && derivedAncestry == null) {
+                && replayEvidence.isEmpty() && derivedAncestry == null && businessClosureSignals.isEmpty() && derivedEntryHandoff == null) {
             throw new IllegalArgumentException("an execution batch must contain at least one operation");
         }
     }
@@ -99,6 +103,16 @@ public final class ExecutionBatch {
     public static Builder to(ExecutionKey key) {
         return new Builder(key);
     }
+
+    /** Explicit authored close signals committed atomically with their actual visit completions.
+     * @return immutable closure requests carrying original causal coordinates
+     */
+    public List<ai.ravenroot.api.correlation.BusinessClosureSignal> businessClosureSignals() { return businessClosureSignals; }
+
+    /** Explicit new-context custody written atomically with its original visit completion.
+     * @return optional authored child handoff, never selective replay ancestry
+     */
+    public Optional<DerivedEntryHandoff> derivedEntryHandoff() { return Optional.ofNullable(derivedEntryHandoff); }
 
     /** Runtime counters committed with retained SOURCE custody, when supplied by the runtime.
      * @return original monotone counters; absent for non-entry writes
@@ -405,6 +419,8 @@ public final class ExecutionBatch {
         }
         private final ExecutionKey key;
         private DeploymentEntryRuntimeState deploymentEntryRuntimeState;
+        private DerivedEntryHandoff derivedEntryHandoff;
+        private final List<ai.ravenroot.api.correlation.BusinessClosureSignal> businessClosureSignals = new ArrayList<>();
         private RevisionExpectation expectation = RevisionExpectation.any();
         private Long fencingToken;
         private final List<ExecutionTransition> transitions = new ArrayList<>();
@@ -703,6 +719,23 @@ public final class ExecutionBatch {
             if (replaySourceExpectation != null) throw new IllegalStateException("source settlement is already set");
             replaySourceExpectation = settlement;
             return this;
+        }
+
+        /** Transfers a computed new context and bounded input under this original visit's fence.
+         * @param handoff explicit child custody and admission policy
+         * @return this builder
+         */
+        public Builder handoffDerivedEntry(DerivedEntryHandoff handoff) {
+            if (derivedEntryHandoff != null) throw new IllegalStateException("derived handoff is already set");
+            derivedEntryHandoff = java.util.Objects.requireNonNull(handoff); return this;
+        }
+
+        /** Requests an authored business close barrier with the actual visit's lifecycle commit.
+         * @param signal original scoped closure request and causal coordinates
+         * @return this builder
+         */
+        public Builder requestBusinessClosure(ai.ravenroot.api.correlation.BusinessClosureSignal signal) {
+            businessClosureSignals.add(java.util.Objects.requireNonNull(signal)); return this;
         }
 
         /** Retains runtime counters atomically with lifecycle progress of a SOURCE-owned entry.

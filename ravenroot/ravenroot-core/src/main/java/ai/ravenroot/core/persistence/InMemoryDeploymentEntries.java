@@ -14,23 +14,30 @@ final class InMemoryDeploymentEntries {
     private final Clock clock;
     private final InMemoryBusinessHistories histories;
     InMemoryDeploymentEntries(Clock clock, InMemoryBusinessHistories histories) { this.clock = clock; this.histories = histories; }
+    record AdmissionPlan(DeploymentEntryAdmission result, InMemoryBusinessHistories.AdmissionPlan history, int retainedBytes) { }
     DeploymentEntryAdmission admit(DeploymentEntryIntent proposed, CorrelationMapping.Mode mode, BusinessHistoryPolicy policy) {
+        var plan = prepareAdmission(proposed, mode, policy); publishAdmission(plan); return plan.result();
+    }
+    AdmissionPlan prepareAdmission(DeploymentEntryIntent proposed, CorrelationMapping.Mode mode, BusinessHistoryPolicy policy) {
         if (proposed.checkpoint() != null) throw new BusinessHistoryException(INVALID_REQUEST);
         if (proposed.input().size() > policy.maxPendingEntryBytesPerScope()) throw new BusinessHistoryException(RESOURCE_LIMIT);
         PayloadJson.read(proposed.input().bytes(), policy.selection().input());
+        if (!(PayloadJson.read(proposed.attributes().bytes(), policy.selection().input()) instanceof ai.ravenroot.api.payload.PayloadValue.MapValue))
+            throw new BusinessHistoryException(INVALID_REQUEST);
         var existing = entries.get(proposed.key());
         if (existing != null) {
             existing.requireSameAdmission(proposed);
-            return new DeploymentEntryAdmission(DeploymentEntryAdmission.Outcome.PENDING, Optional.of(existing));
+            return new AdmissionPlan(new DeploymentEntryAdmission(DeploymentEntryAdmission.Outcome.PENDING, Optional.of(existing)), null, 0);
         }
         var prior = histories.traversal(proposed.scope().tenantId(), proposed.processInstanceId(), proposed.traversalId());
         if (prior.isPresent()) {
             var original = prior.orElseThrow();
             if (!original.scope().equals(proposed.scope()) || !original.context().equals(proposed.context())
-                    || !original.entryNodeId().equals(proposed.entryNodeId()) || original.cause() != proposed.cause())
+                    || !original.entryNodeId().equals(proposed.entryNodeId()) || original.cause() != proposed.cause()
+                    || !Objects.equals(original.derivation(), proposed.traversal().derivation()))
                 throw new BusinessHistoryException(CONTEXT_CONFLICT);
-            return new DeploymentEntryAdmission(original.status().terminal() ? DeploymentEntryAdmission.Outcome.SETTLED
-                    : DeploymentEntryAdmission.Outcome.INPUT_UNAVAILABLE, Optional.empty());
+            return new AdmissionPlan(new DeploymentEntryAdmission(original.status().terminal() ? DeploymentEntryAdmission.Outcome.SETTLED
+                    : DeploymentEntryAdmission.Outcome.INPUT_UNAVAILABLE, Optional.empty()), null, 0);
         }
         if (proposed.cause() == CorrelatedTraversal.Cause.DERIVED_CONTEXT) {
             var cause = proposed.derivedFrom();
@@ -44,15 +51,19 @@ final class InMemoryDeploymentEntries {
         if (lifetime.compareTo(policy.historyRetention()) > 0) lifetime = policy.historyRetention();
         var accepted = new DeploymentEntryIntent(proposed.scope(), proposed.processInstanceId(), proposed.traversalId(), proposed.entryNodeId(),
                 proposed.context(), proposed.identity(), proposed.input(), now, now.plus(lifetime), proposed.cause(),
-                proposed.derivedFrom(), proposed.derivationReason(), null);
+                proposed.derivedFrom(), proposed.derivationReason(), null, proposed.attributes(), proposed.command());
         int encoded = DeploymentEntryCodec.encode(accepted).length + 128;
         var selected = entries.values().stream().filter(value -> value.scope().equals(proposed.scope())).toList();
         if (selected.size() >= policy.maxPendingEntriesPerScope()
                 || selected.stream().mapToLong(value -> retainedBytes.get(value.key())).sum() > policy.maxPendingEntryBytesPerScope() - encoded)
             throw new BusinessHistoryException(RESOURCE_LIMIT);
-        histories.admit(accepted.traversal(), mode);
-        entries.put(accepted.key(), accepted); retainedBytes.put(accepted.key(), encoded);
-        return new DeploymentEntryAdmission(DeploymentEntryAdmission.Outcome.ACCEPTED, Optional.of(accepted));
+        var history = histories.prepareAdmission(accepted.traversal(), mode);
+        return new AdmissionPlan(new DeploymentEntryAdmission(DeploymentEntryAdmission.Outcome.ACCEPTED, Optional.of(accepted)), history, encoded);
+    }
+    void publishAdmission(AdmissionPlan plan) {
+        if (plan.history() == null) return;
+        var accepted = plan.result().intent().orElseThrow();
+        histories.publishAdmission(plan.history()); entries.put(accepted.key(), accepted); retainedBytes.put(accepted.key(), plan.retainedBytes());
     }
     DeploymentEntryIntent projected(ExecutionBatch batch, ai.ravenroot.api.application.ProcessInstance folded) {
         var entry = entries.get(batch.key()); if (entry == null) return null;

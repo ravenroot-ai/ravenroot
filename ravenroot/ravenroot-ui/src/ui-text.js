@@ -3,6 +3,19 @@ import { STATIC_ENGLISH_MESSAGES } from './ui-static-text.js';
 import { DYNAMIC_ENGLISH_MESSAGES } from './ui-dynamic-text.js';
 
 export const ENGLISH_MESSAGES = Object.freeze({
+  'correlation.preview.title': 'Application correlation preview',
+  'correlation.preview.description': 'Test the current selectors against an explicit sample of the input this node receives. This reads no execution content and creates no history.',
+  'correlation.preview.sample': 'Sample input (JSON)',
+  'correlation.preview.bound': 'Sample editor limit: {maximum} UTF-8 bytes. The service also applies its configured input and selector limits.',
+  'correlation.preview.run': 'Preview application context',
+  'correlation.preview.invalidSample': 'Enter valid JSON within the sample editor byte limit.',
+  'correlation.preview.loading': 'Evaluating sample…',
+  'correlation.preview.refused': 'Sample refused: {reason}. Selector: {selector}.',
+  'correlation.preview.requiresExisting': 'Valid selection. Actual admission additionally requires an existing open history in the authorized deployment and version.',
+  'correlation.preview.generated': 'This sample needs a new identity. The zero UUID below is an illustrative preview placeholder.',
+  'correlation.preview.selected': 'Valid sample selection. Actual admission still applies deployment authority and lifecycle checks.',
+  'correlation.preview.failed': 'Preview unavailable. Retry against the connected service.',
+  'correlation.entry.title': 'START application context',
   'history.details': 'Record details',
   'history.facts.applicationContext': 'Application context',
   'history.facts.closureSignal': 'Requested closure and original cause',

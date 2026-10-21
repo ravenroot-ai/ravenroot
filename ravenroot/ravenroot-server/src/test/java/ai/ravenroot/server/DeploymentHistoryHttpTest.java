@@ -252,7 +252,10 @@ class DeploymentHistoryHttpTest {
         var policy = new ai.ravenroot.api.correlation.BusinessHistoryPolicy(defaults.maxHistoriesPerScope(),
                 defaults.maxOpenJoinsPerHistory(), defaults.maxRetainedJoinsPerHistory(), defaults.maxContributionsPerJoin(),
                 defaults.maxJoinPayloadBytes(), defaults.maxPageSize(), defaults.historyRetention(), defaults.joinDeadline(), limits);
-        try (var fixture = new Fixture(policy)) {
+        try (var fixture = new Fixture(policy, BehaviorRegistry.standard())) {
+            var selector = fixture.application.nodeTypes().stream().filter(type -> type.behavior().equals("correlation-derive"))
+                    .flatMap(type -> type.properties().stream()).filter(property -> property.name().equals("correlation.selector")).findFirst().orElseThrow();
+            assertEquals(128, selector.maximumUtf8Bytes(), "SDK/HTTP/CLI catalog must expose the preview/runtime operator selection bound");
             fixture.rejectAggregateLoads.set(true);
             String request = """
                     {"properties":{"correlation.mode":"REQUIRE_EXISTING","correlation.selector":"/metadata/id"},
@@ -281,6 +284,9 @@ class DeploymentHistoryHttpTest {
         final HttpClient client = HttpClient.newHttpClient();
         Fixture() throws Exception { this(ai.ravenroot.api.correlation.BusinessHistoryPolicy.DEFAULTS); }
         Fixture(ai.ravenroot.api.correlation.BusinessHistoryPolicy policy) throws Exception {
+            this(policy, new BehaviorRegistry());
+        }
+        Fixture(ai.ravenroot.api.correlation.BusinessHistoryPolicy policy, BehaviorRegistry behaviors) throws Exception {
             store = new SqliteExecutionStore(directory.resolve(UUID.randomUUID() + ".db"), Clock.systemUTC(),
                     ai.ravenroot.persistence.sqlite.SqliteStoreConfig.defaults().withBusinessHistories(policy));
             ExecutionStore observed = (ExecutionStore) java.lang.reflect.Proxy.newProxyInstance(ExecutionStore.class.getClassLoader(), new Class<?>[]{ExecutionStore.class},
@@ -290,7 +296,7 @@ class DeploymentHistoryHttpTest {
                         try { return method.invoke(store, arguments); }
                         catch (java.lang.reflect.InvocationTargetException failure) { throw failure.getCause(); }
                     });
-            application = new DefaultRavenrootApplication(engine, new ExecutionMonitor(), new BehaviorRegistry(),
+            application = new DefaultRavenrootApplication(engine, new ExecutionMonitor(), behaviors,
                     new InMemoryArtifactRegistry(), new DisabledProgramRuntime(), ExecutionIdentitySource.randomUuids(), observed, 8, UnknownBehaviorPolicy.passThrough());
             application.registerLocalDeployment(IDENTITY, "document", new java.io.ByteArrayInputStream(GRAPH.getBytes(StandardCharsets.UTF_8)));
             application.startLocalDeployment(IDENTITY, "document").toCompletableFuture().get(5, TimeUnit.SECONDS);

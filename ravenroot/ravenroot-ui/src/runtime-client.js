@@ -729,6 +729,13 @@ export class RavenrootRuntimeClient {
     });
   }
 
+  /** Evaluates explicit caller-supplied mapping and JSON sample without history admission. */
+  async previewCorrelation(properties, sample, { signal } = {}) {
+    return this.#json('/v1/correlation/preview', { method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ properties, sample }), signal });
+  }
+
   /** Explicitly rehosts an existing durable registration from server-retained graph custody. */
   async restoreDeployment(deploymentId, { registrationIdentity, graphVersion }) {
     const result = await this.#json(`/v1/deployments/${encodeURIComponent(deploymentId)}/restore`, {

@@ -50,7 +50,7 @@ class DeploymentHistoryBrowserTest {
                     d.maxContributionsPerJoin(), d.maxJoinPayloadBytes(), cap, d.historyRetention(), d.joinDeadline(), d.selection(), d.maxJoinCasAttempts(), d.readTimeout(), d.response());
             try (var engine = new PekkoExecutionEngine("history-browser-" + cap);
                  var store = new SqliteExecutionStore(output.resolve("history.db"), Clock.systemUTC(), SqliteStoreConfig.defaults().withBusinessHistories(policy))) {
-                var app = new DefaultRavenrootApplication(engine, new ExecutionMonitor(), new BehaviorRegistry(), new InMemoryArtifactRegistry(),
+                var app = new DefaultRavenrootApplication(engine, new ExecutionMonitor(), BehaviorRegistry.standard(), new InMemoryArtifactRegistry(),
                         new DisabledProgramRuntime(), ExecutionIdentitySource.randomUuids(), store, 8, UnknownBehaviorPolicy.passThrough());
                 try {
                     app.registerLocalDeployment(identity, "history-browser", new java.io.ByteArrayInputStream(GRAPH.getBytes(StandardCharsets.UTF_8)));

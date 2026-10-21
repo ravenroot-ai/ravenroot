@@ -2748,3 +2748,7 @@
 #repository-next-version { margin-left: 12px; }
 
 .doc-run-binding { max-width: 18rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .7rem; color: var(--text-muted); }
+#node-correlation-preview { min-width: 0; }
+#node-correlation-preview button { min-height: 44px; }
+#node-correlation-preview textarea { width: 100%; box-sizing: border-box; }
+#node-correlation-preview pre { max-height: 16rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }

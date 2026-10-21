@@ -1,4 +1,5 @@
 import { createDeploymentHistoryMonitor } from './embed-viewer-entry.js';
+import { mountCorrelationPreview } from './correlation-authoring.js';
 import { runOriginDeployment, persistedDeploymentRun } from './deployment-run.js';
 import { chooseRepositoryDocument, managedRepositoryLaunch } from './repository-picker.js';
 import { uiMessage, uiComputed, isUiMessage, renderUiMessage, uiErrorMessage, uiMessageOf } from './ui-message.js';
@@ -7245,12 +7246,24 @@ function runAfterInspectorDraft(action, {
   return deferredResult;
 }
 
+function startCorrelationDescriptor(kind) {
+  const shared = catalogDescriptor('correlation-derive');
+  return kind === 'START' && shared ? { ...shared, displayName: uiText('correlation.entry.title'),
+    properties: shared.properties.filter(property => property.name.startsWith('correlation.')) } : null;
+}
+
+function nodeEditorCatalogDescriptor(descriptor, kind) {
+  return kind === 'START' ? null : descriptor;
+}
+
 function renderNodeForm(model, creating) {
   contextualHelp.dismiss();
   const descriptor = catalogDescriptor(model.behavior);
-  const catalogEditorDescriptor = programCatalogEditorDescriptor(descriptor);
+  const catalogEditorDescriptor = programCatalogEditorDescriptor(nodeEditorCatalogDescriptor(descriptor, model.kind));
+  const startMapping = startCorrelationDescriptor(model.kind);
   const catalogFieldOwner = { documentId: workspace.activeId, nodeId: model.id };
   const catalogNames = new Set((descriptor?.properties || []).map(property => property.name));
+  for (const property of startMapping?.properties || []) catalogNames.add(property.name);
   // `runtime.nature` (or whatever `descriptor.natureProperty` names) is platform-owned, never a
   // behavior property (see NodeRuntimeNatureProperty's javadoc) — it has its own dedicated control
   // below and must never also surface as a free-form "additional property" row, which would give the
@@ -7302,10 +7315,12 @@ function renderNodeForm(model, creating) {
       <div id="node-nature-section">${natureFieldHtml(descriptor, model)}</div>
       <div id="node-max-concurrency-section">${maxConcurrencyFieldHtml(descriptor, model)}</div>
       <div id="node-join-section">${joinFieldHtml(graphData, model)}</div>
+      <div id="node-correlation-section">${catalogPropertyFieldsHtml(startMapping, model.properties || {}, catalogFieldOwner)}</div>
       <div id="catalog-properties">${catalogPropertyFieldsHtml(
         catalogEditorDescriptor, model.properties || {}, catalogFieldOwner)}</div>
       <div id="program-workspace">${programWorkspaceContentHtml(descriptor, model)}</div>
       <div id="additional-property-groups">${additionalPropertyGroupsHtml(additionalGroups.groups)}</div>
+      <section id="node-correlation-preview"></section>
       ${propertyEditorHtml('node-properties', extras)}
       <div class="editor-actions">
         ${creating ? '' : `<button class="btn danger" type="button" id="delete-node">${escapeHtml(uiText("workspace.app.delete.node"))}</button>`}
@@ -7313,10 +7328,19 @@ function renderNodeForm(model, creating) {
       </div>
     </form>`;
   const form = document.getElementById('node-editor');
+  let correlationPreview = { reconcile() {} };
   form._localeRender = () => renderNodeForm(model, creating);
+  const renderCorrelationCatalogControls = (selected, values) => {
+    const kind = form.elements.kind.value;
+    document.getElementById('catalog-properties').innerHTML = catalogPropertyFieldsHtml(
+      programCatalogEditorDescriptor(nodeEditorCatalogDescriptor(selected, kind)), values, catalogFieldOwner);
+    document.getElementById('node-correlation-section').innerHTML = catalogPropertyFieldsHtml(startCorrelationDescriptor(kind), values, catalogFieldOwner);
+    correlationPreview.reconcile();
+  };
   form.elements.catalogBehavior.addEventListener('change', event => {
     const selected = catalogDescriptor(event.target.value);
     if (!selected) return;
+    const sharedMapping = Object.fromEntries(Object.entries(readCurrentCatalogPropertyValues(form)).filter(([name]) => name.startsWith('correlation.')));
     form.elements.kind.value = 'BEHAVIOR';
     form.elements.behavior.value = selected.behavior;
     if (Array.from(form.elements.nodeType.options).some(option => option.value === selected.visualType)) {
@@ -7336,8 +7360,7 @@ function renderNodeForm(model, creating) {
     // condition that decides whether the bypass control may exist at all. Rebuilt for the same reason
     // the nature control is, and against the CURRENT form state rather than the loaded model.
     renderBypassSection(form, model);
-    document.getElementById('catalog-properties').innerHTML = catalogPropertyFieldsHtml(
-      programCatalogEditorDescriptor(selected), {}, catalogFieldOwner);
+    renderCorrelationCatalogControls(selected, sharedMapping);
     document.getElementById('program-workspace').innerHTML = programWorkspaceContentHtml(selected, model);
     document.getElementById('additional-property-groups').innerHTML = additionalPropertyGroupsHtml(
       splitAdditionalPropertyGroups(selected, model.properties || {}, model.propertyTypes || {}).groups);
@@ -7346,7 +7369,11 @@ function renderNodeForm(model, creating) {
   // `NodeBypassValidator` refuses the key on every non-BEHAVIOR node, `false` included, so
   // changing Kind changes whether the control may be offered. Re-rendered rather than left stale: a
   // checkbox surviving a switch to END would let a save write a graph the runtime refuses to load.
-  form.elements.kind.addEventListener('change', () => renderBypassSection(form, model));
+  form.elements.kind.addEventListener('change', () => {
+    renderBypassSection(form, model);
+    const values = readCurrentCatalogPropertyValues(form);
+    renderCorrelationCatalogControls(catalogDescriptor(form.elements.behavior.value), values);
+  });
   bindBypassField();
   bindNatureField();
   bindMaxConcurrencyField();
@@ -7421,6 +7448,17 @@ function renderNodeForm(model, creating) {
   });
   bindProgramWorkspace(form, model);
   bindInspectorDraft(form, model, 'node', creating);
+  const previewOwner = workspace.active, previewIncarnation = previewOwner.incarnation;
+  correlationPreview = mountCorrelationPreview({ container: document.getElementById('node-correlation-preview'), form,
+    properties: () => readCatalogPropertyEditor(form).properties,
+    isCurrent: () => workspace.active === previewOwner && previewOwner.incarnation === previewIncarnation && form.isConnected,
+    preview: async (properties, sample, options) => {
+      const client = runtimeClient, authority = workspaceAuthority;
+      if (!client || !tenantAuthorityAllows(previewOwner, client)) throw new Error('No current authoring service');
+      const result = await client.previewCorrelation(properties, sample, options);
+      if (client !== runtimeClient || authority !== workspaceAuthority) throw new DOMException('Retired authoring authority', 'AbortError');
+      return result;
+    } });
 }
 
 function catalogDescriptor(behavior) {

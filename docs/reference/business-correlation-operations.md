@@ -5,6 +5,27 @@ Ordinary transforms can replace the payload without changing that context. The b
 transport message identity, process identity, traversal identity, node visit, and attempt remain
 separate values.
 
+## Preview a mapping in the editor
+
+In Edit mode, select START, a SOURCE, or a **Derive business context** node. Its catalog controls
+declare the application ID policy and explicit JSON Pointers. START reuses the same mapping schema;
+SOURCE and derive controls retain the shared mapping when switching between those catalog types.
+Catalog selector bounds come from the running application's configured correlation selection policy.
+
+Enter the actual exposed input shape in **Sample input (JSON)** and choose **Preview application
+context**. The editor sends the current unsaved mapping and that sample to the same bounded selector
+implementation used by ingress. Missing, null, non-scalar, oversized, or conflicting selections show
+the declared reason and configured selector. The preview does not fetch stored content, create a
+business history, admit START, or activate a SOURCE. `REQUIRE_EXISTING` still needs an authorized open
+history at actual admission; a valid sample alone cannot establish that authority.
+
+The sample editor accepts at most 65,536 UTF-8 bytes and the service independently applies its normal
+configured input limits. The sample stays in the current inspector and is not saved into GraphML.
+Editing a selector or sample clears its old result. Switching documents or authority retires pending
+results. A generated zero UUID is an illustrative preview placeholder, never a real execution ID.
+The embedded viewer remains read-only and shows the resulting retained context and audit lineage
+through the same history projections as native Monitoring.
+
 ## Close a business history
 
 Add a **Close business history** (`correlation-close`) node with a literal, non-secret `auditReason`

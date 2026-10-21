@@ -5,6 +5,47 @@ test.use({ hasTouch: true });
 const ORIGIN = process.env.RAVENROOT_DEPLOYMENT_PERSISTENCE_ORIGIN;
 const CAP = Number(process.env.RAVENROOT_HISTORY_PAGE_CAP);
 const OUTPUT = process.env.RAVENROOT_HISTORY_EVIDENCE_DIR;
+if (CAP === 10) test('author previews START and SOURCE selectors and authors explicit close and derived identity controls', async ({ page }) => {
+  await page.goto(ORIGIN); await expect(page.locator('#runtime-connection')).toHaveClass(/connected/, { timeout: 30_000 });
+  const graph = `<graphml xmlns="http://graphml.graphdrawing.org/xmlns"><key id="k" for="node" attr.name="kind" attr.type="string"/><key id="b" for="node" attr.name="behavior" attr.type="string"/><graph id="authoring" edgedefault="directed"><node id="start"><data key="k">START</data></node><node id="derive"><data key="k">BEHAVIOR</data><data key="b">correlation-derive</data></node><node id="close"><data key="k">BEHAVIOR</data><data key="b">correlation-close</data></node><node id="ingress"><data key="k">BEHAVIOR</data><data key="b">timer</data></node><node id="end"><data key="k">END</data></node><edge source="start" target="derive"/><edge source="derive" target="close"/><edge source="close" target="end"/></graph></graphml>`;
+  await page.locator('#file-inp').setInputFiles({ name: 'correlation-authoring.graphml', mimeType: 'application/xml', buffer: Buffer.from(graph) });
+  await page.locator('#btn-modify').click();
+  const select = async id => { await page.evaluate(id => { window.cy.$(':selected').unselect(); window.cy.getElementById(id).select(); }, id); await expect(page.locator('#node-editor input[name="id"]')).toHaveValue(id); };
+  const field = name => page.locator(`#node-editor [data-catalog-property="${name}"]`);
+  const panel = page.locator('#node-correlation-preview'), sample = panel.getByLabel('Sample input (JSON)'), preview = panel.getByRole('button', { name: 'Preview application context' });
+  const mutations = []; page.on('request', request => { const path = new URL(request.url()).pathname; if (request.method() === 'POST' && (path.startsWith('/v1/deployments') || path.startsWith('/v1/executions'))) mutations.push(request.url()); });
+  await select('start'); await field('correlation.mode').selectOption('REQUIRE_EXISTING'); await field('correlation.selector').fill('/metadata/id');
+  await sample.fill('{"metadata":{"id":"bronze-file-42"}}'); await preview.click(); await expect(panel.locator('pre')).toContainText('bronze-file-42');
+  await expect(panel).toContainText('additionally requires an existing open history');
+  for (const input of [{}, { metadata: { id: null } }, { metadata: { id: {} } }, { metadata: { id: 'x'.repeat(257) } }]) {
+    await sample.fill(JSON.stringify(input)); await preview.click(); await expect(panel).toContainText('Sample refused:'); await expect(panel.locator('pre')).toBeEmpty();
+  }
+  await field('correlation.secondarySelector').fill('/other'); await sample.fill('{"metadata":{"id":"first"},"other":"second"}'); await preview.click(); await expect(panel).toContainText('CONFLICTING_MAPPINGS');
+  await field('correlation.secondarySelector').fill(''); await page.getByRole('button', { name: 'Save node', exact: true }).click();
+  await select('derive'); await field('auditReason').fill('explicit downstream operation'); await field('correlation.mode').selectOption('ACCEPT_OR_CREATE'); await field('correlation.selector').fill('/derivedId');
+  await sample.fill('{"derivedId":"silver-file-42"}'); await preview.click(); await expect(panel.locator('pre')).toContainText('silver-file-42');
+  await page.getByRole('button', { name: 'Save node', exact: true }).click();
+  await select('close'); await field('auditReason').fill('all expected partitions observed'); await field('disposition').selectOption('FAILED'); await expect(panel).toBeHidden();
+  await page.getByRole('button', { name: 'Save node', exact: true }).click();
+  await select('ingress'); await field('correlation.mode').selectOption('REQUIRE_EXISTING'); await field('correlation.selector').fill('/metadata/id'); await sample.fill('{"metadata":{"id":"bronze-file-42"}}'); await preview.click(); await expect(panel.locator('pre')).toContainText('bronze-file-42');
+  await page.locator('#node-editor [name="catalogBehavior"]').selectOption('correlation-derive');
+  await expect(field('correlation.mode')).toHaveValue('REQUIRE_EXISTING'); await expect(field('correlation.selector')).toHaveValue('/metadata/id');
+  await page.locator('#node-editor [name="kind"]').selectOption('START');
+  await expect(field('correlation.mode')).toHaveCount(1); await expect(field('correlation.selector')).toHaveValue('/metadata/id');
+  await expect(page.locator('#node-correlation-section')).toContainText('START application context');
+  await page.locator('#node-editor [name="kind"]').selectOption('BEHAVIOR'); await expect(field('correlation.mode')).toHaveCount(1); await expect(field('correlation.selector')).toHaveValue('/metadata/id');
+  await page.locator('#node-editor [name="catalogBehavior"]').selectOption('timer'); await expect(field('correlation.selector')).toHaveValue('/metadata/id');
+  await field('zoneId').fill('UTC'); await field('times').fill('10:00'); await page.locator('#node-editor [name="nodeType"]').selectOption('consumer');
+  await page.getByRole('button', { name: 'Save node', exact: true }).click();
+  await sample.fill('{"metadata":{"id":"bronze-file-42"}}');
+  await preview.click(); await expect(panel.locator('pre')).toContainText('bronze-file-42');
+  const authored = await page.evaluate(() => Object.fromEntries(['start', 'derive', 'close'].map(id => [id, window.ravenroot.activeDocument().graph.nodeMap[id].properties])));
+  expect(authored.start).toMatchObject({ 'correlation.mode': 'REQUIRE_EXISTING', 'correlation.selector': '/metadata/id' });
+  expect(authored.derive).toMatchObject({ auditReason: 'explicit downstream operation', 'correlation.selector': '/derivedId' });
+  expect(authored.close).toMatchObject({ auditReason: 'all expected partitions observed', disposition: 'FAILED' });
+  expect(JSON.stringify(authored)).not.toContain('bronze-file-42'); expect(JSON.stringify(authored)).not.toContain('silver-file-42'); expect(mutations).toEqual([]);
+  await page.screenshot({ path: join(OUTPUT, 'correlation-authoring-preview.png'), fullPage: true });
+});
 test('native monitor reads bounded real persistent histories, visits and retry attempts', async ({ page }) => {
   test.setTimeout(60_000); page.setDefaultTimeout(10_000);
   if (!ORIGIN || !OUTPUT || ![1, 10].includes(CAP)) throw new Error('requires real history server harness');

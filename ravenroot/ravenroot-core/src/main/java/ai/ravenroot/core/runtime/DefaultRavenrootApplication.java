@@ -762,7 +762,16 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
 
     @Override
     public List<ai.ravenroot.api.catalog.NodeTypeDescriptor> nodeTypes() {
-        return behaviors.descriptors();
+        var limits = executionStore == null ? ai.ravenroot.api.correlation.CorrelationLimits.DEFAULTS
+                : executionStore.businessHistoryPolicy().selection();
+        var mapping = java.util.Arrays.stream(ai.ravenroot.api.correlation.CorrelationMappingProperties.descriptors(limits))
+                .collect(java.util.stream.Collectors.toMap(ai.ravenroot.api.catalog.NodePropertyDescriptor::name, value -> value));
+        return behaviors.descriptors().stream().map(type -> {
+            if (type.properties().stream().noneMatch(property -> mapping.containsKey(property.name()))) return type;
+            return new ai.ravenroot.api.catalog.NodeTypeDescriptor(type.behavior(), type.displayName(), type.category(), type.description(),
+                    type.visualType(), type.agentic(), type.properties().stream().map(property -> mapping.getOrDefault(property.name(), property)).toList(),
+                    type.capabilities(), type.defaultNature(), type.allowedNatures(), type.commands(), type.outcomes(), type.runtimeConcurrency(), type.additionalProperties());
+        }).toList();
     }
 
     @Override

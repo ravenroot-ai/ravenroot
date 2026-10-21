@@ -114,6 +114,35 @@ class GraphAuthoringHttpIntegrationTest {
             assertEquals(200, saved.statusCode(), saved.body());
             assertEquals("tenant-b", repository.lastActor.tenantId());
 
+            URI versions = base.resolve("/v1/graph-authoring/orders.graphml/versions");
+            var deniedVersion = client.send(HttpRequest.newBuilder(versions)
+                    .header("Authorization", "Bearer tenant-a:reader:read")
+                    .POST(HttpRequest.BodyPublishers.noBody()).build(), HttpResponse.BodyHandlers.ofString());
+            assertEquals(403, deniedVersion.statusCode());
+            var unsupported = client.send(HttpRequest.newBuilder(versions)
+                    .header("Authorization", "Bearer tenant-a:alice:all")
+                    .POST(HttpRequest.BodyPublishers.noBody()).build(), HttpResponse.BodyHandlers.ofString());
+            assertEquals(501, unsupported.statusCode());
+            repository.supportsVersions = true;
+            var missingExpected = client.send(HttpRequest.newBuilder(versions)
+                    .header("Authorization", "Bearer tenant-a:alice:all")
+                    .header("Idempotency-Key", "version-request-key-001")
+                    .POST(HttpRequest.BodyPublishers.noBody()).build(), HttpResponse.BodyHandlers.ofString());
+            assertEquals(400, missingExpected.statusCode());
+            var versioned = client.send(HttpRequest.newBuilder(versions)
+                    .header("Authorization", "Bearer tenant-b:bob:all")
+                    .header("Idempotency-Key", "version-request-key-001")
+                    .header("X-Ravenroot-Expected-Draft", "draft-observation")
+                    .header("X-Ravenroot-Expected-Release", "release-observation")
+                    .header("X-Ravenroot-Expected-Publication", "publication-observation")
+                    .POST(HttpRequest.BodyPublishers.noBody()).build(), HttpResponse.BodyHandlers.ofString());
+            assertEquals(200, versioned.statusCode(), versioned.body());
+            assertEquals("tenant-b", repository.lastActor.tenantId());
+            assertEquals(new GraphAuthoringRepository.Revision("draft-observation", "release-observation", "publication-observation"), repository.lastVersionRequest.expected());
+            var invalidSource = client.send(HttpRequest.newBuilder(base.resolve("/v1/graph-authoring/orders.graphml?source=invalid"))
+                    .header("Authorization", "Bearer tenant-a:alice:all").GET().build(), HttpResponse.BodyHandlers.ofString());
+            assertEquals(400, invalidSource.statusCode());
+
             var traversal = client.send(HttpRequest.newBuilder(base.resolve("/v1/graph-authoring/%2e%2e%2fsecret"))
                     .header("Authorization", "Bearer tenant-a:alice:all").GET().build(),
                     HttpResponse.BodyHandlers.ofString());
@@ -127,7 +156,15 @@ class GraphAuthoringHttpIntegrationTest {
     private static final class TenantRecordingRepository implements GraphAuthoringRepository {
         volatile Actor lastActor;
         volatile int saveCalls;
-        @Override public Set<Capability> capabilities() { return Set.of(Capability.LIST, Capability.OPEN, Capability.SAVE); }
+        volatile boolean supportsVersions;
+        volatile MutationRequest lastVersionRequest;
+        @Override public Set<Capability> capabilities() { return supportsVersions
+                ? Set.of(Capability.LIST, Capability.OPEN, Capability.SAVE, Capability.CREATE_NEXT_VERSION)
+                : Set.of(Capability.LIST, Capability.OPEN, Capability.SAVE); }
+        @Override public CompletionStage<Document> createNextVersion(Actor actor, MutationRequest request) {
+            lastActor = actor; lastVersionRequest = request;
+            return CompletableFuture.completedFuture(new Document(summary(request.documentId()), "<graphml/>".getBytes()));
+        }
         @Override public CompletionStage<Page<DocumentSummary>> list(Actor actor, String cursor) {
             lastActor = actor;
             return CompletableFuture.completedFuture(new Page<>(List.of(summary(actor.tenantId() + ".graphml")), ""));

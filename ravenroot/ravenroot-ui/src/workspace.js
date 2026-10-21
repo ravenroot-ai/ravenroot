@@ -80,6 +80,8 @@ export function createDocumentRecord({
     },
     authoring: {
       providerDocumentId: null,
+      repositoryScope: null,
+      localChanges: false,
       revision: null,
       graphId: null,
       releaseVersion: null,
@@ -539,7 +541,8 @@ function rememberedSourceProcessDecision(workspace, event, streamTenant) {
 // the one the user is most likely to have forgotten. The caller writes the working view back into
 // the active record first, so that "dirty" here means every document's own history.
 export function hasUnsavedWork(workspace) {
-  return workspace.documents.some(document_ => Boolean(document_.history?.isDirty())
+  return workspace.documents.some(document_ => Boolean(document_.authoring?.localChanges)
+    || Boolean(document_.history?.isDirty())
     || (documentIsEditable(document_) && document_.visualGroupPresentationDirty));
 }
 

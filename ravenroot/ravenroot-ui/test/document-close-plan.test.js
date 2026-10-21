@@ -50,3 +50,9 @@ describe('close-all document planning', () => {
     });
   });
 });
+
+
+it('includes restored managed changes in the protected close cohort', () => {
+  const restored = { id: 'restored', authoring: { localChanges: true } };
+  expect(classifyDocumentCloseTargets([restored]).dirty).toEqual([restored]);
+});

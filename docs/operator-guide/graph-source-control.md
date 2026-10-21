@@ -80,7 +80,7 @@ as `RavenrootServerMain`.
 
 Every saved document carries graph-scoped `ravenroot.authoring.graphId` and `ravenroot.authoring.releaseVersion` metadata. The stable graph ID is separate from a runtime content digest. The positive authored release version is separate from GraphML schema versions and runtime aggregate versions. It is a canonical decimal integer from 1 through `9007199254740991`; leading zeroes, signs, fractions, exponents, and larger values are refused consistently by the browser, server, and publisher.
 
-Opening or saving unchanged content does not increment the authored version. The first changed save after the release branch contains the previous draft increments it once; later saves on that draft keep the incremented value. Every mutation checks the observed draft ref, release ref, and publication token, then uses the provider concurrency mechanism described below (GitHub uses a non-force expected-parent update). A stale browser gets `409` and must reopen before retrying.
+Opening or saving never increments the authored version. Release is the immutability boundary, independently of publication: changed saves of released vN are refused until an explicit next-version operation creates draft vN+1. Further edits, no-op saves, historical content restoration and reverting to released content retain the assigned successor version. Explicit discard restores release content while retaining an already assigned successor version. Every mutation checks the observed draft ref, release ref, and publication token, then uses the provider concurrency mechanism described below (GitHub uses a non-force expected-parent update). A stale browser gets `409` and must reopen before retrying.
 
 A release action creates or reuses a pull request on GitHub or a merge request on GitLab from the tenant draft branch to the configured graph release branch. It grants no authority over Ravenroot's product repository or `main` branch. Deleting a draft removes the branch file while Git history remains the archive.
 
@@ -399,3 +399,14 @@ page immediately after reopening also asserted three provider calls, one catalog
 bodies. Unpublishing through a catalog-only change required one catalog validation and zero provider
 bodies. The artifact records those list latencies and physical index sizes separately from the
 zero-publication scaling dataset. No live-provider measurements were run.
+
+
+### Explicit successor drafts and external editor links
+
+Feature-detect `CREATE_NEXT_VERSION` in `/v1/configuration` → `graphAuthoring.operations`.
+External clients use the provider-neutral [managed authoring API](../reference/api-cli.md#managed-authoring-links-and-successor-drafts).
+The operation needs authenticated `GRAPH_WRITE` permission and the complete draft/release/publication observation. It writes only the configured tenant draft branch; release bytes, publication and deployment are separate.
+
+A valid release with no draft may create vN+1. With an existing draft, creation requires identical vN release/draft bytes. An existing vN+1 is preserved and must be opened; a different request receives `409`. No release, inconsistent graph/version metadata, a draft below vN or above vN+1, and a release at `9007199254740991` refuse creation. An unreleased v1 stays an ordinary editable initial draft.
+
+For a legacy divergent draft still numbered vN, first download or otherwise back up every unsaved and stored draft edit. Review the differences. Only then explicitly discard the legacy draft changes to the release baseline, create vN+1 and reapply the protected changes. Creation never silently overwrites or relabels legacy work. Publication pending or failed does not prevent successor creation, and never authorizes deployment.

@@ -26,13 +26,15 @@ function nullableString(value, label) {
   return value;
 }
 
-function persistedAuthoring(value) {
+function persistedAuthoring(value, localChanges = false) {
   if (!value?.providerDocumentId) return null;
   const revision = value.revision;
   if (!revision || ['draft', 'release', 'publication'].some(key => typeof revision[key] !== 'string' || !revision[key])) {
     throw productError("workspace.error.workspace.persistence.repository.authoring.revision.is.invalid", new TypeError('Repository authoring revision is invalid'));
   }
-  return Object.freeze({ providerDocumentId: nullableString(value.providerDocumentId, 'providerDocumentId'),
+  return Object.freeze({ localChanges: Boolean(localChanges),
+    repositoryScope: nullableString(value.repositoryScope, 'repositoryScope'),
+    providerDocumentId: nullableString(value.providerDocumentId, 'providerDocumentId'),
     revision: Object.freeze({ draft: revision.draft, release: revision.release, publication: revision.publication }),
     graphId: nullableString(value.graphId, 'graphId'),
     releaseVersion: Number.isSafeInteger(value.releaseVersion) && value.releaseVersion > 0 ? value.releaseVersion : null,
@@ -89,7 +91,9 @@ export function persistedDocument(document_) {
       sourceGraphVersion: nullableString(document_.provenance?.sourceGraphVersion, 'sourceGraphVersion'),
       deploymentId: nullableString(document_.provenance?.deploymentId, 'deploymentId'),
     }),
-    authoring: persistedAuthoring(document_.authoring),
+    authoring: persistedAuthoring(document_.authoring, document_.history
+      ? document_.history.isDirty() || document_.visualGroupPresentationDirty || document_.authoring?.localChanges
+      : document_.authoring?.localChanges),
     graph,
     presentation: Object.freeze({
       ...visualGroupPresentation(document_),

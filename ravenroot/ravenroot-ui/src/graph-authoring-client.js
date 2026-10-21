@@ -103,6 +103,10 @@ export class GraphAuthoringClient {
         { 'Content-Type': 'application/graphml+xml; charset=utf-8' }),
     });
   }
+  createNextVersion(documentId, revision, idempotencyKey = crypto.randomUUID()) {
+    return this.#json(`/v1/graph-authoring/${encodeURIComponent(documentId)}/versions`,
+      { method: 'POST', headers: this.#mutationHeaders(revision, idempotencyKey) });
+  }
   restore(documentId, sourceRevision, revision, idempotencyKey = crypto.randomUUID()) {
     return this.#json(`/v1/graph-authoring/${encodeURIComponent(documentId)}/restore?revision=${encodeURIComponent(sourceRevision)}`,
       { method: 'POST', headers: this.#mutationHeaders(revision, idempotencyKey) });
@@ -155,7 +159,7 @@ export class GraphAuthoringClient {
     await invalidateRejectedCredential(response, this.credentialProvider, credential);
     if (options.empty && response.status === 204) return null;
     const value = await response.json().catch(() => ({}));
-    if (!response.ok) throw value.error ? new Error(value.error)
+    if (!response.ok) throw value.error ? Object.assign(new Error(value.error), { status: response.status, code: value.error })
       : productError('workspace.graphAuthoring.requestFailed', new Error(`Graph authoring request failed (${response.status})`), { status: response.status });
     return value;
   }

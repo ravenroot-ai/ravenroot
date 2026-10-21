@@ -36,18 +36,18 @@ semantic review and focused source inventories remain required for those boundar
 
 | Measure | Count |
 |---|---:|
-| Atomic operational candidates discovered | 32161 |
+| Atomic operational candidates discovered | 32162 |
 | Source-proven Helm operator fields | 39 |
 | Helm operator fields represented by lexical inventory rows | 31 |
 | Source-proven Helm fields outside lexical candidate patterns | 8 |
-| Reviewed | 32161 |
+| Reviewed | 32162 |
 | Pending review | 0 |
 | Confirmed hard-coded candidates awaiting remediation | 0 |
 | Unique confirmed operator-configurable parameters | 352 |
 | Unique parameters converted to centralized configuration | 16 |
 | Duplicate authorities removed | 27 |
 | Retained security ceilings or defaults | 2466 |
-| Retained protocol or format invariants | 13698 |
+| Retained protocol or format invariants | 13699 |
 | Retained published contract descriptions | 616 |
 | Retained presentation text | 2962 |
 | Retained derived values | 1156 |
@@ -62,10 +62,10 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 189.
+Checked source reconciliations: 190.
 
 The following tables are exhaustive projections of the same active inventory; each includes
-zero-count or unclassified rows as needed and sums to 32161 candidates.
+zero-count or unclassified rows as needed and sums to 32162 candidates.
 
 ### Status counts
 
@@ -77,7 +77,7 @@ zero-count or unclassified rows as needed and sums to 32161 candidates.
 | deferred | 0 |
 | duplicate-removed | 0 |
 | pending-review | 0 |
-| retained | 30246 |
+| retained | 30247 |
 
 ### Classification counts
 
@@ -86,7 +86,7 @@ zero-count or unclassified rows as needed and sums to 32161 candidates.
 | derived | 1156 |
 | operator-configurable | 1915 |
 | presentation-text | 2962 |
-| protocol-or-format-invariant | 13698 |
+| protocol-or-format-invariant | 13699 |
 | published-contract-description | 616 |
 | security-ceiling-or-default | 2466 |
 | test-fixture | 9348 |
@@ -98,7 +98,7 @@ zero-count or unclassified rows as needed and sums to 32161 candidates.
 |---|---:|
 | deployment | 3215 |
 | deployment-example | 20 |
-| java | 8278 |
+| java | 8279 |
 | script | 2890 |
 | test-fixture | 9348 |
 | ui | 8410 |
@@ -118,7 +118,7 @@ assigned to an issue retroactively.
 | #319 | 334 |
 | #320 | 1466 |
 | #321 | 8113 |
-| Retained; no remediation required | 21976 |
+| Retained; no remediation required | 21977 |
 
 ## Latest reconciliation
 
@@ -128,11 +128,11 @@ identity and retirement has its own approved record in the machine-readable inve
 | Partition | Count |
 |---|---:|
 | Source inventory candidates | 32161 |
-| Unchanged identities | 32158 |
-| Approved identity migrations | 2 |
-| Approved retirements | 1 |
+| Unchanged identities | 32161 |
+| Approved identity migrations | 0 |
+| Approved retirements | 0 |
 | Semantically classified additions | 1 |
-| Current candidates | 32161 |
+| Current candidates | 32162 |
 
 ## Final semantic review
 
@@ -7068,29 +7068,30 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-e1ec8ec968d03cc6cfda` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerPolicy.java:12` `AmqpConsumerPolicy` | java | retained | security-ceiling-or-default | These intervals bound lifecycle, expiry, retry, polling, or shutdown work at the component boundary; operator settings already identified by typed authorities are reviewed separately. |
 | `oc-697926a62bcd69f22f60` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerPolicy.java:13` `AmqpConsumerPolicy` | java | retained | security-ceiling-or-default | These intervals bound lifecycle, expiry, retry, polling, or shutdown work at the component boundary; operator settings already identified by typed authorities are reviewed separately. |
 | `oc-cbb98656f3eb14a2e28b` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerProtocol.java:25` `Mode` | java | retained | protocol-or-format-invariant | Issue #567 retains the empty queue sentinel in the typed subscriber destination; graph authors do not provide broker-generated queue names. |
-| `oc-2f32127b8c25c93ad605` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java:154` `if` | java | retained | protocol-or-format-invariant | Issue #567 retains '"\\0"' as exact AMQP destination, graph-property, blank-sentinel, or lease-identity vocabulary consumed by source validation. |
-| `oc-d5fa090e625933ed2f49` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java:154` `if` | java | retained | protocol-or-format-invariant | Issue #567 retains '"\\0"' as exact AMQP destination, graph-property, blank-sentinel, or lease-identity vocabulary consumed by source validation. |
-| `oc-a0d7b4dfc184799f421b` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java:219` `while` | java | retained | security-ceiling-or-default | These intervals bound lifecycle, expiry, retry, polling, or shutdown work at the component boundary; operator settings already identified by typed authorities are reviewed separately. |
-| `oc-eaee0daaf5239a5456aa` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java:242` `catch` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-8b533a0b19faba7bc91f` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java:377` `jitteredReconnectBackoff` | java | retained | security-ceiling-or-default | These numeric bounds limit admitted payload, memory, concurrency, queue, or collection work at the enforcing component boundary. |
-| `oc-a82497420a3ab43bc426` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java:377` `jitteredReconnectBackoff` | java | retained | security-ceiling-or-default | These numeric bounds limit admitted payload, memory, concurrency, queue, or collection work at the enforcing component boundary. |
-| `oc-899879a905c2f1a9a81b` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java:445` `if` | java | retained | protocol-or-format-invariant | Issue #567 retains '"Consumer"' as exact AMQP destination, graph-property, blank-sentinel, or lease-identity vocabulary consumed by source validation. |
-| `oc-39d6b64fb6e32f34acaf` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java:446` `if` | java | retained | protocol-or-format-invariant | Issue #567 retains '"queue"' as exact AMQP destination, graph-property, blank-sentinel, or lease-identity vocabulary consumed by source validation. |
-| `oc-c8583b8d9762bd11d099` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java:446` `if` | java | retained | protocol-or-format-invariant | Issue #567 retains '""' as exact AMQP destination, graph-property, blank-sentinel, or lease-identity vocabulary consumed by source validation. |
-| `oc-37ad937ac53ca7e711dc` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java:470` `if` | java | retained | protocol-or-format-invariant | Issue #567 retains '"retryBackoffMs"' as exact AMQP destination, graph-property, blank-sentinel, or lease-identity vocabulary consumed by source validation. |
-| `oc-6ecc9556677eaae6121a` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java:470` `if` | java | retained | protocol-or-format-invariant | Issue #567 retains '""' as exact AMQP destination, graph-property, blank-sentinel, or lease-identity vocabulary consumed by source validation. |
-| `oc-8e406fd11047b1f1f707` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java:473` `if` | java | retained | protocol-or-format-invariant | Issue #567 retains '""' as exact AMQP destination, graph-property, blank-sentinel, or lease-identity vocabulary consumed by source validation. |
-| `oc-fa30da52d3c0380dda1f` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java:473` `if` | java | retained | protocol-or-format-invariant | Issue #567 retains '"maxRetryBackoffMs"' as exact AMQP destination, graph-property, blank-sentinel, or lease-identity vocabulary consumed by source validation. |
-| `oc-94b23dbbe897cae32db0` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java:479` `if` | java | retained | protocol-or-format-invariant | Issue #567 retains '"drainTimeoutMs"' as exact AMQP destination, graph-property, blank-sentinel, or lease-identity vocabulary consumed by source validation. |
-| `oc-9f82e4dea30603de2f11` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java:479` `if` | java | retained | security-ceiling-or-default | Issue #567 retains zero as the lower bound for the graph-authored consumer drain timeout before tenant-policy tightening. |
-| `oc-f5db5eb32c4a79ea9667` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java:479` `if` | java | retained | protocol-or-format-invariant | Issue #567 retains '""' as exact AMQP destination, graph-property, blank-sentinel, or lease-identity vocabulary consumed by source validation. |
-| `oc-44c54e87a415274c7392` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java:514` `if` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-64e92a1ed7d6ef7c89fc` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java:514` `if` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-6b5709e7bcc7df7ed540` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java:536` `codePoints` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-b8bc80e2089e308203cf` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java:537` `codePoints` | java | retained | security-ceiling-or-default | Issue #521 adds an absolute 60-second validation ceiling for graph-authored AMQP consumer retry delays before tenant authority lookup; it is a fixed safety bound, not operator policy. |
-| `oc-1425763c9dbfdff421e9` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java:539` `codePoints` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-ffd265b2b842e80bb55a` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java:540` `codePoints` | java | retained | security-ceiling-or-default | Issue #521 adds an absolute 60-second validation ceiling for graph-authored AMQP consumer retry delays before tenant authority lookup; it is a fixed safety bound, not operator policy. |
-| `oc-2e12653411780f6455ce` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java:583` `FailureStreak` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-c665aa7f089a957b34b5` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java:30` `State` | java | retained | protocol-or-format-invariant | The fixed logger identity separates safe AMQP delivery-rejection diagnostics from listener availability; it is an observability routing name, not an operator capacity, retry, credential or network setting. |
+| `oc-2f32127b8c25c93ad605` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java:155` `if` | java | retained | protocol-or-format-invariant | Issue #567 retains '"\\0"' as exact AMQP destination, graph-property, blank-sentinel, or lease-identity vocabulary consumed by source validation. |
+| `oc-d5fa090e625933ed2f49` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java:155` `if` | java | retained | protocol-or-format-invariant | Issue #567 retains '"\\0"' as exact AMQP destination, graph-property, blank-sentinel, or lease-identity vocabulary consumed by source validation. |
+| `oc-a0d7b4dfc184799f421b` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java:220` `while` | java | retained | security-ceiling-or-default | These intervals bound lifecycle, expiry, retry, polling, or shutdown work at the component boundary; operator settings already identified by typed authorities are reviewed separately. |
+| `oc-eaee0daaf5239a5456aa` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java:243` `catch` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-8b533a0b19faba7bc91f` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java:389` `jitteredReconnectBackoff` | java | retained | security-ceiling-or-default | These numeric bounds limit admitted payload, memory, concurrency, queue, or collection work at the enforcing component boundary. |
+| `oc-a82497420a3ab43bc426` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java:389` `jitteredReconnectBackoff` | java | retained | security-ceiling-or-default | These numeric bounds limit admitted payload, memory, concurrency, queue, or collection work at the enforcing component boundary. |
+| `oc-899879a905c2f1a9a81b` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java:457` `if` | java | retained | protocol-or-format-invariant | Issue #567 retains '"Consumer"' as exact AMQP destination, graph-property, blank-sentinel, or lease-identity vocabulary consumed by source validation. |
+| `oc-39d6b64fb6e32f34acaf` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java:458` `if` | java | retained | protocol-or-format-invariant | Issue #567 retains '"queue"' as exact AMQP destination, graph-property, blank-sentinel, or lease-identity vocabulary consumed by source validation. |
+| `oc-c8583b8d9762bd11d099` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java:458` `if` | java | retained | protocol-or-format-invariant | Issue #567 retains '""' as exact AMQP destination, graph-property, blank-sentinel, or lease-identity vocabulary consumed by source validation. |
+| `oc-37ad937ac53ca7e711dc` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java:482` `if` | java | retained | protocol-or-format-invariant | Issue #567 retains '"retryBackoffMs"' as exact AMQP destination, graph-property, blank-sentinel, or lease-identity vocabulary consumed by source validation. |
+| `oc-6ecc9556677eaae6121a` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java:482` `if` | java | retained | protocol-or-format-invariant | Issue #567 retains '""' as exact AMQP destination, graph-property, blank-sentinel, or lease-identity vocabulary consumed by source validation. |
+| `oc-8e406fd11047b1f1f707` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java:485` `if` | java | retained | protocol-or-format-invariant | Issue #567 retains '""' as exact AMQP destination, graph-property, blank-sentinel, or lease-identity vocabulary consumed by source validation. |
+| `oc-fa30da52d3c0380dda1f` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java:485` `if` | java | retained | protocol-or-format-invariant | Issue #567 retains '"maxRetryBackoffMs"' as exact AMQP destination, graph-property, blank-sentinel, or lease-identity vocabulary consumed by source validation. |
+| `oc-94b23dbbe897cae32db0` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java:491` `if` | java | retained | protocol-or-format-invariant | Issue #567 retains '"drainTimeoutMs"' as exact AMQP destination, graph-property, blank-sentinel, or lease-identity vocabulary consumed by source validation. |
+| `oc-9f82e4dea30603de2f11` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java:491` `if` | java | retained | security-ceiling-or-default | Issue #567 retains zero as the lower bound for the graph-authored consumer drain timeout before tenant-policy tightening. |
+| `oc-f5db5eb32c4a79ea9667` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java:491` `if` | java | retained | protocol-or-format-invariant | Issue #567 retains '""' as exact AMQP destination, graph-property, blank-sentinel, or lease-identity vocabulary consumed by source validation. |
+| `oc-44c54e87a415274c7392` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java:526` `if` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-64e92a1ed7d6ef7c89fc` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java:526` `if` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-6b5709e7bcc7df7ed540` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java:548` `codePoints` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-b8bc80e2089e308203cf` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java:549` `codePoints` | java | retained | security-ceiling-or-default | Issue #521 adds an absolute 60-second validation ceiling for graph-authored AMQP consumer retry delays before tenant authority lookup; it is a fixed safety bound, not operator policy. |
+| `oc-1425763c9dbfdff421e9` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java:551` `codePoints` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-ffd265b2b842e80bb55a` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java:552` `codePoints` | java | retained | security-ceiling-or-default | Issue #521 adds an absolute 60-second validation ceiling for graph-authored AMQP consumer retry delays before tenant authority lookup; it is a fixed safety bound, not operator policy. |
+| `oc-2e12653411780f6455ce` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpConsumerSource.java:595` `FailureStreak` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-68677491f4ec4f9a5af4` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpDeliveryEvent.java:166` `optional` | java | retained | protocol-or-format-invariant | These literals are exact Java property keys; values and defaults are reviewed at their typed consumers. |
 | `oc-a516678f85682d8ac4bc` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpDeliveryEvent.java:166` `optional` | java | retained | protocol-or-format-invariant | Issue #567 retains the versioned v2 delivery-key domain separator that gives subscriber receipts a distinct stable idempotency identity. |
 | `oc-f525e7f1680f3ca0f8dc` | `ravenroot/ravenroot-extensions/ravenroot-amqp091/src/main/java/ai/ravenroot/extensions/amqp091/AmqpPublishNodeBehavior.java:42` `AmqpPublishNodeBehavior` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |

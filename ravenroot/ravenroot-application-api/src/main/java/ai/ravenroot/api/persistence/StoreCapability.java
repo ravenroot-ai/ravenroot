@@ -205,5 +205,8 @@ public enum StoreCapability {
     BUSINESS_HISTORIES,
 
     /** Cross-traversal contribution CAS and atomic continuation outbox. */
-    CORRELATED_JOINS
+    CORRELATED_JOINS,
+
+    /** Store-limited traversal, visit, attempt and causal-parent keyset reads. */
+    EXECUTION_HISTORY
 }

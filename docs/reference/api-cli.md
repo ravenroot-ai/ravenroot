@@ -48,6 +48,75 @@ source package declared them at registration; unknown or undeclared failures use
 and an incident handle. Property values, adapter exception messages, profiles, hosts, and stacks are
 never part of this response. `diagnostic` remains for older consumers and stays a fixed bounded text.
 
+## Initial START and retained deployment history
+
+Activating a deployment starts its eligible SOURCE listeners. It does not dispatch START. An
+explicit `POST /v1/deployments/{id}/initial-start` admits the deployment's original START once,
+using a JSON body with `incarnationId`, `graphVersion`, `requestId`, and `input`. The permanent
+admission marker belongs to the tenant and logical deployment. A different request ID, a restart,
+another replica, or expiry of transport deduplication cannot replace its original input or create
+another initial START. An explicitly new logical deployment has its own admission.
+
+The response always contains `outcome`, `requestId`, `processInstanceId`, and `traversalId`.
+`ACCEPTED` returns HTTP 202; `DUPLICATE` returns 200 and the same original identities. `REFUSED`
+returns 409, and `RECONCILE` returns 503 when admission cannot yet be established. Identifiers may
+be null for refused or unresolved requests. Durable initial START requires a durable execution
+store with initial-admission support.
+
+`GET /v1/deployments/{id}/history` reads one page under ordinary execution-read authorization.
+Supply the current immutable `graphVersion` query parameter and the captured
+`X-Ravenroot-Deployment-Incarnation` header. Every response carries that exact `source` tuple.
+The deployment binding is checked before and after each read. A stale incarnation is a conflict;
+a foreign or absent selection is a nondisclosing 404. Historical traversals from an earlier
+incarnation remain readable through the current binding when their logical deployment and exact
+version match.
+
+| `view` | Required selection | Optional filter |
+|---|---|---|
+| `histories` (default) | Current deployment binding | Exact `applicationCorrelationId`, `publicReference`, or `lifecycle` |
+| `traversals` | `applicationCorrelationId` | None |
+| `uncorrelated-traversals` | Current deployment binding | None; legacy records retain no invented business ID |
+| `process-traversals` | `processInstanceId` | None |
+| `visits` | `processInstanceId`, `traversalId` | Exact `nodeId` |
+| `attempts` | Process, traversal, and `invocationId` | None |
+| `parents` | Process, traversal, and `invocationId` | None |
+| `joins` | `applicationCorrelationId` | None |
+| `activity` | Process and traversal | Exact `invocationId` and `attemptId`; an attempt requires its invocation |
+
+All views accept `limit` and an opaque `cursor`. Keep the source, selection, filters, and page size
+unchanged while following `nextCursor`; cursors grant no authority and cannot cross a tenant,
+incarnation, or selection. Store queries apply the limit before serializing metadata. A process can
+contain several real traversal IDs, and a visit can have several retry attempts. Visit position is
+creation order, not a claim that parallel work happened sequentially. Causal parents carry their
+actual traversal IDs.
+
+Visit timing and safe outcome fields can be null after event retention or for older records.
+`eventHistoryAvailable=false` states that absence explicitly. Captured inputs and outputs are read
+only through `activity`, using the existing activity capture, redaction, size and retention policy.
+`CAPTURE_DISABLED`, `NOT_RETAINED`, and `EXPIRED` distinguish unavailable capture from available
+content; an empty retained page never proves that a node received an empty payload. Metadata reads
+never load a whole execution or retained join payloads.
+
+The ordinary SDK exposes these reads through
+`authorizedApplication.deploymentHistory(context, source)`, returning a read-only
+`DeploymentHistoryReader`. Its `policy()` publishes operator-owned limits. The embedded viewer uses
+`POST /v1/embed/history` with the existing v2 deployment-read capability, session currency,
+origin checks, and one-use proof bound to that path. Its `query` is a JSON object encoded as text;
+the deployment and tenant come from the authorized session. A read-only grant cannot dispatch START.
+
+The CLI provides the same ordinary application and HTTP operations:
+
+```text
+ravenroot deployments run-initial orders --incarnation CAPTURED_ID --graph-version PINNED_VERSION --request-id run-1 --input-file input.json
+ravenroot deployments history orders --incarnation CAPTURED_ID --graph-version PINNED_VERSION --view histories --limit 50
+ravenroot deployments history orders --incarnation CAPTURED_ID --graph-version PINNED_VERSION --view visits --process-instance-id PROCESS_ID --traversal-id TRAVERSAL_ID --limit 50
+```
+
+Both embedded and remote CLI transports print the shared JSON page, including `nextCursor`.
+Use `--application-correlation-id`, `--public-reference`, `--node-id`, `--invocation-id`, and
+`--attempt-id` for the corresponding view fields. Read deadlines, page ceilings and response budgets
+are described in [configuration](configuration.md#business-history-and-correlated-join-limits).
+
 ## Execution and events
 
 | Method and path | Result |

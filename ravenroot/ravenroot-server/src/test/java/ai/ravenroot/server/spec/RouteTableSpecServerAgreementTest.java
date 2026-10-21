@@ -53,7 +53,8 @@ class RouteTableSpecServerAgreementTest {
                 ((ai.ravenroot.api.payload.PayloadValue.TextValue) value).value();
         var document = members.apply(ai.ravenroot.api.payload.PayloadJson.read(
                 OpenApiSpecGenerator.generate(RouteTable.ALL).getBytes(StandardCharsets.UTF_8),
-                ai.ravenroot.api.payload.PayloadLimits.DEFAULTS));
+                // This is the generated API specification, with schemas for every route, rather than a workflow input.
+                new ai.ravenroot.api.payload.PayloadLimits(1024 * 1024, 64, 2048, 25_000, 262144, 256)));
         assertEquals("3.0.3", text.apply(document.get("openapi")));
         var paths = members.apply(document.get("paths"));
         var operation = members.apply(members.apply(paths.get("/v1/events")).get("get"));

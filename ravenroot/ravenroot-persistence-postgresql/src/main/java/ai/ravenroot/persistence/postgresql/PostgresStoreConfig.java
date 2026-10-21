@@ -98,6 +98,10 @@ public record PostgresStoreConfig(Duration lockTimeout, Duration statementTimeou
                 graphDefinitionUpsertAttempts, ai.ravenroot.api.correlation.BusinessHistoryPolicy.DEFAULTS);
     }
 
+    /** Supplies operator-owned business-history, pagination and response projection budgets. */
+    public PostgresStoreConfig withBusinessHistories(ai.ravenroot.api.correlation.BusinessHistoryPolicy policy) {
+        return new PostgresStoreConfig(lockTimeout, statementTimeout, serializationRetries, maxLeaseTtl, maxPayloadBytes, maxClockSkew, journalRetention, maxInventoryPageSize, terminalRetention, executionResultRetention, graphDefinitionUpsertAttempts, policy);
+    }
     public PostgresStoreConfig {
         Objects.requireNonNull(businessHistories, "businessHistories");
         Objects.requireNonNull(lockTimeout, "lockTimeout");

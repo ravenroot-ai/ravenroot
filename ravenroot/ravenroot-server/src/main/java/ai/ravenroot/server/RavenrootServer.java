@@ -886,6 +886,8 @@ public final class RavenrootServer implements AutoCloseable {
                     publicContext(embed::projection));
             server.createContext(ai.ravenroot.server.embed.EmbedBrowserHttpHandler.OBSERVATION_PATH,
                     publicContext(embed::observation));
+            server.createContext(ai.ravenroot.server.embed.EmbedBrowserHttpHandler.HISTORY_PATH,
+                    publicContext(embed::history));
             server.createContext(ai.ravenroot.server.embed.EmbedBrowserHttpHandler.RUNS_PATH,
                     publicContext(embed::runs));
             server.createContext(ai.ravenroot.server.embed.EmbedBrowserHttpHandler.START_EXECUTION_PATH,
@@ -4358,13 +4360,28 @@ public final class RavenrootServer implements AutoCloseable {
                 json(exchange, 200, view.orElseThrow().toJson());
                 return;
             }
+            if (segments.length == 3 && "history".equals(segments[2])) {
+                if (!method(exchange, httpContext, "GET")) return;
+                var incarnations = exchange.getRequestHeaders().get("X-Ravenroot-Deployment-Incarnation");
+                if (incarnations == null || incarnations.size() != 1) { fail(exchange, httpContext, ErrorCode.INVALID_REQUEST); return; }
+                String incarnation = incarnations.getFirst();
+                var fields = new java.util.LinkedHashMap<>(query);
+                String version = fields.remove("graphVersion");
+                var source = new ai.ravenroot.api.history.DeploymentHistorySource(deploymentId, incarnation, version);
+                var request = new ai.ravenroot.api.history.DeploymentHistoryRequest(fields);
+                var reader = authorizedApplication.deploymentHistory(context, source);
+                exchange.getResponseHeaders().set("Cache-Control", "private, no-store");
+                json(exchange, 200, request.read(reader, context.tenantId()));
+                return;
+            }
             if (segments.length == 3 && "initial-start".equals(segments[2])) {
                 if (!method(exchange, httpContext, "POST")) return;
                 var body = strictJsonMap(boundedBody(exchange, payloadLimits.maxEncodedBytes()),
                         java.util.Set.of("incarnationId", "graphVersion", "requestId", "input"));
                 if (!(body.entries().get("incarnationId") instanceof PayloadValue.TextValue incarnation)
                         || !(body.entries().get("graphVersion") instanceof PayloadValue.TextValue version)
-                        || !(body.entries().get("requestId") instanceof PayloadValue.TextValue request)) {
+                        || !(body.entries().get("requestId") instanceof PayloadValue.TextValue request)
+                        || !body.entries().containsKey("input")) {
                     fail(exchange, httpContext, ErrorCode.INVALID_REQUEST); return;
                 }
                 var result = authorizedApplication.startLocalDeploymentExecution(context, deploymentId,
@@ -4470,6 +4487,14 @@ public final class RavenrootServer implements AutoCloseable {
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
             fail(exchange, httpContext, ErrorCode.REQUEST_INTERRUPTED);
+        } catch (ai.ravenroot.api.history.HistoryReadException failure) {
+            fail(exchange, httpContext, switch (failure.reason()) {
+                case NOT_FOUND -> ErrorCode.UNKNOWN_RESOURCE;
+                case SOURCE_CHANGED -> ErrorCode.CONFLICT;
+                case UNAVAILABLE -> ErrorCode.REQUEST_INTERRUPTED;
+            });
+        } catch (ai.ravenroot.api.correlation.BusinessHistoryException invalid) {
+            fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
         } catch (IllegalArgumentException invalid) {
             fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
         } catch (IllegalStateException conflict) {

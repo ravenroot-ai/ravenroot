@@ -72,7 +72,7 @@ public final class OpenApiSpecGenerator {
         json.append(",\n").append(diagnosticSchemas()).append(",\n")
                 .append(deploymentSchemas()).append(",\n")
                 .append(processInventorySchemas()).append(",\n")
-                .append(executionEventSchemas()).append("    }\n");
+                .append(executionEventSchemas()).append(",\n").append(HistoryOpenApi.schemas()).append("    }\n");
         json.append("  }\n");
         json.append("}\n");
         return json.toString();
@@ -135,6 +135,9 @@ public final class OpenApiSpecGenerator {
         if (isHumanTaskCapabilityCompletion(route, method)) {
             entry.append(jsonRequestBody("HumanTaskCapabilityCompletion"));
         }
+        if ("/v1/deployments/{id}/initial-start".equals(route.path())) entry.append(jsonRequestBody("InitialStartRequest"));
+        if ("/v1/embed/executions".equals(route.path())) entry.append(jsonRequestBody("EmbedInitialStartRequest"));
+        if ("/v1/embed/history".equals(route.path())) entry.append(jsonRequestBody("EmbedHistoryRequest"));
         entry.append("        \"responses\": {\n");
         var responses = new java.util.ArrayList<String>();
         route.successStatuses().stream().sorted().forEach(status ->
@@ -240,6 +243,12 @@ public final class OpenApiSpecGenerator {
             parameters.add("          {\"name\": \"generation\", \"in\": \"query\", \"required\": true, "
                     + "\"schema\": {\"type\": \"integer\", \"format\": \"int64\", \"minimum\": 1}}");
         }
+        if ("/v1/deployments/{id}/history".equals(route.path())) {
+            parameters.add("          {\"name\":\"X-Ravenroot-Deployment-Incarnation\",\"in\":\"header\",\"required\":true,\"schema\":{\"type\":\"string\"}}");
+            parameters.add("          {\"name\":\"graphVersion\",\"in\":\"query\",\"required\":true,\"schema\":{\"type\":\"string\"}}");
+            for (String field : new String[]{"view", "applicationCorrelationId", "publicReference", "lifecycle", "processInstanceId", "traversalId", "invocationId", "attemptId", "nodeId", "cursor", "limit"})
+                parameters.add(queryParameter(field, "limit".equals(field) ? "integer" : "string", "History view field; invalid combinations are refused. Page size is bounded by the operator history policy."));
+        }
         if (isDeploymentCommand(route, method)) {
             parameters.add(deploymentHeader("Idempotency-Key", "string",
                     "Required for a durable deployment; one unique key per operator intent."));
@@ -309,7 +318,8 @@ public final class OpenApiSpecGenerator {
     }
 
     private static boolean isDeploymentCommand(RouteDescriptor route, String method) {
-        return ("POST".equals(method) && route.path().startsWith("/v1/deployments/{id}/"))
+        return ("POST".equals(method) && route.path().startsWith("/v1/deployments/{id}/")
+                && !route.path().endsWith("/initial-start"))
                 || ("DELETE".equals(method) && "/v1/deployments/{id}".equals(route.path()));
     }
 
@@ -370,6 +380,10 @@ public final class OpenApiSpecGenerator {
         } else if (("/v1/deployments".equals(route.path()) && "POST".equals(method))
                 || ("/v1/deployments/{id}".equals(route.path()) && "GET".equals(method))) {
             schema = "LocalDeploymentStatus";
+        } else if ("/v1/deployments/{id}/initial-start".equals(route.path()) || "/v1/embed/executions".equals(route.path())) {
+            schema = "InitialStartResponse";
+        } else if ("/v1/deployments/{id}/history".equals(route.path()) || "/v1/embed/history".equals(route.path())) {
+            schema = "DeploymentHistoryPage";
         } else if (isDeploymentCommand(route, method)) {
             schema = "DeploymentCommandResponse";
         }

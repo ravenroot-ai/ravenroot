@@ -157,6 +157,23 @@ class DeploymentInitialStartTest {
                 assertNotNull(initial.processInstanceId());
                 assertNotNull(initial.traversalId());
                 assertTrue(completed.await(5, TimeUnit.SECONDS));
+                var reader = application.deploymentHistory(IDENTITY.tenantId(),
+                        new ai.ravenroot.api.history.DeploymentHistorySource("document", binding.incarnationId(), binding.graphVersion()));
+                var actualTraversals = reader.processTraversals(initial.processInstanceId(), Optional.empty(), 10);
+                assertEquals(List.of(initial.traversalId()), actualTraversals.items().stream().map(ai.ravenroot.api.history.TraversalSummary::traversalId).toList());
+                var actualVisits = reader.visits(initial.processInstanceId(), initial.traversalId(), Optional.empty(), Optional.empty(), 10);
+                assertEquals(3, actualVisits.items().size());
+                var effectVisit = actualVisits.items().stream().filter(v -> v.nodeId().equals("effect")).findFirst().orElseThrow();
+                assertEquals(1, reader.attempts(initial.processInstanceId(), initial.traversalId(), effectVisit.invocationId(), Optional.empty(), 10).items().size());
+                assertEquals(ai.ravenroot.api.history.HistoryActivityPage.Availability.CAPTURE_DISABLED,
+                        reader.activity(initial.processInstanceId(), initial.traversalId(), effectVisit.invocationId(), null, 0, 10).availability());
+                var foreignSelection = assertThrows(ai.ravenroot.api.history.HistoryReadException.class, () ->
+                        reader.visits(initial.processInstanceId(), UUID.randomUUID(), Optional.empty(), Optional.empty(), 10));
+                assertEquals(ai.ravenroot.api.history.HistoryReadException.Reason.NOT_FOUND, foreignSelection.reason());
+                var staleReader = application.deploymentHistory(IDENTITY.tenantId(),
+                        new ai.ravenroot.api.history.DeploymentHistorySource("document", "stale", binding.graphVersion()));
+                assertEquals(ai.ravenroot.api.history.HistoryReadException.Reason.SOURCE_CHANGED,
+                        assertThrows(ai.ravenroot.api.history.HistoryReadException.class, () -> staleReader.processTraversals(initial.processInstanceId(), Optional.empty(), 10)).reason());
                 var repeated = application.startEmbedDeploymentExecution(IDENTITY, "document", binding.incarnationId(),
                         binding.graphVersion(), "different-client");
                 assertEquals(EmbedDeploymentStart.Outcome.DUPLICATE, repeated.outcome());

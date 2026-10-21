@@ -3544,6 +3544,23 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
     }
 
     @Override
+    public ai.ravenroot.api.history.DeploymentHistoryReader deploymentHistory(String tenantId,
+            ai.ravenroot.api.history.DeploymentHistorySource source) {
+        java.util.Objects.requireNonNull(source, "source");
+        var key = new LocalDeploymentKey(requireTenant(tenantId), requireLocalDeploymentId(source.deploymentId()));
+        var captured = localDeployments.get(key);
+        if (captured == null) throw new ai.ravenroot.api.history.HistoryReadException(
+                ai.ravenroot.api.history.HistoryReadException.Reason.NOT_FOUND);
+        return new DefaultDeploymentHistoryReader(executionStore,
+                new ai.ravenroot.api.correlation.BusinessScope(key.tenantId(), captured.lifecycleId().value(), source.graphVersion()), source,
+                () -> localDeployments.get(key) == captured && deployments.get(captured.engineId()) == captured.deployment()
+                        && source.incarnationId().equals(captured.deployment().incarnationId())
+                        && source.graphVersion().equals(captured.deployment().graphVersion()),
+                this::activityArchiveAvailable, this::activityArchiveMaxPageSize,
+                query -> behaviors.activityCapture().read(key.tenantId(), query));
+    }
+
+    @Override
     public java.util.Optional<DeploymentViewerView> localDeploymentView(String tenantId, String deploymentId) {
         var key = new LocalDeploymentKey(requireTenant(tenantId), requireLocalDeploymentId(deploymentId));
         LocalDeploymentRecord record = localDeployments.get(key);
@@ -3631,7 +3648,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         if (outcome == EmbedDeploymentStart.Outcome.ACCEPTED || outcome == EmbedDeploymentStart.Outcome.DUPLICATE) {
             try {
                 var initial = executionStore.initialStart(security.tenantId(), record.lifecycleId().value())
-                        .toCompletableFuture().get(10, java.util.concurrent.TimeUnit.SECONDS);
+                        .toCompletableFuture().get(executionStore.businessHistoryPolicy().readTimeout().toNanos(), java.util.concurrent.TimeUnit.NANOSECONDS);
                 if (initial.isPresent()) return new EmbedDeploymentStart(outcome, requestId,
                         initial.orElseThrow().processInstanceId(), initial.orElseThrow().traversalId());
             } catch (InterruptedException interrupted) {

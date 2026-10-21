@@ -6498,8 +6498,10 @@ public final class GraphRunner implements AutoCloseable {
                         new ExecutionTransition.InvocationTransitioned(traversalId, invocationId,
                                 NodeInvocationStatus.COMPLETED));
                 UUID completed = eventId();
-                record(transitions, events(boundary ? ExecutionEventType.SOURCE_BOUNDARY
-                        : ExecutionEventType.NODE_COMPLETED, completed, startedEventId, invocationId, attemptId));
+                record(transitions, events(List.of(new PublishedEvent(boundary ? ExecutionEventType.SOURCE_BOUNDARY
+                        : ExecutionEventType.NODE_COMPLETED, completed, ai.ravenroot.api.persistence.NodeOutcomeEventData.of(
+                                boundary ? "source-boundary" : ai.ravenroot.api.catalog.NodeOutcomeDescriptor.BLANK_OUTCOME))),
+                        startedEventId, invocationId, attemptId));
                 lifecycle = fold(lifecycle, transitions);
                 return completed;
             } finally {
@@ -6549,8 +6551,10 @@ public final class GraphRunner implements AutoCloseable {
                         ? ExecutionEventType.NODE_BYPASSED : ExecutionEventType.NODE_COMPLETED;
                 var published = defaulted
                         ? List.of(new PublishedEvent(ExecutionEventType.NODE_DEFAULTED, defaultedEventId),
-                                new PublishedEvent(completionType, completedEventId))
-                        : List.of(new PublishedEvent(completionType, completedEventId));
+                                new PublishedEvent(completionType, completedEventId, ai.ravenroot.api.persistence.NodeOutcomeEventData.of(
+                                        result == null ? null : result.outcome())))
+                        : List.of(new PublishedEvent(completionType, completedEventId,
+                                ai.ravenroot.api.persistence.NodeOutcomeEventData.of(result == null ? null : result.outcome())));
                 var evidence = replayEvidence(invocationId, attemptId, nodeId, parents, command, result, iteration);
                 record(transitions, events(published, startedEventId, invocationId, attemptId), evidence);
                 lifecycle = fold(lifecycle, transitions);
@@ -6976,13 +6980,14 @@ public final class GraphRunner implements AutoCloseable {
                 published.add(envelope(each.type(), each.eventId(), java.util.Objects.requireNonNull(causedBy,
                         () -> "a " + each.type() + " event is caused by another event in this journal; "
                                 + "publishing it with absent causation would state, permanently and falsely, "
-                                + "that its cause lies outside"), invocationId, attemptId));
+                                + "that its cause lies outside"), invocationId, attemptId, each.payload() == null ? OpaquePayload.empty(EVENT_CONTENT_TYPE) : each.payload()));
             }
             return List.copyOf(published);
         }
 
         /** One event a batch is about to journal, paired with the identity minted for it. */
-        private record PublishedEvent(ExecutionEventType type, UUID eventId) {
+        private record PublishedEvent(ExecutionEventType type, UUID eventId, OpaquePayload payload) {
+            private PublishedEvent(ExecutionEventType type, UUID eventId) { this(type, eventId, null); }
         }
 
         private EventEnvelope envelope(ExecutionEventType type, UUID eventId, UUID causationId,

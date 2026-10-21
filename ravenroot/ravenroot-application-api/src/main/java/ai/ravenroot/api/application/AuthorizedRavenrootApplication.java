@@ -793,6 +793,55 @@ public final class AuthorizedRavenrootApplication {
         return delegate.localDeployment(context.tenantId(), deploymentId);
     }
 
+    /** Read-only history under ordinary authenticated execution-read authority. */
+    public ai.ravenroot.api.history.DeploymentHistoryReader deploymentHistory(RequestContext context,
+            ai.ravenroot.api.history.DeploymentHistorySource source) {
+        return historyReader(context, source, AuthorizationAction.EXECUTION_READ);
+    }
+    /** Read-only history under the separate deployment embed capability. */
+    public ai.ravenroot.api.history.DeploymentHistoryReader embedDeploymentHistory(RequestContext context,
+            ai.ravenroot.api.history.DeploymentHistorySource source) {
+        return historyReader(context, source, AuthorizationAction.EMBED_DEPLOYMENT_RUN_READ);
+    }
+    private ai.ravenroot.api.history.DeploymentHistoryReader historyReader(RequestContext context,
+            ai.ravenroot.api.history.DeploymentHistorySource source, AuthorizationAction action) {
+        Objects.requireNonNull(source, "source");
+        var resource = ProtectedResource.owned("deployment-view", source.deploymentId(), context.tenantId());
+        require(context, action, resource);
+        var reader = delegate.deploymentHistory(context.tenantId(), source);
+        return new ai.ravenroot.api.history.DeploymentHistoryReader() {
+            @Override public ai.ravenroot.api.history.HistoryPage<ai.ravenroot.api.history.TraversalSummary> uncorrelatedTraversals(java.util.Optional<String> cursor, int limit) {
+                require(context, action, resource); return reader.uncorrelatedTraversals(cursor, limit);
+            }
+            @Override public ai.ravenroot.api.correlation.BusinessHistoryPolicy policy() { require(context, action, resource); return reader.policy(); }
+            @Override public ai.ravenroot.api.history.DeploymentHistorySource source() { require(context, action, resource); return reader.source(); }
+            @Override public ai.ravenroot.api.correlation.BusinessHistoryPage histories(ai.ravenroot.api.correlation.BusinessHistoryQuery query) {
+                require(context, action, resource); return reader.histories(query);
+            }
+            @Override public ai.ravenroot.api.correlation.CorrelatedTraversalPage traversals(String id, java.util.Optional<String> cursor, int limit) {
+                require(context, action, resource); return reader.traversals(id, cursor, limit);
+            }
+            @Override public ai.ravenroot.api.history.HistoryPage<ai.ravenroot.api.history.TraversalSummary> processTraversals(java.util.UUID process, java.util.Optional<String> cursor, int limit) {
+                require(context, action, resource); return reader.processTraversals(process, cursor, limit);
+            }
+            @Override public ai.ravenroot.api.history.HistoryPage<ai.ravenroot.api.history.NodeVisitSummary> visits(java.util.UUID process, java.util.UUID traversal, java.util.Optional<String> node, java.util.Optional<String> cursor, int limit) {
+                require(context, action, resource); return reader.visits(process, traversal, node, cursor, limit);
+            }
+            @Override public ai.ravenroot.api.history.HistoryPage<ai.ravenroot.api.history.NodeAttemptSummary> attempts(java.util.UUID process, java.util.UUID traversal, java.util.UUID invocation, java.util.Optional<String> cursor, int limit) {
+                require(context, action, resource); return reader.attempts(process, traversal, invocation, cursor, limit);
+            }
+            @Override public ai.ravenroot.api.history.HistoryPage<ai.ravenroot.api.history.VisitParent> parents(java.util.UUID process, java.util.UUID traversal, java.util.UUID invocation, java.util.Optional<String> cursor, int limit) {
+                require(context, action, resource); return reader.parents(process, traversal, invocation, cursor, limit);
+            }
+            @Override public ai.ravenroot.api.correlation.CorrelatedJoinPage joins(String id, java.util.Optional<String> cursor, int limit) {
+                require(context, action, resource); return reader.joins(id, cursor, limit);
+            }
+            @Override public ai.ravenroot.api.history.HistoryActivityPage activity(java.util.UUID process, java.util.UUID traversal, java.util.UUID invocation, java.util.UUID attempt, long afterCursor, int limit) {
+                require(context, action, resource); return reader.activity(process, traversal, invocation, attempt, afterCursor, limit);
+            }
+        };
+    }
+
     /**
      * Resolves one deployment viewer source under its distinct observation action.
      * @param context authenticated request context supplying the owning tenant

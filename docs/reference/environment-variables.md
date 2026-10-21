@@ -388,6 +388,22 @@ Detailed contract: [Persistence and recovery](../operator-guide/persistence-life
 | `RAVENROOT_EXECUTION_STORE_POOL_TIMEOUT_MS` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_EXECUTION_STORE_URL` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_EXECUTION_STORE_USER` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_HISTORY_MAX_HISTORIES_PER_SCOPE` | [Business history policy](configuration.md#business-history-and-correlated-join-limits): default `100000`. |
+| `RAVENROOT_HISTORY_MAX_OPEN_JOINS` | [Business history policy](configuration.md#business-history-and-correlated-join-limits): default `64`. |
+| `RAVENROOT_HISTORY_MAX_RETAINED_JOINS` | [Business history policy](configuration.md#business-history-and-correlated-join-limits): default `1024`. |
+| `RAVENROOT_HISTORY_MAX_CONTRIBUTIONS` | [Business history policy](configuration.md#business-history-and-correlated-join-limits): default `1024`. |
+| `RAVENROOT_HISTORY_MAX_JOIN_PAYLOAD_BYTES` | [Business history policy](configuration.md#business-history-and-correlated-join-limits): default `16777216`. |
+| `RAVENROOT_HISTORY_MAX_PAGE_SIZE` | [Business history policy](configuration.md#business-history-and-correlated-join-limits): default `100`. |
+| `RAVENROOT_HISTORY_RETENTION_SECONDS` | [Business history policy](configuration.md#business-history-and-correlated-join-limits): default `2592000`. |
+| `RAVENROOT_HISTORY_JOIN_DEADLINE_SECONDS` | [Business history policy](configuration.md#business-history-and-correlated-join-limits): default `86400`. |
+| `RAVENROOT_HISTORY_MAX_ID_CHARACTERS` | [Business history policy](configuration.md#business-history-and-correlated-join-limits): default `256`. |
+| `RAVENROOT_HISTORY_MAX_SELECTOR_CHARACTERS` | [Business history policy](configuration.md#business-history-and-correlated-join-limits): default `1024`. |
+| `RAVENROOT_HISTORY_MAX_SELECTOR_SEGMENTS` | [Business history policy](configuration.md#business-history-and-correlated-join-limits): default `32`. |
+| `RAVENROOT_HISTORY_MAX_MANIFEST_ITEMS` | [Business history policy](configuration.md#business-history-and-correlated-join-limits): default `1024`. |
+| `RAVENROOT_HISTORY_MAX_CAS_ATTEMPTS` | [Business history policy](configuration.md#business-history-and-correlated-join-limits): default `128`. |
+| `RAVENROOT_HISTORY_READ_TIMEOUT_MS` | [Business history policy](configuration.md#business-history-and-correlated-join-limits): default `10000`. |
+| `RAVENROOT_HISTORY_RESPONSE_MAX_BYTES` | [Business history policy](configuration.md#business-history-and-correlated-join-limits): default `4194304`. |
+| `RAVENROOT_HISTORY_RESPONSE_MAX_VALUES` | [Business history policy](configuration.md#business-history-and-correlated-join-limits): default `100000`. |
 | `RAVENROOT_POSTGRES_EXECUTION_RESULT_RETENTION_SECONDS` | PostgreSQL durable-result retention; default `604800` seconds |
 | `RAVENROOT_POSTGRES_GRAPH_DEFINITION_UPSERT_ATTEMPTS` | PostgreSQL definition insert/removal race attempts; default `3` |
 | `RAVENROOT_POSTGRES_JOURNAL_RETENTION_SECONDS` | PostgreSQL journal retention; default `86400` seconds |

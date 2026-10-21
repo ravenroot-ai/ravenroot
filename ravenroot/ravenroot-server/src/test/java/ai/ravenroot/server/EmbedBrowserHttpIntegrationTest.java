@@ -436,7 +436,7 @@ class EmbedBrowserHttpIntegrationTest {
                 EmbedBrowserHttpHandler.DISCOVERY_PATH, EmbedBrowserHttpHandler.GRANT_PATH + "/{id}",
                 EmbedBrowserHttpHandler.ACKNOWLEDGEMENT_PATH, EmbedBrowserHttpHandler.LAUNCH_PATH,
                 EmbedBrowserHttpHandler.EXCHANGE_PATH, EmbedBrowserHttpHandler.PROJECTION_PATH,
-                EmbedBrowserHttpHandler.OBSERVATION_PATH, EmbedBrowserHttpHandler.RUNS_PATH,
+                EmbedBrowserHttpHandler.OBSERVATION_PATH, EmbedBrowserHttpHandler.RUNS_PATH, EmbedBrowserHttpHandler.HISTORY_PATH,
                 EmbedBrowserHttpHandler.START_EXECUTION_PATH);
         var declared = RouteTable.ALL.stream().filter(route -> route.path().startsWith("/v1/embed/"))
                 .collect(java.util.stream.Collectors.toUnmodifiableMap(
@@ -734,6 +734,81 @@ class EmbedBrowserHttpIntegrationTest {
                     .header("Authorization", "Bearer " + hidden.bearer()));
             assertEquals(403, hiddenStart.statusCode(), hiddenStart.body());
         }
+    }
+
+    @Test
+    void historyRequiresV2ReadAuthorityProofAndCurrentBindingAndStartReturnsOriginalIdentities() throws Exception {
+        var registrations = new InMemoryEmbedRegistrationAuthority();
+        provision(registrations, EmbedProvisionCommand.deploymentV2WithExecutionCapability("history-start", 0,
+                "issuer", "workload", "tenant", PARENT, Optional.empty(), "orders", true));
+        provision(registrations, EmbedProvisionCommand.deploymentV2("history-read", 0,
+                "issuer", "workload", "tenant", PARENT, Optional.empty(), "orders", false));
+        provision(registrations, EmbedProvisionCommand.deployment("history-v1", 0,
+                "issuer", "workload", "tenant", PARENT, Optional.empty(), "orders"));
+        var directory = java.nio.file.Files.createTempDirectory("embed-history-");
+        try (var engine = new PekkoExecutionEngine("embed-history");
+             var store = new ai.ravenroot.persistence.sqlite.SqliteExecutionStore(directory.resolve("history.db"), Clock.systemUTC())) {
+            var environment = BehaviorEnvironment.safeDefaults();
+            var application = new DefaultRavenrootApplication(engine, new ExecutionMonitor(), BehaviorRegistry.standard(environment),
+                    environment.artifacts(), environment.programRuntime(), ExecutionIdentitySource.randomUuids(), store, 8);
+            var operator = new SecurityContext("register", "tenant", "operator", PrincipalType.USER, "issuer");
+            application.registerLocalDeployment(operator, "orders", new ByteArrayInputStream(LIVE_GRAPH.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+            application.startLocalDeployment(operator, "orders").toCompletableFuture().get(10, java.util.concurrent.TimeUnit.SECONDS);
+            try (var server = server(engine, false, registrations, new AtomicInteger(), application)) {
+                server.start(); var client = HttpClient.newHttpClient(); String base = "http://127.0.0.1:" + server.port();
+                var start = viewerSession(client, base, "history-start", "history-start");
+                var accepted = send(client, viewerPost(base + EmbedBrowserHttpHandler.START_EXECUTION_PATH, VIEWER,
+                        startProofBody(start, "history-first")).header("Authorization", "Bearer " + start.bearer()));
+                assertEquals(202, accepted.statusCode(), accepted.body());
+                assertFalse(json(accepted.body(), "processInstanceId").isBlank());
+                assertFalse(json(accepted.body(), "traversalId").isBlank());
+                var duplicate = send(client, viewerPost(base + EmbedBrowserHttpHandler.START_EXECUTION_PATH, VIEWER,
+                        startProofBody(start, "history-second")).header("Authorization", "Bearer " + start.bearer()));
+                assertEquals(200, duplicate.statusCode(), duplicate.body());
+                assertEquals(json(accepted.body(), "processInstanceId"), json(duplicate.body(), "processInstanceId"));
+                assertEquals(json(accepted.body(), "traversalId"), json(duplicate.body(), "traversalId"));
+                var read = viewerSession(client, base, "history-read", "history-read");
+                String query = "{\"view\":\"process-traversals\",\"processInstanceId\":\"" + json(accepted.body(), "processInstanceId") + "\"}";
+                String valid = historyProofBody(read, "history-page", query, EmbedBrowserHttpHandler.HISTORY_PATH);
+                var page = send(client, viewerPost(base + EmbedBrowserHttpHandler.HISTORY_PATH, VIEWER, valid).header("Authorization", "Bearer " + read.bearer()));
+                assertEquals(200, page.statusCode(), page.body()); assertPrivate(page);
+                assertTrue(page.body().contains(json(accepted.body(), "traversalId")), page.body());
+                assertEquals(403, send(client, viewerPost(base + EmbedBrowserHttpHandler.HISTORY_PATH, VIEWER, valid)
+                        .header("Authorization", "Bearer " + read.bearer())).statusCode(), "proof cannot replay");
+                assertEquals(403, send(client, viewerPost(base + EmbedBrowserHttpHandler.HISTORY_PATH, VIEWER,
+                        historyProofBody(read, "wrong-proof-path", query, EmbedBrowserHttpHandler.RUNS_PATH))
+                        .header("Authorization", "Bearer " + read.bearer())).statusCode());
+                assertEquals(403, send(client, viewerPost(base + EmbedBrowserHttpHandler.HISTORY_PATH, PARENT,
+                        historyProofBody(read, "wrong-origin", query, EmbedBrowserHttpHandler.HISTORY_PATH))
+                        .header("Authorization", "Bearer " + read.bearer())).statusCode());
+                assertEquals(403, send(client, viewerPost(base + EmbedBrowserHttpHandler.HISTORY_PATH, VIEWER,
+                        historyProofBody(read, "cookie", query, EmbedBrowserHttpHandler.HISTORY_PATH))
+                        .header("Authorization", "Bearer " + read.bearer()).header("Cookie", "ambient=blocked")).statusCode());
+                var legacy = viewerSession(client, base, "history-v1", "history-v1");
+                assertEquals(403, send(client, viewerPost(base + EmbedBrowserHttpHandler.HISTORY_PATH, VIEWER,
+                        historyProofBody(legacy, "legacy", query, EmbedBrowserHttpHandler.HISTORY_PATH))
+                        .header("Authorization", "Bearer " + legacy.bearer())).statusCode());
+                assertEquals(400, send(client, viewerPost(base + EmbedBrowserHttpHandler.HISTORY_PATH, VIEWER,
+                        historyProofBody(read, "injected-tenant", "{\"tenantId\":\"foreign\"}", EmbedBrowserHttpHandler.HISTORY_PATH))
+                        .header("Authorization", "Bearer " + read.bearer())).statusCode());
+                assertEquals(403, send(client, viewerPost(base + EmbedBrowserHttpHandler.START_EXECUTION_PATH, VIEWER,
+                        startProofBody(read, "read-cannot-start")).header("Authorization", "Bearer " + read.bearer())).statusCode());
+                registrations.revoke(new EmbedRevokeCommand("history-read", "tenant", 1));
+                assertEquals(403, send(client, viewerPost(base + EmbedBrowserHttpHandler.HISTORY_PATH, VIEWER,
+                        historyProofBody(read, "revoked-history", query, EmbedBrowserHttpHandler.HISTORY_PATH))
+                        .header("Authorization", "Bearer " + read.bearer())).statusCode());
+            }
+        } finally {
+            try (var files = java.nio.file.Files.walk(directory)) {
+                for (var file : files.sorted(java.util.Comparator.reverseOrder()).toList()) java.nio.file.Files.deleteIfExists(file);
+            }
+        }
+    }
+
+    private static String historyProofBody(ViewerSession session, String jti, String query, String signedPath) throws Exception {
+        String proof = proofBody(session.pair(), session.bearer(), session.nonce(), jti, signedPath, Instant.now(), false);
+        return proof.substring(0, proof.length() - 1) + ",\"query\":"
+                + ai.ravenroot.api.payload.PayloadJson.write(ai.ravenroot.api.payload.PayloadValue.of(query)) + "}";
     }
 
     private record ViewerSession(KeyPair pair, String bearer, String nonce) { }

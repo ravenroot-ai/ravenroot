@@ -510,6 +510,25 @@ public final class RemoteBackend implements CliBackend {
         return deploymentFrom(MinimalJson.asObject(MinimalJson.parse(post(path, graphMl, "application/xml"))));
     }
 
+    @Override public String deploymentHistory(ai.ravenroot.api.history.DeploymentHistorySource source,
+            java.util.Map<String, String> query) throws IOException {
+        new ai.ravenroot.api.history.DeploymentHistoryRequest(query);
+        var parameters = new java.util.LinkedHashMap<>(query); parameters.put("graphVersion", source.graphVersion());
+        String path = "/v1/deployments/" + java.net.URLEncoder.encode(source.deploymentId(), StandardCharsets.UTF_8) + "/history?"
+                + parameters.entrySet().stream().map(entry -> java.net.URLEncoder.encode(entry.getKey(), StandardCharsets.UTF_8)
+                        + "=" + java.net.URLEncoder.encode(entry.getValue(), StandardCharsets.UTF_8)).collect(java.util.stream.Collectors.joining("&"));
+        return send(baseRequest(path).header("X-Ravenroot-Deployment-Incarnation", source.incarnationId()).GET().build());
+    }
+    @Override public String initialStart(ai.ravenroot.api.history.DeploymentHistorySource source,
+            String requestId, byte[] input) throws IOException {
+        Object value = ai.ravenroot.api.payload.PayloadJson.read(input, ai.ravenroot.api.payload.PayloadLimits.DEFAULTS).toJava();
+        var body = new java.util.LinkedHashMap<String, Object>();
+        body.put("incarnationId", source.incarnationId()); body.put("graphVersion", source.graphVersion());
+        body.put("requestId", requestId); body.put("input", value);
+        return post("/v1/deployments/" + java.net.URLEncoder.encode(source.deploymentId(), StandardCharsets.UTF_8) + "/initial-start",
+                ai.ravenroot.api.payload.PayloadJson.writeJava(body, ai.ravenroot.api.payload.PayloadLimits.DEFAULTS), "application/json");
+    }
+
     @Override
     public DeploymentView deployment(String deploymentId) throws IOException {
         return deploymentFrom(MinimalJson.asObject(MinimalJson.parse(

@@ -466,6 +466,65 @@
         }
       }
     },
+    "/v1/deployments/{id}/history": {
+      "get": {
+        "summary": "Store-paged exact-version business histories and actual traversal/visit/attempt/parent metadata; captured content follows existing redaction and retention.",
+        "x-assistant-posture": "READ",
+        "security": [{"bearerAuth": []}],
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name":"X-Ravenroot-Deployment-Incarnation","in":"header","required":true,"schema":{"type":"string"}},
+          {"name":"graphVersion","in":"query","required":true,"schema":{"type":"string"}},
+          {"name": "view", "in": "query", "required": false, "description": "History view field; invalid combinations are refused. Page size is bounded by the operator history policy.", "schema": {"type": "string"}},
+          {"name": "applicationCorrelationId", "in": "query", "required": false, "description": "History view field; invalid combinations are refused. Page size is bounded by the operator history policy.", "schema": {"type": "string"}},
+          {"name": "publicReference", "in": "query", "required": false, "description": "History view field; invalid combinations are refused. Page size is bounded by the operator history policy.", "schema": {"type": "string"}},
+          {"name": "lifecycle", "in": "query", "required": false, "description": "History view field; invalid combinations are refused. Page size is bounded by the operator history policy.", "schema": {"type": "string"}},
+          {"name": "processInstanceId", "in": "query", "required": false, "description": "History view field; invalid combinations are refused. Page size is bounded by the operator history policy.", "schema": {"type": "string"}},
+          {"name": "traversalId", "in": "query", "required": false, "description": "History view field; invalid combinations are refused. Page size is bounded by the operator history policy.", "schema": {"type": "string"}},
+          {"name": "invocationId", "in": "query", "required": false, "description": "History view field; invalid combinations are refused. Page size is bounded by the operator history policy.", "schema": {"type": "string"}},
+          {"name": "attemptId", "in": "query", "required": false, "description": "History view field; invalid combinations are refused. Page size is bounded by the operator history policy.", "schema": {"type": "string"}},
+          {"name": "nodeId", "in": "query", "required": false, "description": "History view field; invalid combinations are refused. Page size is bounded by the operator history policy.", "schema": {"type": "string"}},
+          {"name": "cursor", "in": "query", "required": false, "description": "History view field; invalid combinations are refused. Page size is bounded by the operator history policy.", "schema": {"type": "string"}},
+          {"name": "limit", "in": "query", "required": false, "description": "History view field; invalid combinations are refused. Page size is bounded by the operator history policy.", "schema": {"type": "integer"}}
+        ],
+        "responses": {
+          "200": {"description": "success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DeploymentHistoryPage"}}}},
+          "401": {"description": "AUTHENTICATION_REQUIRED"},
+          "403": {"description": "ACCESS_DENIED"},
+          "405": {"description": "METHOD_NOT_ALLOWED"},
+          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
+          "414": {"description": "QUERY_TOO_LARGE"},
+          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
+          "400": {"description": "INVALID_REQUEST"},
+          "404": {"description": "UNKNOWN_RESOURCE"},
+          "409": {"description": "CONFLICT"},
+          "503": {"description": "REQUEST_INTERRUPTED"}
+        }
+      }
+    },
+    "/v1/deployments/{id}/initial-start": {
+      "post": {
+        "summary": "Accepts or reconciles the single initial START for the authorized deployment. Requires exact incarnationId and graphVersion, a bounded requestId and structured input. Distinct requests reconcile the original processInstanceId and traversalId; restart, completion, failure and retention never restore eligibility. A permanent initial-start-capable execution store is required before effects.",
+        "x-assistant-posture": "NEVER",
+        "security": [{"bearerAuth": []}],
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/InitialStartRequest"}}}},
+        "responses": {
+          "202": {"description": "success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/InitialStartResponse"}}}},
+          "401": {"description": "AUTHENTICATION_REQUIRED"},
+          "403": {"description": "ACCESS_DENIED"},
+          "405": {"description": "METHOD_NOT_ALLOWED"},
+          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
+          "414": {"description": "QUERY_TOO_LARGE"},
+          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
+          "404": {"description": "UNKNOWN_RESOURCE"},
+          "400": {"description": "INVALID_REQUEST"},
+          "409": {"description": "CONFLICT"}
+        }
+      }
+    },
     "/v1/deployments/{id}/pause": {
       "post": {
         "summary": "Durably closes admission for one tenant-scoped deployment generation while retaining accepted work for Resume. Requires Idempotency-Key and X-Ravenroot-Expected-Generation headers and a bounded X-Ravenroot-Reason.",
@@ -672,9 +731,10 @@
         "summary": "Requests one idempotent traversal under a separately authorized exact v2 embed binding.",
         "x-assistant-posture": "NEVER",
         "security": [{"bearerAuth": []}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/EmbedInitialStartRequest"}}}},
         "responses": {
-          "200": {"description": "success"},
-          "202": {"description": "success"},
+          "200": {"description": "success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/InitialStartResponse"}}}},
+          "202": {"description": "success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/InitialStartResponse"}}}},
           "400": {"description": "EMBED_REQUEST_INVALID"},
           "405": {"description": "EMBED_METHOD_NOT_ALLOWED"},
           "403": {"description": "EMBED_SESSION_UNAVAILABLE"},
@@ -696,6 +756,22 @@
           "400": {"description": "EMBED_REQUEST_INVALID"},
           "405": {"description": "EMBED_METHOD_NOT_ALLOWED"},
           "503": {"description": "EMBED_TEMPORARILY_UNAVAILABLE"}
+        }
+      }
+    },
+    "/v1/embed/history": {
+      "post": {
+        "summary": "Proof-protected bounded read-only business histories, actual traversals, visits, attempts, parents and captured content for the exact v2 deployment.",
+        "x-assistant-posture": "NEVER",
+        "security": [{"bearerAuth": []}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/EmbedHistoryRequest"}}}},
+        "responses": {
+          "200": {"description": "success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DeploymentHistoryPage"}}}},
+          "400": {"description": "EMBED_REQUEST_INVALID"},
+          "405": {"description": "EMBED_METHOD_NOT_ALLOWED"},
+          "403": {"description": "EMBED_SESSION_UNAVAILABLE"},
+          "503": {"description": "EMBED_TEMPORARILY_UNAVAILABLE"},
+          "413": {"description": "EMBED_REQUEST_TOO_LARGE"}
         }
       }
     },
@@ -2337,6 +2413,7 @@
       "DurableExecutionStreamEvent": {"allOf":[{"$ref":"#/components/schemas/ExecutionStreamEventBase"},{"type":"object","required":["eventId","journalOffset","streamSequence","causationId","handlerId"],"additionalProperties":true,"properties":{"source":{"type":"string","enum":["DURABLE"]},"id":{"type":"string","pattern":"^[1-9][0-9]*$","maxLength":19},"eventId":{"type":"string","format":"uuid","description":"Persisted journal deduplication identity, distinct from cursor id; causationId refers to this UUID space."},"journalOffset":{"type":"integer","format":"int64","minimum":1,"description":"Tenant-local durable order and SSE resume cursor."},"streamSequence":{"type":"integer","format":"int64","minimum":1,"description":"Order within the process instance, not the tenant resume cursor."},"causationId":{"type":"string","format":"uuid","description":"Journal event that caused this one; null when the cause lies outside the journal.","nullable":true},"handlerId":{"type":"string","format":"uuid","nullable":true}},"not":{"anyOf":[{"required":["sequence"]},{"required":["engineId"]},{"required":["executionId"]},{"required":["activeInstances"]},{"required":["inFlightArrivals"]},{"required":["fallback"]},{"required":["publicReason"]},{"required":["message"]},{"required":["messageRedacted"]},{"required":["messageTruncated"]},{"required":["output"]},{"required":["outputRedacted"]},{"required":["outputTruncated"]},{"required":["processingDuration"]}]}}],"example":{"schemaVersion":1,"occurredAt":"2026-01-01T00:00:00Z","graphVersion":"graph-v1","processInstanceId":"10000000-0000-0000-0000-000000000001","traversalId":"20000000-0000-0000-0000-000000000002","invocationId":null,"attemptId":null,"nodeId":null,"edgeId":null,"source":"DURABLE","id":"12","eventId":"30000000-0000-0000-0000-000000000003","journalOffset":12,"streamSequence":1,"eventType":"EXECUTION_STARTED","description":"Execution started.","causationId":null,"handlerId":null}},
       "EventStreamTruncated": {"type":"object","required":["code","retainedFrom","resumeFrom"],"additionalProperties":true,"properties":{"code":{"type":"string","enum":["STREAM_RETENTION_EXCEEDED"]},"retainedFrom":{"type":"integer","format":"int64","minimum":1},"resumeFrom":{"type":"integer","format":"int64","minimum":0}}},
       "EventStreamOverrun": {"type":"object","required":["code","resumeAfter"],"additionalProperties":true,"properties":{"code":{"type":"string","enum":["STREAM_CONSUMER_TOO_SLOW"]},"resumeAfter":{"type":"integer","format":"int64"}}}
-    }
+,
+"DeploymentHistorySource":{"type":"object","additionalProperties":false,"required":["kind","deploymentId","incarnationId","graphVersion"],"properties":{"kind":{"type":"string","enum":["deployment"]},"deploymentId":{"type":"string"},"incarnationId":{"type":"string"},"graphVersion":{"type":"string"}}},"ApplicationCorrelationContext":{"type":"object","additionalProperties":false,"required":["applicationCorrelationId","contributionId","contributionKind","roundId","publicReference"],"properties":{"applicationCorrelationId":{"type":"string"},"contributionId":{"type":"string","nullable":true},"contributionKind":{"type":"string","nullable":true},"roundId":{"type":"string"},"publicReference":{"type":"string","nullable":true}}},"BusinessHistorySummary":{"type":"object","additionalProperties":false,"required":["applicationCorrelationId","publicReference","lifecycle","state","revision","runningTraversals","completedTraversals","failedTraversals","cancelledTraversals","incompleteHistory","createdAt","updatedAt","expiresAt"],"properties":{"applicationCorrelationId":{"type":"string"},"publicReference":{"type":"string","nullable":true},"lifecycle":{"type":"string","enum":["OPEN","COMPLETED","FAILED","CANCELLED","EXPIRED"]},"state":{"type":"string","enum":["RUNNING","AWAITING_EXTERNAL_EVENT","COMPLETED","FAILED","PARTIAL","CANCELLED","INCOMPLETE_HISTORY"]},"revision":{"type":"integer","format":"int64","minimum":0},"runningTraversals":{"type":"integer","format":"int64","minimum":0},"completedTraversals":{"type":"integer","format":"int64","minimum":0},"failedTraversals":{"type":"integer","format":"int64","minimum":0},"cancelledTraversals":{"type":"integer","format":"int64","minimum":0},"incompleteHistory":{"type":"boolean"},"createdAt":{"type":"string","format":"date-time"},"updatedAt":{"type":"string","format":"date-time"},"expiresAt":{"type":"string","format":"date-time"}}},"CorrelatedTraversalSummary":{"type":"object","additionalProperties":false,"required":["processInstanceId","traversalId","entryNodeId","status","terminationReason","cause","applicationContext","startedAt","updatedAt","endedAt"],"properties":{"processInstanceId":{"type":"string","format":"uuid"},"traversalId":{"type":"string","format":"uuid"},"entryNodeId":{"type":"string"},"status":{"type":"string"},"terminationReason":{"type":"string","nullable":true},"cause":{"type":"string","nullable":true},"applicationContext":{"allOf":[{"$ref":"#/components/schemas/ApplicationCorrelationContext"}],"nullable":true},"startedAt":{"type":"string","format":"date-time"},"updatedAt":{"type":"string","format":"date-time"},"endedAt":{"type":"string","nullable":true,"format":"date-time"}}},"ExecutionTraversalSummary":{"type":"object","additionalProperties":false,"required":["processInstanceId","traversalId","entryNodeId","status","terminationReason","cause","applicationContext","visitCount"],"properties":{"processInstanceId":{"type":"string","format":"uuid"},"traversalId":{"type":"string","format":"uuid"},"entryNodeId":{"type":"string"},"status":{"type":"string"},"terminationReason":{"type":"string","nullable":true},"cause":{"type":"string","nullable":true},"applicationContext":{"allOf":[{"$ref":"#/components/schemas/ApplicationCorrelationContext"}],"nullable":true},"visitCount":{"type":"integer","format":"int64","minimum":0}}},"NodeVisitSummary":{"type":"object","additionalProperties":false,"required":["processInstanceId","traversalId","invocationId","nodeId","position","status","command","attemptCount","parentCount","startedAt","settledAt","outcome","eventHistoryAvailable"],"properties":{"processInstanceId":{"type":"string","format":"uuid"},"traversalId":{"type":"string","format":"uuid"},"invocationId":{"type":"string","format":"uuid"},"nodeId":{"type":"string"},"position":{"type":"integer","format":"int64","minimum":0},"status":{"type":"string"},"command":{"type":"string"},"attemptCount":{"type":"integer","format":"int64","minimum":0},"parentCount":{"type":"integer","format":"int64","minimum":0},"startedAt":{"type":"string","nullable":true,"format":"date-time"},"settledAt":{"type":"string","nullable":true,"format":"date-time"},"outcome":{"type":"string","nullable":true},"eventHistoryAvailable":{"type":"boolean"}}},"NodeAttemptSummary":{"type":"object","additionalProperties":false,"required":["attemptId","ordinal","status","completion","startedAt","settledAt","eventHistoryAvailable"],"properties":{"attemptId":{"type":"string","format":"uuid"},"ordinal":{"type":"integer","format":"int64","minimum":1},"status":{"type":"string"},"completion":{"type":"string","nullable":true},"startedAt":{"type":"string","nullable":true,"format":"date-time"},"settledAt":{"type":"string","nullable":true,"format":"date-time"},"eventHistoryAvailable":{"type":"boolean"}}},"VisitParent":{"type":"object","additionalProperties":false,"required":["processInstanceId","traversalId","invocationId","nodeId"],"properties":{"processInstanceId":{"type":"string","format":"uuid"},"traversalId":{"type":"string","format":"uuid"},"invocationId":{"type":"string","format":"uuid"},"nodeId":{"type":"string"}}},"CorrelatedJoinSummary":{"type":"object","additionalProperties":false,"required":["applicationCorrelationId","nodeId","roundId","revision","phase","expectedContributions","receivedContributions","sealed","retainedPayloadBytes","openedAt","deadlineAt","updatedAt","continuationProcessInstanceId","continuationTraversalId"],"properties":{"applicationCorrelationId":{"type":"string"},"nodeId":{"type":"string"},"roundId":{"type":"string"},"revision":{"type":"integer","format":"int64","minimum":0},"phase":{"type":"string"},"expectedContributions":{"type":"integer","format":"int64","minimum":0},"receivedContributions":{"type":"integer","format":"int64","minimum":0},"sealed":{"type":"boolean"},"retainedPayloadBytes":{"type":"integer","format":"int64","minimum":0},"openedAt":{"type":"string","format":"date-time"},"deadlineAt":{"type":"string","format":"date-time"},"updatedAt":{"type":"string","format":"date-time"},"continuationProcessInstanceId":{"type":"string","format":"uuid"},"continuationTraversalId":{"type":"string","format":"uuid"}}},"HistoryActivityObservation":{"type":"object","additionalProperties":false,"required":["eventId","nodeId","invocationId","attemptId","attemptOrdinal","contentKind","command","outcome","occurredAt","expiresAt","contentType","content"],"properties":{"eventId":{"type":"string"},"nodeId":{"type":"string"},"invocationId":{"type":"string","format":"uuid"},"attemptId":{"type":"string","format":"uuid"},"attemptOrdinal":{"type":"integer","format":"int64","minimum":1},"contentKind":{"type":"string"},"command":{"type":"string"},"outcome":{"type":"string","nullable":true},"occurredAt":{"type":"string","format":"date-time"},"expiresAt":{"type":"string","format":"date-time"},"contentType":{"type":"string"},"content":{}}},"DeploymentHistoryPage":{"type":"object","additionalProperties":false,"required":["source","view","items","nextCursor","availability"],"properties":{"source":{"$ref":"#/components/schemas/DeploymentHistorySource"},"view":{"type":"string","enum":["histories","traversals","uncorrelated-traversals","process-traversals","visits","attempts","parents","joins","activity"]},"items":{"type":"array","maxItems":1000,"items":{"oneOf":[{"$ref":"#/components/schemas/BusinessHistorySummary"},{"$ref":"#/components/schemas/CorrelatedTraversalSummary"},{"$ref":"#/components/schemas/ExecutionTraversalSummary"},{"$ref":"#/components/schemas/NodeVisitSummary"},{"$ref":"#/components/schemas/NodeAttemptSummary"},{"$ref":"#/components/schemas/VisitParent"},{"$ref":"#/components/schemas/CorrelatedJoinSummary"},{"$ref":"#/components/schemas/HistoryActivityObservation"}]}},"nextCursor":{"type":"string","nullable":true,"description":"Opaque cursor bound to source incarnation, tenant, exact selection, filters and page size."},"availability":{"type":"string","enum":["AVAILABLE","NOT_FOUND","EXPIRED","CAPTURE_DISABLED","NOT_RETAINED"]},"gap":{"type":"boolean"},"contentPolicy":{"type":"string","enum":["REDACTED_BOUNDED_CAPTURE"]}}},"InitialStartRequest":{"type":"object","additionalProperties":false,"required":["incarnationId","graphVersion","requestId","input"],"properties":{"incarnationId":{"type":"string"},"graphVersion":{"type":"string"},"requestId":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},"input":{}}},"InitialStartResponse":{"type":"object","additionalProperties":false,"required":["outcome","requestId","processInstanceId","traversalId"],"properties":{"outcome":{"type":"string","enum":["ACCEPTED","DUPLICATE","REFUSED","RECONCILE"]},"requestId":{"type":"string"},"processInstanceId":{"type":"string","nullable":true,"format":"uuid"},"traversalId":{"type":"string","nullable":true,"format":"uuid"}}},"EmbedHistoryRequest":{"type":"object","additionalProperties":false,"required":["nonce","jti","issuedAt","signature","query"],"properties":{"nonce":{"type":"string"},"jti":{"type":"string"},"issuedAt":{"type":"string","format":"date-time"},"signature":{"type":"string"},"query":{"type":"string","maxLength":8192,"description":"JSON object of text-valued history query fields. Deployment binding and tenant come only from the authorized session."}}},"EmbedInitialStartRequest":{"type":"object","additionalProperties":false,"required":["nonce","jti","issuedAt","signature","requestId"],"properties":{"nonce":{"type":"string"},"jti":{"type":"string"},"issuedAt":{"type":"string","format":"date-time"},"signature":{"type":"string"},"requestId":{"type":"string","maxLength":128}}}    }
   }
 }

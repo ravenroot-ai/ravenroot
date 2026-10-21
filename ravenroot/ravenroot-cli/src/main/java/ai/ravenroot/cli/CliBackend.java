@@ -162,6 +162,17 @@ public interface CliBackend {
      * id are the identical nondisclosing failure on both transports -- neither this method nor its
      * caller can tell them apart, by construction.
      */
+    /** Exact-bound read-only deployment history; returns the shared public JSON page. */
+    default String deploymentHistory(ai.ravenroot.api.history.DeploymentHistorySource source,
+            Map<String, String> query) throws IOException {
+        throw new IOException("deployment history requires a capable backend");
+    }
+    /** Admits or reconciles the permanent original START; request IDs never grant another START. */
+    default String initialStart(ai.ravenroot.api.history.DeploymentHistorySource source,
+            String requestId, byte[] input) throws IOException {
+        throw new IOException("initial START requires a capable backend");
+    }
+
     DeploymentView deployment(String deploymentId) throws IOException;
 
     /**

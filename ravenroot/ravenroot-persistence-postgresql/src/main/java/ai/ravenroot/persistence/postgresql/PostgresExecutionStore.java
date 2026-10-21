@@ -224,7 +224,7 @@ public final class PostgresExecutionStore implements ExecutionStore {
             StoreCapability.DURABLE,
             StoreCapability.TRANSACTIONAL_BATCH,
             StoreCapability.INITIAL_START_ADMISSION,
-            StoreCapability.BUSINESS_HISTORIES, StoreCapability.CORRELATED_JOINS,
+            StoreCapability.BUSINESS_HISTORIES, StoreCapability.CORRELATED_JOINS, StoreCapability.EXECUTION_HISTORY,
             StoreCapability.CROSS_PROCESS_LEASE,
             StoreCapability.IDEMPOTENCY_PURGE,
             StoreCapability.EVENT_JOURNAL,
@@ -2312,6 +2312,33 @@ public final class PostgresExecutionStore implements ExecutionStore {
         });
     }
 
+    @Override public CompletionStage<ai.ravenroot.api.history.HistoryPage<ai.ravenroot.api.history.TraversalSummary>> uncorrelatedDeploymentTraversals(
+            ai.ravenroot.api.correlation.BusinessScope scope, Optional<String> cursor, int limit) {
+        return async(() -> read(null, connection -> ExecutionHistoryStorage.uncorrelated(connection, scope, cursor, limit, businessHistoryPolicy().maxPageSize())));
+    }
+    @Override public CompletionStage<Boolean> executionSelectionExists(ExecutionKey key, UUID traversalId,
+            Optional<UUID> invocationId, Optional<UUID> attemptId) {
+        return async(() -> read(key, connection -> ExecutionHistoryStorage.selectionExists(connection, key, traversalId, invocationId, attemptId)));
+    }
+    @Override public CompletionStage<ai.ravenroot.api.history.HistoryPage<ai.ravenroot.api.history.TraversalSummary>> executionTraversals(
+            ExecutionKey key, Optional<String> cursor, int limit) {
+        return async(() -> read(key, connection -> ExecutionHistoryStorage.traversals(connection, key, cursor, limit, businessHistoryPolicy().maxPageSize())));
+    }
+    @Override public CompletionStage<Optional<ai.ravenroot.api.history.TraversalSummary>> executionTraversal(ExecutionKey key, UUID traversalId) {
+        return async(() -> read(key, connection -> ExecutionHistoryStorage.traversal(connection, key, traversalId)));
+    }
+    @Override public CompletionStage<ai.ravenroot.api.history.HistoryPage<ai.ravenroot.api.history.NodeVisitSummary>> executionVisits(
+            ExecutionKey key, UUID traversalId, Optional<String> nodeId, Optional<String> cursor, int limit) {
+        return async(() -> read(key, connection -> ExecutionHistoryStorage.visits(connection, key, traversalId, nodeId, cursor, limit, businessHistoryPolicy().maxPageSize())));
+    }
+    @Override public CompletionStage<ai.ravenroot.api.history.HistoryPage<ai.ravenroot.api.history.NodeAttemptSummary>> executionVisitAttempts(
+            ExecutionKey key, UUID traversalId, UUID invocationId, Optional<String> cursor, int limit) {
+        return async(() -> read(key, connection -> ExecutionHistoryStorage.attempts(connection, key, traversalId, invocationId, cursor, limit, businessHistoryPolicy().maxPageSize())));
+    }
+    @Override public CompletionStage<ai.ravenroot.api.history.HistoryPage<ai.ravenroot.api.history.VisitParent>> executionVisitParents(
+            ExecutionKey key, UUID traversalId, UUID invocationId, Optional<String> cursor, int limit) {
+        return async(() -> read(key, connection -> ExecutionHistoryStorage.parents(connection, key, traversalId, invocationId, cursor, limit, businessHistoryPolicy().maxPageSize())));
+    }
     @Override public CompletionStage<Optional<ai.ravenroot.api.correlation.CorrelatedJoinRecord>> correlatedJoin(
             ai.ravenroot.api.correlation.CorrelatedJoinKey key) {
         return async(() -> write(null, connection -> {

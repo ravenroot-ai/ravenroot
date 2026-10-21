@@ -496,6 +496,18 @@ public interface RavenrootApplication extends AutoCloseable {
     }
 
     /**
+     * Captures a read-only deployment history facade. Each read fences its physical source before and after storage access.
+     * @param tenantId authenticated tenant whose retained history is read
+     * @param source exact current logical deployment, physical incarnation and immutable graph version
+     * @return bounded reader that preserves original process and traversal identities across incarnation changes
+     */
+    default ai.ravenroot.api.history.DeploymentHistoryReader deploymentHistory(String tenantId,
+            ai.ravenroot.api.history.DeploymentHistorySource source) {
+        throw new ai.ravenroot.api.history.HistoryReadException(
+                ai.ravenroot.api.history.HistoryReadException.Reason.UNAVAILABLE);
+    }
+
+    /**
      * Resolves a browser-safe view from the immutable definition retained by one local deployment.
      * Unknown and cross-tenant identifiers are the same empty result.
      * @param tenantId tenant whose deployment is read

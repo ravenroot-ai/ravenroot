@@ -97,6 +97,10 @@ public record SqliteStoreConfig(SynchronousMode synchronousMode, Duration busyTi
                 ai.ravenroot.api.correlation.BusinessHistoryPolicy.DEFAULTS);
     }
 
+    /** Supplies operator-owned business-history, pagination and response projection budgets. */
+    public SqliteStoreConfig withBusinessHistories(ai.ravenroot.api.correlation.BusinessHistoryPolicy policy) {
+        return new SqliteStoreConfig(synchronousMode, busyTimeout, maxLeaseTtl, maxPayloadBytes, maxClockSkew, journalRetention, maxInventoryPageSize, terminalRetention, executionResultRetention, policy);
+    }
     public SqliteStoreConfig {
         Objects.requireNonNull(businessHistories, "businessHistories");
         Objects.requireNonNull(synchronousMode, "synchronousMode");

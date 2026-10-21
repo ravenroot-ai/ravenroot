@@ -327,6 +327,24 @@ final class EmbeddedBackend implements CliBackend {
         return deploymentView(status);
     }
 
+    @Override public String deploymentHistory(ai.ravenroot.api.history.DeploymentHistorySource source,
+            java.util.Map<String, String> query) {
+        return new ai.ravenroot.api.history.DeploymentHistoryRequest(query).read(
+                application.deploymentHistory(requestContext, source), requestContext.tenantId());
+    }
+    @Override public String initialStart(ai.ravenroot.api.history.DeploymentHistorySource source,
+            String requestId, byte[] input) {
+        var value = ai.ravenroot.api.payload.PayloadJson.read(input, ai.ravenroot.api.payload.PayloadLimits.DEFAULTS);
+        var result = application.startLocalDeploymentExecution(requestContext, source.deploymentId(), source.incarnationId(),
+                source.graphVersion(), requestId, value);
+        var fields = new java.util.LinkedHashMap<String, Object>();
+        fields.put("outcome", result.outcome().name()); fields.put("requestId", result.requestId());
+        fields.put("processInstanceId", result.processInstanceId() == null ? null : result.processInstanceId().toString());
+        fields.put("traversalId", result.traversalId() == null ? null : result.traversalId().toString());
+        return ai.ravenroot.api.payload.PayloadJson.write(ai.ravenroot.api.payload.PayloadValue.fromJava(fields,
+                ai.ravenroot.api.payload.PayloadLimits.DEFAULTS));
+    }
+
     @Override
     public DeploymentView deployment(String deploymentId) throws IOException {
         return application.localDeployment(requestContext, deploymentId)

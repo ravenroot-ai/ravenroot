@@ -46,6 +46,7 @@ describe('tenant workspace snapshot', () => {
   it('persists browser-safe repository identity and the complete stale-state revision', () => {
     const source = document_('repository');
     source.authoring = {
+      repositoryScope: JSON.stringify(['https://runtime.example', 'tenant-a', 'github', 'example/graphs', 'main']),
       providerDocumentId: 'orders.graphml',
       revision: { draft: 'd', release: 'r', publication: 'p' },
       graphId: 'orders', releaseVersion: 8, releasedGraphId: 'orders', releasedVersion: 7,
@@ -54,6 +55,8 @@ describe('tenant workspace snapshot', () => {
     };
     const stored = persistedDocument(source);
     expect(stored.authoring).toEqual({
+      localChanges: false,
+      repositoryScope: source.authoring.repositoryScope,
       providerDocumentId: 'orders.graphml',
       revision: { draft: 'd', release: 'r', publication: 'p' },
       graphId: 'orders', releaseVersion: 8, releasedGraphId: 'orders', releasedVersion: 7,
@@ -61,6 +64,24 @@ describe('tenant workspace snapshot', () => {
     });
     expect(JSON.stringify(stored)).not.toContain('never-persist-request-state');
     expect(JSON.stringify(stored)).not.toContain('never-persist-error-state');
+  });
+
+  it('keeps restored managed changes protected until an acknowledged clean baseline is persisted', () => {
+    const scope = workspaceScope('https://runtime.example', 'tenant-a');
+    const source = document_('managed');
+    source.authoring = { providerDocumentId: 'orders.graphml', repositoryScope: 'exact-scope',
+      revision: { draft: 'd1', release: 'r1', publication: 'absent' } };
+    source.history = { isDirty: () => true };
+    const stored = workspaceSnapshot(scope, [source], source.documentId);
+    expect(stored.documents[0].authoring.localChanges).toBe(true);
+    expect(validateWorkspaceSnapshot(stored, scope).documents[0].authoring)
+      .toMatchObject({ repositoryScope: 'exact-scope', localChanges: true,
+        revision: source.authoring.revision });
+    source.authoring.saveError = 'conflict';
+    expect(persistedDocument(source).authoring.localChanges).toBe(true);
+    source.authoring.localChanges = false;
+    source.history = { isDirty: () => false };
+    expect(persistedDocument(source).authoring.localChanges).toBe(false);
   });
 
   it('keeps live deployment attachments session-only without changing existing document persistence', () => {

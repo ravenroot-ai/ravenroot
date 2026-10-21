@@ -240,13 +240,14 @@ class AuthoringReadConcurrencyTest {
         }
     }
 
-    @Test
+    @org.junit.jupiter.api.RepeatedTest(20)
     void uniqueMissAdmissionAndEvictionAreBounded() throws Exception {
         var cache = new ReadObjects();
         var index = new VolatileGraphAuthoringReadIndex();
         var release = new CountDownLatch(1);
         var entered = new CountDownLatch(16);
         var rejected = new AtomicInteger();
+        var saturatedRejections = new CountDownLatch(36);
         try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
             var tasks = new ArrayList<Future<?>>();
             for (int i = 0; i < 100; i++) {
@@ -269,12 +270,20 @@ class AuthoringReadConcurrencyTest {
                                                 GraphAuthoringException.Failure.LIMIT_EXCEEDED,
                                                 failure.failure());
                                         rejected.incrementAndGet();
+                                        saturatedRejections.countDown();
                                     }
                                 }));
             }
-            assertTrue(entered.await(5, TimeUnit.SECONDS));
-            assertTrue(cache.inFlight() <= 64);
-            release.countDown();
+            try {
+                assertTrue(entered.await(5, TimeUnit.SECONDS));
+                // Keep all admitted misses blocked until every excess request has been refused.
+                // Releasing after only the 16 active loaders lets late requests reuse freed slots.
+                assertTrue(saturatedRejections.await(5, TimeUnit.SECONDS));
+                assertEquals(64, cache.inFlight());
+                assertEquals(36, rejected.get());
+            } finally {
+                release.countDown();
+            }
             for (var task : tasks) task.get(10, TimeUnit.SECONDS);
             assertTrue(rejected.get() > 0);
             for (int i = 0; i < 2200; i++) {

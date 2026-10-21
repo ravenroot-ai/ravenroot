@@ -2254,12 +2254,12 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as location:
             root = Path(location)
             authority, entries, candidates, details = self.route_table_authority_fixture(root)
-            self.assertEqual(121, len(details))
+            self.assertEqual(122, len(details))
             self.assertEqual(
-                {"methods": 134, "path": 121, "summary": 462, "successStatuses": 125},
+                {"methods": 135, "path": 122, "summary": 463, "successStatuses": 126},
                 {role: len(ids) for role, ids in authority["candidateIdsByRole"].items()},
             )
-            self.assertEqual(842, len(entries))
+            self.assertEqual(846, len(entries))
             self.assertEqual([], self.route_table_errors(root, authority, entries, candidates))
             self.assertEqual({
                 "StableEdgeId.MAX_UTF8_BYTES": 8192,
@@ -4672,7 +4672,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             document = {"entries": list(entries.values()), "retiredEntries": [],
                         "migrationHistory": []}
             self.assertIn(
-                "| Retained published contract descriptions | 462 |",
+                "| Retained published contract descriptions | 463 |",
                 audit.render_report(document),
             )
             deferred = copy.deepcopy(document)
@@ -4680,7 +4680,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                              if entry["classification"] == "published-contract-description")
             published.update(status="deferred", followUp="#225")
             self.assertIn(
-                "| Retained published contract descriptions | 461 |",
+                "| Retained published contract descriptions | 462 |",
                 audit.render_report(deferred),
             )
         self.assertIn(
@@ -6886,7 +6886,7 @@ class GraphAuthoringPolicyAuditTest(unittest.TestCase):
             "/v1/graph-authoring-webhooks", "/v1/graph-authoring", "/v1/graph-authoring/{id}",
             "/v1/graph-authoring/{id}/history", "/v1/graph-authoring/{id}/diff",
             "/v1/graph-authoring/{id}/restore", "/v1/graph-authoring/{id}/discard",
-            "/v1/graph-authoring/{id}/release", "/v1/graph-artifacts",
+            "/v1/graph-authoring/{id}/release", "/v1/graph-authoring/{id}/versions", "/v1/graph-artifacts",
             "/v1/graph-artifacts/{graphId}/{version}/import",
             "/v1/graph-artifacts/{graphId}/{version}/deploy",
         }, set(authority["routePaths"]))
@@ -7005,6 +7005,159 @@ class GraphAuthoringPolicyAuditTest(unittest.TestCase):
                     refreshed = {candidate.id: candidate for candidate in audit.discover(self.root)}
                     self.assertIsNone(
                         audit.graph_authoring_authority_from_source(self.root, refreshed))
+                finally:
+                    path.write_text(original, encoding="utf-8")
+
+    def test_successor_route_requires_authenticated_side_effecting_never_posture(self) -> None:
+        path = self.root / audit.GRAPH_AUTHORING_ROUTE_PATH
+        original = path.read_text(encoding="utf-8")
+        marker = 'new RouteDescriptor(Set.of("POST"), "/v1/graph-authoring/{id}/versions",'
+        start = original.index(marker)
+        end = original.index('new RouteDescriptor(', start + len(marker))
+        descriptor = original[start:end]
+        for before, after in (('Set.of("POST")', 'Set.of("GET")'),
+                              ('true, false, 200,', 'false, false, 200,'),
+                              ('true, false, 200,', 'true, false, 201,'),
+                              ('NEVER, false)', 'READ, true)')):
+            with self.subTest(mutation=after):
+                self.assertEqual(1, descriptor.count(before))
+                try:
+                    path.write_text(original[:start] + descriptor.replace(before, after, 1) + original[end:], encoding="utf-8")
+                    self.assertTrue(audit.graph_authoring_authority_from_source(self.root, self.discovered) is None,
+                                    "Route metadata cannot silently weaken the successor mutation contract")
+                finally:
+                    path.write_text(original, encoding="utf-8")
+
+    def test_successor_guards_cannot_be_rebaselined_away(self) -> None:
+        mutations = [
+            (next(path for path in audit.GRAPH_AUTHORING_FILE_PROOFS if path.stem == "GraphAuthoringHttpApi"), None,
+             'require(context, AuthorizationAction.GRAPH_WRITE, documentId);\n                    if (!repository.capabilities()',
+             'require(context, AuthorizationAction.GRAPH_READ, documentId);\n                    if (!repository.capabilities()'),
+            (next(path for path in audit.GRAPH_AUTHORING_FILE_PROOFS if path.stem == "GraphAuthoringHttpApi"), None,
+             'if (!repository.capabilities().contains(GraphAuthoringRepository.Capability.CREATE_NEXT_VERSION))',
+             'if (false)'),
+            (audit.GRAPH_AUTHORING_UI_PATH, "createRepositorySuccessor",
+             'if (!globalThis.confirm(', 'if (false && !globalThis.confirm('),
+            (audit.GRAPH_AUTHORING_UI_PATH, "createRepositorySuccessor",
+             '!authoring?.draftDeleted || !authoring.canWrite', '!authoring?.draftDeleted'),
+            (audit.GRAPH_AUTHORING_UI_PATH, "createRepositorySuccessor",
+             'authoring.versionRequest ||= crypto.randomUUID()', 'authoring.versionRequest = crypto.randomUUID()'),
+            (audit.GRAPH_AUTHORING_UI_PATH, "requireRepositoryBinding",
+             'client !== graphAuthoringClient || authority !== workspaceAuthority', 'client !== graphAuthoringClient'),
+            (audit.GRAPH_AUTHORING_PICKER_PATH, None, "params.has('file')", 'false'),
+        ]
+        http_path = next(path for path in audit.GRAPH_AUTHORING_FILE_PROOFS if path.stem == "GraphAuthoringHttpApi")
+        for header in ("X-Ravenroot-Expected-Draft", "X-Ravenroot-Expected-Release", "X-Ravenroot-Expected-Publication"):
+            mutations.append((http_path, None, f'requiredHeader(exchange, "{header}")', '"absent"'))
+        mutations.append((http_path, None,
+                          'new GraphAuthoringRepository.MutationRequest(id, source, expected(exchange),\n'
+                          '                requiredHeader(exchange, "Idempotency-Key"))',
+                          'new GraphAuthoringRepository.MutationRequest(id, source, expected(exchange), "fixed-request-key")'))
+        for name in ("GithubAuthoringRepository", "GitlabAuthoringRepository"):
+            path = next(path for path in audit.GRAPH_AUTHORING_FILE_PROOFS if path.stem == name)
+            mutations.extend((
+                (path, None, 'requireExpected(request.expected(), initial.revision());', ';'),
+                (path, None, 'draft.releaseVersion() != release.releaseVersion()', 'false'),
+                (path, None, 'version = draftMetadata.releaseVersion();', 'version = draftMetadata.releaseVersion() + 1;'),
+                (path, None, 'release.releaseVersion() >= GraphReleaseMetadata.MAX_RELEASE_VERSION', 'false'),
+            ))
+        for relative, method, before, after in mutations:
+            path = self.root / relative
+            original = path.read_text(encoding="utf-8")
+            with self.subTest(path=relative, mutation=after):
+                if method:
+                    span = audit._javascript_function_span(original, method)
+                    self.assertIsNotNone(span)
+                    body = original[slice(*span)]
+                    self.assertEqual(1, body.count(before))
+                    mutated = original[:span[0]] + body.replace(before, after, 1) + original[span[1]:]
+                    new_span = audit._javascript_function_span(mutated, method)
+                    evidence = {method: hashlib.sha256(audit.normalized(mutated[slice(*new_span)]).encode()).hexdigest()}
+                    proofs = audit.GRAPH_AUTHORING_UI_METHOD_PROOFS
+                else:
+                    self.assertEqual(1, original.count(before))
+                    mutated = original.replace(before, after, 1)
+                    evidence = {relative: audit._source_digest(mutated)}
+                    proofs = audit.GRAPH_AUTHORING_FILE_PROOFS
+                try:
+                    path.write_text(mutated, encoding="utf-8")
+                    with mock.patch.dict(proofs, evidence):
+                        self.assertTrue(audit.graph_authoring_authority_from_source(self.root, self.discovered) is None,
+                                        "A refreshed digest must not admit a weakened successor guard")
+                finally:
+                    path.write_text(original, encoding="utf-8")
+
+    def test_managed_open_scope_and_local_work_guards_cannot_be_rebaselined_away(self) -> None:
+        ui_path = audit.GRAPH_AUTHORING_UI_PATH
+        mutations = [
+            (ui_path, "requireRepositoryOperationBinding", "requireRepositoryBinding(binding.client, binding.authority);", ";"),
+            (ui_path, "requireRepositoryOperationBinding", "binding.scope !== repositoryScope()", "false"),
+            (ui_path, "requireRepositoryOperationBinding", "target.incarnation !== binding.incarnation", "false"),
+            (ui_path, "requireRepositoryOperationBinding", "target.history.revision() !== binding.historyRevision", "false"),
+            (ui_path, "requireRepositoryOperationBinding", "target.authoring.revision?.[key] !== binding.expected[key]", "false"),
+            (ui_path, "repositoryHistory", "const page = await client.history(id);\n    requireRepositoryOperationBinding(target, binding);", "const page = await client.history(id);"),
+            (ui_path, "repositoryHistory", "await client.restore(id, revision, binding.expected)", "await graphAuthoringClient.restore(id, revision, binding.expected)"),
+            (ui_path, "repositoryDiscard", "const result = await client.discard(id, binding.expected);\n    requireRepositoryOperationBinding(target, binding);", "const result = await client.discard(id, binding.expected);"),
+            (ui_path, "repositoryScope", "workspaceAuthority.scope?.tenantId ?? null", "null"),
+            (ui_path, "repositoryScope", "configuration.provider", "null"),
+            (ui_path, "repositoryScope", "configuration.repositoryDisplay", "null"),
+            (ui_path, "repositoryScope", "configuration.releaseBranch", "null"),
+            (ui_path, "repositoryDocumentBindingIsCurrent", "target.authoring.repositoryScope !== scope", "false"),
+            (ui_path, "openRepositorySource", "target.authoring.repositoryScope === scope", "true"),
+            (ui_path, "openRepositorySource", "tenantAuthorityAllows(target)", "true"),
+            (ui_path, "openRepositorySource", "target.authoring.draftDeleted === (source === 'release')", "true"),
+            (ui_path, "preserveOpenRepositoryGraph", "updateHistoryUi();", "target.history.markSaved(); updateHistoryUi();"),
+            (ui_path, "openRepositoryGraph", "if (repositoryDocumentHasLocalWork(existing))", "if (false)"),
+            (ui_path, "openRepositoryGraph", "if (repositoryDocumentHasLocalWork(current)", "if (false"),
+            (ui_path, "openRepositoryGraph", "current.history.revision() !== observedRevision", "false"),
+            (ui_path, "openRepositoryGraph", "if (!completeReplaceActiveDocument(target, graph, result.documentId)) return false;", "openDocument({ name: result.documentId, graph });"),
+            (ui_path, "saveRepositoryGraph", "if (!repositoryDocumentBindingIsCurrent(target)) return false;", ";"),
+            (ui_path, "saveRepositoryGraph", "if (target.history === history && history.revision() === submittedRevision)", "if (true)"),
+            (ui_path, "applyAuthoringDocument", "target.authoring.saveError = null;", "target.authoring.saveError = null; target.authoring.localChanges = false;"),
+            (Path("ravenroot/ravenroot-ui/src/workspace-persistence.js"), "persistedAuthoring",
+             "localChanges: Boolean(localChanges)", "localChanges: false"),
+            (Path("ravenroot/ravenroot-ui/src/workspace-persistence.js"), "persistedAuthoring",
+             "repositoryScope: nullableString(value.repositoryScope, 'repositoryScope')", "repositoryScope: null"),
+            (Path("ravenroot/ravenroot-ui/src/document-close-plan.js"), "classifyDocumentCloseTargets",
+             "document_.authoring?.localChanges", "false"),
+            (Path("ravenroot/ravenroot-ui/src/workspace.js"), "hasUnsavedWork",
+             "Boolean(document_.authoring?.localChanges)", "false"),
+            (ui_path, "paneIsDirty", "document_?.authoring?.localChanges", "false"),
+            (ui_path, "updateHistoryUi", "activeAuthoring?.localChanges", "false"),
+        ]
+        for relative, method, before, after in mutations:
+            path = self.root / relative
+            original = path.read_text(encoding="utf-8")
+            span = audit._javascript_function_span(original, method)
+            self.assertIsNotNone(span)
+            body = original[slice(*span)]
+            with self.subTest(path=relative, method=method, mutation=after):
+                self.assertEqual(1, body.count(before))
+                mutated = original[:span[0]] + body.replace(before, after, 1) + original[span[1]:]
+                try:
+                    path.write_text(mutated, encoding="utf-8")
+                    sources = {source: (self.root / source).read_text(encoding="utf-8")
+                               for source in (*audit.GRAPH_AUTHORING_FILE_PROOFS,
+                                              *audit.GRAPH_AUTHORING_SUPPORT_FILE_PROOFS)}
+                    ui = (self.root / ui_path).read_text(encoding="utf-8")
+                    self.assertFalse(audit.graph_authoring_managed_open_boundary(sources, ui),
+                                     "Managed source preservation must fail independently of refreshed digests")
+                    ui_methods = {name: hashlib.sha256(audit.normalized(
+                        ui[slice(*audit._javascript_function_span(ui, name))]).encode()).hexdigest()
+                                  for name in audit.GRAPH_AUTHORING_UI_METHOD_PROOFS}
+                    ui_support = {name: hashlib.sha256(audit.normalized(
+                        ui[slice(*audit._javascript_function_span(ui, name))]).encode()).hexdigest()
+                                  for name in audit.GRAPH_AUTHORING_UI_SUPPORT_SPAN_PROOFS}
+                    spans = {(source, name): hashlib.sha256(audit.normalized(
+                        (self.root / source).read_text()[slice(*audit._javascript_function_span(
+                            (self.root / source).read_text(), name))]).encode()).hexdigest()
+                             for source, name in audit.GRAPH_AUTHORING_UI_SPAN_PROOFS}
+                    with mock.patch.dict(audit.GRAPH_AUTHORING_UI_METHOD_PROOFS, ui_methods), \
+                            mock.patch.dict(audit.GRAPH_AUTHORING_UI_SUPPORT_SPAN_PROOFS, ui_support), \
+                            mock.patch.dict(audit.GRAPH_AUTHORING_UI_SPAN_PROOFS, spans), \
+                            mock.patch.dict(audit.GRAPH_AUTHORING_SUPPORT_FILE_PROOFS,
+                                            {relative: audit._source_digest(mutated)}):
+                        self.assertIsNone(audit.graph_authoring_authority_from_source(self.root, self.discovered))
                 finally:
                     path.write_text(original, encoding="utf-8")
 

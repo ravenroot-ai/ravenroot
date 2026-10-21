@@ -49,6 +49,109 @@ class GitlabAuthoringRepositoryTest {
     private static final String DRAFT = "draft/customers-a";
 
     @Test
+    void successorRecoversAcrossRestartWithoutAnotherIncrement() {
+        var api = new Gitlab();
+        var publication = new java.util.concurrent.atomic.AtomicReference<>("absent");
+        GraphAuthoringRepository.MutationRequest request;
+        byte[] expected;
+        long writes;
+        try (var repository = repository(api, (t, g, v, c, b) -> publication.get())) {
+            repository.save(ALICE, new GraphAuthoringRepository.SaveRequest("orders.graphml", graph("one"),
+                    EMPTY, "restart-initial-key-001")).toCompletableFuture().join();
+            api.merge();
+            var release = repository.open(ALICE, "orders.graphml", true).toCompletableFuture().join();
+            request = new GraphAuthoringRepository.MutationRequest("orders.graphml", "",
+                    release.summary().revision(), "restart-successor-key-01");
+            api.loseCommit = true;
+            var created = repository.createNextVersion(ALICE, request).toCompletableFuture().join();
+            publication.set("published-after-success");
+            expected = created.graphMl(); writes = api.writes;
+        }
+        try (var repository = repository(api, (t, g, v, c, b) -> publication.get())) {
+            var recovered = repository.createNextVersion(ALICE, request).toCompletableFuture().join();
+            assertEquals(2, recovered.summary().releaseVersion());
+            assertArrayEquals(expected, recovered.graphMl());
+            assertEquals(writes, api.writes);
+            assertFailure(GraphAuthoringException.Failure.UNAUTHORIZED, () -> repository.createNextVersion(
+                    new GraphAuthoringRepository.Actor("other-tenant", "alice"), request).toCompletableFuture().join());
+        }
+    }
+
+    @Test
+    void successorRejectsAbsentReleaseStaleObservationsLegacyDivergenceAndMaximumVersion() {
+        var api = new Gitlab();
+        try (var repository = repository(api)) {
+            var first = repository.save(ALICE, new GraphAuthoringRepository.SaveRequest("orders.graphml",
+                    graph("one"), EMPTY, "edge-create-key-000001")).toCompletableFuture().join();
+            assertFailure(GraphAuthoringException.Failure.CONFLICT, () -> repository.createNextVersion(ALICE,
+                    new GraphAuthoringRepository.MutationRequest("orders.graphml", "", first.summary().revision(),
+                            "edge-no-release-key-001")).toCompletableFuture().join());
+            api.merge();
+            var released = repository.open(ALICE, "orders.graphml", false).toCompletableFuture().join();
+            var actual = released.summary().revision();
+            for (int index = 0; index < 3; index++) {
+                var stale = new GraphAuthoringRepository.Revision(index == 0 ? "stale" : actual.draft(),
+                        index == 1 ? "stale" : actual.release(), index == 2 ? "stale" : actual.publication());
+                int part = index;
+                assertFailure(GraphAuthoringException.Failure.CONFLICT, () -> repository.createNextVersion(ALICE,
+                        new GraphAuthoringRepository.MutationRequest("orders.graphml", "", stale,
+                                "edge-stale-key-00000" + part)).toCompletableFuture().join());
+            }
+            api.external("graphs/customers/a/orders.graphml", GraphReleaseMetadata.assign(graph("legacy"), first.summary().graphId(), 1).graphMl());
+            var legacy = repository.open(ALICE, "orders.graphml", false).toCompletableFuture().join();
+            var noOp = repository.save(ALICE, new GraphAuthoringRepository.SaveRequest("orders.graphml", legacy.graphMl(),
+                    legacy.summary().revision(), "legacy-unchanged-key-001")).toCompletableFuture().join();
+            assertArrayEquals(legacy.graphMl(), noOp.graphMl());
+            assertEquals(legacy.summary().revision(), noOp.summary().revision());
+            assertFailure(GraphAuthoringException.Failure.CONFLICT, () -> repository.save(ALICE,
+                    new GraphAuthoringRepository.SaveRequest("orders.graphml", graph("changed legacy"), legacy.summary().revision(),
+                            "legacy-changed-key-0001")).toCompletableFuture().join());
+            assertFailure(GraphAuthoringException.Failure.CONFLICT, () -> repository.createNextVersion(ALICE,
+                    new GraphAuthoringRepository.MutationRequest("orders.graphml", "", legacy.summary().revision(),
+                            "edge-legacy-key-00001")).toCompletableFuture().join());
+            assertArrayEquals(legacy.graphMl(), repository.open(ALICE, "orders.graphml", false).toCompletableFuture().join().graphMl());
+            api.external("graphs/customers/a/orders.graphml", GraphReleaseMetadata.assign(graph("max"), first.summary().graphId(), GraphReleaseMetadata.MAX_RELEASE_VERSION).graphMl());
+            api.merge();
+            var maximum = repository.open(ALICE, "orders.graphml", false).toCompletableFuture().join();
+            assertFailure(GraphAuthoringException.Failure.CONFLICT, () -> repository.createNextVersion(ALICE,
+                    new GraphAuthoringRepository.MutationRequest("orders.graphml", "", maximum.summary().revision(),
+                            "edge-maximum-key-0001")).toCompletableFuture().join());
+        }
+    }
+
+    @Test
+    void explicitSuccessorRetriesPreserveIdentityAndBaselineReverts() {
+        var api = new Gitlab();
+        try (var repository = repository(api)) {
+            var first = save(repository, "orders.graphml", "one", EMPTY, "successor-initial-key-001");
+            api.merge();
+            var released = repository.open(ALICE, "orders.graphml", false).toCompletableFuture().join();
+            var request = mutation("orders.graphml", "", released.summary().revision(), "successor-retry-key-0001");
+            assertEquals(1, repository.list(ALICE, "").toCompletableFuture().join().items().getFirst().releaseVersion());
+            var wrapper = new ForwardingGraphAuthoringRepository(repository);
+            var successor = wrapper.createNextVersion(ALICE, request).toCompletableFuture().join();
+            assertEquals(2, wrapper.list(ALICE, "").toCompletableFuture().join().items().getFirst().releaseVersion());
+            assertFailure(GraphAuthoringException.Failure.CONFLICT, () -> wrapper.createNextVersion(BOB, request).toCompletableFuture().join());
+            assertEquals(2, successor.summary().releaseVersion());
+            assertFailure(GraphAuthoringException.Failure.CONFLICT, () -> repository.createNextVersion(ALICE,
+                    mutation("orders.graphml", "", request.expected(), "same-state-competing-001")).toCompletableFuture().join());
+            int writes = api.writes;
+            assertArrayEquals(successor.graphMl(), repository.createNextVersion(ALICE, request).toCompletableFuture().join().graphMl());
+            assertEquals(writes, api.writes);
+            assertFailure(GraphAuthoringException.Failure.CONFLICT, () -> repository.createNextVersion(ALICE,
+                    mutation("orders.graphml", "", successor.summary().revision(), request.idempotencyKey())).toCompletableFuture().join());
+            assertFailure(GraphAuthoringException.Failure.CONFLICT, () -> repository.createNextVersion(ALICE,
+                    mutation("orders.graphml", "", successor.summary().revision(), "successor-competing-001")).toCompletableFuture().join());
+            var edited = save(repository, "orders.graphml", "two", successor.summary().revision(), "successor-edit-key-0001");
+            var reverted = repository.save(ALICE, new GraphAuthoringRepository.SaveRequest("orders.graphml", first.graphMl(),
+                    edited.summary().revision(), "successor-revert-key-01")).toCompletableFuture().join();
+            assertEquals(2, reverted.summary().releaseVersion());
+            assertEquals(first.summary().graphId(), reverted.summary().graphId());
+            assertArrayEquals(first.graphMl(), repository.open(ALICE, "orders.graphml", true).toCompletableFuture().join().graphMl());
+        }
+    }
+
+    @Test
     void fullLifecycleIncludesImmutableHistoryDiffRestoreDeleteDiscardAndMergeRequest() {
         var api = new Gitlab();
         try (var repository = repository(api)) {
@@ -111,12 +214,15 @@ class GitlabAuthoringRepositoryTest {
             api.merge();
             var released =
                     repository.open(ALICE, "orders.graphml", true).toCompletableFuture().join();
+            var successor = repository.createNextVersion(ALICE, mutation("orders.graphml", "",
+                    released.summary().revision(), "successor-key-0000001")).toCompletableFuture().join();
+            assertEquals(2, successor.summary().releaseVersion());
             var edit =
                     save(
                             repository,
                             "orders.graphml",
                             "three",
-                            released.summary().revision(),
+                            successor.summary().revision(),
                             "third-save-key-000001");
             var discarded =
                     repository
@@ -129,7 +235,8 @@ class GitlabAuthoringRepositoryTest {
                                             "discard-key-000000001"))
                             .toCompletableFuture()
                             .join();
-            assertArrayEquals(released.graphMl(), discarded.graphMl());
+            assertEquals(2, discarded.summary().releaseVersion());
+            assertArrayEquals(released.graphMl(), repository.open(ALICE, "orders.graphml", true).toCompletableFuture().join().graphMl());
             var deletion =
                     mutation(
                             "orders.graphml",

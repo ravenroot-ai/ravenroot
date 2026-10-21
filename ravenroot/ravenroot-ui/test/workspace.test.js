@@ -24,6 +24,14 @@ function workspaceOf(...names) {
 // statistics all follow it, so an ambiguous answer shows up as a panel describing the wrong graph.
 
 describe('exactly one document is active, and which one is not left to chance', () => {
+  it('warns before leaving a restored managed graph with unsaved persisted changes', () => {
+    const workspace = workspaceOf('restored');
+    workspace.active.authoring.localChanges = true;
+    expect(hasUnsavedWork(workspace)).toBe(true);
+    workspace.active.authoring.localChanges = false;
+    expect(hasUnsavedWork(workspace)).toBe(false);
+  });
+
   it('keeps durable document identity separate from transient incarnation', () => {
     const document_ = createDocumentRecord({ id: 'durable-id' });
     expect(document_.documentId).toBe('durable-id');

@@ -21,7 +21,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class CorrelatedJoinRuntimeRecoveryTest {
     @TempDir Path directory;
     private static final ai.ravenroot.api.security.SecurityContext IDENTITY = TestIdentities.TENANT_A;
-    private static final String GRAPH = """
+    static final String GRAPH = """
             <graphml xmlns="http://graphml.graphdrawing.org/xmlns">
               <key id="kind" for="node" attr.name="kind" attr.type="string"/>
               <key id="behavior" for="node" attr.name="behavior" attr.type="string"/>

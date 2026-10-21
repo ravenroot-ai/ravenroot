@@ -3552,6 +3552,20 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 traversal -> businessHistories.traversal(key.tenantId(), key.processInstanceId(), traversal).orElse(null),
                 cursor, limit, businessHistoryPolicy().maxPageSize()));
     }
+    @Override public CompletionStage<Map<UUID, String>> executionInvocationNodeIds(ExecutionKey key, Set<UUID> invocationIds) {
+        var requested = Set.copyOf(invocationIds);
+        if (requested.size() > 1000) throw new IllegalArgumentException("invocation binding limit is 1000");
+        return completeHistory(() -> {
+            var state = historyState(key);
+            if (state == null || requested.isEmpty()) return Map.of();
+            var bindings = new HashMap<UUID, String>();
+            for (var traversal : state.traversals().values()) for (var id : requested) {
+                var visit = traversal.invocations().get(id);
+                if (visit != null) bindings.put(id, visit.nodeId());
+            }
+            return Map.copyOf(bindings);
+        });
+    }
     @Override public CompletionStage<Optional<ai.ravenroot.api.history.TraversalSummary>> executionTraversal(ExecutionKey key, UUID traversalId) {
         return completeHistory(() -> InMemoryExecutionHistory.traversal(key, historyState(key), traversalId,
                 traversal -> businessHistories.traversal(key.tenantId(), key.processInstanceId(), traversal).orElse(null)));

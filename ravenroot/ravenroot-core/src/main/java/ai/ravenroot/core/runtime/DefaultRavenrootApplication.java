@@ -3170,37 +3170,8 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                             + "replay is unavailable; the in-memory-only degradation must be chosen "
                             + "by the caller, not discovered by catching this)");
         }
-        List<JournalRecord> page = await(executionStore.readJournal(tenantId, afterOffset, limit));
-        // Scoped to this one page rather than kept as instance state: bounded by `limit`, so the
-        // cost is bounded too, and a cache that outlived a single call would need its own staleness
-        // policy for no benefit -- a page's own records rarely span more than a handful of instances.
-        var nodeNamesByInstance = new HashMap<ExecutionKey, Map<UUID, String>>();
-        var events = new ArrayList<DurableExecutionEvent>(page.size());
-        for (JournalRecord record : page) {
-            EventEnvelope envelope = record.envelope();
-            String nodeId = envelope.invocation()
-                    .map(invocationId -> nodeNamesByInstance
-                            .computeIfAbsent(record.key(), this::loadInvocationNodeNames)
-                            .get(invocationId))
-                    .orElse(null);
-            events.add(new DurableExecutionEvent(envelope.eventId(), record.journalOffset(),
-                    record.streamSequence(), envelope.tenantId(), envelope.eventType(),
-                    envelope.processInstanceId(), envelope.traversalId(), envelope.invocationId(),
-                    envelope.attemptId(), envelope.causationId(), envelope.correlationId(),
-                    envelope.graphVersion(), envelope.occurredAt(), nodeId,
-                    ExecutionEventType.EDGE_TRAVERSED.name().equals(envelope.eventType())
-                            ? ai.ravenroot.api.persistence.EdgeTraversalEventData.edgeId(envelope.payload())
-                                    .orElse(null)
-                            : null,
-                    // Decoded from the body under its own media type, exactly as the edge identity
-                    // above is, so a foreign or malformed payload stays absent rather than becoming
-                    // a plausible-looking handler id attributed to a handler that may exist.
-                    ai.ravenroot.api.persistence.HandlerEventData.isHandlerEvent(envelope.eventType())
-                            ? ai.ravenroot.api.persistence.HandlerEventData.handlerId(envelope.payload())
-                                    .orElse(null)
-                            : null));
-        }
-        return List.copyOf(events);
+        requireEventPageLimit(limit);
+        return projectDurableEvents(await(executionStore.readJournal(tenantId, afterOffset, limit)));
     }
 
     @Override
@@ -3213,50 +3184,51 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
     public DurableProcessEventPage durableEventPageForProcess(String tenantId, UUID processInstanceId,
                                                                long afterSequence, int limit) {
         if (!durableEventJournalAvailable()) return new DurableProcessEventPage(List.of(), 1, 1);
+        requireEventPageLimit(limit);
         var key = new ExecutionKey(requireTenant(tenantId), java.util.Objects.requireNonNull(processInstanceId));
         var page = await(executionStore.readProcessJournalPage(key, afterSequence, limit));
-        var nodeNames = loadInvocationNodeNames(key);
-        var events = new ArrayList<DurableExecutionEvent>(page.records().size());
-        for (JournalRecord record : page.records()) {
-            EventEnvelope envelope = record.envelope();
-            String nodeId = envelope.invocation().map(nodeNames::get).orElse(null);
-            events.add(new DurableExecutionEvent(envelope.eventId(), record.journalOffset(),
-                    record.streamSequence(), envelope.tenantId(), envelope.eventType(),
-                    envelope.processInstanceId(), envelope.traversalId(), envelope.invocationId(),
-                    envelope.attemptId(), envelope.causationId(), envelope.correlationId(),
-                    envelope.graphVersion(), envelope.occurredAt(), nodeId,
-                    ExecutionEventType.EDGE_TRAVERSED.name().equals(envelope.eventType())
-                            ? ai.ravenroot.api.persistence.EdgeTraversalEventData.edgeId(envelope.payload())
-                            .orElse(null) : null));
-        }
-        return new DurableProcessEventPage(events, page.retainedFromSequence(), page.nextSequence());
+        return new DurableProcessEventPage(projectDurableEvents(page.records()), page.retainedFromSequence(), page.nextSequence());
     }
 
-    /**
-     * The invocation-to-node binding {@code InvocationAdded} recorded as structure, in the same
-     * transaction as the events themselves. The envelope deliberately carries no node id; see
-     * {@link EventEnvelope}'s own Javadoc for why the binding is joined here rather than added to the
-     * payload schema. A best-effort join, not a second source of truth: an instance whose current state is no
-     * longer loadable (its own retention is independent of the journal's) resolves every one of its
-     * node ids to {@code null} rather than failing the whole page over one unresolved instance.
-     */
-    private Map<UUID, String> loadInvocationNodeNames(ExecutionKey key) {
-        StoredProcessInstance stored;
-        try {
-            stored = await(executionStore.load(key));
-        } catch (ExecutionStoreException notFound) {
-            if (notFound.failure() instanceof ExecutionStoreFailure.NotFound) {
-                return Map.of();
+    private static void requireEventPageLimit(int limit) {
+        if (limit < 1 || limit > 1000) throw new IllegalArgumentException("event page limit must be 1 through 1000");
+    }
+
+    /** Resolves only this page's selected metadata; retained execution payloads are never loaded. */
+    private List<DurableExecutionEvent> projectDurableEvents(List<JournalRecord> page) {
+        var selected = new HashMap<ExecutionKey, java.util.Set<UUID>>();
+        for (var record : page) record.envelope().invocation().ifPresent(id ->
+                selected.computeIfAbsent(record.key(), ignored -> new java.util.HashSet<>()).add(id));
+        var bindings = new HashMap<ExecutionKey, Map<UUID, String>>();
+        if (executionStore.supports(ai.ravenroot.api.persistence.StoreCapability.EXECUTION_HISTORY))
+            selected.forEach((key, ids) -> bindings.put(key, await(executionStore.executionInvocationNodeIds(key, ids))));
+        var contexts = new HashMap<ExecutionKey, Map<UUID, ai.ravenroot.api.correlation.ApplicationCorrelationContext>>();
+        var events = new ArrayList<DurableExecutionEvent>(page.size());
+        for (var record : page) {
+            var envelope = record.envelope();
+            ai.ravenroot.api.correlation.ApplicationCorrelationContext context = null;
+            if (executionStore.supports(ai.ravenroot.api.persistence.StoreCapability.BUSINESS_HISTORIES)) {
+                var byTraversal = contexts.computeIfAbsent(record.key(), ignored -> new HashMap<>());
+                if (!byTraversal.containsKey(envelope.traversalId())) {
+                    var relation = await(executionStore.correlatedTraversal(envelope.tenantId(),
+                            envelope.processInstanceId(), envelope.traversalId()));
+                    byTraversal.put(envelope.traversalId(), relation.map(ai.ravenroot.api.correlation.CorrelatedTraversal::context).orElse(null));
+                }
+                context = byTraversal.get(envelope.traversalId());
             }
-            throw notFound;
+            events.add(new DurableExecutionEvent(envelope.eventId(), record.journalOffset(), record.streamSequence(),
+                    envelope.tenantId(), envelope.eventType(), envelope.processInstanceId(), envelope.traversalId(),
+                    envelope.invocationId(), envelope.attemptId(), envelope.causationId(), envelope.correlationId(),
+                    envelope.graphVersion(), envelope.occurredAt(),
+                    envelope.invocationId() == null ? null
+                            : bindings.getOrDefault(record.key(), Map.of()).get(envelope.invocationId()),
+                    ExecutionEventType.EDGE_TRAVERSED.name().equals(envelope.eventType())
+                            ? ai.ravenroot.api.persistence.EdgeTraversalEventData.edgeId(envelope.payload()).orElse(null) : null,
+                    ai.ravenroot.api.persistence.HandlerEventData.isHandlerEvent(envelope.eventType())
+                            ? ai.ravenroot.api.persistence.HandlerEventData.handlerId(envelope.payload()).orElse(null) : null,
+                    context, ai.ravenroot.api.persistence.NodeOutcomeEventData.outcome(envelope.payload()).orElse(null)));
         }
-        var bindings = new HashMap<UUID, String>();
-        for (Traversal traversal : stored.state().traversals().values()) {
-            for (NodeInvocation invocation : traversal.invocations().values()) {
-                bindings.put(invocation.invocationId(), invocation.nodeId());
-            }
-        }
-        return bindings;
+        return List.copyOf(events);
     }
 
     /**

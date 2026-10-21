@@ -61,6 +61,12 @@ public abstract class ExecutionHistoryContract {
                 cursor = page.nextCursor(); pages++;
             } while (cursor.isPresent());
             assertEquals(1000, ids.size()); assertEquals(28, pages);
+            var bindings = await(store.executionInvocationNodeIds(seeded.key, ids));
+            assertEquals(1000, bindings.size()); assertTrue(bindings.values().stream().allMatch("loop"::equals));
+            assertTrue(await(store.executionInvocationNodeIds(new ExecutionKey("foreign", seeded.key.processInstanceId()), ids)).isEmpty());
+            assertTrue(await(store.executionInvocationNodeIds(seeded.key, Set.of(UUID.randomUUID()))).isEmpty());
+            var oversized = new HashSet<>(ids); oversized.add(UUID.randomUUID());
+            assertThrows(IllegalArgumentException.class, () -> store.executionInvocationNodeIds(seeded.key, oversized));
             assertThrows(ExecutionException.class, () -> await(store.executionVisits(seeded.key, traversal,
                     Optional.empty(), Optional.empty(), store.businessHistoryPolicy().maxPageSize() + 1)));
         }

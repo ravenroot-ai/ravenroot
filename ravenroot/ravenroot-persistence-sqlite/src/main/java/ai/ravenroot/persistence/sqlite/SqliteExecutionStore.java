@@ -5685,6 +5685,11 @@ public final class SqliteExecutionStore implements ExecutionStore {
             ExecutionKey key, Optional<String> cursor, int limit) {
         return async(() -> inReadTransaction(key, () -> ExecutionHistoryStorage.traversals(connection, key, cursor, limit, businessHistoryPolicy().maxPageSize())));
     }
+    @Override public CompletionStage<java.util.Map<UUID, String>> executionInvocationNodeIds(ExecutionKey key, Set<UUID> invocationIds) {
+        var requested = Set.copyOf(invocationIds);
+        if (requested.size() > 1000) throw new IllegalArgumentException("invocation binding limit is 1000");
+        return async(() -> inReadTransaction(key, () -> ExecutionHistoryStorage.invocationNodeIds(connection, key, requested)));
+    }
     @Override public CompletionStage<Optional<ai.ravenroot.api.history.TraversalSummary>> executionTraversal(ExecutionKey key, UUID traversalId) {
         return async(() -> inReadTransaction(key, () -> ExecutionHistoryStorage.traversal(connection, key, traversalId)));
     }

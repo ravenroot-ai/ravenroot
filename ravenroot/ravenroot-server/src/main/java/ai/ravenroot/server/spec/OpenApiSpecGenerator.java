@@ -427,6 +427,17 @@ public final class OpenApiSpecGenerator {
                 + "      \"ProcessInventoryPage\": {\"type\":\"object\",\"required\":[\"items\",\"nextCursor\",\"retainedFrom\",\"maxPageSize\"],\"properties\":{\"items\":{\"type\":\"array\",\"items\":{\"$ref\":\"#/components/schemas/ProcessInventoryEntry\"}},\"nextCursor\":{\"type\":\"string\",\"nullable\":true},\"retainedFrom\":{\"type\":\"string\",\"format\":\"date-time\"},\"maxPageSize\":{\"type\":\"integer\",\"minimum\":1}}}";
     }
 
+    private static String businessEventProperties() {
+        return """
+                "applicationCorrelationId":{"type":"string","maxLength":4096,"nullable":true,"description":"Retained business identity, independent of transport request and process/traversal identities. Null for legacy uncorrelated records."},
+                "contributionId":{"type":"string","maxLength":4096,"nullable":true},
+                "contributionKind":{"type":"string","maxLength":4096,"nullable":true},
+                "roundId":{"type":"string","maxLength":4096,"nullable":true},
+                "publicReference":{"type":"string","maxLength":4096,"nullable":true},
+                "outcome":{"type":"string","maxLength":128,"nullable":true,"description":"Safe retained durable outcome classifier; absent or null when not recorded."},
+                """.strip();
+    }
+
     /** JSON data schemas for named SSE frames; unknown future members remain permitted. */
     private static String executionEventSchemas() {
         return "      \"ExecutionStreamEventBase\": {\"type\":\"object\",\"description\":\"Version 1 JSON data of an execution SSE fram"
@@ -434,7 +445,7 @@ public final class OpenApiSpecGenerator {
                  + "the same process-local continuity domain. Unknown fields and event classifiers are allowed. A conflicting type"
                  + " alias is invalid. IDs and aliases require semantic equality checks outside OpenAPI 3.0.3.\",\"required\":[\"schem"
                  + "aVersion\",\"source\",\"id\",\"eventType\",\"occurredAt\",\"processInstanceId\",\"traversalId\"],\"additionalProperties\":tru"
-                 + "e,\"properties\":{\"schemaVersion\":{\"type\":\"integer\",\"enum\":[1]},\"source\":{\"type\":\"string\",\"enum\":[\"RING\",\"DURABL"
+                 + "e,\"properties\":{" + businessEventProperties() + "\"schemaVersion\":{\"type\":\"integer\",\"enum\":[1]},\"source\":{\"type\":\"string\",\"enum\":[\"RING\",\"DURABL"
                  + "E\"]},\"id\":{\"type\":\"string\",\"pattern\":\"^(0|-?[1-9][0-9]*)$\",\"maxLength\":20,\"description\":\"Canonical signed deci"
                  + "mal long string equal to the SSE id and native cursor. Not a globally unique event UUID. Use exact integer ari"
                  + "thmetic; never compare against a rounded floating-point cursor.\"},\"eventType\":{\"type\":\"string\",\"minLength\":1,\""

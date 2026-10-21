@@ -6468,6 +6468,8 @@ public final class RavenrootServer implements AutoCloseable {
                 + ",\"traversalId\":\"" + event.traversalId() + "\""
                 + ",\"handlerId\":" + (event.handlerId() == null ? "null"
                         : "\"" + event.handlerId() + "\"")
+                + ExecutionEventWireJson.correlationFields(event.applicationCorrelation())
+                + ",\"outcome\":" + (event.outcome() == null ? "null" : "\"" + escape(event.outcome()) + "\"")
                 + "}";
     }
 

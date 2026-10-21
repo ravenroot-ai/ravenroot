@@ -4,6 +4,14 @@ import java.util.*;
 import java.util.concurrent.*;
 /** Bounded metadata reads independent of whole-aggregate loading and activity payload retention. */
 public interface ExecutionHistoryStore {
+    /** Resolves only requested durable invocation-to-node bindings, without reading execution data.
+     * @param key authenticated tenant and exact original process identity
+     * @param invocationIds at most 1000 exact invocation identities selected from a bounded journal page
+     * @return immutable retained bindings; absent or foreign identities have no entry
+     */
+    default CompletionStage<Map<UUID, String>> executionInvocationNodeIds(ExecutionKey key, Set<UUID> invocationIds) {
+        return unsupported();
+    }
     /** Lists genuine legacy traversals in one logical deployment/version without inventing business IDs.
  * @param scope tenant, logical deployment and exact immutable graph version
  * @param cursor opaque continuation from the preceding page of the same selection and filters

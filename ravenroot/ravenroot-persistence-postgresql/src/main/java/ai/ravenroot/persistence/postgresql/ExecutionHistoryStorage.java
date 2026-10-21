@@ -79,6 +79,21 @@ final class ExecutionHistoryStorage {
         }
         return page(items, limit, key, null, query, Long.toString(last));
     }
+    static Map<UUID, String> invocationNodeIds(Connection db, ExecutionKey key, Set<UUID> requested) throws SQLException {
+        var ids = List.copyOf(requested);
+        if (ids.size() > 1000) throw new IllegalArgumentException("invocation binding limit is 1000");
+        if (ids.isEmpty()) return Map.of();
+        var bindings = new HashMap<UUID, String>();
+        try (var statement = db.prepareStatement("SELECT invocation_id, node_id FROM invocation WHERE " + PROCESS
+                + " AND invocation_id IN (" + String.join(",", Collections.nCopies(ids.size(), "?")) + ")")) {
+            int at = bindKey(statement, 1, key);
+            for (var id : ids) bindUuid(statement, at++, id);
+            try (var rows = statement.executeQuery()) {
+                while (rows.next()) bindings.put(uuid(rows, "invocation_id"), rows.getString("node_id"));
+            }
+        }
+        return Map.copyOf(bindings);
+    }
     static Optional<TraversalSummary> traversal(Connection db, ExecutionKey key, UUID traversal) throws SQLException {
         try (var statement = db.prepareStatement("SELECT ingress_node_id, status, termination_reason, "
                 + "(SELECT COUNT(*) FROM invocation i WHERE i.tenant_id = t.tenant_id AND i.process_instance_id = t.process_instance_id "

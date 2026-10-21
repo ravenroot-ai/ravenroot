@@ -54,6 +54,8 @@ public final class ExecutionEventWireJson {
                 + ",\"edgeId\":" + (event.edgeId() == null ? "null"
                         : "\"" + escape(StableEdgeId.requireValid(event.edgeId())) + "\"")
                 + ",\"handlerId\":" + nullableUuid(event.handlerId())
+                + correlationFields(event.applicationCorrelation())
+                + ",\"outcome\":" + nullableEscaped(event.outcome())
                 + "}";
     }
 
@@ -86,8 +88,7 @@ public final class ExecutionEventWireJson {
                 // origin. Keeping both here preserves durable re-entry identity across the live SSE
                 // and the ring recent-event endpoint, which share this projection.
                 + ",\"workloadId\":" + nullableEscaped(event.workloadId())
-                + ",\"applicationCorrelationId\":" + nullableEscaped(event.applicationCorrelation() == null
-                        ? null : event.applicationCorrelation().applicationCorrelationId())
+                + correlationFields(event.applicationCorrelation())
                 + ",\"invocationId\":" + nullableUuid(event.invocationId())
                 + ",\"attemptId\":" + nullableUuid(event.attemptId())
                 + ",\"type\":\"" + event.type() + "\""
@@ -109,6 +110,14 @@ public final class ExecutionEventWireJson {
                 + ",\"processingDuration\":" + (event.processingDuration() == null ? "null"
                         : event.processingDuration().toNanos() / 1_000_000_000.0)
                 + "}";
+    }
+
+    static String correlationFields(ai.ravenroot.api.correlation.ApplicationCorrelationContext context) {
+        return ",\"applicationCorrelationId\":" + nullableEscaped(context == null ? null : context.applicationCorrelationId())
+                + ",\"contributionId\":" + nullableEscaped(context == null ? null : context.contributionId().orElse(null))
+                + ",\"contributionKind\":" + nullableEscaped(context == null ? null : context.contributionKind().orElse(null))
+                + ",\"roundId\":" + nullableEscaped(context == null ? null : context.roundId())
+                + ",\"publicReference\":" + nullableEscaped(context == null ? null : context.publicReference().orElse(null));
     }
 
     /** Escapes one JSON string value without admitting a general-purpose object serializer. */

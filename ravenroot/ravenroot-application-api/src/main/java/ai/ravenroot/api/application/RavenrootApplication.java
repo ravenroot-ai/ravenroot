@@ -617,7 +617,7 @@ public interface RavenrootApplication extends AutoCloseable {
      * @param tenantId owning tenant
      * @param processInstanceId exact process identity
      * @param afterSequence exclusive durable per-process sequence
-     * @param limit maximum number of events to return
+     * @param limit maximum number of events to return, from 1 through 1000
      * @return ordered durable events after the requested sequence
      */
     default List<DurableExecutionEvent> durableEventsForProcess(String tenantId, UUID processInstanceId,
@@ -630,7 +630,7 @@ public interface RavenrootApplication extends AutoCloseable {
      * @param tenantId exact owning tenant
      * @param processInstanceId exact process identity
      * @param afterSequence exclusive durable process sequence
-     * @param limit maximum event count
+     * @param limit maximum event count, from 1 through 1000
      * @return bounded events and authoritative retained/allocation boundaries
      */
     default DurableProcessEventPage durableEventPageForProcess(String tenantId, UUID processInstanceId,
@@ -1215,7 +1215,7 @@ public interface RavenrootApplication extends AutoCloseable {
  * states for itself)
  * @param tenantId tenant whose durable events are being read
  * @param afterOffset exclusive durable offset from which the page begins
- * @param limit maximum number of events to return in the page
+ * @param limit maximum number of events to return in the page, from 1 through 1000
  * @return a page of retained tenant-scoped durable events after the requested offset
  */
     List<DurableExecutionEvent> durableEventsAfter(String tenantId, long afterOffset, int limit);

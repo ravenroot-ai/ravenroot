@@ -107,6 +107,12 @@ limits; a permanent refusal records `FAILED` before admitting a continuation pro
 and collection expiry prevent release. Draining currently admitted traversals does not imply that an
 open business history or incomplete join has completed.
 
+Durable event replay resolves only invocation bindings selected by its page, with at most 1000
+events per SDK request. It retains the established `applicationCorrelationId`, contribution and round
+fields independently from the transport request ID, process ID and traversal ID. Safe recorded
+outcomes are available without copying captured input or contribution data into event metadata.
+Legacy uncorrelated rows keep null business fields.
+
 Visit timing and safe outcome fields can be null after event retention or for older records.
 `eventHistoryAvailable=false` states that absence explicitly. Captured inputs and outputs are read
 only through `activity`, using the existing activity capture, redaction, size and retention policy.

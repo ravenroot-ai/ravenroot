@@ -3555,6 +3555,29 @@ public final class InMemoryExecutionStore implements ExecutionStore {
         }
     }
 
+    @Override public CompletionStage<ai.ravenroot.api.persistence.InitialStartRecord> acceptInitialStart(
+            ai.ravenroot.api.persistence.InitialStartRecord proposed,
+            ai.ravenroot.api.correlation.CorrelatedTraversal correlation,
+            ai.ravenroot.api.correlation.CorrelationMapping.Mode mode) {
+        return completeBusiness(() -> {
+            var key = List.of(proposed.identity().tenantId(), proposed.deploymentId());
+            var existing = initialStarts.get(key);
+            if (existing != null) return existing;
+            if (proposed.input().size() > maxPayloadBytes()) throw failure(new ExecutionStoreFailure.PayloadTooLarge(
+                    proposed.input().size(), maxPayloadBytes()));
+            if (!correlation.scope().equals(new ai.ravenroot.api.correlation.BusinessScope(proposed.identity().tenantId(),
+                    proposed.deploymentId(), proposed.graphVersion())) || !correlation.processInstanceId().equals(proposed.processInstanceId())
+                    || !correlation.traversalId().equals(proposed.traversalId())
+                    || correlation.cause() != ai.ravenroot.api.correlation.CorrelatedTraversal.Cause.INITIAL_START)
+                throw new ai.ravenroot.api.correlation.BusinessHistoryException(
+                        ai.ravenroot.api.correlation.BusinessHistoryException.Reason.CONTEXT_CONFLICT);
+            businessHistories.admit(correlation, mode);
+            var accepted = new ai.ravenroot.api.persistence.InitialStartRecord(proposed.deploymentId(), proposed.graphVersion(),
+                    proposed.identity(), proposed.input(), clock.instant());
+            initialStarts.put(key, accepted); return accepted;
+        });
+    }
+
     @Override
     public CompletionStage<Optional<ai.ravenroot.api.persistence.InitialStartRecord>> initialStart(
             String tenantId, String deploymentId) {
@@ -3765,9 +3788,9 @@ public final class InMemoryExecutionStore implements ExecutionStore {
         }
     }
 
-    private static <T> CompletionStage<T> completeBusiness(java.util.function.Supplier<T> operation) {
+    private <T> CompletionStage<T> completeBusiness(java.util.function.Supplier<T> operation) {
         try {
-            return complete(operation);
+            return complete(() -> { synchronized (monitor) { return operation.get(); } });
         } catch (ai.ravenroot.api.correlation.BusinessHistoryException expected) {
             return CompletableFuture.failedFuture(expected);
         }

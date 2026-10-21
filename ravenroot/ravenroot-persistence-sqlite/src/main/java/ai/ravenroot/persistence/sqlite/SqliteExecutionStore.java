@@ -5675,7 +5675,10 @@ public final class SqliteExecutionStore implements ExecutionStore {
 
     @Override public CompletionStage<Optional<ai.ravenroot.api.correlation.CorrelatedJoinRecord>> correlatedJoin(
             ai.ravenroot.api.correlation.CorrelatedJoinKey key) {
-        return async(() -> inWriteTransaction(null, () -> CorrelatedJoinStorage.load(connection, key)));
+        return async(() -> inWriteTransaction(null, () -> {
+            BusinessHistoryStorage.expire(connection, key.scope(), clock.instant());
+            return CorrelatedJoinStorage.load(connection, key);
+        }));
     }
     @Override public CompletionStage<ai.ravenroot.api.correlation.CorrelatedJoinRecord> compareAndSetCorrelatedJoin(
             ai.ravenroot.api.correlation.CorrelatedJoinRecord desired) {
@@ -5694,7 +5697,10 @@ public final class SqliteExecutionStore implements ExecutionStore {
     @Override public CompletionStage<ai.ravenroot.api.correlation.CorrelatedJoinPage> correlatedJoins(
             ai.ravenroot.api.correlation.BusinessScope scope, String applicationId,
             Set<ai.ravenroot.api.correlation.CorrelatedJoinRecord.Phase> phases, Optional<String> cursor, int limit) {
-        return async(() -> inWriteTransaction(null, () -> CorrelatedJoinStorage.page(connection, scope, applicationId, phases, cursor, limit, businessHistoryPolicy())));
+        return async(() -> inWriteTransaction(null, () -> {
+            BusinessHistoryStorage.expire(connection, scope, clock.instant());
+            return CorrelatedJoinStorage.page(connection, scope, applicationId, phases, cursor, limit, businessHistoryPolicy());
+        }));
     }
     @Override public ai.ravenroot.api.correlation.BusinessHistoryPolicy businessHistoryPolicy() {
         return config.businessHistories();
@@ -5735,31 +5741,47 @@ public final class SqliteExecutionStore implements ExecutionStore {
         return async(() -> inWriteTransaction(null, () -> BusinessHistoryStorage.close(connection, scope, applicationId, expectedRevision, closure, clock.instant())));
     }
 
-    @Override
-    public CompletionStage<ai.ravenroot.api.persistence.InitialStartRecord> acceptInitialStart(
+    @Override public CompletionStage<ai.ravenroot.api.persistence.InitialStartRecord> acceptInitialStart(
             ai.ravenroot.api.persistence.InitialStartRecord proposed) {
+        return acceptInitialStartInternal(proposed, null, ai.ravenroot.api.correlation.CorrelationMapping.Mode.GENERATE_NEW);
+    }
+    @Override public CompletionStage<ai.ravenroot.api.persistence.InitialStartRecord> acceptInitialStart(
+            ai.ravenroot.api.persistence.InitialStartRecord proposed,
+            ai.ravenroot.api.correlation.CorrelatedTraversal correlation,
+            ai.ravenroot.api.correlation.CorrelationMapping.Mode mode) {
+        Objects.requireNonNull(correlation, "correlation");
+        return acceptInitialStartInternal(proposed, correlation, mode);
+    }
+    private CompletionStage<ai.ravenroot.api.persistence.InitialStartRecord> acceptInitialStartInternal(
+            ai.ravenroot.api.persistence.InitialStartRecord proposed,
+            ai.ravenroot.api.correlation.CorrelatedTraversal correlation,
+            ai.ravenroot.api.correlation.CorrelationMapping.Mode mode) {
         Objects.requireNonNull(proposed, "proposed");
         return async(() -> {
             if (proposed.input().size() > maxPayloadBytes()) throw failure(
                     new ExecutionStoreFailure.PayloadTooLarge(proposed.input().size(), maxPayloadBytes()));
             return inWriteTransaction(null, () -> {
+                int inserted;
                 try (PreparedStatement insert = connection.prepareStatement(
                         "INSERT INTO deployment_initial_start (tenant_id, deployment_id, graph_version, request_id, "
                                 + "subject, principal_type, issuer, input_content_type, input_bytes, "
                                 + "accepted_at_epoch_second, accepted_at_nano, process_instance_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                                 + "ON CONFLICT DO NOTHING")) {
-                    insert.setString(1, proposed.identity().tenantId());
-                    insert.setString(2, proposed.deploymentId());
-                    insert.setString(3, proposed.graphVersion());
-                    insert.setString(4, proposed.identity().requestId());
-                    insert.setString(5, proposed.identity().subject());
-                    insert.setString(6, proposed.identity().principalType().name());
-                    insert.setString(7, proposed.identity().issuer());
-                    insert.setString(8, proposed.input().contentType());
-                    insert.setBytes(9, proposed.input().bytes());
-                    StoredInstant.bindValue(insert, 10, clock.instant());
-                    insert.setString(12, proposed.processInstanceId().toString());
-                    insert.executeUpdate();
+                    insert.setString(1, proposed.identity().tenantId()); insert.setString(2, proposed.deploymentId());
+                    insert.setString(3, proposed.graphVersion()); insert.setString(4, proposed.identity().requestId());
+                    insert.setString(5, proposed.identity().subject()); insert.setString(6, proposed.identity().principalType().name());
+                    insert.setString(7, proposed.identity().issuer()); insert.setString(8, proposed.input().contentType());
+                    insert.setBytes(9, proposed.input().bytes()); StoredInstant.bindValue(insert, 10, clock.instant());
+                    insert.setString(12, proposed.processInstanceId().toString()); inserted = insert.executeUpdate();
+                }
+                if (inserted != 0 && correlation != null) {
+                    if (!correlation.scope().equals(new ai.ravenroot.api.correlation.BusinessScope(proposed.identity().tenantId(),
+                            proposed.deploymentId(), proposed.graphVersion())) || !correlation.processInstanceId().equals(proposed.processInstanceId())
+                            || !correlation.traversalId().equals(proposed.traversalId())
+                            || correlation.cause() != ai.ravenroot.api.correlation.CorrelatedTraversal.Cause.INITIAL_START)
+                        throw new ai.ravenroot.api.correlation.BusinessHistoryException(
+                                ai.ravenroot.api.correlation.BusinessHistoryException.Reason.CONTEXT_CONFLICT);
+                    BusinessHistoryStorage.admit(connection, correlation, mode, businessHistoryPolicy(), clock.instant());
                 }
                 return readInitialStart(proposed.identity().tenantId(), proposed.deploymentId()).orElseThrow();
             });

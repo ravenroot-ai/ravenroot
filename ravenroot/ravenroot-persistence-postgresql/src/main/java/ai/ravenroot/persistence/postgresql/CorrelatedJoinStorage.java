@@ -33,10 +33,11 @@ final class CorrelatedJoinStorage {
             int at = bindScope(lock, 1, key.scope()); lock.setString(at, key.applicationCorrelationId());
             if (lock.executeUpdate() == 0) throw new BusinessHistoryException(UNKNOWN_HISTORY);
         }
-        BusinessHistoryStorage.expire(db, key.scope(), now);
         var prior = load(db, key);
         CorrelatedJoinTransitions.require(prior, desired, policy, now);
         var group = BusinessHistoryStorage.history(db, key.scope(), key.applicationCorrelationId()).orElseThrow();
+        if (!now.isBefore(group.expiresAt()) && (desired.phase() == CorrelatedJoinRecord.Phase.OPEN
+                || desired.phase() == CorrelatedJoinRecord.Phase.READY)) throw new BusinessHistoryException(EXPIRED_HISTORY);
         if ((desired.phase() == CorrelatedJoinRecord.Phase.OPEN || desired.phase() == CorrelatedJoinRecord.Phase.READY)
                 && group.lifecycle() != BusinessHistory.Lifecycle.OPEN)
             throw new BusinessHistoryException(group.lifecycle() == BusinessHistory.Lifecycle.EXPIRED ? EXPIRED_HISTORY : CLOSED_HISTORY);

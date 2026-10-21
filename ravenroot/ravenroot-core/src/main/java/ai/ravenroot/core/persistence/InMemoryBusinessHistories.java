@@ -124,9 +124,17 @@ final class InMemoryBusinessHistories {
         histories.put(key, closed); cancelPending(scope, id, clock.instant()); return closed;
     }
     private final Map<CorrelatedJoinKey, CorrelatedJoinRecord> joins = new HashMap<>();
-    synchronized Optional<CorrelatedJoinRecord> join(CorrelatedJoinKey key) { return Optional.ofNullable(joins.get(key)); }
+    private final Map<CorrelatedJoinKey, CorrelatedJoinSummary> expiredJoins = new HashMap<>();
+    synchronized Optional<CorrelatedJoinRecord> join(CorrelatedJoinKey key) {
+        expire(key.scope());
+        if (expiredJoins.containsKey(key)) throw new BusinessHistoryException(EXPIRED_HISTORY);
+        return Optional.ofNullable(joins.get(key));
+    }
     synchronized CorrelatedJoinRecord writeJoin(CorrelatedJoinRecord desired) {
-        var key = desired.key(); var prior = Optional.ofNullable(joins.get(key));
+        var key = desired.key();
+        expire(key.scope());
+        if (expiredJoins.containsKey(key)) throw new BusinessHistoryException(EXPIRED_HISTORY);
+        var prior = Optional.ofNullable(joins.get(key));
         Instant now = clock.instant();
         CorrelatedJoinTransitions.require(prior, desired, policy, now);
         var group = history(key.scope(), key.applicationCorrelationId()).orElseThrow(() -> new BusinessHistoryException(UNKNOWN_HISTORY));
@@ -136,7 +144,8 @@ final class InMemoryBusinessHistories {
         if (prior.isEmpty()) {
             var existing = joins.values().stream().filter(j -> j.key().scope().equals(key.scope())
                     && j.key().applicationCorrelationId().equals(key.applicationCorrelationId())).toList();
-            if (existing.size() >= policy.maxRetainedJoinsPerHistory() || existing.stream().filter(j ->
+            if (existing.size() + expiredJoins.keySet().stream().filter(j -> j.scope().equals(key.scope())
+                    && j.applicationCorrelationId().equals(key.applicationCorrelationId())).count() >= policy.maxRetainedJoinsPerHistory() || existing.stream().filter(j ->
                     j.phase() == CorrelatedJoinRecord.Phase.OPEN || j.phase() == CorrelatedJoinRecord.Phase.READY).count()
                     >= policy.maxOpenJoinsPerHistory()) throw new BusinessHistoryException(RESOURCE_LIMIT);
         }
@@ -167,13 +176,14 @@ final class InMemoryBusinessHistories {
     }
     synchronized CorrelatedJoinPage joins(BusinessScope scope, String applicationId,
             Set<CorrelatedJoinRecord.Phase> phases, Optional<String> cursor, int limit) {
-        requirePage(limit);
+        requirePage(limit); expire(scope);
         String filter = "joins:" + Objects.toString(applicationId, "") + '\0'
                 + phases.stream().map(Enum::name).sorted().toList() + '\0' + limit;
         var after = cursor.map(value -> BusinessCursor.decode(scope, filter, value, 3)).orElse(List.of());
-        var ordering = Comparator.comparing((CorrelatedJoinRecord j) -> j.key().applicationCorrelationId())
+        var ordering = Comparator.comparing((CorrelatedJoinSummary j) -> j.key().applicationCorrelationId())
                 .thenComparing(j -> j.key().nodeId()).thenComparing(j -> j.key().roundId());
-        var items = joins.values().stream().filter(j -> j.key().scope().equals(scope))
+        var items = java.util.stream.Stream.concat(joins.values().stream().map(CorrelatedJoinSummary::of), expiredJoins.values().stream())
+                .filter(j -> j.key().scope().equals(scope))
                 .filter(j -> applicationId == null || j.key().applicationCorrelationId().equals(applicationId))
                 .filter(j -> phases.isEmpty() || phases.contains(j.phase()))
                 .filter(j -> after.isEmpty() || compareKey(j.key(), after) > 0).sorted(ordering).limit(limit + 1L).toList();
@@ -181,7 +191,7 @@ final class InMemoryBusinessHistories {
         Optional<String> next = Optional.empty();
         if (more) { var last = selected.getLast().key(); next = Optional.of(BusinessCursor.encode(scope, filter,
                 List.of(last.applicationCorrelationId(), last.nodeId(), last.roundId()))); }
-        return new CorrelatedJoinPage(selected.stream().map(CorrelatedJoinSummary::of).toList(), next);
+        return new CorrelatedJoinPage(selected, next);
     }
     private void cancelPending(BusinessScope scope, String applicationId, Instant now) {
         joins.replaceAll((key, value) -> key.scope().equals(scope) && key.applicationCorrelationId().equals(applicationId)
@@ -194,13 +204,26 @@ final class InMemoryBusinessHistories {
         if (compared == 0) compared = key.roundId().compareTo(after.get(2));
         return compared;
     }
-    synchronized void clear() { histories.clear(); traversals.clear(); joins.clear(); }
+    synchronized void clear() { histories.clear(); traversals.clear(); joins.clear(); expiredJoins.clear(); }
     private void expire(BusinessScope scope) {
         Instant now = Instant.ofEpochMilli(clock.instant().toEpochMilli());
         histories.replaceAll((key, group) -> key.scope.equals(scope) && group.lifecycle() == BusinessHistory.Lifecycle.OPEN
                 && !now.isBefore(group.expiresAt()) ? new BusinessHistory(scope, key.id, group.publicReference(),
                 BusinessHistory.Lifecycle.EXPIRED, group.revision() + 1, group.runningTraversals(), group.completedTraversals(),
                 group.failedTraversals(), group.cancelledTraversals(), true, group.createdAt(), now, group.expiresAt()) : group);
+        var iterator = joins.entrySet().iterator();
+        while (iterator.hasNext()) {
+            var entry = iterator.next(); var key = entry.getKey();
+            var group = histories.get(new Key(key.scope(), key.applicationCorrelationId()));
+            if (!key.scope().equals(scope) || group == null || now.isBefore(group.expiresAt())) continue;
+            var summary = CorrelatedJoinSummary.of(entry.getValue());
+            var phase = summary.phase() == CorrelatedJoinRecord.Phase.OPEN || summary.phase() == CorrelatedJoinRecord.Phase.READY
+                    ? CorrelatedJoinRecord.Phase.EXPIRED : summary.phase();
+            expiredJoins.put(key, new CorrelatedJoinSummary(key, summary.revision() + 1, phase,
+                    summary.expectedContributions(), summary.receivedContributions(), summary.sealed(), 0,
+                    summary.openedAt(), summary.deadlineAt(), now));
+            iterator.remove();
+        }
     }
     private void requirePage(int limit) { if (limit < 1 || limit > policy.maxPageSize()) throw new BusinessHistoryException(INVALID_REQUEST); }
     private static String historyFilter(BusinessHistoryQuery query) {

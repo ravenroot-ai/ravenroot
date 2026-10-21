@@ -1723,6 +1723,14 @@ public interface ExecutionStore extends AutoCloseable, ai.ravenroot.api.correlat
                 new ExecutionStoreFailure.CapabilityNotSupported(StoreCapability.INITIAL_START_ADMISSION)));
     }
 
+    /** Accepts START and its validated business relation atomically; a refused mapping consumes neither. */
+    default CompletionStage<InitialStartRecord> acceptInitialStart(InitialStartRecord proposed,
+            ai.ravenroot.api.correlation.CorrelatedTraversal correlation,
+            ai.ravenroot.api.correlation.CorrelationMapping.Mode mode) {
+        return java.util.concurrent.CompletableFuture.failedFuture(new ExecutionStoreException(
+                new ExecutionStoreFailure.CapabilityNotSupported(StoreCapability.BUSINESS_HISTORIES)));
+    }
+
     /**
      * Looks up initial admission without accepting new work.
      * @param tenantId authorized tenant

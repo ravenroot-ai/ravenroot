@@ -956,18 +956,21 @@ public final class ExecutionRecorder implements AutoCloseable {
         operationLock.lock();
         try {
             requireFence();
+            long startedNanos = System.nanoTime();
+            long waitNanos = Math.max(1, leaseTtl.toNanos() / 3);
             return CorrelatedJoinRuntime.accept(store, lease, node, entryNodeId, message, now, new CorrelatedJoinRuntime.StoreAwait() {
-                @Override public <T> T get(CompletionStage<T> stage) { return awaitCorrelation(stage); }
+                @Override public <T> T get(CompletionStage<T> stage) { return awaitCorrelation(stage, startedNanos, waitNanos); }
             });
         } finally {
             operationLock.unlock();
         }
     }
 
-    private <T> T awaitCorrelation(CompletionStage<T> stage) {
+    private <T> T awaitCorrelation(CompletionStage<T> stage, long startedNanos, long waitNanos) {
         try {
-            return stage.toCompletableFuture().get(Math.max(1, leaseTtl.toNanos() / 3),
-                    java.util.concurrent.TimeUnit.NANOSECONDS);
+            long remaining = waitNanos - (System.nanoTime() - startedNanos);
+            if (remaining <= 0) throw new java.util.concurrent.TimeoutException("correlation deadline elapsed");
+            return stage.toCompletableFuture().get(remaining, java.util.concurrent.TimeUnit.NANOSECONDS);
         } catch (java.util.concurrent.ExecutionException failed) {
             Throwable cause = failed.getCause();
             if (cause instanceof RuntimeException runtime) throw runtime;

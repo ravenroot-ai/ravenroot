@@ -3609,7 +3609,8 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
             return new EmbedDeploymentStart(EmbedDeploymentStart.Outcome.REFUSED, requestId);
         }
         if (executionStore == null || !executionStore.supports(
-                ai.ravenroot.api.persistence.StoreCapability.INITIAL_START_ADMISSION)) {
+                ai.ravenroot.api.persistence.StoreCapability.INITIAL_START_ADMISSION)
+                || !executionStore.supports(ai.ravenroot.api.persistence.StoreCapability.DURABLE)) {
             return new EmbedDeploymentStart(EmbedDeploymentStart.Outcome.REFUSED, requestId);
         }
         var receipt = record.deployment().ingress().offerDurably(security,

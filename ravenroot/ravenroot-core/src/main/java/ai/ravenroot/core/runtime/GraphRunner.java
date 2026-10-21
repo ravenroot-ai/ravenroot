@@ -896,7 +896,7 @@ public final class GraphRunner implements AutoCloseable {
         validateGraphAdmission(this.graph, this.behaviors, executionPolicy, this.executionLimits,
                 this.completedHumanTaskNode);
         validateAdmittedCommands(this.graph, this.behaviors, executionPolicy);
-        this.operationallyReachableNodes = operationallyReachableNodes(this.graph, executionPolicy);
+        this.operationallyReachableNodes = operationallyReachableNodes(this.graph, this.behaviors, executionPolicy);
         if (operationalPolicy == null) {
             var live = this.behaviors.unpinnedOperationalPolicy(this.executionLimits);
             this.operationalPolicy = new ai.ravenroot.api.persistence.ResolvedOperationalPolicy(
@@ -4888,18 +4888,30 @@ public final class GraphRunner implements AutoCloseable {
         return nodeId;
     }
 
+    private static Set<String> admittedEntryNodes(GraphDefinition graph, BehaviorRegistry behaviors) {
+        var entries = new java.util.LinkedHashSet<String>();
+        entries.add(graph.start().id());
+        for (var node : graph.nodes()) {
+            if (ai.ravenroot.api.catalog.NodeBypassProperty.isBypassed(node.properties())) continue;
+            if (CorrelatedJoinConfiguration.enabled(node) || node.kind() == NodeKind.BEHAVIOR
+                    && NodeRuntimeNatureProperty.effectiveNature(behaviors.descriptor(node).orElse(null), node.properties())
+                    == NodeRuntimeNature.SOURCE) entries.add(node.id());
+        }
+        return Set.copyOf(entries);
+    }
+
     /**
      * Conservative command-flow analysis. Every outcome edge is considered, so a factory is skipped
      * only when no possible route can deliver an operational command to that node.
      */
-    private static Set<String> operationallyReachableNodes(GraphDefinition graph, ExecutionPolicy policy) {
+    private static Set<String> operationallyReachableNodes(GraphDefinition graph, BehaviorRegistry behaviors, ExecutionPolicy policy) {
         NodeCommand initial = policy == ExecutionPolicy.TEST_PASSTHROUGH
                 ? NodeCommand.PASSTHROUGH : NodeCommand.PROCESS;
         record Reachability(String nodeId, NodeCommand command) { }
         var visited = new java.util.HashSet<Reachability>();
         var pending = new java.util.ArrayDeque<Reachability>();
         var operational = new java.util.HashSet<String>();
-        pending.add(new Reachability(graph.start().id(), initial));
+        for (String entry : admittedEntryNodes(graph, behaviors)) pending.add(new Reachability(entry, initial));
         while (!pending.isEmpty()) {
             Reachability current = pending.removeFirst();
             if (!visited.add(current)) continue;
@@ -4925,7 +4937,7 @@ public final class GraphRunner implements AutoCloseable {
         record Reachability(String nodeId, NodeCommand command) { }
         var visited = new java.util.HashSet<Reachability>();
         var pending = new java.util.ArrayDeque<Reachability>();
-        pending.add(new Reachability(graph.start().id(), initial));
+        for (String entry : admittedEntryNodes(graph, behaviors)) pending.add(new Reachability(entry, initial));
         while (!pending.isEmpty()) {
             Reachability current = pending.removeFirst();
             if (!visited.add(current)) continue;

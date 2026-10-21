@@ -20,6 +20,31 @@ public abstract class BusinessHistoryContract {
     /** Each ID selects an isolated physical store and may be reopened when DURABLE is declared. */
     protected abstract ExecutionStore createStore(String id, Clock clock);
 
+    @Test void refusedInitialCorrelationDoesNotConsumeStartAndAcceptedWorkCannotBeReplaced() throws Exception {
+        try (var store = createStore(id(), clock())) {
+            var identity = new SecurityContext("initial-request", SCOPE.tenantId(), "actor", PrincipalType.WORKLOAD, "test");
+            var proposed = new InitialStartRecord(SCOPE.deploymentId(), SCOPE.graphVersion(), identity,
+                    OpaquePayload.of("{}".getBytes(java.nio.charset.StandardCharsets.UTF_8), "application/json"), EPOCH);
+            var context = context("initial-business", "first", "file.csv");
+            var relation = new CorrelatedTraversal(SCOPE, context, proposed.processInstanceId(), proposed.traversalId(), "start",
+                    CorrelatedTraversal.Cause.INITIAL_START, TraversalStatus.ACCEPTED, null, EPOCH, EPOCH, null);
+            assertRefusal(BusinessHistoryException.Reason.UNKNOWN_HISTORY,
+                    store.acceptInitialStart(proposed, relation, CorrelationMapping.Mode.REQUIRE_EXISTING));
+            assertTrue(await(store.initialStart(SCOPE.tenantId(), SCOPE.deploymentId())).isEmpty());
+            assertTrue(await(store.correlatedTraversal(SCOPE.tenantId(), proposed.processInstanceId(), proposed.traversalId())).isEmpty());
+            await(store.recordCorrelatedTraversal(arrival(SCOPE, "initial-business", "external", "file.csv"),
+                    CorrelationMapping.Mode.ACCEPT_OR_CREATE));
+            var accepted = await(store.acceptInitialStart(proposed, relation, CorrelationMapping.Mode.REQUIRE_EXISTING));
+            var replacement = new CorrelatedTraversal(SCOPE, context("replacement", "first", "other.csv"),
+                    proposed.processInstanceId(), proposed.traversalId(), "start", CorrelatedTraversal.Cause.INITIAL_START,
+                    TraversalStatus.ACCEPTED, null, EPOCH, EPOCH, null);
+            assertEquals(accepted, await(store.acceptInitialStart(proposed, replacement, CorrelationMapping.Mode.ACCEPT_OR_CREATE)));
+            assertTrue(await(store.businessHistory(SCOPE, "replacement")).isEmpty());
+            assertEquals("initial-business", await(store.correlatedTraversal(SCOPE.tenantId(), proposed.processInstanceId(), proposed.traversalId()))
+                    .orElseThrow().context().applicationCorrelationId());
+        }
+    }
+
     @Test void sourceFirstHistoryWaitsForExternalWorkAndNeverInfersCompletionFromSilence() throws Exception {
         try (var store = createStore(id(), clock())) {
             assertTrue(store.supports(StoreCapability.BUSINESS_HISTORIES));

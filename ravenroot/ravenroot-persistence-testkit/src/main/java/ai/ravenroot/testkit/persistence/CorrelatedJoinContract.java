@@ -142,6 +142,35 @@ public abstract class CorrelatedJoinContract {
         }
     }
 
+    @Test void historyExpiryReclaimsJoinPayloadButRetainsAnObservableNonReopeningTombstone() throws Exception {
+        var current = new java.util.concurrent.atomic.AtomicReference<>(NOW);
+        var clock = new Clock() {
+            @Override public ZoneId getZone() { return ZoneOffset.UTC; }
+            @Override public Clock withZone(ZoneId zone) { return this; }
+            @Override public Instant instant() { return current.get(); }
+        };
+        try (var store = createStore(id(), clock)) {
+            var event = contributions(store, "retention", "0", 1).getFirst();
+            var key = new CorrelatedJoinKey(SCOPE, "retention", "combine", "0");
+            var record = CorrelatedJoinRecord.open(key, Set.of(), 2, true, JoinCause.of(event), NOW, NOW.plusSeconds(60));
+            await(store.compareAndSetCorrelatedJoin(record));
+            record = record.contribute(event, Set.of(), null, false, NOW, store.businessHistoryPolicy());
+            await(store.compareAndSetCorrelatedJoin(record));
+            assertTrue(await(store.correlatedJoins(SCOPE, "retention", Set.of(), Optional.empty(), 1))
+                    .items().getFirst().retainedPayloadBytes() > 0);
+            current.set(NOW.plus(store.businessHistoryPolicy().historyRetention()).plusMillis(1));
+            assertEquals(BusinessHistory.Lifecycle.EXPIRED, await(store.businessHistory(SCOPE, "retention")).orElseThrow().lifecycle());
+            var tombstone = await(store.correlatedJoins(SCOPE, "retention", Set.of(), Optional.empty(), 1)).items().getFirst();
+            assertEquals(CorrelatedJoinRecord.Phase.EXPIRED, tombstone.phase());
+            assertEquals(1, tombstone.receivedContributions());
+            assertEquals(0, tombstone.retainedPayloadBytes());
+            var unavailable = assertThrows(ExecutionException.class, () -> await(store.correlatedJoin(key)));
+            assertEquals(BusinessHistoryException.Reason.EXPIRED_HISTORY, ((BusinessHistoryException) unavailable.getCause()).reason());
+            var late = assertThrows(ExecutionException.class, () -> contributions(store, "retention", "0", 1));
+            assertEquals(BusinessHistoryException.Reason.EXPIRED_HISTORY, ((BusinessHistoryException) late.getCause()).reason());
+        }
+    }
+
     @Test void readyOutboxAndItsOriginalCausalDataSurviveReopen() throws Exception {
         String id = id(); CorrelatedJoinRecord saved;
         try (var store = createStore(id, clock())) {

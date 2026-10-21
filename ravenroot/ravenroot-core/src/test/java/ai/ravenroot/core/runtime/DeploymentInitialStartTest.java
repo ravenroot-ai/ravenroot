@@ -189,6 +189,64 @@ class DeploymentInitialStartTest {
         }
     }
 
+    @Test void recoveryRetriesAfterAnOrphanedUnstartedExecutionLeaseExpires() throws Exception {
+        var now = new java.util.concurrent.atomic.AtomicReference<>(Instant.parse("2026-01-01T00:00:00Z"));
+        var clock = new Clock() {
+            @Override public ZoneId getZone() { return ZoneOffset.UTC; }
+            @Override public Clock withZone(ZoneId zone) { return this; }
+            @Override public Instant instant() { return now.get(); }
+        };
+        var timers = new java.util.concurrent.ScheduledThreadPoolExecutor(1);
+        timers.setExecuteExistingDelayedTasksAfterShutdownPolicy(false);
+        try (timers; var engine = new SameThreadExecutionEngine((delay, task) -> {
+                 var scheduled = timers.schedule(task, delay.toNanos(), TimeUnit.NANOSECONDS);
+                 return () -> scheduled.cancel(false);
+             });
+             var store = new SqliteExecutionStore(directory.resolve("orphaned-start.db"), clock)) {
+            var initial = store.acceptInitialStart(new InitialStartRecord("orphan", deploymentVersion(), IDENTITY,
+                    OpaquePayload.of("\"original-input\"".getBytes(StandardCharsets.UTF_8), "application/json"), now.get()))
+                    .toCompletableFuture().get();
+            var key = new ExecutionKey(IDENTITY.tenantId(), initial.processInstanceId());
+            var traversal = new Traversal(initial.traversalId(), "start", TraversalStatus.RUNNING, Map.of());
+            store.apply(ExecutionBatch.to(key).expecting(RevisionExpectation.notPresent())
+                    .apply(new ExecutionTransition.ProcessCreated(new ProcessInstance(initial.processInstanceId(),
+                            ProcessInstanceStatus.RUNNING, Map.of(initial.traversalId(), traversal)),
+                            new GraphVersionPin(initial.graphVersion()))).build()).toCompletableFuture().get();
+            store.claim(key, "orphaned-worker", Duration.ofMinutes(1)).toCompletableFuture().get();
+            var refusedClaim = new CountDownLatch(1);
+            ExecutionStore observed = (ExecutionStore) java.lang.reflect.Proxy.newProxyInstance(
+                    ExecutionStore.class.getClassLoader(), new Class<?>[]{ExecutionStore.class}, (proxy, method, arguments) -> {
+                        try {
+                            Object value = method.invoke(store, arguments);
+                            if (method.getName().equals("claim") && value instanceof CompletionStage<?> claim)
+                                claim.whenComplete((lease, failure) -> { if (failure != null) refusedClaim.countDown(); });
+                            return value;
+                        } catch (java.lang.reflect.InvocationTargetException wrapped) { throw wrapped.getCause(); }
+                    });
+            var effects = new CopyOnWriteArrayList<Object>(); var monitor = new ExecutionMonitor();
+            var finished = terminalLatch(monitor);
+            var registry = new BehaviorRegistry().register("effect", message -> {
+                effects.add(message.payload()); return CompletableFuture.completedFuture(NodeResult.continueWith(message.payload()));
+            });
+            var deployment = new DefaultGraphDeployment(DeploymentId.of("orphan"), engine, registry, monitor,
+                    ExecutionIdentitySource.randomUuids(), GRAPH.getBytes(StandardCharsets.UTF_8),
+                    DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY, observed,
+                    DefaultGraphDeployment.DEFAULT_INBOX_RETENTION, "recovery-worker", Duration.ofMillis(300),
+                    RequestReplyLimits.defaults(DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY), clock);
+            deployment.start(IDENTITY).toCompletableFuture().get(5, TimeUnit.SECONDS);
+            assertTrue(refusedClaim.await(5, TimeUnit.SECONDS), "the original lease must actually refuse the first recovery");
+            assertTrue(effects.isEmpty());
+            now.set(now.get().plusSeconds(61));
+            assertTrue(finished.await(5, TimeUnit.SECONDS), "a refused first claim must re-arm recovery");
+            assertEquals(List.of("original-input"), effects);
+            assertEquals(initial.processInstanceId(), monitor.eventsAfter(0).stream()
+                    .filter(event -> event.type() == ExecutionEventType.EXECUTION_STARTED).findFirst().orElseThrow().processInstanceId());
+            assertEquals(initial.traversalId(), monitor.eventsAfter(0).stream()
+                    .filter(event -> event.type() == ExecutionEventType.EXECUTION_STARTED).findFirst().orElseThrow().traversalId());
+            deployment.stop().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        }
+    }
+
     private static String deploymentVersion() throws Exception {
         try (var engine = new SameThreadExecutionEngine()) {
             return deployment("hash", engine, null, new CopyOnWriteArrayList<>(), new ExecutionMonitor()).graphVersion();

@@ -288,7 +288,7 @@ public final class BehaviorRegistry {
             return descriptor;
         }
         if (!descriptor.declaresNature()) {
-            return descriptor.withNature(NodeRuntimeNature.SOURCE, java.util.Set.of(NodeRuntimeNature.SOURCE))
+            return sourceEmissionDescriptor(descriptor.withNature(NodeRuntimeNature.SOURCE, java.util.Set.of(NodeRuntimeNature.SOURCE)))
                     .withProperties(ai.ravenroot.api.correlation.CorrelationMappingProperties.descriptors(
                             ai.ravenroot.api.correlation.CorrelationLimits.DEFAULTS));
         }
@@ -300,8 +300,17 @@ public final class BehaviorRegistry {
                     + "source anyway, because source discovery reads the interface. Permit SOURCE, or "
                     + "stop implementing InboundSourceCapable.");
         }
-        return descriptor.withProperties(ai.ravenroot.api.correlation.CorrelationMappingProperties.descriptors(
+        return sourceEmissionDescriptor(descriptor).withProperties(ai.ravenroot.api.correlation.CorrelationMappingProperties.descriptors(
                 ai.ravenroot.api.correlation.CorrelationLimits.DEFAULTS));
+    }
+
+    private static NodeTypeDescriptor sourceEmissionDescriptor(NodeTypeDescriptor descriptor) {
+        String outcome = ai.ravenroot.api.catalog.NodeOutcomeDescriptor.BLANK_OUTCOME;
+        if (descriptor.outcomes().stream().anyMatch(value -> value.name().equals(outcome))) return descriptor;
+        var outcomes = new java.util.ArrayList<>(descriptor.outcomes());
+        outcomes.add(ai.ravenroot.api.catalog.NodeOutcomeDescriptor.literal(outcome,
+                "An admitted event enters this SOURCE and follows its outgoing flow."));
+        return descriptor.withOutcomes(outcomes.toArray(ai.ravenroot.api.catalog.NodeOutcomeDescriptor[]::new));
     }
 
     /**

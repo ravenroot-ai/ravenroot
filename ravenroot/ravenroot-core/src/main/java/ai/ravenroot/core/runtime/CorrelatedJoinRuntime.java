@@ -38,7 +38,7 @@ final class CorrelatedJoinRuntime {
         } else if (!announcement.controlAllowed()) {
             throw new IllegalArgumentException("correlated join requires a contribution ID or an authorized producer signal");
         }
-        for (int retry = 0; retry < policy.maxContributionsPerJoin(); retry++) {
+        for (int retry = 0; retry < policy.maxJoinCasAttempts(); retry++) {
             var prior = await.get(store.correlatedJoin(key));
             CorrelatedJoinRecord next;
             if (prior.isEmpty()) {

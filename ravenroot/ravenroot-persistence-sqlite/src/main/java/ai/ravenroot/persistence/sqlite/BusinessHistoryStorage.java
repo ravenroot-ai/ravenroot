@@ -214,6 +214,15 @@ final class BusinessHistoryStorage {
             update.setLong(1, now.toEpochMilli()); int at = bindScope(update, 2, scope); update.setLong(at, now.toEpochMilli());
             update.executeUpdate();
         }
+        // Payload retention is independent from compact key tombstones. No late event can
+        // recreate the generation after dedicated execution data has been reclaimed.
+        try (var update = db.prepareStatement("UPDATE correlated_business_join SET snapshot = NULL, retained_bytes = 0, "
+                + "phase = CASE WHEN phase IN ('OPEN','READY') THEN 'EXPIRED' ELSE phase END, revision = revision + 1, updated_ms = ? "
+                + "WHERE " + SCOPE + " AND snapshot IS NOT NULL AND application_id IN (SELECT application_id FROM business_history WHERE "
+                + SCOPE + " AND expires_ms <= ?)")) {
+            update.setLong(1, now.toEpochMilli()); int at = bindScope(update, 2, scope);
+            at = bindScope(update, at, scope); update.setLong(at, now.toEpochMilli()); update.executeUpdate();
+        }
     }
 
     private static BusinessHistory readHistory(ResultSet rows, BusinessScope scope) throws SQLException {

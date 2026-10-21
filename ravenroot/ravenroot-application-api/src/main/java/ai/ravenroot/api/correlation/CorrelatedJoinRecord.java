@@ -99,6 +99,6 @@ public record CorrelatedJoinRecord(CorrelatedJoinKey key, long revision, Phase p
     }
     private CorrelatedJoinRecord withPhase(Phase next, long version, Instant now) {
         return new CorrelatedJoinRecord(key, version, next, expectedIds, expectedCount, sealed, contributions,
-                openedBy, openedAt, deadlineAt, now);
+                openedBy, openedAt, deadlineAt, now.isBefore(updatedAt) ? updatedAt : now);
     }
 }

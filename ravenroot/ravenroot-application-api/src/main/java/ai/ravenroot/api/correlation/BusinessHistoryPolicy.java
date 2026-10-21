@@ -7,10 +7,17 @@ import java.util.Objects;
 public record BusinessHistoryPolicy(int maxHistoriesPerScope, int maxOpenJoinsPerHistory, int maxRetainedJoinsPerHistory,
                                     int maxContributionsPerJoin, long maxJoinPayloadBytes,
                                     int maxPageSize, Duration historyRetention, Duration joinDeadline,
-                                    CorrelationLimits selection) {
+                                    CorrelationLimits selection, int maxJoinCasAttempts) {
     /** Finite shipped policy; compact identity tombstones remain within the total scope cap. */
     public static final BusinessHistoryPolicy DEFAULTS = new BusinessHistoryPolicy(100_000, 64, 1024, 1024,
-            16L * 1024 * 1024, 100, Duration.ofDays(30), Duration.ofHours(24), CorrelationLimits.DEFAULTS);
+            16L * 1024 * 1024, 100, Duration.ofDays(30), Duration.ofHours(24), CorrelationLimits.DEFAULTS, 128);
+    /** Compatibility constructor retaining the finite conflict-retry budget. */
+    public BusinessHistoryPolicy(int maxHistoriesPerScope, int maxOpenJoinsPerHistory, int maxRetainedJoinsPerHistory,
+            int maxContributionsPerJoin, long maxJoinPayloadBytes, int maxPageSize,
+            Duration historyRetention, Duration joinDeadline, CorrelationLimits selection) {
+        this(maxHistoriesPerScope, maxOpenJoinsPerHistory, maxRetainedJoinsPerHistory, maxContributionsPerJoin,
+                maxJoinPayloadBytes, maxPageSize, historyRetention, joinDeadline, selection, 128);
+    }
     /** Compatibility policy with an explicit finite ceiling for retained join tombstones. */
     public BusinessHistoryPolicy(int maxHistoriesPerScope, int maxOpenJoinsPerHistory,
             int maxContributionsPerJoin, long maxJoinPayloadBytes, int maxPageSize,
@@ -20,7 +27,7 @@ public record BusinessHistoryPolicy(int maxHistoriesPerScope, int maxOpenJoinsPe
     }
     /** Rejects unlimited retention, groups, pages and payload storage. */
     public BusinessHistoryPolicy {
-        if (maxHistoriesPerScope < 1 || maxHistoriesPerScope > 10_000_000 || maxOpenJoinsPerHistory < 1
+        if (maxJoinCasAttempts < 1 || maxJoinCasAttempts > 10000 || maxHistoriesPerScope < 1 || maxHistoriesPerScope > 10_000_000 || maxOpenJoinsPerHistory < 1
                 || maxOpenJoinsPerHistory > 1024 || maxRetainedJoinsPerHistory < maxOpenJoinsPerHistory
                 || maxRetainedJoinsPerHistory > 100_000 || maxContributionsPerJoin < 1 || maxContributionsPerJoin > 10_000
                 || maxJoinPayloadBytes < 1 || maxJoinPayloadBytes > 48L * 1024 * 1024

@@ -3157,10 +3157,11 @@ public final class GraphRunner implements AutoCloseable {
                             state.lifecycle.traversals().get(state.traversalId).ingressNodeId(), delivered, clock.instant()),
                             task -> Thread.ofVirtual().name("ravenroot-correlated-contribution").start(task)))
                     .thenCompose(record -> {
-                        state.nodeCompleted(invocationId, attemptId, startedEventId, false, false);
-                        monitor.nodeCompleted(identity, node.id(), invocationId, attemptId, false,
-                                record.phase() == ai.ravenroot.api.correlation.CorrelatedJoinRecord.Phase.READY
-                                        ? "correlated-ready" : "correlated-waiting", 1);
+                        String outcome = record.phase() == ai.ravenroot.api.correlation.CorrelatedJoinRecord.Phase.READY
+                                ? "correlated-ready" : "correlated-waiting";
+                        state.classifiedBoundaryCompleted(invocationId, attemptId, startedEventId,
+                                ExecutionEventType.NODE_COMPLETED, outcome);
+                        monitor.nodeCompleted(identity, node.id(), invocationId, attemptId, false, outcome, 1);
                         admissionLease.close();
                         hop.close();
                         if (record.phase() == ai.ravenroot.api.correlation.CorrelatedJoinRecord.Phase.READY)
@@ -6490,17 +6491,25 @@ public final class GraphRunner implements AutoCloseable {
          * @return the identity of the completion event, for the successors it dispatches to name
          */
         private UUID sourceCompleted(UUID invocationId, UUID attemptId, UUID startedEventId, boolean boundary) {
+            return classifiedBoundaryCompleted(invocationId, attemptId, startedEventId,
+                    boundary ? ExecutionEventType.SOURCE_BOUNDARY : ExecutionEventType.NODE_COMPLETED,
+                    boundary ? "source-boundary" : ai.ravenroot.api.catalog.NodeOutcomeDescriptor.BLANK_OUTCOME);
+        }
+
+        /** Public classification without a fabricated result or ordinary successor replay evidence. */
+        private UUID classifiedBoundaryCompleted(UUID invocationId, UUID attemptId, UUID startedEventId,
+                ExecutionEventType eventType, String outcome) {
             stateLock.lock();
             try {
+                if (terminal) return null;
                 var transitions = List.<ExecutionTransition>of(
                         new ExecutionTransition.AttemptTransitioned(traversalId, invocationId, attemptId,
                                 NodeAttemptStatus.COMPLETED),
                         new ExecutionTransition.InvocationTransitioned(traversalId, invocationId,
                                 NodeInvocationStatus.COMPLETED));
                 UUID completed = eventId();
-                record(transitions, events(List.of(new PublishedEvent(boundary ? ExecutionEventType.SOURCE_BOUNDARY
-                        : ExecutionEventType.NODE_COMPLETED, completed, ai.ravenroot.api.persistence.NodeOutcomeEventData.of(
-                                boundary ? "source-boundary" : ai.ravenroot.api.catalog.NodeOutcomeDescriptor.BLANK_OUTCOME))),
+                record(transitions, events(List.of(new PublishedEvent(eventType, completed,
+                        ai.ravenroot.api.persistence.NodeOutcomeEventData.of(outcome))),
                         startedEventId, invocationId, attemptId));
                 lifecycle = fold(lifecycle, transitions);
                 return completed;

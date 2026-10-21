@@ -259,8 +259,12 @@ class SourceLocalTraversalTest {
         return deployment(engine, store, contexts, effects, monitor, GRAPH);
     }
 
-    private static DefaultGraphDeployment deployment(SameThreadExecutionEngine engine, ExecutionStore store,
+    static DefaultGraphDeployment deployment(SameThreadExecutionEngine engine, ExecutionStore store,
             Map<String, InboundSourceContext> contexts, List<String> effects, ExecutionMonitor monitor, String graph) {
+        return deployment(engine, store, contexts, effects, monitor, graph, Clock.systemUTC());
+    }
+    static DefaultGraphDeployment deployment(SameThreadExecutionEngine engine, ExecutionStore store,
+            Map<String, InboundSourceContext> contexts, List<String> effects, ExecutionMonitor monitor, String graph, Clock clock) {
         var source = new NodeBehavior() {
             @Override public NodeTypeDescriptor descriptor() {
                 return new NodeTypeDescriptor("source", "Source", "Test", "Source", "actor", false,
@@ -297,6 +301,7 @@ class SourceLocalTraversalTest {
         return new DefaultGraphDeployment(DeploymentId.of("source-local"), engine, registry, monitor,
                 ExecutionIdentitySource.randomUuids(), graph.getBytes(StandardCharsets.UTF_8),
                 DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY, store,
-                DefaultGraphDeployment.DEFAULT_INBOX_RETENTION, "source-local-test", Duration.ofSeconds(30));
+                DefaultGraphDeployment.DEFAULT_INBOX_RETENTION, "source-local-test", Duration.ofSeconds(30),
+                RequestReplyLimits.defaults(DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY), clock);
     }
 }

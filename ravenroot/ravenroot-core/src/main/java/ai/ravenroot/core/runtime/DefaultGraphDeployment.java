@@ -2910,6 +2910,25 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
             var group = awaitStore(executionStore.businessHistory(joinKey.scope(), joinKey.applicationCorrelationId()),
                     deadline, "join history authority").orElseThrow();
             if (group.lifecycle() != ai.ravenroot.api.correlation.BusinessHistory.Lifecycle.OPEN) return;
+            if (acknowledgeJoinContinuation(current)) return;
+            var values = new java.util.ArrayList<Object>();
+            for (var item : current.contributions().values()) {
+                var value = new java.util.LinkedHashMap<String, Object>();
+                value.put("contributionId", item.contributionId()); value.put("kind", item.kind());
+                value.put("payload", ai.ravenroot.api.payload.PayloadJson.read(item.payload().bytes(),
+                        executionStore.businessHistoryPolicy().selection().input()).toJava());
+                values.add(value);
+            }
+            var payload = java.util.Map.<String, Object>of("applicationCorrelationId", joinKey.applicationCorrelationId(),
+                    "roundId", joinKey.roundId(), "contributions", values);
+            try {
+                graphExecutionLimits.payload().enforceAndMeasure(payload);
+            } catch (ai.ravenroot.api.payload.PayloadException refused) {
+                awaitStore(executionStore.compareAndSetCorrelatedJoin(current.terminate(
+                        ai.ravenroot.api.correlation.CorrelatedJoinRecord.Phase.FAILED, clock.instant())),
+                        deadline, "join continuation payload refusal");
+                return;
+            }
             var context = new ai.ravenroot.api.correlation.ApplicationCorrelationContext(joinKey.applicationCorrelationId(),
                     Optional.empty(), Optional.empty(), joinKey.roundId(), group.publicReference());
             var now = clock.instant();
@@ -2927,16 +2946,6 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
                 if (recorder == null) { acknowledgeJoinContinuation(current); return; }
             }
             var policy = resolveHostedPolicy(identity, process, recorder, deadline);
-            var values = new java.util.ArrayList<Object>();
-            for (var item : current.contributions().values()) {
-                var value = new java.util.LinkedHashMap<String, Object>();
-                value.put("contributionId", item.contributionId()); value.put("kind", item.kind());
-                value.put("payload", ai.ravenroot.api.payload.PayloadJson.read(item.payload().bytes(),
-                        executionStore.businessHistoryPolicy().selection().input()).toJava());
-                values.add(value);
-            }
-            var payload = java.util.Map.<String, Object>of("applicationCorrelationId", joinKey.applicationCorrelationId(),
-                    "roundId", joinKey.roundId(), "contributions", values);
             lock.lock();
             try {
                 if (ingressGeneration != generation || admissionFenced || !awaitingDispatch.remove(traversal)) return;
@@ -2944,6 +2953,7 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
                 executeHosted(activeRunner, identity, process, traversal, joinKey.nodeId(), payload, recorder, policy, true)
                         .whenComplete((result, failure) -> {
                             try { acknowledgeJoinContinuation(current); }
+                            catch (RuntimeException unresolved) { /* READY is retried by recovery. */ }
                             finally {
                                 admitted.remove(traversal); heldPermits.release(); activeJoinContinuations.remove(process);
                             }
@@ -2958,21 +2968,28 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
                 closeQuietly(recorder);
                 if (reserved) releaseAdmission(traversal, permits);
                 activeJoinContinuations.remove(process);
+                // Opening admission may have raced a retired release waiting on the store. Its
+                // duplicate signal was deliberately coalesced; hand the outbox to the new generation.
+                lock.lock();
+                try {
+                    if (ingressGeneration != generation && !admissionFenced && runner != null
+                            && (status.state() == DeploymentState.READY || status.state() == DeploymentState.DEGRADED))
+                        signalJoinContinuation(record, ingressGeneration);
+                } finally { lock.unlock(); }
             }
         }
     }
 
-    private void acknowledgeJoinContinuation(ai.ravenroot.api.correlation.CorrelatedJoinRecord record) {
-        try {
-            long deadline = persistenceDeadline();
-            var execution = awaitStore(executionStore.load(new ai.ravenroot.api.persistence.ExecutionKey(
-                    record.key().scope().tenantId(), record.key().continuationProcessId())), deadline, "join continuation evidence");
-            var traversal = execution.state().traversals().get(record.key().continuationTraversalId());
-            if (traversal == null || traversal.invocations().isEmpty()) return;
-            var current = awaitStore(executionStore.correlatedJoin(record.key()), deadline, "join outbox read").orElseThrow();
-            if (current.phase() == ai.ravenroot.api.correlation.CorrelatedJoinRecord.Phase.READY)
-                awaitStore(executionStore.compareAndSetCorrelatedJoin(current.dispatched(clock.instant())), deadline, "join outbox acknowledgement");
-        } catch (RuntimeException unresolved) { /* READY survives until its accepted continuation can be proved. */ }
+    private boolean acknowledgeJoinContinuation(ai.ravenroot.api.correlation.CorrelatedJoinRecord record) {
+        long deadline = persistenceDeadline();
+        var traversal = awaitStore(executionStore.executionTraversal(new ai.ravenroot.api.persistence.ExecutionKey(
+                    record.key().scope().tenantId(), record.key().continuationProcessId()),
+                    record.key().continuationTraversalId()), deadline, "join continuation evidence");
+        if (traversal.isEmpty() || traversal.orElseThrow().visitCount() == 0) return false;
+        var current = awaitStore(executionStore.correlatedJoin(record.key()), deadline, "join outbox read").orElseThrow();
+        if (current.phase() == ai.ravenroot.api.correlation.CorrelatedJoinRecord.Phase.READY)
+            awaitStore(executionStore.compareAndSetCorrelatedJoin(current.dispatched(clock.instant())), deadline, "join outbox acknowledgement");
+        return true;
     }
 
     private void armInitialRecovery(SecurityContext security, long generation) {
@@ -3016,28 +3033,45 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
     }
 
     private void armCorrelatedRecovery(SecurityContext security, long generation) {
-        if (security == null || executionStore == null
-                || !executionStore.supports(ai.ravenroot.api.persistence.StoreCapability.CORRELATED_JOINS)
-                || correlatedRecoveryGeneration == generation) return;
-        correlatedRecoveryGeneration = generation;
-        correlatedRecoveryCursor = Optional.empty();
-        VIRTUAL_THREADS.execute(() -> recoverCorrelatedJoins(security, generation));
+        lock.lock();
+        try {
+            if (security == null || executionStore == null
+                    || !executionStore.supports(ai.ravenroot.api.persistence.StoreCapability.CORRELATED_JOINS)
+                    || correlatedRecoveryGeneration == generation) return;
+            correlatedRecoveryGeneration = generation;
+            correlatedRecoveryCursor = Optional.empty();
+            VIRTUAL_THREADS.execute(() -> recoverCorrelatedJoins(security, generation));
+        } finally { lock.unlock(); }
+    }
+
+    private boolean currentRecoveryGeneration(long generation) {
+        return ingressGeneration == generation && correlatedRecoveryGeneration == generation
+                && !admissionFenced && runner != null
+                && (status.state() == DeploymentState.READY || status.state() == DeploymentState.DEGRADED);
     }
 
     private void recoverCorrelatedJoins(SecurityContext security, long generation) {
+        Optional<String> cursor;
         lock.lock();
         try {
-            if (ingressGeneration != generation || runner == null
-                    || status.state() != DeploymentState.READY && status.state() != DeploymentState.DEGRADED) return;
+            if (!currentRecoveryGeneration(generation)) return;
+            cursor = correlatedRecoveryCursor;
         } finally { lock.unlock(); }
         try {
             var scope = new ai.ravenroot.api.correlation.BusinessScope(security.tenantId(), executionContextDeploymentId, graphVersion);
             var page = awaitStore(executionStore.correlatedJoins(scope, null,
                     java.util.Set.of(ai.ravenroot.api.correlation.CorrelatedJoinRecord.Phase.OPEN,
-                            ai.ravenroot.api.correlation.CorrelatedJoinRecord.Phase.READY), correlatedRecoveryCursor,
+                            ai.ravenroot.api.correlation.CorrelatedJoinRecord.Phase.READY), cursor,
                     executionStore.businessHistoryPolicy().maxPageSize()), persistenceDeadline(), "join recovery page");
-            correlatedRecoveryCursor = page.nextCursor();
+            lock.lock();
+            try {
+                if (!currentRecoveryGeneration(generation)) return;
+                correlatedRecoveryCursor = page.nextCursor();
+            } finally { lock.unlock(); }
             for (var summary : page.items()) {
+                lock.lock();
+                try { if (!currentRecoveryGeneration(generation)) return; }
+                finally { lock.unlock(); }
                 if (summary.phase() == ai.ravenroot.api.correlation.CorrelatedJoinRecord.Phase.READY) {
                     var record = awaitStore(executionStore.correlatedJoin(summary.key()), persistenceDeadline(), "join recovery intent");
                     record.ifPresent(value -> signalJoinContinuation(value, generation));
@@ -3049,10 +3083,17 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
                 }
             }
         } catch (RuntimeException unresolved) {
-            correlatedRecoveryCursor = Optional.empty();
+            lock.lock();
+            try { if (currentRecoveryGeneration(generation)) correlatedRecoveryCursor = Optional.empty(); }
+            finally { lock.unlock(); }
         } finally {
-            Duration delay = Duration.ofNanos(Math.max(1, executionLeaseTtl.toNanos() / 3));
-            engine.scheduler().schedule(delay, () -> VIRTUAL_THREADS.execute(() -> recoverCorrelatedJoins(security, generation)));
+            lock.lock();
+            try {
+                if (currentRecoveryGeneration(generation)) {
+                    Duration delay = Duration.ofNanos(Math.max(1, executionLeaseTtl.toNanos() / 3));
+                    engine.scheduler().schedule(delay, () -> VIRTUAL_THREADS.execute(() -> recoverCorrelatedJoins(security, generation)));
+                }
+            } finally { lock.unlock(); }
         }
     }
 

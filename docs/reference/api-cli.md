@@ -98,6 +98,15 @@ first accepted process, traversal, visit, attempt and time. Duplicate deliveries
 causal coordinates. Membership metadata remains readable after contribution data expires; captured
 content is still unavailable according to its own retention policy.
 
+A complete, sealed join records a durable `READY` continuation intent with its own stable process
+and traversal identities. Recovery reconciles that intent after a lost response or restart; retrying
+does not create a new round. Only explicitly authored producer entries may announce or seal a
+dynamic expectation. Results received before that announcement remain subject to the configured
+contribution and byte limits. The combined continuation must also fit the graph execution payload
+limits; a permanent refusal records `FAILED` before admitting a continuation process. Cancellation
+and collection expiry prevent release. Draining currently admitted traversals does not imply that an
+open business history or incomplete join has completed.
+
 Visit timing and safe outcome fields can be null after event retention or for older records.
 `eventHistoryAvailable=false` states that absence explicitly. Captured inputs and outputs are read
 only through `activity`, using the existing activity capture, redaction, size and retention policy.

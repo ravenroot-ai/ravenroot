@@ -14817,7 +14817,7 @@ GRAPH_AUTHORING_SUPPORT_FILE_PROOFS = {
 GRAPH_AUTHORING_TEST_PROOFS = {
     Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/AuthoringPublicationIndexTest.java"): "64bd2a9f1cd7a82af8442fa2be71a7e84833582ba6aee133dbe8ed395d475afd",
     Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/AuthoringReadBaselineTest.java"): "9cb70ae35e84149d70a87bd6c180b7a48775754dc988dfde8f788235e5ef553e",
-    Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/AuthoringReadConcurrencyTest.java"): "8bd499485f2a9cc27e9c2b1be10241d4693984e1cdbce37101ce5c9b540a6a68",
+    Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/AuthoringReadConcurrencyTest.java"): "48bd6737a6f6fd2b7b48caeeb74a21a6b3d97628c042c2ae495119da35263ecc",
     Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/AuthoringReadIdentityTest.java"): "3267ce878217bd5b48d2c4c8893bfa9e2daf7c17ae716463a78f60c2aacd62e3",
     Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/AuthoringReadIndexIntegrationTest.java"): "38081bd45faab0a7891eb170adfd8248dc6a35e3c774591212d14c341c8c0000",
 

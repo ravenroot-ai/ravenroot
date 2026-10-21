@@ -201,6 +201,9 @@ public enum StoreCapability {
     /** Non-expiring logical-deployment initial START arbitration and original work retention. */
     INITIAL_START_ADMISSION,
 
+    /** Bounded retained deployment-entry input and runtime-owned first-dispatch checkpoints. */
+    DEPLOYMENT_ENTRY_CUSTODY,
+
     /** Durable scoped application histories and immutable traversal relations. */
     BUSINESS_HISTORIES,
 

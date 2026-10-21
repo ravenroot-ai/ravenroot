@@ -63,7 +63,7 @@ import java.util.concurrent.CompletionStage;
  * timers, does not model fan-in, and does not make the core durable. Those belong to ARC-02's
  * successor, the runtime, CORE-03 and PERS-04 respectively.</p>
  */
-public interface ExecutionStore extends AutoCloseable, ai.ravenroot.api.correlation.BusinessHistoryStore, ai.ravenroot.api.correlation.CorrelatedJoinStore, ai.ravenroot.api.history.ExecutionHistoryStore {
+public interface ExecutionStore extends AutoCloseable, DeploymentEntryStore, ai.ravenroot.api.correlation.BusinessHistoryStore, ai.ravenroot.api.correlation.CorrelatedJoinStore, ai.ravenroot.api.history.ExecutionHistoryStore {
     /**
      * Lists at most {@code limit} retained evidence records for one exact tenant-scoped source.
      *

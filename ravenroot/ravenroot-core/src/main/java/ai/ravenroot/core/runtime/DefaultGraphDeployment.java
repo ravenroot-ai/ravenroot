@@ -344,6 +344,9 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
     private final java.util.Set<UUID> activeJoinContinuations = java.util.concurrent.ConcurrentHashMap.newKeySet();
     private long correlatedRecoveryGeneration = Long.MIN_VALUE;
     private long initialRecoveryGeneration = Long.MIN_VALUE;
+    private long entryRecoveryGeneration = Long.MIN_VALUE;
+    private Optional<String> entryRecoveryCursor = Optional.empty();
+    private final Map<UUID, Long> activeEntryRecoveries = new java.util.concurrent.ConcurrentHashMap<>();
     private java.util.Optional<String> correlatedRecoveryCursor = java.util.Optional.empty();
 
     private CompletionStage<DeploymentStatus> inFlightStop;
@@ -1114,6 +1117,7 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
             draining = false;
             drained = false;
             armCorrelatedRecovery(lifecycleIdentity, deploymentGeneration);
+            armEntryRecovery(lifecycleIdentity, deploymentGeneration);
             armInitialRecovery(lifecycleIdentity, deploymentGeneration);
         } finally {
             lock.unlock();
@@ -1602,6 +1606,7 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
             this.inFlightStart = null;
             this.correlatedRecoveryCursor = java.util.Optional.empty();
             armCorrelatedRecovery(security, generation);
+            armEntryRecovery(security, generation);
             if (recoveredInitial != null) armInitialRecovery(security, generation);
             return this.status;
         } finally {
@@ -2853,7 +2858,8 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
                 try {
                     if (agentBudgets != null && recorder != null && (cause == null
                             || !(cause instanceof ai.ravenroot.core.security.nodepackage.DurableToolApprovalSuspension
-                            || cause instanceof ai.ravenroot.core.humantask.DurableHumanTaskSuspension))) {
+                            || cause instanceof ai.ravenroot.core.humantask.DurableHumanTaskSuspension
+                            || cause instanceof GraphRunner.RetainedEntryPendingException))) {
                         agentBudgets.finishProcess(key, failure == null && result != null);
                     }
                 } finally {
@@ -2874,6 +2880,13 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
             UUID processInstanceId, UUID traversalId, String entryNodeId, Object payload, String pinnedVersion,
             String deploymentId, String workloadId, ExecutionRecorder recorder,
             ai.ravenroot.api.persistence.ResolvedOperationalPolicy policy, GraphExecutionLimits limits) {
+        if (entryNodeId != null && recorder != null
+                && executionStore.supports(ai.ravenroot.api.persistence.StoreCapability.DEPLOYMENT_ENTRY_CUSTODY)) {
+            var retained = awaitStore(executionStore.deploymentEntry(new ai.ravenroot.api.persistence.ExecutionKey(
+                    security.tenantId(), processInstanceId)), persistenceDeadline(), "source dispatch retained input");
+            if (retained.isPresent()) return activeRunner.executeRetainedSource(retained.orElseThrow(), pinnedVersion,
+                    deploymentId, recorder, policy, limits);
+        }
         if (entryNodeId != null && CorrelatedJoinConfiguration.enabled(manager.definition().node(entryNodeId)))
             return activeRunner.executeCorrelatedContinuation(security, processInstanceId, traversalId, entryNodeId,
                     payload, pinnedVersion, deploymentId, workloadId, recorder, policy, limits);
@@ -2990,6 +3003,119 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
         if (current.phase() == ai.ravenroot.api.correlation.CorrelatedJoinRecord.Phase.READY)
             awaitStore(executionStore.compareAndSetCorrelatedJoin(current.dispatched(clock.instant())), deadline, "join outbox acknowledgement");
         return true;
+    }
+
+    private void armEntryRecovery(SecurityContext security, long generation) {
+        if (security == null || executionStore == null || entryRecoveryGeneration == generation
+                || !executionStore.supports(ai.ravenroot.api.persistence.StoreCapability.DEPLOYMENT_ENTRY_CUSTODY)) return;
+        entryRecoveryGeneration = generation; entryRecoveryCursor = Optional.empty();
+        VIRTUAL_THREADS.execute(() -> recoverEntries(security, generation));
+    }
+
+    private boolean currentEntryGeneration(long generation) {
+        return ingressGeneration == generation && entryRecoveryGeneration == generation && !admissionFenced && runner != null
+                && (status.state() == DeploymentState.READY || status.state() == DeploymentState.DEGRADED);
+    }
+
+    private void recoverEntries(SecurityContext security, long generation) {
+        Optional<String> cursor;
+        lock.lock(); try { if (!currentEntryGeneration(generation)) return; cursor = entryRecoveryCursor; }
+        finally { lock.unlock(); }
+        try {
+            var scope = new ai.ravenroot.api.correlation.BusinessScope(security.tenantId(), executionContextDeploymentId, graphVersion);
+            var page = awaitStore(executionStore.pendingDeploymentEntries(scope, cursor,
+                    executionStore.businessHistoryPolicy().maxPageSize()), persistenceDeadline(), "source custody recovery page");
+            lock.lock(); try { if (!currentEntryGeneration(generation)) return; entryRecoveryCursor = page.nextCursor(); }
+            finally { lock.unlock(); }
+            for (var summary : page.items()) recoverEntry(summary, generation);
+        } catch (RuntimeException unresolved) {
+            lock.lock(); try { if (currentEntryGeneration(generation)) entryRecoveryCursor = Optional.empty(); }
+            finally { lock.unlock(); }
+        } finally {
+            lock.lock(); try {
+                if (currentEntryGeneration(generation)) engine.scheduler().schedule(
+                        Duration.ofNanos(Math.max(1, executionLeaseTtl.toNanos() / 3)),
+                        () -> VIRTUAL_THREADS.execute(() -> recoverEntries(security, generation)));
+            } finally { lock.unlock(); }
+        }
+    }
+
+    private void recoverEntry(ai.ravenroot.api.persistence.DeploymentEntrySummary summary, long generation) {
+        var reservedGeneration = new java.util.concurrent.atomic.AtomicBoolean();
+        activeEntryRecoveries.compute(summary.processInstanceId(), (process, previous) -> {
+            if (previous == null || previous.longValue() < generation) { reservedGeneration.set(true); return generation; }
+            return previous;
+        });
+        if (!reservedGeneration.get()) return;
+        ExecutionRecorder recorder = null; Semaphore permits = null; boolean reserved = false, dispatched = false;
+        try {
+            GraphRunner activeRunner;
+            lock.lock(); try {
+                if (!currentEntryGeneration(generation) || admitted.containsKey(summary.traversalId())) return;
+                activeRunner = runner; permits = ingressPermits;
+                if (permits == null || !permits.tryAcquire()) return;
+                reserved = true; admitted.put(summary.traversalId(), generation); awaitingDispatch.add(summary.traversalId());
+            } finally { lock.unlock(); }
+            long deadline = persistenceDeadline();
+            var key = new ai.ravenroot.api.persistence.ExecutionKey(summary.scope().tenantId(), summary.processInstanceId());
+            var entry = awaitStore(executionStore.deploymentEntry(key), deadline, "original source custody").orElse(null);
+            if (entry == null || !entry.scope().equals(summary.scope()) || !entry.entryNodeId().equals(summary.entryNodeId())) return;
+            var target = runtimeDefinitionsForEntry(entry.entryNodeId());
+            if (!target) return;
+            try {
+                var stored = awaitStore(executionStore.load(key), deadline, "retained source lifecycle");
+                var traversal = stored.state().traversals().get(entry.traversalId());
+                if (!graphVersion.equals(stored.graphVersionPin().reference()) || traversal == null
+                        || !entry.entryNodeId().equals(traversal.ingressNodeId())) return;
+                if (stored.state().status().terminal() || traversal.status().terminal()) return;
+                if (stored.state().status() == ai.ravenroot.api.application.ProcessInstanceStatus.WAITING
+                        || traversal.status() == ai.ravenroot.api.application.TraversalStatus.WAITING) return;
+                if (traversal.invocations().isEmpty()) recorder = resumeUnstartedTraversal(entry.identity(), entry.processInstanceId(),
+                        entry.traversalId(), entry.entryNodeId(), deadline);
+                else if (entry.checkpoint() != null) recorder = ExecutionRecorder.open(executionStore, key, workerId,
+                        executionLeaseTtl, stored.revision(), remainingStoreTime(deadline, "source recovery lease"));
+            } catch (ai.ravenroot.api.persistence.ExecutionStoreException missing) {
+                if (!(missing.failure() instanceof ai.ravenroot.api.persistence.ExecutionStoreFailure.NotFound)) throw missing;
+                recorder = openTraversalRecorder(entry.identity(), entry.processInstanceId(), entry.traversalId(), entry.entryNodeId(), deadline);
+            }
+            if (recorder == null) return;
+            var policy = resolveHostedPolicy(entry.identity(), entry.processInstanceId(), recorder, deadline);
+            lock.lock(); try {
+                if (!currentEntryGeneration(generation) || !awaitingDispatch.remove(entry.traversalId())) return;
+                if (!clock.instant().isBefore(entry.expiresAt())) {
+                    recorder.record(List.of(new ai.ravenroot.api.persistence.ExecutionTransition.TraversalTransitioned(entry.traversalId(),
+                                    ai.ravenroot.api.application.TraversalStatus.FAILED, ai.ravenroot.api.application.ExecutionTerminationReason.UNREACHABLE),
+                            new ai.ravenroot.api.persistence.ExecutionTransition.ProcessTransitioned(ai.ravenroot.api.application.ProcessInstanceStatus.FAILED,
+                                    ai.ravenroot.api.application.ExecutionTerminationReason.UNREACHABLE)), List.of());
+                    return;
+                }
+                var heldPermits = permits;
+                executeHosted(activeRunner, entry.identity(), entry.processInstanceId(), entry.traversalId(), entry.entryNodeId(),
+                        null, recorder, policy, true).whenComplete((ignored, error) -> {
+                    admitted.remove(entry.traversalId(), generation); heldPermits.release(); activeEntryRecoveries.remove(entry.processInstanceId(), generation);
+                });
+                dispatched = true;
+            } finally { lock.unlock(); }
+        } catch (RuntimeException unresolved) {
+            // Current leases, unavailable manifests and ambiguous effects are retained for their
+            // existing authorities; none licenses a replacement visit or an empty payload.
+        } finally {
+            if (!dispatched) {
+                closeQuietly(recorder);
+                if (reserved) {
+                    lock.lock(); try {
+                        if (admitted.remove(summary.traversalId(), generation)) awaitingDispatch.remove(summary.traversalId());
+                        permits.release();
+                    } finally { lock.unlock(); }
+                }
+                activeEntryRecoveries.remove(summary.processInstanceId(), generation);
+            }
+        }
+    }
+
+    private boolean runtimeDefinitionsForEntry(String nodeId) {
+        try { return nodeId.equals(ingressEntry(IngressTarget.node(nodeId))); }
+        catch (IllegalArgumentException invalid) { return false; }
     }
 
     private void armInitialRecovery(SecurityContext security, long generation) {
@@ -3501,6 +3627,47 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
                         releaseAdmission(traversalId, permits);
                         return new ai.ravenroot.api.deployment.IngressReceipt.Ambiguous(idempotentKey,
                                 "initial START admission must be reconciled");
+                    }
+                }
+                if (entryNodeId != null) {
+                    if (!executionStore.supports(ai.ravenroot.api.persistence.StoreCapability.DEPLOYMENT_ENTRY_CUSTODY)) {
+                        releaseAdmission(traversalId, permits);
+                        return new ai.ravenroot.api.deployment.IngressReceipt.Refused("store lacks durable source input custody");
+                    }
+                    try {
+                        recordGraphDefinition(security, deadlineNanos);
+                        recordExecutionManifest(new ai.ravenroot.api.persistence.ExecutionKey(tenantId, processInstanceId), deadlineNanos);
+                        var snapshot = ai.ravenroot.api.payload.PayloadValue.fromJava(payload, graphExecutionLimits.payload());
+                        var input = ai.ravenroot.api.payload.PayloadJson.write(snapshot).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                        var correlation = entryCorrelation(security, processInstanceId, traversalId, entryNodeId, snapshot.toJava());
+                        var acceptedAt = clock.instant();
+                        var proposed = new ai.ravenroot.api.persistence.DeploymentEntryIntent(correlation.traversal().scope(),
+                                processInstanceId, traversalId, entryNodeId, correlation.traversal().context(), security,
+                                ai.ravenroot.api.persistence.OpaquePayload.of(input, "application/json"), acceptedAt,
+                                acceptedAt.plus(executionStore.businessHistoryPolicy().historyRetention()),
+                                ai.ravenroot.api.correlation.CorrelatedTraversal.Cause.SOURCE_EVENT, null, "", null);
+                        var admission = awaitStore(executionStore.acceptDeploymentEntry(proposed, correlation.mode()),
+                                deadlineNanos, "atomic source input custody and business admission");
+                        if (admission.outcome() == ai.ravenroot.api.persistence.DeploymentEntryAdmission.Outcome.SETTLED) {
+                            releaseAdmission(traversalId, permits);
+                            return new ai.ravenroot.api.deployment.IngressReceipt.Duplicate(idempotentKey);
+                        }
+                        if (admission.intent().isEmpty()) {
+                            releaseAdmission(traversalId, permits);
+                            return new ai.ravenroot.api.deployment.IngressReceipt.Ambiguous(idempotentKey,
+                                    "original source input is unavailable; reconciliation required");
+                        }
+                        var original = admission.intent().orElseThrow();
+                        acceptedSecurity = original.identity();
+                        // Live dispatch uses the exact immutable snapshot owned by the receipt. It
+                        // never retains caller-owned mutable maps after custody has transferred.
+                        acceptedPayload = ai.ravenroot.api.payload.PayloadJson.read(original.input().bytes(), graphExecutionLimits.payload()).toJava();
+                    } catch (ai.ravenroot.api.correlation.BusinessHistoryException | IllegalArgumentException invalid) {
+                        releaseAdmission(traversalId, permits);
+                        return new ai.ravenroot.api.deployment.IngressReceipt.Refused(correlationRefusal(invalid));
+                    } catch (RuntimeException unresolved) {
+                        releaseAdmission(traversalId, permits);
+                        return new ai.ravenroot.api.deployment.IngressReceipt.Ambiguous(idempotentKey, "source input custody must be reconciled");
                     }
                 }
                 boolean firstDelivery;

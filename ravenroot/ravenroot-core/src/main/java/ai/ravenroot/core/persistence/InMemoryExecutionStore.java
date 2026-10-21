@@ -125,6 +125,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
 
     private final Object monitor = new Object();
     private final InMemoryBusinessHistories businessHistories;
+    private final InMemoryDeploymentEntries deploymentEntries;
     private final Map<List<String>, ai.ravenroot.api.persistence.InitialStartRecord> initialStarts =
             new LinkedHashMap<>();
     private final Map<String, Map<String, ai.ravenroot.api.runner.GovernedRunnerResource>> runnerCatalog =
@@ -265,6 +266,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
         this.clock = Objects.requireNonNull(clock, "clock");
         policy = Objects.requireNonNull(policy, "policy");
         this.businessHistories = new InMemoryBusinessHistories(clock, policy.businessHistories());
+        this.deploymentEntries = new InMemoryDeploymentEntries(clock, businessHistories);
         this.maxLeaseTtl = policy.maximumLeaseTtl();
         this.maxPayloadBytes = policy.maximumPayloadBytes();
         this.maxClockSkew = policy.maximumClockSkew();
@@ -322,7 +324,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 // says and what this adapter still does not say.
                 StoreCapability.EXECUTION_RESULTS, StoreCapability.RUNNER_JOBS,
                 StoreCapability.DURABLE_SAGAS, StoreCapability.SELECTIVE_REPLAY_EVIDENCE,
-                StoreCapability.FLOW_INVOCATIONS, StoreCapability.INITIAL_START_ADMISSION, StoreCapability.BUSINESS_HISTORIES, StoreCapability.CORRELATED_JOINS, StoreCapability.EXECUTION_HISTORY);
+                StoreCapability.FLOW_INVOCATIONS, StoreCapability.INITIAL_START_ADMISSION, StoreCapability.DEPLOYMENT_ENTRY_CUSTODY, StoreCapability.BUSINESS_HISTORIES, StoreCapability.CORRELATED_JOINS, StoreCapability.EXECUTION_HISTORY);
     }
 
     @Override
@@ -610,6 +612,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                         createdAt, generation, origin, retainedUntil);
                 dropAcknowledgementsForRescheduledWork(next);
 
+                var projectedEntry = deploymentEntries.projected(batch, folded);
                 var sagaReplacements = validateSagaWrites(key, batch, now);
                 var outboxInserts = validateSagaCommands(key, batch, now);
                 var outboxRearms = validateSagaCommandRearms(key, batch);
@@ -636,6 +639,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                             key.processInstanceId(), traversal.traversalId(), traversal.status(),
                             traversal.terminationReason());
                 }
+                deploymentEntries.publish(key, projectedEntry);
                 instances.put(key, next);
                 sagaReplacements.forEach(sagas::put);
                 outboxInserts.forEach(sagaOutbox::put);
@@ -2126,6 +2130,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
         synchronized (monitor) {
             initialStarts.clear();
             businessHistories.clear();
+            deploymentEntries.clear();
             instances.clear();
             idempotency.clear();
             forgottenBefore.clear();
@@ -3551,6 +3556,32 @@ public final class InMemoryExecutionStore implements ExecutionStore {
         return completeHistory(() -> InMemoryExecutionHistory.traversals(key, historyState(key),
                 traversal -> businessHistories.traversal(key.tenantId(), key.processInstanceId(), traversal).orElse(null),
                 cursor, limit, businessHistoryPolicy().maxPageSize()));
+    }
+    @Override public CompletionStage<ai.ravenroot.api.persistence.DeploymentEntryAdmission> acceptDeploymentEntry(
+            ai.ravenroot.api.persistence.DeploymentEntryIntent proposed, ai.ravenroot.api.correlation.CorrelationMapping.Mode mode,
+            Optional<LeaseHandle> derivingFence) {
+        return completeBusiness(() -> {
+            if (proposed.input().size() > maxPayloadBytes()) throw failure(new ExecutionStoreFailure.PayloadTooLarge(proposed.input().size(), maxPayloadBytes()));
+            if (proposed.cause() == ai.ravenroot.api.correlation.CorrelatedTraversal.Cause.DERIVED_CONTEXT) {
+                var fence = derivingFence.orElseThrow(() -> new IllegalArgumentException("derived entry requires original lease"));
+                if (!fence.key().equals(new ExecutionKey(proposed.scope().tenantId(), proposed.derivedFrom().processInstanceId())))
+                    throw new ai.ravenroot.api.correlation.BusinessHistoryException(ai.ravenroot.api.correlation.BusinessHistoryException.Reason.CONTEXT_CONFLICT);
+                requireCurrentReplayLease(fence.key(), fence);
+                var original = historyState(fence.key());
+                var traversal = original == null ? null : original.traversals().get(proposed.derivedFrom().traversalId());
+                var invocation = traversal == null ? null : traversal.invocations().get(proposed.derivedFrom().invocationId());
+                if (invocation == null || invocation.attempts().stream().noneMatch(value -> value.attemptId().equals(proposed.derivedFrom().attemptId())))
+                    throw new ai.ravenroot.api.correlation.BusinessHistoryException(ai.ravenroot.api.correlation.BusinessHistoryException.Reason.CONTEXT_CONFLICT);
+            } else if (derivingFence.isPresent()) throw new IllegalArgumentException("source entry cannot present a derivation lease");
+            return deploymentEntries.admit(proposed, mode, businessHistoryPolicy());
+        });
+    }
+    @Override public CompletionStage<Optional<ai.ravenroot.api.persistence.DeploymentEntryIntent>> deploymentEntry(ExecutionKey key) {
+        return completeBusiness(() -> deploymentEntries.get(key));
+    }
+    @Override public CompletionStage<ai.ravenroot.api.history.HistoryPage<ai.ravenroot.api.persistence.DeploymentEntrySummary>> pendingDeploymentEntries(
+            ai.ravenroot.api.correlation.BusinessScope scope, Optional<String> cursor, int limit) {
+        return completeBusiness(() -> deploymentEntries.page(scope, cursor, limit, businessHistoryPolicy()));
     }
     @Override public CompletionStage<Map<UUID, String>> executionInvocationNodeIds(ExecutionKey key, Set<UUID> invocationIds) {
         var requested = Set.copyOf(invocationIds);

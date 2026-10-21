@@ -224,7 +224,7 @@ public final class PostgresExecutionStore implements ExecutionStore {
             StoreCapability.DURABLE,
             StoreCapability.TRANSACTIONAL_BATCH,
             StoreCapability.INITIAL_START_ADMISSION,
-            StoreCapability.BUSINESS_HISTORIES, StoreCapability.CORRELATED_JOINS, StoreCapability.EXECUTION_HISTORY,
+            StoreCapability.DEPLOYMENT_ENTRY_CUSTODY, StoreCapability.BUSINESS_HISTORIES, StoreCapability.CORRELATED_JOINS, StoreCapability.EXECUTION_HISTORY,
             StoreCapability.CROSS_PROCESS_LEASE,
             StoreCapability.IDEMPOTENCY_PURGE,
             StoreCapability.EVENT_JOURNAL,
@@ -673,6 +673,7 @@ public final class PostgresExecutionStore implements ExecutionStore {
                     retainedUntil, existing.revision());
         }
         AggregateStorage.write(connection, key, folded);
+        DeploymentEntryStorage.project(connection, batch, folded);
         // The business summary is a projection of this same committed lifecycle, never a
         // completion callback that a process crash could omit after effects have finished.
         for (var traversal : folded.traversals().values()) {
@@ -2323,6 +2324,28 @@ public final class PostgresExecutionStore implements ExecutionStore {
     @Override public CompletionStage<ai.ravenroot.api.history.HistoryPage<ai.ravenroot.api.history.TraversalSummary>> executionTraversals(
             ExecutionKey key, Optional<String> cursor, int limit) {
         return async(() -> read(key, connection -> ExecutionHistoryStorage.traversals(connection, key, cursor, limit, businessHistoryPolicy().maxPageSize())));
+    }
+    @Override public CompletionStage<ai.ravenroot.api.persistence.DeploymentEntryAdmission> acceptDeploymentEntry(
+            ai.ravenroot.api.persistence.DeploymentEntryIntent proposed, ai.ravenroot.api.correlation.CorrelationMapping.Mode mode,
+            Optional<LeaseHandle> derivingFence) {
+        Objects.requireNonNull(proposed); Objects.requireNonNull(derivingFence);
+        return async(() -> write(proposed.key(), connection -> {
+            if (proposed.input().size() > maxPayloadBytes()) throw failure(new ExecutionStoreFailure.PayloadTooLarge(proposed.input().size(), maxPayloadBytes()));
+            if (proposed.cause() == ai.ravenroot.api.correlation.CorrelatedTraversal.Cause.DERIVED_CONTEXT) {
+                var fence = derivingFence.orElseThrow(() -> new IllegalArgumentException("derived entry requires original lease"));
+                if (!fence.key().equals(new ExecutionKey(proposed.scope().tenantId(), proposed.derivedFrom().processInstanceId())))
+                    throw new ai.ravenroot.api.correlation.BusinessHistoryException(ai.ravenroot.api.correlation.BusinessHistoryException.Reason.CONTEXT_CONFLICT);
+                requireReplayLease(connection, fence.key(), fence);
+            } else if (derivingFence.isPresent()) throw new IllegalArgumentException("source entry cannot present a derivation lease");
+            return DeploymentEntryStorage.admit(connection, proposed, mode, businessHistoryPolicy(), clock.instant());
+        }));
+    }
+    @Override public CompletionStage<Optional<ai.ravenroot.api.persistence.DeploymentEntryIntent>> deploymentEntry(ExecutionKey key) {
+        return async(() -> read(key, connection -> DeploymentEntryStorage.load(connection, key)));
+    }
+    @Override public CompletionStage<ai.ravenroot.api.history.HistoryPage<ai.ravenroot.api.persistence.DeploymentEntrySummary>> pendingDeploymentEntries(
+            ai.ravenroot.api.correlation.BusinessScope scope, Optional<String> cursor, int limit) {
+        return async(() -> read(null, connection -> DeploymentEntryStorage.page(connection, scope, cursor, limit, businessHistoryPolicy())));
     }
     @Override public CompletionStage<java.util.Map<UUID, String>> executionInvocationNodeIds(ExecutionKey key, Set<UUID> invocationIds) {
         var requested = Set.copyOf(invocationIds);

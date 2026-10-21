@@ -22,12 +22,15 @@ final class BusinessHistoryConfiguration {
                 new CorrelationLimits(integer(properties, environment, "max-id-characters", selection.maxIdCharacters()),
                         integer(properties, environment, "max-selector-characters", selection.maxSelectorCharacters()),
                         integer(properties, environment, "max-selector-segments", selection.maxSelectorSegments()),
-                        integer(properties, environment, "max-manifest-items", selection.maxManifestItems()), selection.input()),
+                        integer(properties, environment, "max-manifest-items", selection.maxManifestItems()),
+                        ai.ravenroot.core.runtime.GraphExecutionLimits.fromEnvironment(environment).payload()),
                 integer(properties, environment, "max-cas-attempts", d.maxJoinCasAttempts()),
                 Duration.ofMillis(integer(properties, environment, "read-timeout-ms", Math.toIntExact(d.readTimeout().toMillis()))),
                 new PayloadLimits(integer(properties, environment, "response-max-bytes", response.maxEncodedBytes()), response.maxDepth(),
                         response.maxCollectionSize(), integer(properties, environment, "response-max-values", response.maxValueCount()),
-                        response.maxTextLength(), response.maxKeyLength()));
+                        response.maxTextLength(), response.maxKeyLength()),
+                integer(properties, environment, "max-pending-entries", d.maxPendingEntriesPerScope()),
+                integer(properties, environment, "max-pending-entry-bytes", Math.toIntExact(d.maxPendingEntryBytesPerScope())));
     }
     private static int integer(Map<String, String> properties, Map<String, String> environment, String name, int fallback) {
         String property = "ravenroot.history." + name;

@@ -14,11 +14,14 @@ class BusinessHistoryConfigurationTest {
         properties.setProperty("ravenroot.history.max-page-size", "1000");
         properties.setProperty("ravenroot.history.response-max-bytes", "1048576");
         properties.setProperty("ravenroot.history.read-timeout-ms", "250");
+        properties.setProperty("ravenroot.history.max-pending-entries", "25");
         var parsed = assertInstanceOf(ExecutionStoreConfiguration.SingleHost.class,
                 ExecutionStoreConfiguration.fromSystem(properties, Map.of("RAVENROOT_EXECUTION_STORE_DIR", directory.toString(),
-                        "RAVENROOT_HISTORY_MAX_PAGE_SIZE", "20", "RAVENROOT_HISTORY_MAX_ID_CHARACTERS", "128")));
+                        "RAVENROOT_HISTORY_MAX_PAGE_SIZE", "20", "RAVENROOT_HISTORY_MAX_ID_CHARACTERS", "128",
+                        "RAVENROOT_HISTORY_MAX_PENDING_ENTRIES", "50", "RAVENROOT_HISTORY_MAX_PENDING_ENTRY_BYTES", "1048576")));
         var policy = parsed.storeConfig().businessHistories();
         assertEquals(1000, policy.maxPageSize()); assertEquals(1048576, policy.response().maxEncodedBytes());
+        assertEquals(25, policy.maxPendingEntriesPerScope()); assertEquals(1048576, policy.maxPendingEntryBytesPerScope());
         assertEquals(Duration.ofMillis(250), policy.readTimeout()); assertEquals(128, policy.selection().maxIdCharacters());
         try (var opened = ExecutionStoreBootstrap.openOwned(parsed, Clock.systemUTC())) {
             assertEquals(policy, opened.store().businessHistoryPolicy());
@@ -33,7 +36,8 @@ class BusinessHistoryConfigurationTest {
     }
     @Test void resourceCeilingsAndContradictoryProjectionBudgetsFailBeforeComposition() {
         for (var invalid : List.of(Map.of("RAVENROOT_HISTORY_MAX_PAGE_SIZE", "1001"), Map.of("RAVENROOT_HISTORY_MAX_PAGE_SIZE", "0"),
-                Map.of("RAVENROOT_HISTORY_READ_TIMEOUT_MS", "60001"), Map.of("RAVENROOT_HISTORY_RESPONSE_MAX_BYTES", "16777217"),
+                Map.of("RAVENROOT_HISTORY_READ_TIMEOUT_MS", "60001"), Map.of("RAVENROOT_HISTORY_MAX_PENDING_ENTRIES", "100001"),
+                Map.of("RAVENROOT_HISTORY_MAX_PENDING_ENTRY_BYTES", "67108865"), Map.of("RAVENROOT_HISTORY_RESPONSE_MAX_BYTES", "16777217"),
                 Map.of("RAVENROOT_HISTORY_MAX_PAGE_SIZE", "1000", "RAVENROOT_HISTORY_RESPONSE_MAX_VALUES", "1000")))
             assertThrows(IllegalArgumentException.class, () -> BusinessHistoryConfiguration.fromSources(Map.of(), invalid));
         assertEquals(BusinessHistoryPolicy.DEFAULTS, BusinessHistoryConfiguration.fromSources(Map.of(), Map.of()));

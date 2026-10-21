@@ -42,8 +42,10 @@ public final class ExecutionBatch {
     private final List<ReplayInvocationEvidence> replayEvidence;
     private final DerivedExecutionAncestry derivedAncestry;
     private final ReplaySourceSettlement replaySourceExpectation;
+    private final DeploymentEntryRuntimeState deploymentEntryRuntimeState;
 
     private ExecutionBatch(Builder builder) {
+        this.deploymentEntryRuntimeState = builder.deploymentEntryRuntimeState;
         this.runnerOperations = List.copyOf(builder.runnerOperations);
         this.key = builder.key;
         this.expectation = builder.expectation;
@@ -97,6 +99,11 @@ public final class ExecutionBatch {
     public static Builder to(ExecutionKey key) {
         return new Builder(key);
     }
+
+    /** Runtime counters committed with retained SOURCE custody, when supplied by the runtime.
+     * @return original monotone counters; absent for non-entry writes
+     */
+    public Optional<DeploymentEntryRuntimeState> deploymentEntryRuntimeState() { return Optional.ofNullable(deploymentEntryRuntimeState); }
 
 /**
  * Returns the aggregate every operation in this batch affects.
@@ -397,6 +404,7 @@ public final class ExecutionBatch {
             return this;
         }
         private final ExecutionKey key;
+        private DeploymentEntryRuntimeState deploymentEntryRuntimeState;
         private RevisionExpectation expectation = RevisionExpectation.any();
         private Long fencingToken;
         private final List<ExecutionTransition> transitions = new ArrayList<>();
@@ -695,6 +703,14 @@ public final class ExecutionBatch {
             if (replaySourceExpectation != null) throw new IllegalStateException("source settlement is already set");
             replaySourceExpectation = settlement;
             return this;
+        }
+
+        /** Retains runtime counters atomically with lifecycle progress of a SOURCE-owned entry.
+         * @param state original monotone budget and source reservation
+         * @return this builder
+         */
+        public Builder deploymentEntryRuntimeState(DeploymentEntryRuntimeState state) {
+            this.deploymentEntryRuntimeState = java.util.Objects.requireNonNull(state); return this;
         }
 
 /**

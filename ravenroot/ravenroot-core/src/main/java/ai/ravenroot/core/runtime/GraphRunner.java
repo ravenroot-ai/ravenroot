@@ -1213,6 +1213,35 @@ public final class GraphRunner implements AutoCloseable {
             GraphExecutionLimits executionGraphLimits,
             ai.ravenroot.api.persistence.DerivedExecutionWork preparedRoot,
             boolean calledExecution) {
+        return executeStartingAt(security, processInstanceId, traversalId, startNodeId, sourceNodeId, payload,
+                attributes, initialCommand, graphVersion, deploymentId, workloadId, recorder, executionOperationalPolicy,
+                executionGraphLimits, preparedRoot, calledExecution, null);
+    }
+
+    CompletionStage<GraphExecutionResult> executeRetainedSource(ai.ravenroot.api.persistence.DeploymentEntryIntent entry,
+            String graphVersion, String deploymentId, ExecutionRecorder recorder,
+            ai.ravenroot.api.persistence.ResolvedOperationalPolicy policy, GraphExecutionLimits limits) {
+        if (!entry.scope().graphVersion().equals(graphVersion) || !entry.scope().deploymentId().equals(deploymentId)
+                || !entry.processInstanceId().equals(recorder.processInstanceId()) || !entry.scope().tenantId().equals(recorder.tenantId()))
+            throw new IllegalArgumentException("retained SOURCE scope mismatch");
+        if (entry.checkpoint() == null) return executeIngress(entry.identity(), entry.processInstanceId(), entry.traversalId(),
+                entry.entryNodeId(), ai.ravenroot.api.payload.PayloadJson.read(entry.input().bytes(), limits.payload()).toJava(),
+                graphVersion, deploymentId, entry.traversalId().toString(), recorder, policy, limits);
+        var definition = runtimeDefinitions.get(entry.entryNodeId());
+        if (definition == null || definition.nature() != NodeRuntimeNature.SOURCE || authoredBypassNodes.contains(entry.entryNodeId()))
+            throw new IllegalArgumentException("retained entry requires its enabled pinned SOURCE");
+        return executeStartingAt(entry.identity(), entry.processInstanceId(), entry.traversalId(), entry.entryNodeId(), null,
+                ai.ravenroot.api.payload.PayloadJson.read(entry.input().bytes(), limits.payload()).toJava(), Map.of(), NodeCommand.PROCESS,
+                graphVersion, deploymentId, entry.traversalId().toString(), recorder, policy, limits, null, false, entry.checkpoint());
+    }
+
+    private CompletionStage<GraphExecutionResult> executeStartingAt(
+            SecurityContext security, UUID processInstanceId, UUID traversalId, String startNodeId,
+            String sourceNodeId, Object payload, Map<String, Object> attributes, NodeCommand initialCommand,
+            String graphVersion, String deploymentId, String workloadId, ExecutionRecorder recorder,
+            ai.ravenroot.api.persistence.ResolvedOperationalPolicy executionOperationalPolicy,
+            GraphExecutionLimits executionGraphLimits, ai.ravenroot.api.persistence.DerivedExecutionWork preparedRoot,
+            boolean calledExecution, ai.ravenroot.api.persistence.DeploymentEntryCheckpoint retainedEntry) {
         java.util.Objects.requireNonNull(security, "security");
         java.util.Objects.requireNonNull(executionGraphLimits, "executionGraphLimits");
         if (processInstanceId == null) throw new IllegalArgumentException("processInstanceId cannot be null");
@@ -1223,15 +1252,29 @@ public final class GraphRunner implements AutoCloseable {
                 recorder == null ? transientCorrelation(startNodeId, payload, processInstanceId)
                         : recorder.applicationCorrelation(traversalId));
         GraphNode start = graph.node(startNodeId);
-        var budget = new ExecutionBudget(executionGraphLimits, runnerActorCapacity);
-        ExecutionBudget.Hop rootHop = budget.reserveRoot(
-                measureDelivery(payload, attributes, executionGraphLimits));
-        var state = preparedRoot == null
+        var budget = retainedEntry == null ? new ExecutionBudget(executionGraphLimits, runnerActorCapacity)
+                : ExecutionBudget.restore(executionGraphLimits, new GraphExecutionBudgetSnapshot(
+                        retainedEntry.runtimeState().traversalSteps(), retainedEntry.runtimeState().amplifiedDeliveries(),
+                        retainedEntry.runtimeState().payloadBytes(), 1, 0), runnerActorCapacity);
+        ExecutionBudget.Hop rootHop = retainedEntry == null ? budget.reserveRoot(
+                measureDelivery(payload, attributes, executionGraphLimits)) : budget.resumeReservedHop();
+        var state = preparedRoot == null && retainedEntry == null
                 ? new ExecutionState(processInstanceId, traversalId, start.id(), new BranchLiveness(start.id()),
                         recorder, identity, identitySource, clock, executionGraphLimits, budget, calledExecution)
                 : new ExecutionState(processInstanceId, traversalId, start.id(), new BranchLiveness(start.id()),
                         recorder, identity, identitySource, clock, recorder.storedState(),
                         executionGraphLimits, budget, calledExecution, List.of());
+        if (retainedEntry != null) {
+            state.retainedSourceRecovery = true;
+            state.sourceFanOutReserved = retainedEntry.runtimeState().rootFanOutReserved();
+            state.traversalAcceptedPublished = true;
+            state.recoveredSourceInvocation = retainedEntry.invocationId();
+            state.preexistingSourceChildren = state.lifecycle.traversals().get(traversalId).invocations().values().stream()
+                    .anyMatch(visit -> visit.parentInvocationIds().contains(retainedEntry.invocationId()));
+            state.everFannedOut = targetDeliveries(graph.nextEdges(startNodeId, "continue"), NodeCommand.PROCESS).size() > 1;
+            state.recoveredOriginalVisits = Set.copyOf(state.lifecycle.traversals().get(traversalId).invocations().keySet());
+            state.lifecycle.traversals().get(traversalId).invocations().values().forEach(visit -> state.visitedNodes.add(visit.nodeId()));
+        }
         var coordinator = new JoinCoordinator(joinStore, engine.scheduler(), monitor, identity, joinSpecs, clock,
                 timeoutRelinquishedObserver);
         if (coordinators.putIfAbsent(traversalId, coordinator) != null) {
@@ -1265,7 +1308,9 @@ public final class GraphRunner implements AutoCloseable {
         // one event this journal holds whose own cause lies outside it — the authenticated request.
         NodeCommand routedCommand = executionPolicy == ExecutionPolicy.TEST_PASSTHROUGH
                 ? NodeCommand.PASSTHROUGH : initialCommand;
-        CompletionStage<Void> root = preparedRoot == null
+        CompletionStage<Void> root = retainedEntry != null
+                ? dispatchRetainedSource(start, payload, state, identity, coordinator, retainedEntry, rootHop)
+                : preparedRoot == null
                 ? dispatch(start, sourceNodeId, payload, attributes, Set.of(), routedCommand,
                         state.traversalAcceptedEventId(), state, identity, coordinator,
                         IterationContext.EMPTY, rootHop)
@@ -1326,6 +1371,11 @@ public final class GraphRunner implements AutoCloseable {
                     }
                     if (suspension instanceof VerifiedExternalWorkSuspension verified) {
                         return CompletableFuture.<GraphExecutionResult>failedFuture(verified.signal());
+                    }
+                    if (outcome == null && state.preexistingSourceChildren && !recoveredSourceBranchesAreClosedLeaves(state)) {
+                        // Reconciliation owns only missing SOURCE successors. Existing real effects and
+                        // their pending continuations retain their original recovery authority.
+                        return CompletableFuture.<GraphExecutionResult>failedFuture(new RetainedEntryPendingException());
                     }
                     if (outcome == null) {
                         try {
@@ -2972,6 +3022,53 @@ public final class GraphRunner implements AutoCloseable {
                 coordinator, iteration, hop);
     }
 
+    private boolean recoveredSourceBranchesAreClosedLeaves(ExecutionState state) {
+        if (state.hasUnfinishedInvocation()) return false;
+        var visits = state.lifecycle.traversals().get(state.traversalId).invocations();
+        return state.recoveredOriginalVisits.stream().filter(id -> !id.equals(state.recoveredSourceInvocation))
+                .map(visits::get).allMatch(visit -> visit != null && visit.status() == NodeInvocationStatus.COMPLETED
+                        && graph.edges().stream().noneMatch(edge -> edge.source().equals(visit.nodeId())));
+    }
+
+    /** A partial source reconciliation leaves existing real work under its original authority. */
+    static final class RetainedEntryPendingException extends RuntimeException {
+        RetainedEntryPendingException() { super("retained source has original downstream work requiring reconciliation"); }
+    }
+
+    private CompletionStage<Void> dispatchRetainedSource(GraphNode node, Object payload, ExecutionState state,
+            ExecutionMonitor.ExecutionIdentity identity, JoinCoordinator coordinator,
+            ai.ravenroot.api.persistence.DeploymentEntryCheckpoint checkpoint, ExecutionBudget.Hop hop) {
+        var invocation = state.lifecycle.traversals().get(state.traversalId).invocations().get(checkpoint.invocationId());
+        var attempt = invocation == null ? null : invocation.attempts().stream()
+                .filter(value -> value.attemptId().equals(checkpoint.attemptId())).findFirst().orElse(null);
+        if (invocation == null || attempt == null || !invocation.nodeId().equals(node.id())
+                || !invocation.parentInvocationIds().isEmpty() || !invocation.command().equals(NodeCommand.PROCESS)
+                || checkpoint.completedEventId() == null && (invocation.status() != NodeInvocationStatus.RUNNING
+                    || attempt.status() != NodeAttemptStatus.RUNNING)
+                || checkpoint.completedEventId() != null && (invocation.status() != NodeInvocationStatus.COMPLETED
+                    || attempt.status() != NodeAttemptStatus.COMPLETED)) {
+            hop.close(); return CompletableFuture.failedFuture(new IllegalStateException("original SOURCE checkpoint mismatch"));
+        }
+        var definition = runtimeDefinitions.get(node.id());
+        var admission = new TraversalAdmissionRegistry.Key(identity.security().tenantId(), identity.deploymentId(),
+                identity.graphVersion(), identity.traversalId(), node.id());
+        return traversalAdmission.acquire(admission, definition.maxConcurrency(), state.limits.maxLiveActorsPerTraversal(),
+                state.limits.maxQueuedAdmissionsPerNode()).thenCompose(lease -> {
+            if (cancelledTraversals.contains(identity.traversalId())) {
+                lease.close(); hop.close(); return CompletableFuture.failedFuture(new TraversalCancelledException(state.traversalId, node.id()));
+            }
+            UUID completed = checkpoint.completedEventId() == null
+                    ? state.sourceCompleted(checkpoint.invocationId(), checkpoint.attemptId(), checkpoint.startedEventId(), false)
+                    : checkpoint.completedEventId();
+            lease.close(); hop.close();
+            var result = new NodeResult("continue", payload, Map.of());
+            return dispatchSuccessors(graph.nextEdges(node.id(), "continue"), node, result, measure(result, state.limits),
+                    new NodeMessage(identity.security(), identity.processInstanceId(), identity.traversalId(),
+                            checkpoint.invocationId(), checkpoint.attemptId(), Set.of(), node.id(), payload, Map.of(),
+                            NodeCommand.PROCESS, identity.applicationCorrelation()), completed, state, identity, coordinator, IterationContext.EMPTY);
+        }).whenComplete((ignored, failed) -> hop.close());
+    }
+
     /** Dispatches the one root attempt already admitted atomically with derived ancestry. */
     private CompletionStage<Void> dispatchPrepared(GraphNode node, String sourceNodeId, Object payload,
                                                    Map<String, Object> attributes, NodeCommand command,
@@ -3976,17 +4073,30 @@ public final class GraphRunner implements AutoCloseable {
                                                         ExecutionMonitor.ExecutionIdentity identity,
                                                         JoinCoordinator coordinator, IterationContext iteration) {
         var deliveries = targetDeliveries(edges, delivered.command());
+        boolean sourceRoot = runtimeDefinitions.get(node.id()).nature() == NodeRuntimeNature.SOURCE
+                && delivered.parentInvocationIds().isEmpty()
+                && state.lifecycle.traversals().get(state.traversalId).ingressNodeId().equals(node.id());
+        boolean alreadyReserved = sourceRoot && state.retainedSourceRecovery && state.sourceFanOutReserved;
+        if (sourceRoot && state.retainedSourceRecovery) {
+            var originalVisits = state.lifecycle.traversals().get(state.traversalId).invocations().values();
+            deliveries = deliveries.stream().filter(target -> originalVisits.stream().noneMatch(visit ->
+                    visit.parentInvocationIds().contains(state.recoveredSourceInvocation)
+                            && visit.nodeId().equals(target.targetId()) && visit.command().equals(target.command()))).toList();
+        }
         // Reserve the entire batch before any liveness change, event, actor, or child state exists.
         // An over-budget fan-out therefore has no successfully dispatched prefix.
-        List<ExecutionBudget.Hop> hops = state.budget.reserveFanOut(deliveries.size(), routedBytes);
-        var taken = deliveries.stream().map(TargetDelivery::targetId).toList();
+        List<ExecutionBudget.Hop> hops = alreadyReserved ? state.budget.resumeFanOut(deliveries.size())
+                : state.budget.reserveFanOut(deliveries.size(), routedBytes);
+        if (sourceRoot) state.sourceFanOutReserved = true;
+        final var selectedDeliveries = deliveries;
+        var taken = targetDeliveries(edges, delivered.command()).stream().map(TargetDelivery::targetId).toList();
         // `iteration` is read from this runner's scope and from `delivered`, never from `result`.
         // That is the whole of why the token cannot be forged: result is what the node returned.
         var dispatches = new ArrayList<>(state.liveness.reportUntaken(node.id(), taken, coordinator, iteration));
         // Record the complete fan-out before any child can reach a durable pause boundary.
         state.successorsDispatched(deliveries.size());
         List<Integer> humanTaskRoutes = java.util.stream.IntStream.range(0, deliveries.size())
-                .filter(index -> reachesHumanTask(deliveries.get(index).targetId()))
+                .filter(index -> reachesHumanTask(selectedDeliveries.get(index).targetId()))
                 .boxed().toList();
         if (humanTaskRoutes.size() == 1 && deliveries.size() > 1) {
             int withheld = humanTaskRoutes.getFirst();
@@ -3999,7 +4109,7 @@ public final class GraphRunner implements AutoCloseable {
             }
             return coordinator.awaitContinuationBoundary(state.budget, 1, dispatches)
                     .thenCompose(ignored -> {
-                        CompletableFuture<Void> humanTask = dispatchSuccessor(deliveries.get(withheld), node,
+                        CompletableFuture<Void> humanTask = dispatchSuccessor(selectedDeliveries.get(withheld), node,
                                 result, delivered, causedBy, state, identity, coordinator, iteration,
                                 hops.get(withheld));
                         withheldDispatched.set(true);
@@ -5973,6 +6083,7 @@ public final class GraphRunner implements AutoCloseable {
                                boolean calledExecution) {
             this.traversalId = traversalId;
             this.recorder = recorder;
+            this.sourceFanOutReserved = recorder != null && recorder.sourceFanOutReserved();
             this.liveness = liveness;
             this.identity = identity;
             this.identitySource = identitySource;
@@ -6006,6 +6117,7 @@ public final class GraphRunner implements AutoCloseable {
                                List<ai.ravenroot.api.payload.PayloadValue> priorCalledEndOutputs) {
             this.traversalId = traversalId;
             this.recorder = recorder;
+            this.sourceFanOutReserved = recorder != null && recorder.sourceFanOutReserved();
             this.liveness = liveness;
             this.identity = identity;
             this.identitySource = identitySource;
@@ -6057,6 +6169,11 @@ public final class GraphRunner implements AutoCloseable {
          * traversal that had two.</p>
          */
         private volatile boolean everFannedOut;
+        private boolean sourceFanOutReserved;
+        private boolean retainedSourceRecovery;
+        private UUID recoveredSourceInvocation;
+        private boolean preexistingSourceChildren;
+        private Set<UUID> recoveredOriginalVisits = Set.of();
 
         /** Records what a node's successor dispatch did, so a later hold can know whether to trust it. */
         private void successorsDispatched(int count) {
@@ -6933,13 +7050,19 @@ public final class GraphRunner implements AutoCloseable {
             if (recorder == null || (transitions.isEmpty() && events.isEmpty())) {
                 return;
             }
-            recorder.record(transitions, events);
+            recorder.record(transitions, events, List.of(), List.of(), entryRuntimeState());
         }
 
         private void record(List<ExecutionTransition> transitions, List<EventEnvelope> events,
                             List<ai.ravenroot.api.persistence.ReplayInvocationEvidence> evidence) {
             if (recorder == null || (transitions.isEmpty() && events.isEmpty() && evidence.isEmpty())) return;
-            recorder.record(transitions, events, List.of(), evidence);
+            recorder.record(transitions, events, List.of(), evidence, entryRuntimeState());
+        }
+
+        private ai.ravenroot.api.persistence.DeploymentEntryRuntimeState entryRuntimeState() {
+            var counters = budget.snapshot();
+            return new ai.ravenroot.api.persistence.DeploymentEntryRuntimeState(counters.traversalSteps(),
+                    counters.amplifiedDeliveries(), counters.payloadBytes(), sourceFanOutReserved);
         }
 
         private UUID eventId() {

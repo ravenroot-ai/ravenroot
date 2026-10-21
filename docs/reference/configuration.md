@@ -161,6 +161,8 @@ Application correlation mappings cannot raise these operator-owned limits.
 | `ravenroot.history.max-retained-joins` | `RAVENROOT_HISTORY_MAX_RETAINED_JOINS` | `1024` | All retained join generations, including small terminal tombstones. |
 | `ravenroot.history.max-contributions` | `RAVENROOT_HISTORY_MAX_CONTRIBUTIONS` | `1024` | Distinct contributions per join. |
 | `ravenroot.history.max-join-payload-bytes` | `RAVENROOT_HISTORY_MAX_JOIN_PAYLOAD_BYTES` | `16777216` | Dedicated retained contribution payload bytes per join. |
+| `ravenroot.history.max-pending-entries` | `RAVENROOT_HISTORY_MAX_PENDING_ENTRIES` | `1024` | Pending source or explicit derivation inputs per scope; hard ceiling 100000. |
+| `ravenroot.history.max-pending-entry-bytes` | `RAVENROOT_HISTORY_MAX_PENDING_ENTRY_BYTES` | `16777216` | Total retained entry input, identity and reserved checkpoint bytes per scope; hard ceiling 67108864 bytes. |
 | `ravenroot.history.max-page-size` | `RAVENROOT_HISTORY_MAX_PAGE_SIZE` | `100` | Largest requested metadata page; hard ceiling 1000. |
 | `ravenroot.history.retention-seconds` | `RAVENROOT_HISTORY_RETENTION_SECONDS` | `2592000` | Business metadata retention deadline; compact tombstones preserve closure. |
 | `ravenroot.history.join-deadline-seconds` | `RAVENROOT_HISTORY_JOIN_DEADLINE_SECONDS` | `86400` | Deadline for incomplete joins; cannot exceed history retention. |
@@ -178,7 +180,9 @@ join and response budgets, excessive pages, and values above its safety ceilings
 can supply the same `BusinessHistoryPolicy` through `SqliteStoreConfig.withBusinessHistories` or
 `PostgresStoreConfig.withBusinessHistories`, including a bounded `PayloadLimits` response policy.
 The default response policy permits 4 MiB, depth 64, 2000 entries per collection, 100000 total
-values, 262144 characters per text and 256 per key. Workflow input payload budgets remain separate.
+values, 262144 characters per text and 256 per key. Workflow input payload budgets remain separate. Correlation selectors read within the configured graph
+input payload budget. Pending-entry quotas include bounded identity and causal checkpoint overhead;
+a full quota refuses the next admission before it can return a committed receipt.
 A response exceeding its configured projection budget is refused; it is never silently truncated.
 
 The server publishes the effective history policy to authenticated SDK readers through

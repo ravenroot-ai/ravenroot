@@ -11,6 +11,27 @@ Protect accepted executions and audit evidence across drain, backup, restart, an
 5. After restart or restore, the durable process inventory (`GET /v1/executions/inventory`, or `ravenroot inventory`) is queryable immediately, with no rebuild delay: it is read from the same rows the lifecycle committed, not from a projection that has to catch up. Use it, not the process-local live-execution view, to find work that outlived the restart. `ravenroot inventory` reads the tenant's whole answer in one call — it pages through the HTTP route internally rather than returning a first page, so its output is never a truncated view of a large tenant.
 6. When an instance you expect to find is absent from `GET /v1/executions/inventory` or `ravenroot inventory`, do not compare against its creation time — the `retainedFrom` floor every inventory listing carries (both process-instance and per-instance traversal listings, and the trailing `retained-from=` line the CLI prints) is measured in retention-deadline space, not creation space, and the boundary is exclusive: a row whose own deadline (`retainedUntil`, or its terminal-transition instant plus the configured terminal retention if you never read the row) sits strictly after the floor is guaranteed still present, while a deadline at or before the floor may have been purged. Compare the instance's deadline against the floor, not when it was created, before concluding the identifier is wrong. In this release that comparison will read as "still present" for every terminal instance regardless of age: see Authority below for why.
 
+## Initial START and source-entry state
+
+The deployment initial START marker is permanent for its tenant and logical deployment. Transport
+inbox expiry and execution retention do not grant another initial START. A distinct deployment remains
+an explicit independent action.
+
+SQLite schema 41 and PostgreSQL schema 21 add this marker, scoped business history, correlated join
+state, scalar join members and retained source-entry input custody. Startup applies each adapter's
+ordered transactional migrations. Existing execution, traversal and journal rows remain authoritative;
+missing business context on historical rows remains uncorrelated rather than being guessed from a
+payload or request identifier. A legacy running source admission without retained input requires an
+explicit unavailable reconciliation outcome; recovery never manufactures an empty input for it.
+
+Retained source input belongs in the same storage-consistent backup as its immutable graph definition,
+manifest, original causal checkpoint and business relationship. Do not restore only an inbox or only
+the new summary tables: neither contains the complete accepted work. A version ahead of the binary is
+refused. Rollback means restoring the complete pre-upgrade backup into an isolated target and running
+the matching older binary, rather than deleting the new tables or lowering a schema version number.
+See [source custody](deployment-startup.md#source-receipt-custody-and-restart) for the receipt and
+terminal-retirement ordering.
+
 ## Graph definitions
 
 Accepting an execution durably stores the exact canonical GraphML document it will run, before the execution is recorded, and binds the execution to that document's content address. Acceptance is refused if the document cannot be stored. An accepted execution is therefore always one whose graph is retained, and the retained document — not a copy held by whichever process accepted it — is the authoritative record of what that execution was accepted to run.

@@ -16,11 +16,36 @@ import java.util.Objects;
  * @param maxJoinCasAttempts maximum revision-conflict retries within one bounded contribution admission
  * @param readTimeout total wait budget for one SDK history operation
  * @param response operator-owned encoded-size and tree bounds for public response projection
+ * @param maxPendingEntriesPerScope finite count ceiling for retained source and derivation input custody
+ * @param maxPendingEntryBytesPerScope finite total retained entry-input byte ceiling in one scope
  */
 public record BusinessHistoryPolicy(int maxHistoriesPerScope, int maxOpenJoinsPerHistory, int maxRetainedJoinsPerHistory,
                                     int maxContributionsPerJoin, long maxJoinPayloadBytes,
                                     int maxPageSize, Duration historyRetention, Duration joinDeadline,
-                                    CorrelationLimits selection, int maxJoinCasAttempts, Duration readTimeout, ai.ravenroot.api.payload.PayloadLimits response) {
+                                    CorrelationLimits selection, int maxJoinCasAttempts, Duration readTimeout, ai.ravenroot.api.payload.PayloadLimits response,
+                                    int maxPendingEntriesPerScope, long maxPendingEntryBytesPerScope) {
+    /** Compatibility constructor retaining finite input-custody quotas.
+     * @param maxHistoriesPerScope retained business identity ceiling
+     * @param maxOpenJoinsPerHistory open correlated-join ceiling per business history
+     * @param maxRetainedJoinsPerHistory retained join-summary ceiling per history
+     * @param maxContributionsPerJoin distinct contribution ceiling per correlated join
+     * @param maxJoinPayloadBytes retained contribution byte ceiling per join
+     * @param maxPageSize maximum requested metadata page size
+     * @param historyRetention finite business history retention window
+     * @param joinDeadline finite correlated collection deadline
+     * @param selection operator-owned pointer, identity and input bounds
+     * @param maxJoinCasAttempts finite conflict retry ceiling
+     * @param readTimeout finite metadata read wait budget
+     * @param response finite metadata response encoding/tree bounds
+     */
+    public BusinessHistoryPolicy(int maxHistoriesPerScope, int maxOpenJoinsPerHistory, int maxRetainedJoinsPerHistory,
+            int maxContributionsPerJoin, long maxJoinPayloadBytes, int maxPageSize, Duration historyRetention,
+            Duration joinDeadline, CorrelationLimits selection, int maxJoinCasAttempts, Duration readTimeout,
+            ai.ravenroot.api.payload.PayloadLimits response) {
+        this(maxHistoriesPerScope, maxOpenJoinsPerHistory, maxRetainedJoinsPerHistory, maxContributionsPerJoin,
+                maxJoinPayloadBytes, maxPageSize, historyRetention, joinDeadline, selection, maxJoinCasAttempts,
+                readTimeout, response, 1024, 16L * 1024 * 1024);
+    }
     /** Default response tree/encoding ceiling, independent from workflow input payload budgets. */
     public static final ai.ravenroot.api.payload.PayloadLimits DEFAULT_RESPONSE_LIMITS =
             new ai.ravenroot.api.payload.PayloadLimits(4 * 1024 * 1024, 64, 2000, 100_000, 262144, 256);
@@ -99,6 +124,9 @@ public record BusinessHistoryPolicy(int maxHistoriesPerScope, int maxOpenJoinsPe
     }
     /** Rejects unlimited retention, groups, pages and payload storage. */
     public BusinessHistoryPolicy {
+        if (maxPendingEntriesPerScope < 1 || maxPendingEntriesPerScope > 100_000
+                || maxPendingEntryBytesPerScope < 1 || maxPendingEntryBytesPerScope > 64L * 1024 * 1024)
+            throw new IllegalArgumentException("invalid deployment entry custody quotas");
         if (maxJoinCasAttempts < 1 || maxJoinCasAttempts > 10000 || maxHistoriesPerScope < 1 || maxHistoriesPerScope > 10_000_000 || maxOpenJoinsPerHistory < 1
                 || maxOpenJoinsPerHistory > 1024 || maxRetainedJoinsPerHistory < maxOpenJoinsPerHistory
                 || maxRetainedJoinsPerHistory > 100_000 || maxContributionsPerJoin < 1 || maxContributionsPerJoin > 10_000

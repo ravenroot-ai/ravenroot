@@ -415,6 +415,13 @@ public final class ExecutionRecorder implements AutoCloseable {
     public void record(List<ExecutionTransition> transitions, List<EventEnvelope> events,
                                     List<AgentBudgetOperation> agentBudgetOperations,
                                     List<ReplayInvocationEvidence> replayEvidence) {
+        record(transitions, events, agentBudgetOperations, replayEvidence, null);
+    }
+
+    /** Commits original SOURCE budget counters in the same lifecycle transaction. */
+    public void record(List<ExecutionTransition> transitions, List<EventEnvelope> events,
+            List<AgentBudgetOperation> agentBudgetOperations, List<ReplayInvocationEvidence> replayEvidence,
+            ai.ravenroot.api.persistence.DeploymentEntryRuntimeState entryState) {
         operationLock.lock();
         try {
             requireFence();
@@ -448,6 +455,7 @@ public final class ExecutionRecorder implements AutoCloseable {
                 agentBudgetOperations.forEach(batch::applyAgentBudget);
             }
             if (replayEvidence != null) replayEvidence.forEach(batch::captureReplayEvidence);
+            if (entryState != null) batch.deploymentEntryRuntimeState(entryState);
             try {
                 StoredProcessInstance applied = await(store.apply(batch.build()));
                 revision = applied.revision();
@@ -1026,6 +1034,12 @@ public final class ExecutionRecorder implements AutoCloseable {
         } finally {
             operationLock.unlock();
         }
+    }
+
+    boolean sourceFanOutReserved() {
+        if (!store.supports(StoreCapability.DEPLOYMENT_ENTRY_CUSTODY)) return false;
+        return await(store.deploymentEntry(key)).map(entry -> entry.checkpoint() != null
+                && entry.checkpoint().runtimeState().rootFanOutReserved()).orElse(false);
     }
 
     /**

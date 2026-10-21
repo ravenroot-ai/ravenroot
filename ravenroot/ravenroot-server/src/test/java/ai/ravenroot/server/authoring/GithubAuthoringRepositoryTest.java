@@ -48,6 +48,77 @@ class GithubAuthoringRepositoryTest {
             new GraphAuthoringRepository.Revision("absent", "absent", "absent");
 
     @Test
+    void successorRecoversAcrossRestartWithoutAnotherIncrement() {
+        var api = new ScriptedGithub();
+        var publication = new java.util.concurrent.atomic.AtomicReference<>("absent");
+        GraphAuthoringRepository.MutationRequest request;
+        byte[] expected;
+        long writes;
+        try (var repository = repository(api, (t, g, v, c, b) -> publication.get())) {
+            repository.save(ALICE, new GraphAuthoringRepository.SaveRequest("orders.graphml", graph("one"),
+                    EMPTY, "restart-initial-key-001")).toCompletableFuture().join();
+            api.mergeDraftToMain();
+            var release = repository.open(ALICE, "orders.graphml", true).toCompletableFuture().join();
+            request = new GraphAuthoringRepository.MutationRequest("orders.graphml", "",
+                    release.summary().revision(), "restart-successor-key-01");
+            api.loseNextPatchResponse();
+            var created = repository.createNextVersion(ALICE, request).toCompletableFuture().join();
+            publication.set("published-after-success");
+            expected = created.graphMl(); writes = api.authoredCommitCount();
+        }
+        try (var repository = repository(api, (t, g, v, c, b) -> publication.get())) {
+            var recovered = repository.createNextVersion(ALICE, request).toCompletableFuture().join();
+            assertEquals(2, recovered.summary().releaseVersion());
+            assertArrayEquals(expected, recovered.graphMl());
+            assertEquals(writes, api.authoredCommitCount());
+            assertFailure(GraphAuthoringException.Failure.UNAUTHORIZED, () -> repository.createNextVersion(
+                    new GraphAuthoringRepository.Actor("other-tenant", "alice"), request).toCompletableFuture().join());
+        }
+    }
+
+    @Test
+    void successorRejectsAbsentReleaseStaleObservationsLegacyDivergenceAndMaximumVersion() {
+        var api = new ScriptedGithub();
+        try (var repository = repository(api, (t, g, v, c, b) -> "absent")) {
+            var first = repository.save(ALICE, new GraphAuthoringRepository.SaveRequest("orders.graphml",
+                    graph("one"), EMPTY, "edge-create-key-000001")).toCompletableFuture().join();
+            assertFailure(GraphAuthoringException.Failure.CONFLICT, () -> repository.createNextVersion(ALICE,
+                    new GraphAuthoringRepository.MutationRequest("orders.graphml", "", first.summary().revision(),
+                            "edge-no-release-key-001")).toCompletableFuture().join());
+            api.mergeDraftToMain();
+            var released = repository.open(ALICE, "orders.graphml", false).toCompletableFuture().join();
+            var actual = released.summary().revision();
+            for (int index = 0; index < 3; index++) {
+                var stale = new GraphAuthoringRepository.Revision(index == 0 ? "stale" : actual.draft(),
+                        index == 1 ? "stale" : actual.release(), index == 2 ? "stale" : actual.publication());
+                int part = index;
+                assertFailure(GraphAuthoringException.Failure.CONFLICT, () -> repository.createNextVersion(ALICE,
+                        new GraphAuthoringRepository.MutationRequest("orders.graphml", "", stale,
+                                "edge-stale-key-00000" + part)).toCompletableFuture().join());
+            }
+            api.external("graphs/customers/a/orders.graphml", GraphReleaseMetadata.assign(graph("legacy"), first.summary().graphId(), 1).graphMl());
+            var legacy = repository.open(ALICE, "orders.graphml", false).toCompletableFuture().join();
+            var noOp = repository.save(ALICE, new GraphAuthoringRepository.SaveRequest("orders.graphml", legacy.graphMl(),
+                    legacy.summary().revision(), "legacy-unchanged-key-001")).toCompletableFuture().join();
+            assertArrayEquals(legacy.graphMl(), noOp.graphMl());
+            assertEquals(legacy.summary().revision(), noOp.summary().revision());
+            assertFailure(GraphAuthoringException.Failure.CONFLICT, () -> repository.save(ALICE,
+                    new GraphAuthoringRepository.SaveRequest("orders.graphml", graph("changed legacy"), legacy.summary().revision(),
+                            "legacy-changed-key-0001")).toCompletableFuture().join());
+            assertFailure(GraphAuthoringException.Failure.CONFLICT, () -> repository.createNextVersion(ALICE,
+                    new GraphAuthoringRepository.MutationRequest("orders.graphml", "", legacy.summary().revision(),
+                            "edge-legacy-key-00001")).toCompletableFuture().join());
+            assertArrayEquals(legacy.graphMl(), repository.open(ALICE, "orders.graphml", false).toCompletableFuture().join().graphMl());
+            api.external("graphs/customers/a/orders.graphml", GraphReleaseMetadata.assign(graph("max"), first.summary().graphId(), GraphReleaseMetadata.MAX_RELEASE_VERSION).graphMl());
+            api.mergeDraftToMain();
+            var maximum = repository.open(ALICE, "orders.graphml", false).toCompletableFuture().join();
+            assertFailure(GraphAuthoringException.Failure.CONFLICT, () -> repository.createNextVersion(ALICE,
+                    new GraphAuthoringRepository.MutationRequest("orders.graphml", "", maximum.summary().revision(),
+                            "edge-maximum-key-0001")).toCompletableFuture().join());
+        }
+    }
+
+    @Test
     void missingDraftBranchReadsAreSideEffectFreeAndFirstWriteProvisionsIt() {
         var github = new ScriptedGithub();
         try (var repository =
@@ -89,6 +160,9 @@ class GithubAuthoringRepositoryTest {
             assertArrayEquals(saved.graphMl(), released.graphMl());
             assertEquals(mutationsBeforeReleasedReads, github.refMutationCount());
 
+            var successor = repository.createNextVersion(ALICE,
+                    new GraphAuthoringRepository.MutationRequest("orders.graphml", "",
+                            released.summary().revision(), "missing-draft-version-001")).toCompletableFuture().join();
             var edited =
                     repository
                             .save(
@@ -96,7 +170,7 @@ class GithubAuthoringRepositoryTest {
                                     new GraphAuthoringRepository.SaveRequest(
                                             "orders.graphml",
                                             graph("two"),
-                                            released.summary().revision(),
+                                            successor.summary().revision(),
                                             "released-fork-key-000001"))
                             .toCompletableFuture()
                             .join();
@@ -276,15 +350,11 @@ class GithubAuthoringRepositoryTest {
                     repository.open(ALICE, "orders.graphml", false).toCompletableFuture().join();
             assertFalse(beforePublication.summary().published());
             github.beforeNextPatch(() -> publication.value = "published-concurrently");
-            var request =
-                    new GraphAuthoringRepository.SaveRequest(
-                            "orders.graphml",
-                            graph("two"),
-                            beforePublication.summary().revision(),
-                            "request-key-000000000005");
+            var request = new GraphAuthoringRepository.MutationRequest("orders.graphml", "",
+                    beforePublication.summary().revision(), "request-key-000000000005");
             assertFailure(
                     GraphAuthoringException.Failure.CONFLICT,
-                    () -> repository.save(ALICE, request).toCompletableFuture().join());
+                    () -> repository.createNextVersion(ALICE, request).toCompletableFuture().join());
             var unchanged =
                     repository.open(ALICE, "orders.graphml", false).toCompletableFuture().join();
             assertArrayEquals(created.graphMl(), unchanged.graphMl());
@@ -298,89 +368,48 @@ class GithubAuthoringRepositoryTest {
     }
 
     @Test
-    void onlyExactSuccessfulPublicationAdvancesADivergedDraftOnce() {
+    void explicitSuccessorDoesNotRequirePublicationAndKeepsAssignedVersion() {
         var github = new ScriptedGithub();
         var publication = new MutablePublication();
         try (var repository = repository(github, publication)) {
-            var created =
-                    repository
-                            .save(
-                                    ALICE,
-                                    new GraphAuthoringRepository.SaveRequest(
-                                            "orders.graphml",
-                                            graph("one"),
-                                            EMPTY,
-                                            "publication-flow-key-0001"))
-                            .toCompletableFuture()
-                            .join();
+            var created = repository.save(ALICE, new GraphAuthoringRepository.SaveRequest(
+                    "orders.graphml", graph("one"), EMPTY, "explicit-create-key-0001")).toCompletableFuture().join();
             github.mergeDraftToMain();
-            var failedPublication =
-                    repository.open(ALICE, "orders.graphml", false).toCompletableFuture().join();
-            assertTrue(failedPublication.summary().released());
-            assertFalse(failedPublication.summary().published());
-            assertEquals(1, failedPublication.summary().releasedVersion());
-
-            var divergedBeforePublication =
-                    repository
-                            .save(
-                                    ALICE,
-                                    new GraphAuthoringRepository.SaveRequest(
-                                            "orders.graphml",
-                                            graph("two"),
-                                            failedPublication.summary().revision(),
-                                            "publication-flow-key-0002"))
-                            .toCompletableFuture()
-                            .join();
-            assertEquals(
-                    1,
-                    divergedBeforePublication.summary().releaseVersion(),
-                    "a release branch without verified publication cannot advance authored"
-                            + " version");
-
-            publication.value = "verified-publication-v1";
-            var simultaneous =
-                    repository.list(ALICE, "").toCompletableFuture().join().items().getFirst();
-            assertEquals(1, simultaneous.releaseVersion());
-            assertEquals(1, simultaneous.releasedVersion());
-            assertTrue(simultaneous.published());
-
-            var firstSaveAfterPublication =
-                    repository
-                            .save(
-                                    ALICE,
-                                    new GraphAuthoringRepository.SaveRequest(
-                                            "orders.graphml",
-                                            divergedBeforePublication.graphMl(),
-                                            simultaneous.revision(),
-                                            "publication-flow-key-0003"))
-                            .toCompletableFuture()
-                            .join();
-            assertEquals(2, firstSaveAfterPublication.summary().releaseVersion());
-            assertEquals(1, firstSaveAfterPublication.summary().releasedVersion());
-            assertTrue(firstSaveAfterPublication.summary().published());
-            var later =
-                    repository
-                            .save(
-                                    ALICE,
-                                    new GraphAuthoringRepository.SaveRequest(
-                                            "orders.graphml",
-                                            graph("three"),
-                                            firstSaveAfterPublication.summary().revision(),
-                                            "publication-flow-key-0004"))
-                            .toCompletableFuture()
-                            .join();
-            assertEquals(
-                    2,
-                    later.summary().releaseVersion(),
-                    "later saves retain the incremented draft version");
-            assertEquals(1, later.summary().releasedVersion());
-            assertArrayEquals(
-                    created.graphMl(),
-                    repository
-                            .open(ALICE, "orders.graphml", true)
-                            .toCompletableFuture()
-                            .join()
-                            .graphMl());
+            var released = repository.open(ALICE, "orders.graphml", false).toCompletableFuture().join();
+            long commits = github.authoredCommitCount();
+            var unchanged = repository.save(ALICE, new GraphAuthoringRepository.SaveRequest(
+                    "orders.graphml", released.graphMl(), released.summary().revision(), "explicit-noop-key-00001")).toCompletableFuture().join();
+            assertArrayEquals(released.graphMl(), unchanged.graphMl());
+            assertEquals(commits, github.authoredCommitCount());
+            assertFailure(GraphAuthoringException.Failure.CONFLICT, () -> repository.save(ALICE,
+                    new GraphAuthoringRepository.SaveRequest("orders.graphml", graph("two"),
+                            released.summary().revision(), "explicit-refuse-key-0001")).toCompletableFuture().join());
+            var request = new GraphAuthoringRepository.MutationRequest("orders.graphml", "",
+                    released.summary().revision(), "explicit-version-key-0001");
+            assertEquals(1, repository.list(ALICE, "").toCompletableFuture().join().items().getFirst().releaseVersion());
+            var wrapper = new ForwardingGraphAuthoringRepository(repository);
+            var next = wrapper.createNextVersion(ALICE, request).toCompletableFuture().join();
+            assertEquals(2, wrapper.list(ALICE, "").toCompletableFuture().join().items().getFirst().releaseVersion());
+            assertFailure(GraphAuthoringException.Failure.CONFLICT, () -> wrapper.createNextVersion(BOB, request).toCompletableFuture().join());
+            assertEquals(2, next.summary().releaseVersion());
+            assertFalse(next.summary().published());
+            assertFailure(GraphAuthoringException.Failure.CONFLICT, () -> repository.createNextVersion(ALICE,
+                    new GraphAuthoringRepository.MutationRequest("orders.graphml", "", request.expected(),
+                            "same-state-competing-001")).toCompletableFuture().join());
+            assertArrayEquals(next.graphMl(), repository.createNextVersion(ALICE, request).toCompletableFuture().join().graphMl());
+            assertFailure(GraphAuthoringException.Failure.CONFLICT, () -> repository.createNextVersion(ALICE,
+                    new GraphAuthoringRepository.MutationRequest("orders.graphml", "", next.summary().revision(),
+                            "competing-version-key-001")).toCompletableFuture().join());
+            assertFailure(GraphAuthoringException.Failure.CONFLICT, () -> repository.createNextVersion(ALICE,
+                    new GraphAuthoringRepository.MutationRequest("orders.graphml", "", next.summary().revision(),
+                            request.idempotencyKey())).toCompletableFuture().join());
+            var edited = repository.save(ALICE, new GraphAuthoringRepository.SaveRequest("orders.graphml", graph("two"),
+                    next.summary().revision(), "explicit-edit-key-00001")).toCompletableFuture().join();
+            var reverted = repository.save(ALICE, new GraphAuthoringRepository.SaveRequest("orders.graphml", created.graphMl(),
+                    edited.summary().revision(), "explicit-revert-key-001")).toCompletableFuture().join();
+            assertEquals(2, reverted.summary().releaseVersion());
+            assertEquals(created.summary().graphId(), reverted.summary().graphId());
+            assertArrayEquals(created.graphMl(), repository.open(ALICE, "orders.graphml", true).toCompletableFuture().join().graphMl());
         }
     }
 
@@ -439,6 +468,9 @@ class GithubAuthoringRepositoryTest {
             assertEquals(1, released.summary().releaseVersion());
             assertTrue(released.summary().released());
 
+            var successor = secondDevice.createNextVersion(ALICE,
+                    new GraphAuthoringRepository.MutationRequest("orders.graphml", "",
+                            released.summary().revision(), "lifecycle-version-key-001")).toCompletableFuture().join();
             var changed =
                     secondDevice
                             .save(
@@ -446,7 +478,7 @@ class GithubAuthoringRepositoryTest {
                                     new GraphAuthoringRepository.SaveRequest(
                                             "orders.graphml",
                                             graph("two"),
-                                            released.summary().revision(),
+                                            successor.summary().revision(),
                                             "lifecycle-key-000000003"))
                             .toCompletableFuture()
                             .join();
@@ -511,9 +543,9 @@ class GithubAuthoringRepositoryTest {
                             .toCompletableFuture()
                             .join();
             assertEquals(
-                    1,
+                    2,
                     restored.summary().releaseVersion(),
-                    "restoring the exact published release does not invent a changed version");
+                    "restoring content retains the explicitly assigned draft version");
             assertTrue(new String(restored.graphMl(), StandardCharsets.UTF_8).contains("one"));
 
             var discarded =
@@ -528,10 +560,10 @@ class GithubAuthoringRepositoryTest {
                             .toCompletableFuture()
                             .join();
             assertEquals(
-                    1,
+                    2,
                     discarded.summary().releaseVersion(),
-                    "discard restores the reviewed version metadata");
-            assertArrayEquals(released.graphMl(), discarded.graphMl());
+                    "discard restores content while retaining the assigned successor");
+            assertEquals(2, GraphReleaseMetadata.read(discarded.graphMl()).releaseVersion());
 
             secondDevice
                     .deleteDraft(

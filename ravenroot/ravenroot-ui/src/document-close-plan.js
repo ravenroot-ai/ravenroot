@@ -19,7 +19,8 @@ export function resolveDocumentCloseSnapshot(workspace, snapshot = []) {
 
 export function classifyDocumentCloseTargets(documents = []) {
   return {
-    dirty: documents.filter(document_ => Boolean(document_.history?.isDirty())),
+    dirty: documents.filter(document_ => Boolean(document_.history?.isDirty()
+      || document_.authoring?.localChanges)),
     activeSessions: documents.filter(document_ => sourceSessionIsActive(document_.sourceSession)),
   };
 }

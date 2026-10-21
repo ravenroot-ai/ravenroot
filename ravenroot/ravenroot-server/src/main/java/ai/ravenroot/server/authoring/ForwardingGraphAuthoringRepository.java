@@ -40,6 +40,11 @@ public class ForwardingGraphAuthoringRepository implements GraphAuthoringReposit
     }
 
     @Override
+    public CompletionStage<Document> createNextVersion(Actor actor, MutationRequest request) {
+        return delegate.createNextVersion(actor, request);
+    }
+
+    @Override
     public CompletionStage<Page<HistoryEntry>> history(
             Actor actor, String documentId, String cursor) {
         return delegate.history(actor, documentId, cursor);

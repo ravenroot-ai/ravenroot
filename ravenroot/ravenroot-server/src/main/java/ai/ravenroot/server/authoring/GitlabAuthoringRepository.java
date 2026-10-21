@@ -232,6 +232,28 @@ public final class GitlabAuthoringRepository implements GraphAuthoringRepository
     }
 
     @Override
+    public CompletionStage<Document> createNextVersion(Actor actor, MutationRequest request) {
+        return async("versions", () -> {
+            requireMutation(actor, request, "versions", "");
+            if (!request.sourceRevision().isEmpty())
+                throw failure(GraphAuthoringException.Failure.INVALID_DOCUMENT);
+            // Derive retry bytes from the immutable observed release, not a later branch head.
+            String[] releaseToken = request.expected().release().split(":", -1);
+            if (releaseToken.length != 2) throw failure(GraphAuthoringException.Failure.CONFLICT);
+            FileSnapshot baseline = file(actor, request.documentId(), validateRevision(releaseToken[0]), true);
+            if (baseline == null || !token(baseline).equals(request.expected().release()))
+                throw failure(GraphAuthoringException.Failure.CONFLICT);
+            var release = GraphReleaseMetadata.read(baseline.bytes());
+            if (release == null || release.releaseVersion() >= GraphReleaseMetadata.MAX_RELEASE_VERSION)
+                throw failure(GraphAuthoringException.Failure.CONFLICT);
+            byte[] successor = GraphReleaseMetadata.assign(baseline.bytes(),
+                    release.graphId(), release.releaseVersion() + 1).graphMl();
+            return saveSync(actor, new SaveRequest(request.documentId(), successor,
+                    request.expected(), request.idempotencyKey()), "versions", true);
+        });
+    }
+
+    @Override
     public CompletionStage<Page<HistoryEntry>> history(
             Actor actor, String documentId, String cursor) {
         return async("history", () -> historySync(actor, documentId, cursor));
@@ -300,7 +322,11 @@ public final class GitlabAuthoringRepository implements GraphAuthoringRepository
                             actor,
                             new SaveRequest(
                                     request.documentId(),
-                                    state.release().bytes(),
+                                    state.draft() != null
+                                            && state.summary().releaseVersion() > state.summary().releasedVersion()
+                                            ? GraphReleaseMetadata.assign(state.release().bytes(),
+                                                    state.summary().graphId(), state.summary().releaseVersion()).graphMl()
+                                            : state.release().bytes(),
                                     request.expected(),
                                     request.idempotencyKey()),
                             "discard",
@@ -460,7 +486,7 @@ public final class GitlabAuthoringRepository implements GraphAuthoringRepository
         beginIdempotency(actor, request.idempotencyKey(), operation, fingerprint);
 
         boolean draftBranchExisted = ref(draftBranch(actor), true) != null;
-        if (draftBranchExisted && committed(actor, request.documentId(), fingerprint)) {
+        if (draftBranchExisted && committed(actor, request.documentId(), fingerprint, "versions".equals(operation))) {
             State recovered = state(actor, request.documentId());
             if (recovered.draft() == null) throw unavailable();
             GraphReleaseMetadata.Rewritten recoveredBytes =
@@ -475,6 +501,14 @@ public final class GitlabAuthoringRepository implements GraphAuthoringRepository
         }
         State initial = state(actor, request.documentId());
         requireExpected(request.expected(), initial.revision());
+        if ("versions".equals(operation) && initial.draft() != null) {
+            var draft = GraphReleaseMetadata.read(initial.draft().bytes());
+            var release = GraphReleaseMetadata.read(initial.release().bytes());
+            if (draft == null || release == null
+                    || draft.releaseVersion() != release.releaseVersion()
+                    || !MessageDigest.isEqual(initial.draft().bytes(), initial.release().bytes()))
+                throw failure(GraphAuthoringException.Failure.CONFLICT);
+        }
 
         ensureDraftBranch(actor);
         State state = state(actor, request.documentId());
@@ -491,6 +525,9 @@ public final class GitlabAuthoringRepository implements GraphAuthoringRepository
         requireUniqueGraphId(actor, request.documentId(), accepted.metadata().graphId());
         if (accepted.graphMl().length > configuration.maxDocumentBytes()) {
             throw failure(GraphAuthoringException.Failure.LIMIT_EXCEEDED);
+        }
+        if (state.draft() != null && MessageDigest.isEqual(state.draft().bytes(), accepted.graphMl())) {
+            return new Document(state.summary(), state.draft().bytes());
         }
         try {
             commitFile(
@@ -796,20 +833,17 @@ public final class GitlabAuthoringRepository implements GraphAuthoringRepository
         } else {
             version = submittedMetadata == null ? 1 : submittedMetadata.releaseVersion();
         }
-        if (releaseMetadata != null && state.summary().published()) {
-            boolean matchesPublishedRelease =
-                    equivalent(
-                            submitted,
-                            state.release().bytes(),
-                            graphId,
-                            releaseMetadata.releaseVersion());
-            version =
-                    matchesPublishedRelease
-                            ? releaseMetadata.releaseVersion()
-                            : Math.max(version, Math.addExact(releaseMetadata.releaseVersion(), 1));
+        if (releaseMetadata != null) {
+            if (draftMetadata == null || version < releaseMetadata.releaseVersion()
+                    || version > releaseMetadata.releaseVersion() + 1)
+                throw failure(GraphAuthoringException.Failure.CONFLICT);
+            if (version == releaseMetadata.releaseVersion()) {
+                // An unchanged released draft is a true no-op, including its original XML bytes.
+                if (!equivalent(submitted, state.draft().bytes(), graphId, version))
+                    throw failure(GraphAuthoringException.Failure.CONFLICT);
+                return new GraphReleaseMetadata.Rewritten(draftMetadata, state.draft().bytes());
+            }
         }
-        if (releaseMetadata != null && version < releaseMetadata.releaseVersion())
-            throw failure(GraphAuthoringException.Failure.CONFLICT);
         return GraphReleaseMetadata.assign(submitted, graphId, version);
     }
 
@@ -1275,6 +1309,10 @@ public final class GitlabAuthoringRepository implements GraphAuthoringRepository
     }
 
     private boolean committed(Actor actor, String documentId, String fingerprint) {
+        return committed(actor, documentId, fingerprint, false);
+    }
+
+    private boolean committed(Actor actor, String documentId, String fingerprint, boolean successorReplay) {
         String head = ref(draftBranch(actor), true);
         if (head == null) return false;
         Coordination coordination = coordination(actor, head);
@@ -1306,8 +1344,8 @@ public final class GitlabAuthoringRepository implements GraphAuthoringRepository
         State observed = state(actor, documentId);
         if (observed.draft() != null)
             requireUniqueGraphId(actor, documentId, observed.summary().graphId());
-        if (!string(entry, "release").equals(observed.revision().release())
-                || !string(entry, "publication").equals(observed.revision().publication())) {
+        if (!successorReplay && (!string(entry, "release").equals(observed.revision().release())
+                || !string(entry, "publication").equals(observed.revision().publication()))) {
             // A successful earlier response and a later publication are indistinguishable after
             // restart. Reject replay; never compensate an already superseded/reviewed operation.
             throw failure(GraphAuthoringException.Failure.CONFLICT);

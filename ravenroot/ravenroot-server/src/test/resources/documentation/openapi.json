@@ -1416,7 +1416,7 @@
         }
       },
       "put": {
-        "summary": "Saves or creates one tenant-confined GraphML draft with three-way optimistic concurrency; version advancement requires publication evidence bound to the exact reviewed commit and bytes.",
+        "summary": "Saves or creates one tenant-confined GraphML draft with three-way optimistic concurrency and a stable assigned version; changed saves of released versions require an explicit successor draft.",
         "x-assistant-posture": "NEVER",
         "security": [{"bearerAuth": []}],
         "parameters": [
@@ -1470,7 +1470,7 @@
     },
     "/v1/graph-authoring/{id}/discard": {
       "post": {
-        "summary": "Replaces a draft with the reviewed release bytes after checking draft, release, and publication state.",
+        "summary": "Restores reviewed release content after checking draft, release, and publication state while retaining an already assigned successor version.",
         "x-assistant-posture": "NEVER",
         "security": [{"bearerAuth": []}],
         "parameters": [
@@ -1552,6 +1552,33 @@
     "/v1/graph-authoring/{id}/restore": {
       "post": {
         "summary": "Restores a historical revision through the same stale-state and idempotency checks as save.",
+        "x-assistant-posture": "NEVER",
+        "security": [{"bearerAuth": []}],
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {"description": "success"},
+          "401": {"description": "AUTHENTICATION_REQUIRED"},
+          "403": {"description": "ACCESS_DENIED"},
+          "405": {"description": "METHOD_NOT_ALLOWED"},
+          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
+          "414": {"description": "QUERY_TOO_LARGE"},
+          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
+          "400": {"description": "INVALID_REQUEST"},
+          "409": {"description": "CONFLICT"},
+          "503": {"description": "REQUEST_INTERRUPTED"},
+          "404": {"description": "NOT_FOUND"},
+          "422": {"description": "INVALID_DOCUMENT"},
+          "413": {"description": "LIMIT_EXCEEDED"},
+          "412": {"description": "PUBLICATION_REQUIRED"},
+          "501": {"description": "UNSUPPORTED_PROVIDER"}
+        }
+      }
+    },
+    "/v1/graph-authoring/{id}/versions": {
+      "post": {
+        "summary": "Explicitly creates the next tenant-confined draft from immutable reviewed release content with write authorization, capability, complete revision and idempotency checks; publication remains separate.",
         "x-assistant-posture": "NEVER",
         "security": [{"bearerAuth": []}],
         "parameters": [

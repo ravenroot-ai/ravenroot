@@ -125,6 +125,7 @@ public final class AmqpPublishNodeBehavior implements NodeBehavior {
                 "May only tighten the operator profile (1-16)."));
         properties.add(optional("retries", "Pre-publish retries", NodePropertyType.INTEGER,
                 "Only proven connection-establishment failures are retried (0-3)."));
+        properties.addAll(List.of(ai.ravenroot.api.correlation.CorrelationHeaderMapping.descriptors()));
         // PERS-04 (ADR 0022). Declared, because unlike a mail or Telegram send this effect CAN
         // be made safe to repeat -- but only by the receiving side, which is why it is an author
         // assertion and not a property of this node.
@@ -156,6 +157,7 @@ public final class AmqpPublishNodeBehavior implements NodeBehavior {
     @Override
     public NodeAction create(NodeConfiguration configuration) {
         Objects.requireNonNull(configuration);
+        var correlationHeaders = ai.ravenroot.api.correlation.CorrelationHeaderMapping.read(configuration.properties(), List.of());
         ConcurrentHashMap<String, AmqpRuntimeControls.Gate> actionGates = new ConcurrentHashMap<>();
         return message -> {
             final Settings settings;
@@ -163,7 +165,11 @@ public final class AmqpPublishNodeBehavior implements NodeBehavior {
             AmqpRuntimeControls.Admission acquired = null;
             try {
                 settings = Settings.from(configuration, profiles, destinationPolicy, message.tenantId());
-                payload = Payload.from(message.payload(), settings);
+                var parsed = Payload.from(message.payload(), settings);
+                final Map<String, Object> mapped;
+                try { mapped = correlationHeaders.merge(parsed.headers(), message.applicationCorrelation()); }
+                catch (IllegalArgumentException refused) { throw Refusal.rejected("CORRELATION_MAPPING_REFUSED"); }
+                payload = parsed.withHeaders(mapped, settings);
                 acquired = controls.acquire(message.tenantId(), settings.profile, settings.maxConcurrency, actionGates);
                 if (!acquired.acquired())
                     return CompletableFuture.completedFuture(result("TEMPORARY_FAILURE", "LOCAL_CAPACITY", payload, 0, null));
@@ -599,7 +605,7 @@ public final class AmqpPublishNodeBehavior implements NodeBehavior {
         static void validateAuthored(NodeConfiguration configuration) {
             for (var property : configuration.properties().entrySet()) {
                 String name = property.getKey();
-                if (CONFIGURATION_FIELDS.contains(name)) continue;
+                if (CONFIGURATION_FIELDS.contains(name) || ai.ravenroot.api.correlation.CorrelationHeaderMapping.propertyNames().contains(name)) continue;
                 if (name.startsWith("saga.")) continue;
                 if (RecoveryRepeatabilityProperty.NAME.equals(name)) {
                     if (RecoveryRepeatabilityProperty.ALLOWED_VALUES.contains(property.getValue())) continue;
@@ -607,6 +613,8 @@ public final class AmqpPublishNodeBehavior implements NodeBehavior {
                 }
                 throw Refusal.rejected("UNKNOWN_GRAPH_PROPERTY");
             }
+            try { ai.ravenroot.api.correlation.CorrelationHeaderMapping.read(configuration.properties(), List.of()); }
+            catch (IllegalArgumentException refused) { throw Refusal.rejected("INVALID_GRAPH_PROPERTY"); }
             if ("amqp-inbox-v1".equals(configuration.property("saga.participant", ""))) {
                 if (!"ravenroot.amqp-inbox.v1".equals(configuration.property("saga.adapter", ""))) {
                     throw Refusal.rejected("SAGA_ADAPTER_REQUIRED");
@@ -884,6 +892,17 @@ public final class AmqpPublishNodeBehavior implements NodeBehavior {
         AmqpProtocol.Publication publication() {
             return new AmqpProtocol.Publication(exchange, routingKey, true, body, contentType, contentEncoding,
                     persistent, priority, expiration, messageId, correlationId, replyTo, type, appId, headers);
+        }
+
+        Payload withHeaders(Map<String, Object> mapped, Settings settings) {
+            if (mapped.equals(headers)) return this;
+            if (mapped.size() > 32) throw Refusal.rejected("INVALID_HEADER");
+            for (var entry : mapped.entrySet()) {
+                if (!settings.profile.allowsHeader(entry.getKey()) || !AmqpWireLimits.isShortstr(entry.getKey())
+                        || !(entry.getValue() instanceof String value) || value.length() > 256 || value.contains("\0")) throw Refusal.rejected("INVALID_HEADER");
+            }
+            return new Payload(exchange, routingKey, body, contentType, contentEncoding, persistent, priority, expiration,
+                    messageId, correlationId, replyTo, type, appId, Map.copyOf(mapped));
         }
 
         @Override

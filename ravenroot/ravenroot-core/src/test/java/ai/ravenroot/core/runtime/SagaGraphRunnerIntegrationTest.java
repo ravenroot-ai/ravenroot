@@ -682,15 +682,17 @@ class SagaGraphRunnerIntegrationTest {
         var key = new ExecutionKey("tenant-a", process);
         var originalPayload = Map.<String, Object>of("contract", "jdbc.parameters.v1", "parameters", Map.of(
                 "orderId", "ORDER-A", "sku", "SKU-A", "quantity", 1));
-        var original = new NodeMessage(TestIdentities.of("tenant-a", "alice"), process, traversal,
+        var application = new ai.ravenroot.api.correlation.ApplicationCorrelationContext("derived-child-business", java.util.Optional.of("part-2"), java.util.Optional.empty(), "round-1", java.util.Optional.empty());
+        var original = withApplication(new NodeMessage(TestIdentities.of("tenant-a", "alice"), process, traversal,
                 UUID.randomUUID(), UUID.randomUUID(), "write", originalPayload,
-                Map.of("businessTarget", "ORDER-A"));
+                Map.of("businessTarget", "ORDER-A", "applicationCorrelationId", "stale-parent-metadata")), application);
         try (var store = new SqliteExecutionStore(directory.resolve("frozen-live-compensation.db"),
                 Clock.systemUTC())) {
             long revision = createRunning(store, key, traversal);
             try (var recorder = ExecutionRecorder.open(store, key, "worker", Duration.ofSeconds(30), revision)) {
                 var coordinator = new SagaCoordinator(graph, registry, Clock.systemUTC());
                 var dispatched = coordinator.before(forward, original, recorder);
+                assertEquals(application, dispatched.message().applicationCorrelation());
                 coordinator.succeeded(dispatched, NodeResult.continueWith(dispatched.message().payload()), recorder);
                 var blocked = coordinator.before(blocker, new NodeMessage(original.security(), process, traversal,
                         UUID.randomUUID(), UUID.randomUUID(), "blocker", originalPayload, original.attributes()),
@@ -702,16 +704,18 @@ class SagaGraphRunnerIntegrationTest {
                         .stream().filter(value -> value.stepId().equals("order-write")).findFirst().orElseThrow();
                 var frozenIntent = SagaRecoveryEnvelope.decode(step.receipt()).compensation();
                 Map<?, ?> envelope = jsonMap(frozenIntent.payload().bytes());
+                assertEquals(application.applicationCorrelationId(), jsonMap(envelope.get("applicationContext")).get("applicationCorrelationId"), "compensation construction and frozen intent retain typed original context");
                 var changedPayload = Map.<String, Object>of("contract", "jdbc.parameters.v1", "parameters", Map.of(
                         "orderId", "ORDER-B", "sku", "SKU-B", "quantity", 99));
                 var currentAuthority = TestIdentities.of("tenant-a", "recovery-worker");
-                var changed = new NodeMessage(currentAuthority, process, traversal, UUID.randomUUID(),
-                        UUID.randomUUID(), "cancel", changedPayload, Map.of("businessTarget", "ORDER-B"));
+                var changed = withApplication(new NodeMessage(currentAuthority, process, traversal, UUID.randomUUID(),
+                        UUID.randomUUID(), "cancel", changedPayload, Map.of("businessTarget", "ORDER-B", "applicationCorrelationId", "forged-new-metadata")), application);
 
                 var live = coordinator.before(compensation, changed, recorder);
                 assertEquals(envelope.get("payload"), live.message().payload());
                 assertEquals(envelope.get("attributes"), live.message().attributes());
                 assertEquals(currentAuthority, live.message().security());
+                assertEquals(application, live.message().applicationCorrelation(), "frozen payload/attributes cannot replace the current traversal's established context");
                 assertEquals("ORDER-A", jsonMap(live.message().payload()).get("parameters") instanceof Map<?, ?> p
                         ? p.get("orderId") : null);
                 assertEquals("ORDER-A", live.message().attributes().get("businessTarget"));
@@ -833,6 +837,11 @@ class SagaGraphRunnerIntegrationTest {
 
     private static final class ConfirmedNoEffect extends RuntimeException implements RetryClassified {
         @Override public Retryability retryability() { return Retryability.RETRYABLE_NO_EFFECT; }
+    }
+
+    private static NodeMessage withApplication(NodeMessage message, ai.ravenroot.api.correlation.ApplicationCorrelationContext context) {
+        return new NodeMessage(message.security(), message.processInstanceId(), message.traversalId(), message.invocationId(), message.attemptId(), message.parentInvocationIds(),
+                message.nodeId(), message.payload(), message.attributes(), message.command(), context);
     }
 
     private static NodeMessage message(UUID process, UUID traversal, UUID invocation) {

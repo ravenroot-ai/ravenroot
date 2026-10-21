@@ -94,3 +94,70 @@ case is explicitly skipped.
 A join may explicitly trust a pinned derivation entry as an expectation producer. The configured
 entry must be the single target of an enabled authored derive operation; naming an arbitrary worker
 does not grant that authority. Payload fields and event attributes cannot grant producer authority.
+
+## Propagate context through an external service
+
+The `http-request`, `amqp.publish.v1`, and `mail.send.v1` catalog types expose five optional
+outgoing properties. Configure literal dedicated headers, for example:
+
+| Property | Example target | Established value |
+| --- | --- | --- |
+| `correlation.outgoing.applicationHeader` | `X-Business-Operation` | Application correlation ID |
+| `correlation.outgoing.contributionHeader` | `X-Business-Part` | Contribution ID, when present |
+| `correlation.outgoing.kindHeader` | `X-Business-Kind` | Contribution kind, when present |
+| `correlation.outgoing.roundHeader` | `X-Business-Round` | Explicit join round |
+| `correlation.outgoing.referenceHeader` | `X-Business-Reference` | Public reference, when present |
+
+Blank disables that field. A configured mapping requires established typed traversal context;
+legacy uncorrelated input fails explicitly instead of interpreting a payload or attribute named
+`applicationCorrelationId`. Optional absent values omit their target header. An existing target
+whose optional value is absent refuses, because its relationship to the context cannot be verified.
+
+Targets use portable `X-*` names of at most 64 characters. Names are unique without regard to case.
+The runtime reserves `X-Ravenroot-*`, `X-Correlation-ID`, `X-Request-ID`, `X-Message-ID`, `X-Reply-To`,
+and `X-Idempotency-Key`; HTTP also reserves the configured credential header. Dedicated business
+headers leave HTTP request IDs, credentials and saga headers, AMQP `messageId`, `correlationId` and
+`replyTo`, and generated SMTP `Message-ID` in their existing identity domains. In particular, mail's
+payload `correlationId` does not automatically become an SMTP header.
+
+Mapped values must contain printable ASCII characters. A valid Unicode business identity that
+cannot be represented in this portable header contract fails explicitly; the runtime does not
+rewrite an opaque identity. Existing native header length, count and envelope limits still apply.
+AMQP and mail operator profiles must independently authorize every target header. Mapping never
+expands a profile or HTTP destination/tool policy. Existing equal target values reconcile; conflicting
+values and case-insensitive duplicate effective headers refuse before external I/O. Mail reports its
+existing `INVALID_INPUT`, AMQP reports `REJECTED`, and HTTP returns a failed node stage.
+
+An external processor must deliberately return those business headers. At an AMQP SOURCE the real
+`amqp.delivery.v1` event exposes approved headers directly under `headers`, so configure
+`correlation.selector=/headers/X-Business-Operation`,
+`correlation.contributionSelector=/headers/X-Business-Part`, and
+`correlation.roundSelector=/headers/X-Business-Round`. The incoming operator consumer policy must
+allow those exact case-sensitive AMQP names. The event's root `messageId`, `correlationId`, and
+`replyTo` remain transport fields; none automatically establishes business identity. The body is an
+explicit representation under `body`, such as `{ "format": "utf8", "text": "..." }`.
+
+At an OpenAPI SOURCE, declare each header as a header parameter in the pinned OpenAPI document and
+allow it in the operator inbound profile. The real asynchronous `openapi.request.v1` and request/reply `openapi.request.v2` events expose their declared
+header parameters under root `headers`; use the actual declared parameter key in the JSON Pointer.
+The root `requestReply` object, when present, belongs to the request/reply waiter. Mapping a business
+header does not replace that waiter or its process/traversal/source generation coordinates.
+`REQUIRE_EXISTING` still requires an open history in the exact authorized tenant, deployment and
+pinned graph version; selector preview alone cannot grant that authority.
+
+Governed saga AMQP work commits a frozen participant envelope before dispatch instead of running
+the inline publisher. Its optional `applicationContext` contains only the five bounded context
+scalars (`applicationCorrelationId`, `contributionId`, `contributionKind`, `roundId`, `publicReference`);
+absent optional fields are JSON null, and legacy uncorrelated envelopes omit the object. The committed
+payload, authored properties, original causal IDs and context are covered by the intent digest.
+A host-supplied `SagaCommandTransport` must decode this actual committed envelope and apply its
+explicit mapping through the same approved connector authority. Frozen context preserves causal
+identity; it never supplies current credentials or replaces `SagaCommandAuthority`. Current authority
+is revalidated before dispatch. A broker acknowledgement is distinct from business completion.
+Live compensation and approval continuation retain the current traversal's typed context even when
+stored payloads or attributes contain stale or conflicting identity-like text.
+
+The connector regressions exercise an actual RabbitMQ publisher-to-SOURCE round trip with separate
+message/waiter IDs and an actual SMTP DATA exchange with generated Message-ID. Separate SQLite saga
+regressions commit, reopen, decode and dispatch the frozen envelope under allowed and denied current
+authority. The latter use a host transport fixture and do not claim a broker exchange.

@@ -34,7 +34,7 @@ export function mountCorrelationPreview({ container, form, properties, preview, 
     } catch { status.textContent = t('correlation.preview.invalidSample'); return; }
     controller = new AbortController(); pending++; run.disabled = true; status.textContent = t('correlation.preview.loading');
     try {
-      const mapping = Object.fromEntries(Object.entries(properties()).filter(([name]) => name.startsWith('correlation.')));
+      const mapping = Object.fromEntries(Object.entries(properties()).filter(([name]) => name.startsWith('correlation.') && !name.startsWith('correlation.outgoing.')));
       const value = await preview(mapping, input, { signal: controller.signal });
       if (!current(token)) return;
       if (typeof value?.valid !== 'boolean') throw new TypeError('Invalid correlation preview response');

@@ -4,7 +4,7 @@ const flush = async () => { for (let i = 0; i < 12; i++) await Promise.resolve()
 function fixture(preview, options = {}) {
   document.body.innerHTML = '<form><input data-catalog-property="correlation.mode" value="REQUIRE_EXISTING"><section></section></form>';
   const form = document.querySelector('form'), container = form.querySelector('section');
-  const control = mountCorrelationPreview({ form, container, properties: () => ({ 'correlation.mode': 'REQUIRE_EXISTING', 'correlation.selector': '/id', auditReason: 'not a selector' }), preview, ...options });
+  const control = mountCorrelationPreview({ form, container, properties: () => ({ 'correlation.mode': 'REQUIRE_EXISTING', 'correlation.selector': '/id', auditReason: 'not a selector', 'correlation.outgoing.applicationHeader': 'X-Business-Operation' }), preview, ...options });
   const sample = container.querySelector('textarea'), run = container.querySelector('button'); sample.value = '{"id":"operation"}';
   return { form, container, control, sample, run };
 }

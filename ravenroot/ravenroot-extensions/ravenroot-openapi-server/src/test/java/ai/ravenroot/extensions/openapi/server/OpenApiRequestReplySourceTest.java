@@ -34,6 +34,28 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class OpenApiRequestReplySourceTest {
+    @Test void actualSourceProjectionMapsExplicitHeaderWithoutReplacingRequestReplyWaiter() throws Exception {
+        Fixture fixture = new Fixture(1); fixture.activate();
+        try {
+            CompletionStage<IngressResponse> waiting = fixture.invoke(new TestCancellation(), "business-ingestion-42");
+            var exchange = fixture.exchange();
+            var input = fixture.context.requestReply.payload.get();
+            var mapping = ai.ravenroot.api.correlation.CorrelationMappingProperties.read(Map.of(
+                    "correlation.mode", "REQUIRE_EXISTING", "correlation.selector", "/headers/x-trace"),
+                    ai.ravenroot.api.correlation.CorrelationLimits.DEFAULTS);
+            var context = mapping.extract(input, UUID::randomUUID);
+            assertEquals("business-ingestion-42", context.applicationCorrelationId());
+            var request = (Map<?, ?>) input.toJava();
+            assertEquals("openapi.request.v2", request.get("version"));
+            var waiter = (Map<?, ?>) request.get("requestReply");
+            assertEquals(exchange.correlationId().toString(), waiter.get("correlationId"));
+            assertNotEquals(context.applicationCorrelationId(), waiter.get("correlationId"));
+            NodeResult response = fixture.respond(exchange, proposal(exchange, 200, Map.of(), "application/json", Map.of("result", "mapped")));
+            exchange.complete(response.payload());
+            assertEquals(200, waiting.toCompletableFuture().get(2, TimeUnit.SECONDS).status());
+        } finally { fixture.source.stop().toCompletableFuture().join(); }
+    }
+
     @Test void declaredRespondCommandProducesTheOnlySuccessfulHttpResponse() throws Exception {
         Fixture fixture = new Fixture(2);
         fixture.context.requestReply.bindingGeneration = 41;
@@ -346,10 +368,12 @@ class OpenApiRequestReplySourceTest {
             source.activateManagedIngress(authority).toCompletableFuture().join();
         }
 
-        CompletionStage<IngressResponse> invoke(CancellationSignal cancellation) {
+        CompletionStage<IngressResponse> invoke(CancellationSignal cancellation) { return invoke(cancellation, "trace"); }
+
+        CompletionStage<IngressResponse> invoke(CancellationSignal cancellation, String businessHeader) {
             return authority.invokeStage(OpenApiServerTestSupport.request("/orders/42",
                     Map.of("verbose", List.of("true")),
-                    Map.of("idempotency-key", UUID.randomUUID().toString(), "x-trace", "trace"),
+                    Map.of("idempotency-key", UUID.randomUUID().toString(), "x-trace", businessHeader),
                     "{\"amount\":2}".getBytes(StandardCharsets.UTF_8)),
                     new IngressRequestContext(Instant.now().plusSeconds(2), cancellation));
         }

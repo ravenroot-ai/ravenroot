@@ -109,7 +109,8 @@ final class HttpRequestNodeBehaviorFactory implements NodeBehaviorFactory {
                         NodeOutcomeDescriptor.fromProperty("successOutcome",
                                 "The endpoint answered with an HTTP 2xx status."),
                         NodeOutcomeDescriptor.fromProperty("failureOutcome",
-                                "The endpoint answered with a non-2xx status."));
+                                "The endpoint answered with a non-2xx status."))
+                .withProperties(ai.ravenroot.api.correlation.CorrelationHeaderMapping.descriptors());
     }
 
     @Override
@@ -137,8 +138,12 @@ final class HttpRequestNodeBehaviorFactory implements NodeBehaviorFactory {
         String failureOutcome = NodeProperties.string(node, "failureOutcome", "error");
         String outcomeLookupTemplate = NodeProperties.string(node, "saga.outcomeLookupUrl", "").trim();
         Map<String, String> headers = headers(node);
+        var correlationHeaders = ai.ravenroot.api.correlation.CorrelationHeaderMapping.read(node.properties(), List.of(credentialHeader, "Idempotency-Key"));
 
         return message -> {
+            final Map<String, Object> outgoingHeaders;
+            try { outgoingHeaders = correlationHeaders.merge(headers, message.applicationCorrelation()); }
+            catch (IllegalArgumentException refused) { return CompletableFuture.failedFuture(refused); }
             ResolvedOperationalPolicy.BuiltInHttpCapacity capacity = capacityFor(message);
             URI uri = URI.create(NodeProperties.render(urlTemplate, message, node));
             outboundPolicy.requireAllowed(uri);
@@ -148,7 +153,7 @@ final class HttpRequestNodeBehaviorFactory implements NodeBehaviorFactory {
             Duration effectiveTimeout = requestedTimeout.compareTo(capacity.maximumTimeout()) > 0
                     ? capacity.maximumTimeout() : requestedTimeout;
             var builder = HttpRequest.newBuilder(uri).timeout(effectiveTimeout);
-            headers.forEach(builder::header);
+            outgoingHeaders.forEach((name, value) -> builder.header(name, (String) value));
             String body = NodeProperties.render(bodyTemplate, message, node);
             byte[] bodyBytes = body.getBytes(StandardCharsets.UTF_8);
             String requestFingerprint = sha256(bodyBytes);

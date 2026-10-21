@@ -113,6 +113,13 @@ final class DefaultDeploymentHistoryReader implements DeploymentHistoryReader {
         return read(r -> { r.history(id); var raw = r.get(store.correlatedJoins(scope, id, Set.of(), cursor("joins", cursor, false), limit));
             return new CorrelatedJoinPage(raw.items(), cursor("joins", raw.nextCursor(), true)); });
     }
+    @Override public HistoryPage<JoinMemberSummary> members(String id, String node, String round, JoinMemberFilter filter,
+            Optional<String> cursor, int limit) {
+        return read(r -> { r.history(id);
+            var key = new CorrelatedJoinKey(scope, id, node, round);
+            return page("join-members", r.get(store.correlatedJoinMembers(key, filter, cursor("join-members", cursor, false), limit)));
+        });
+    }
     @Override public HistoryActivityPage activity(UUID process, UUID traversal, UUID invocation, UUID attempt,
             long afterCursor, int limit) {
         return read(r -> {

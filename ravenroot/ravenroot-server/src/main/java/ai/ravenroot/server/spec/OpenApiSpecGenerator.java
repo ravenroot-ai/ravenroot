@@ -246,7 +246,7 @@ public final class OpenApiSpecGenerator {
         if ("/v1/deployments/{id}/history".equals(route.path())) {
             parameters.add("          {\"name\":\"X-Ravenroot-Deployment-Incarnation\",\"in\":\"header\",\"required\":true,\"schema\":{\"type\":\"string\"}}");
             parameters.add("          {\"name\":\"graphVersion\",\"in\":\"query\",\"required\":true,\"schema\":{\"type\":\"string\"}}");
-            for (String field : new String[]{"view", "applicationCorrelationId", "publicReference", "lifecycle", "processInstanceId", "traversalId", "invocationId", "attemptId", "nodeId", "cursor", "limit"})
+            for (String field : new String[]{"view", "applicationCorrelationId", "publicReference", "lifecycle", "processInstanceId", "traversalId", "invocationId", "attemptId", "nodeId", "roundId", "memberState", "cursor", "limit"})
                 parameters.add(queryParameter(field, "limit".equals(field) ? "integer" : "string", "History view field; invalid combinations are refused. Page size is bounded by the operator history policy."));
         }
         if (isDeploymentCommand(route, method)) {

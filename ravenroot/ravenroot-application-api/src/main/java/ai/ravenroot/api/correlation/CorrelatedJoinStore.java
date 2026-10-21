@@ -30,6 +30,15 @@ public interface CorrelatedJoinStore {
  */
     default CompletionStage<CorrelatedJoinPage> correlatedJoins(BusinessScope scope, String applicationId,
             Set<CorrelatedJoinRecord.Phase> phases, Optional<String> cursor, int limit) { return unsupported(); }
+    /** Reads bounded original membership/arrival facts without deserializing a join payload snapshot.
+     * @param key exact authenticated business join key
+     * @param filter scalar expected, received, missing or all member selection
+     * @param cursor opaque continuation for the identical key, filter and page size
+     * @param limit requested page size bounded by the operator policy
+     * @return bounded original causal metadata, including retained expectation facts after payload expiry
+     */
+    default CompletionStage<ai.ravenroot.api.history.HistoryPage<JoinMemberSummary>> correlatedJoinMembers(
+            CorrelatedJoinKey key, JoinMemberFilter filter, Optional<String> cursor, int limit) { return unsupported(); }
     private static <T> CompletionStage<T> unsupported() {
         return CompletableFuture.failedFuture(new ai.ravenroot.api.persistence.ExecutionStoreException(
                 new ai.ravenroot.api.persistence.ExecutionStoreFailure.CapabilityNotSupported(

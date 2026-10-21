@@ -75,6 +75,17 @@ public interface DeploymentHistoryReader {
  * @return bounded scalar join summaries without contribution payload deserialization
  */
     CorrelatedJoinPage joins(String applicationCorrelationId, Optional<String> cursor, int limit);
+    /** Reads scalar expected, received or missing members of one exact join round.
+     * @param applicationCorrelationId selected scoped business identity
+     * @param nodeId pinned join node identity
+     * @param roundId explicit join generation; another round never consumes these members
+     * @param filter scalar membership selection
+     * @param cursor continuation bound to the same join, filter, source and page size
+     * @param limit requested page size within the operator limit
+     * @return bounded member identities and original accepted causal coordinates, without contribution payloads
+     */
+    HistoryPage<JoinMemberSummary> members(String applicationCorrelationId, String nodeId, String roundId,
+            JoinMemberFilter filter, Optional<String> cursor, int limit);
     /** Captured content remains governed by the existing activity policy, redaction and retention.
  * @param processInstanceId original owning process identity, independent from a business history
  * @param traversalId actual traversal identity within the owning process

@@ -5700,6 +5700,10 @@ public final class SqliteExecutionStore implements ExecutionStore {
             ExecutionKey key, UUID traversalId, UUID invocationId, Optional<String> cursor, int limit) {
         return async(() -> inReadTransaction(key, () -> ExecutionHistoryStorage.parents(connection, key, traversalId, invocationId, cursor, limit, businessHistoryPolicy().maxPageSize())));
     }
+    @Override public CompletionStage<ai.ravenroot.api.history.HistoryPage<ai.ravenroot.api.correlation.JoinMemberSummary>> correlatedJoinMembers(
+            ai.ravenroot.api.correlation.CorrelatedJoinKey key, ai.ravenroot.api.correlation.JoinMemberFilter filter, Optional<String> cursor, int limit) {
+        return async(() -> inWriteTransaction(null, () -> { BusinessHistoryStorage.expire(connection, key.scope(), clock.instant()); return CorrelatedJoinStorage.members(connection, key, filter, cursor, limit, businessHistoryPolicy()); }));
+    }
     @Override public CompletionStage<Optional<ai.ravenroot.api.correlation.CorrelatedJoinRecord>> correlatedJoin(
             ai.ravenroot.api.correlation.CorrelatedJoinKey key) {
         return async(() -> inWriteTransaction(null, () -> {

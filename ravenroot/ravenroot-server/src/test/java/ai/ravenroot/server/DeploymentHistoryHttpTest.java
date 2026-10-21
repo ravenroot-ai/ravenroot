@@ -102,6 +102,42 @@ class DeploymentHistoryHttpTest {
         }
     }
 
+    @Test void joinMemberReadsKeepMissingIdsAndOriginalCausesWithoutLoadingContributionData() throws Exception {
+        try (var fixture = new Fixture()) {
+            var scope = new ai.ravenroot.api.correlation.BusinessScope("tenant", "document", fixture.binding.graphVersion());
+            var context = new ai.ravenroot.api.correlation.ApplicationCorrelationContext("operation", Optional.of("part-1"), Optional.of("partition"), "round", Optional.empty());
+            UUID process = UUID.randomUUID(), traversal = UUID.randomUUID(), invocation = UUID.randomUUID(), attempt = UUID.randomUUID();
+            Instant now = Instant.now();
+            fixture.store.recordCorrelatedTraversal(new ai.ravenroot.api.correlation.CorrelatedTraversal(scope, context, process, traversal, "start",
+                    ai.ravenroot.api.correlation.CorrelatedTraversal.Cause.SOURCE_EVENT, TraversalStatus.RUNNING, null, now, now, null),
+                    ai.ravenroot.api.correlation.CorrelationMapping.Mode.ACCEPT_OR_CREATE).toCompletableFuture().get(5, TimeUnit.SECONDS);
+            var payload = OpaquePayload.of("hidden-business-content".getBytes(StandardCharsets.UTF_8), "text/plain");
+            var item = new ai.ravenroot.api.correlation.JoinContribution("part-1", "partition", process, traversal, invocation, attempt, IDENTITY,
+                    payload, ai.ravenroot.api.correlation.JoinContribution.digest(payload.bytes()), now);
+            var key = new ai.ravenroot.api.correlation.CorrelatedJoinKey(scope, "operation", "combine", "round");
+            var pending = ai.ravenroot.api.correlation.CorrelatedJoinRecord.open(key, Set.of("part-1", "part-2", "part-3"), null, true,
+                    ai.ravenroot.api.correlation.JoinCause.of(item), now, now.plusSeconds(60));
+            var arrived = pending.contribute(item, Set.of(), null, false, now, fixture.store.businessHistoryPolicy());
+            arrived = new ai.ravenroot.api.correlation.CorrelatedJoinRecord(key, 1, arrived.phase(), arrived.expectedIds(), arrived.expectedCount(), arrived.sealed(),
+                    arrived.contributions(), arrived.openedBy(), arrived.openedAt(), arrived.deadlineAt(), arrived.updatedAt());
+            fixture.store.compareAndSetCorrelatedJoin(arrived).toCompletableFuture().get(5, TimeUnit.SECONDS);
+            fixture.rejectAggregateLoads.set(true);
+            String query = "view=join-members&applicationCorrelationId=operation&nodeId=combine&roundId=round&limit=1";
+            var response = fixture.history(query + "&memberState=RECEIVED", "tenant", fixture.binding.incarnationId());
+            assertEquals(200, response.statusCode(), response.body());
+            assertTrue(response.body().contains(process.toString())); assertTrue(response.body().contains(traversal.toString()));
+            assertTrue(response.body().contains(invocation.toString())); assertTrue(response.body().contains(attempt.toString()));
+            assertFalse(response.body().contains("hidden-business-content")); assertFalse(response.body().contains("payload"));
+            var missing = fixture.history(query + "&memberState=MISSING", "tenant", fixture.binding.incarnationId());
+            assertEquals(200, missing.statusCode(), missing.body()); assertTrue(missing.body().contains("part-2"));
+            assertTrue(missing.body().contains("\"processInstanceId\":null"));
+            String cursor = text(object(missing.body()), "nextCursor");
+            assertEquals(400, fixture.history(query + "&memberState=RECEIVED&cursor=" + encode(cursor), "tenant", fixture.binding.incarnationId()).statusCode());
+            var joins = fixture.history("view=joins&applicationCorrelationId=operation", "tenant", fixture.binding.incarnationId());
+            assertEquals(200, joins.statusCode(), joins.body()); assertTrue(joins.body().contains("MANIFEST"));
+        }
+    }
+
     @Test void configuredMaximumPageProjectsAllThousandRowsAndRefusesAnOversizeRequest() throws Exception {
         var d = ai.ravenroot.api.correlation.BusinessHistoryPolicy.DEFAULTS;
         var policy = new ai.ravenroot.api.correlation.BusinessHistoryPolicy(d.maxHistoriesPerScope(), d.maxOpenJoinsPerHistory(),

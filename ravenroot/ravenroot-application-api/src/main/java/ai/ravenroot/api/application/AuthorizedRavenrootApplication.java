@@ -844,6 +844,10 @@ public final class AuthorizedRavenrootApplication {
             @Override public ai.ravenroot.api.correlation.CorrelatedJoinPage joins(String id, java.util.Optional<String> cursor, int limit) {
                 require(context, action, resource); return reader.joins(id, cursor, limit);
             }
+            @Override public ai.ravenroot.api.history.HistoryPage<ai.ravenroot.api.correlation.JoinMemberSummary> members(
+                    String id, String node, String round, ai.ravenroot.api.correlation.JoinMemberFilter filter, java.util.Optional<String> cursor, int limit) {
+                require(context, action, resource); return reader.members(id, node, round, filter, cursor, limit);
+            }
             @Override public ai.ravenroot.api.history.HistoryActivityPage activity(java.util.UUID process, java.util.UUID traversal, java.util.UUID invocation, java.util.UUID attempt, long afterCursor, int limit) {
                 require(context, action, resource); return reader.activity(process, traversal, invocation, attempt, afterCursor, limit);
             }

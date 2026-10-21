@@ -550,7 +550,7 @@ public final class RavenrootCli {
             String response;
             if ("history".equals(args[1])) {
                 var names = java.util.Map.of("application-correlation-id", "applicationCorrelationId", "public-reference", "publicReference",
-                        "process-instance-id", "processInstanceId", "traversal-id", "traversalId", "invocation-id", "invocationId", "attempt-id", "attemptId", "node-id", "nodeId");
+                        "process-instance-id", "processInstanceId", "traversal-id", "traversalId", "invocation-id", "invocationId", "attempt-id", "attemptId", "node-id", "nodeId", "round-id", "roundId", "member-state", "memberState");
                 var query = new java.util.LinkedHashMap<String, String>();
                 options.forEach((name, value) -> { if (query.putIfAbsent(names.getOrDefault(name, name), value) != null)
                     throw new IllegalArgumentException("duplicate history field"); });

@@ -84,6 +84,7 @@ final class CorrelatedJoinStorage {
                 if (update.executeUpdate() == 0) throw new BusinessHistoryException(REVISION_CONFLICT);
             }
         }
+        writeMetadata(db, desired);
         if (desired.phase() == CorrelatedJoinRecord.Phase.FAILED
                 || desired.phase() == CorrelatedJoinRecord.Phase.EXPIRED) {
             try (var close = db.prepareStatement("UPDATE business_history SET lifecycle = ?, incomplete = ?, revision = revision + 1, "
@@ -109,7 +110,7 @@ final class CorrelatedJoinStorage {
         var ordered = phases.stream().map(Enum::name).sorted().toList();
         String filter = "joins:" + Objects.toString(applicationId, "") + '\0' + ordered + '\0' + limit;
         var position = cursor.map(value -> BusinessCursor.decode(scope, filter, value, 3));
-        var sql = new StringBuilder("SELECT application_id, node_id, round_id, revision, phase, expected_count, received_count, sealed, retained_bytes, opened_ms, deadline_ms, updated_ms FROM correlated_business_join WHERE " + SCOPE);
+        var sql = new StringBuilder("SELECT application_id, node_id, round_id, revision, phase, expected_count, received_count, sealed, retained_bytes, opened_ms, deadline_ms, updated_ms, expectation FROM correlated_business_join WHERE " + SCOPE);
         if (applicationId != null) sql.append(" AND application_id = ?");
         if (!phases.isEmpty()) sql.append(" AND phase IN (").append(String.join(",", Collections.nCopies(phases.size(), "?"))).append(")");
         if (position.isPresent()) sql.append(" AND (application_id > ? OR (application_id = ? AND node_id > ?) OR "
@@ -129,13 +130,74 @@ final class CorrelatedJoinStorage {
                     new CorrelatedJoinKey(scope, rows.getString(1), rows.getString(2), rows.getString(3)),
                     rows.getLong(4), CorrelatedJoinRecord.Phase.valueOf(rows.getString(5)), rows.getInt(6), rows.getInt(7),
                     rows.getInt(8) != 0, rows.getLong(9), Instant.ofEpochMilli(rows.getLong(10)),
-                    Instant.ofEpochMilli(rows.getLong(11)), Instant.ofEpochMilli(rows.getLong(12)))); }
+                    Instant.ofEpochMilli(rows.getLong(11)), Instant.ofEpochMilli(rows.getLong(12)), CorrelatedJoinSummary.Expectation.valueOf(rows.getString(13)))); }
         }
         boolean more = items.size() > limit; if (more) items.removeLast();
         Optional<String> next = Optional.empty();
         if (more) { var last = items.getLast().key(); next = Optional.of(BusinessCursor.encode(scope, filter,
                 List.of(last.applicationCorrelationId(), last.nodeId(), last.roundId()))); }
         return new CorrelatedJoinPage(items, next);
+    }
+    private static void writeMetadata(Connection db, CorrelatedJoinRecord desired) throws SQLException {
+        String sql = "INSERT INTO correlated_join_member (tenant_id, deployment_id, graph_version, application_id, node_id, round_id, "
+                + "member_id, expected_member, received_member, kind, process_id, traversal_id, invocation_id, attempt_id, accepted_epoch_second, accepted_nano) "
+                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (tenant_id, deployment_id, graph_version, application_id, node_id, round_id, member_id) "
+                + "DO UPDATE SET expected_member = CASE WHEN correlated_join_member.expected_member = 1 OR excluded.expected_member = 1 THEN 1 ELSE 0 END, "
+                + "received_member = CASE WHEN correlated_join_member.received_member = 1 OR excluded.received_member = 1 THEN 1 ELSE 0 END, "
+                + "kind = COALESCE(correlated_join_member.kind, excluded.kind), process_id = COALESCE(correlated_join_member.process_id, excluded.process_id), "
+                + "traversal_id = COALESCE(correlated_join_member.traversal_id, excluded.traversal_id), invocation_id = COALESCE(correlated_join_member.invocation_id, excluded.invocation_id), "
+                + "attempt_id = COALESCE(correlated_join_member.attempt_id, excluded.attempt_id), accepted_epoch_second = COALESCE(correlated_join_member.accepted_epoch_second, excluded.accepted_epoch_second), "
+                + "accepted_nano = COALESCE(correlated_join_member.accepted_nano, excluded.accepted_nano)";
+        var ids = new TreeSet<>(desired.expectedIds()); ids.addAll(desired.contributions().keySet());
+        try (var statement = db.prepareStatement(sql)) {
+            for (String id : ids) {
+                var arrived = desired.contributions().get(id);
+                int at = bindKey(statement, 1, desired.key()); statement.setString(at++, id);
+                statement.setInt(at++, desired.expectedIds().contains(id) ? 1 : 0); statement.setInt(at++, arrived == null ? 0 : 1);
+                statement.setString(at++, arrived == null ? null : arrived.kind());
+                statement.setString(at++, arrived == null ? null : arrived.processInstanceId().toString());
+                statement.setString(at++, arrived == null ? null : arrived.traversalId().toString());
+                statement.setString(at++, arrived == null ? null : arrived.invocationId().toString());
+                statement.setString(at++, arrived == null ? null : arrived.attemptId().toString());
+                if (arrived == null) { statement.setNull(at++, Types.BIGINT); statement.setNull(at, Types.INTEGER); }
+                else { statement.setLong(at++, arrived.acceptedAt().getEpochSecond()); statement.setInt(at, arrived.acceptedAt().getNano()); }
+                statement.addBatch();
+            }
+            statement.executeBatch();
+        }
+        try (var update = db.prepareStatement("UPDATE correlated_business_join SET expectation = ? WHERE " + KEY)) {
+            update.setString(1, CorrelatedJoinSummary.of(desired).expectation().name()); bindKey(update, 2, desired.key()); update.executeUpdate();
+        }
+    }
+    static ai.ravenroot.api.history.HistoryPage<JoinMemberSummary> members(Connection db, CorrelatedJoinKey key,
+            JoinMemberFilter filter, Optional<String> cursor, int limit, BusinessHistoryPolicy policy) throws SQLException {
+        Objects.requireNonNull(filter); if (limit < 1 || limit > policy.maxPageSize()) throw new BusinessHistoryException(INVALID_REQUEST);
+        String binding = "members:" + key.applicationCorrelationId() + '\0' + key.nodeId() + '\0' + key.roundId() + '\0' + filter + ':' + limit;
+        String after = cursor.map(value -> BusinessCursor.decode(key.scope(), binding, value, 1).getFirst()).orElse(null);
+        try (var exists = db.prepareStatement("SELECT 1 FROM correlated_business_join WHERE " + KEY)) {
+            bindKey(exists, 1, key); try (var rows = exists.executeQuery()) { if (!rows.next()) return ai.ravenroot.api.history.HistoryPage.missing(); }
+        }
+        String predicate = switch (filter) { case ALL -> ""; case EXPECTED -> " AND expected_member = 1";
+            case RECEIVED -> " AND received_member = 1"; case MISSING -> " AND expected_member = 1 AND received_member = 0"; };
+        String sql = "SELECT member_id, expected_member, received_member, kind, process_id, traversal_id, invocation_id, attempt_id, accepted_epoch_second, accepted_nano "
+                + "FROM correlated_join_member WHERE " + KEY + predicate + (after == null ? "" : " AND member_id > ?") + " ORDER BY member_id LIMIT ?";
+        var items = new ArrayList<JoinMemberSummary>();
+        try (var statement = db.prepareStatement(sql)) {
+            int at = bindKey(statement, 1, key); if (after != null) statement.setString(at++, after); statement.setInt(at, limit + 1);
+            try (var rows = statement.executeQuery()) { while (rows.next()) {
+                boolean received = rows.getInt("received_member") != 0;
+                items.add(new JoinMemberSummary(rows.getString("member_id"), rows.getInt("expected_member") != 0, received, rows.getString("kind"),
+                        received ? UUID.fromString(rows.getString("process_id")) : null,
+                        received ? UUID.fromString(rows.getString("traversal_id")) : null,
+                        received ? UUID.fromString(rows.getString("invocation_id")) : null,
+                        received ? UUID.fromString(rows.getString("attempt_id")) : null,
+                        received ? Instant.ofEpochSecond(rows.getLong("accepted_epoch_second"), rows.getInt("accepted_nano")) : null));
+            } }
+        }
+        boolean more = items.size() > limit; if (more) items.removeLast();
+        return new ai.ravenroot.api.history.HistoryPage<>(items,
+                more ? Optional.of(BusinessCursor.encode(key.scope(), binding, List.of(items.getLast().contributionId()))) : Optional.empty(),
+                ai.ravenroot.api.history.HistoryPage.Availability.AVAILABLE);
     }
     private static int bindScope(PreparedStatement statement, int at, BusinessScope scope) throws SQLException {
         statement.setString(at++, scope.tenantId()); statement.setString(at++, scope.deploymentId());

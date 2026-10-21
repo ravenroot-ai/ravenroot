@@ -22,6 +22,7 @@ public final class DeploymentHistoryRequest {
         allowed.addAll(switch (view) {
             case "histories" -> Set.of("applicationCorrelationId", "publicReference", "lifecycle");
             case "traversals", "joins" -> Set.of("applicationCorrelationId");
+            case "join-members" -> Set.of("applicationCorrelationId", "nodeId", "roundId", "memberState");
             case "uncorrelated-traversals" -> Set.of();
             case "process-traversals" -> Set.of("processInstanceId");
             case "visits" -> Set.of("processInstanceId", "traversalId", "nodeId");
@@ -104,10 +105,17 @@ public final class DeploymentHistoryRequest {
                 var page = reader.joins(required("applicationCorrelationId"), cursor, limit);
                 yield page(page.items().stream().map(row -> map("applicationCorrelationId", row.key().applicationCorrelationId(), "nodeId", row.key().nodeId(),
                         "roundId", row.key().roundId(), "revision", row.revision(), "phase", row.phase(),
-                        "expectedContributions", row.expectedContributions(), "receivedContributions", row.receivedContributions(),
+                        "expectation", row.expectation(), "expectedContributions", row.expectedContributions(), "receivedContributions", row.receivedContributions(),
                         "sealed", row.sealed(), "retainedPayloadBytes", row.retainedPayloadBytes(), "openedAt", row.openedAt(),
                         "deadlineAt", row.deadlineAt(), "updatedAt", row.updatedAt(), "continuationProcessInstanceId", row.key().continuationProcessId(),
                         "continuationTraversalId", row.key().continuationTraversalId())).toList(), page.nextCursor(), "AVAILABLE");
+            }
+            case "join-members" -> {
+                var filter = JoinMemberFilter.valueOf(fields.getOrDefault("memberState", "ALL"));
+                var page = reader.members(required("applicationCorrelationId"), required("nodeId"), required("roundId"), filter, cursor, limit);
+                yield page(page.items().stream().map(row -> map("contributionId", row.contributionId(), "expected", row.expected(), "received", row.received(),
+                        "kind", row.kind(), "processInstanceId", row.processInstanceId(), "traversalId", row.traversalId(), "invocationId", row.invocationId(),
+                        "attemptId", row.attemptId(), "acceptedAt", row.acceptedAt())).toList(), page.nextCursor(), page.availability());
             }
             case "activity" -> activity(reader, tenantId, cursor);
             default -> throw new IllegalArgumentException("invalid history view");

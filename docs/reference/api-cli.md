@@ -81,6 +81,7 @@ version match.
 | `attempts` | Process, traversal, and `invocationId` | None |
 | `parents` | Process, traversal, and `invocationId` | None |
 | `joins` | `applicationCorrelationId` | None |
+| `join-members` | Application ID, `nodeId`, `roundId` | `memberState`: `ALL`, `EXPECTED`, `RECEIVED`, or `MISSING` |
 | `activity` | Process and traversal | Exact `invocationId` and `attemptId`; an attempt requires its invocation |
 
 All views accept `limit` and an opaque `cursor`. Keep the source, selection, filters, and page size
@@ -89,6 +90,13 @@ incarnation, or selection. Store queries apply the limit before serializing meta
 contain several real traversal IDs, and a visit can have several retry attempts. Visit position is
 creation order, not a claim that parallel work happened sequentially. Causal parents carry their
 actual traversal IDs.
+
+Join summaries expose `COUNT`, `MANIFEST`, `UNANNOUNCED`, or legacy `UNKNOWN` expectation form.
+An unannounced expectation is not zero work. Manifest counts are provisional until the trusted
+producer seals them. `join-members` pages distinct expected, received or missing identities and the
+first accepted process, traversal, visit, attempt and time. Duplicate deliveries retain these first
+causal coordinates. Membership metadata remains readable after contribution data expires; captured
+content is still unavailable according to its own retention policy.
 
 Visit timing and safe outcome fields can be null after event retention or for older records.
 `eventHistoryAvailable=false` states that absence explicitly. Captured inputs and outputs are read
@@ -114,7 +122,7 @@ ravenroot deployments history orders --incarnation CAPTURED_ID --graph-version P
 
 Both embedded and remote CLI transports print the shared JSON page, including `nextCursor`.
 Use `--application-correlation-id`, `--public-reference`, `--node-id`, `--invocation-id`, and
-`--attempt-id` for the corresponding view fields. Read deadlines, page ceilings and response budgets
+`--attempt-id`, `--round-id`, and `--member-state` for the corresponding view fields. Read deadlines, page ceilings and response budgets
 are described in [configuration](configuration.md#business-history-and-correlated-join-limits).
 
 ## Execution and events

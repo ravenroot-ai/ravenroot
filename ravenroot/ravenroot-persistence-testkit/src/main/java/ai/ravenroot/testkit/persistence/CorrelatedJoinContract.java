@@ -122,6 +122,59 @@ public abstract class CorrelatedJoinContract {
         }
     }
 
+    @Test void memberMetadataSeparatesUnannouncedManifestMissingItemsAndOriginalArrivalCoordinates() throws Exception {
+        try (var store = createStore(id(), clock())) {
+            var events = contributions(store, "members", "round", 2);
+            var key = new CorrelatedJoinKey(SCOPE, "members", "combine", "round");
+            var record = CorrelatedJoinRecord.open(key, Set.of(), null, false, JoinCause.of(events.getFirst()), NOW, NOW.plusSeconds(60));
+            await(store.compareAndSetCorrelatedJoin(record));
+            assertEquals(CorrelatedJoinSummary.Expectation.UNANNOUNCED,
+                    await(store.correlatedJoins(SCOPE, "members", Set.of(), Optional.empty(), 1)).items().getFirst().expectation());
+            assertTrue(await(store.correlatedJoinMembers(key, JoinMemberFilter.ALL, Optional.empty(), 1)).items().isEmpty());
+            record = record.contribute(events.getFirst(), Set.of(), null, false, NOW, store.businessHistoryPolicy());
+            await(store.compareAndSetCorrelatedJoin(record));
+            var original = await(store.correlatedJoinMembers(key, JoinMemberFilter.RECEIVED, Optional.empty(), 1)).items().getFirst();
+            assertEquals(JoinMemberSummary.of(events.getFirst(), false), original);
+            assertTrue(await(store.correlatedJoinMembers(key, JoinMemberFilter.MISSING, Optional.empty(), 1)).items().isEmpty());
+            record = record.contribute(null, Set.of("part-1", "part-2"), null, false, NOW, store.businessHistoryPolicy());
+            await(store.compareAndSetCorrelatedJoin(record));
+            var summary = await(store.correlatedJoins(SCOPE, "members", Set.of(), Optional.empty(), 1)).items().getFirst();
+            assertEquals(CorrelatedJoinSummary.Expectation.MANIFEST, summary.expectation()); assertFalse(summary.sealed());
+            var missing = await(store.correlatedJoinMembers(key, JoinMemberFilter.MISSING, Optional.empty(), 1)).items().getFirst();
+            assertEquals("part-2", missing.contributionId()); assertNull(missing.processInstanceId()); assertFalse(missing.received());
+            assertEquals(JoinMemberSummary.of(events.getFirst(), true),
+                    await(store.correlatedJoinMembers(key, JoinMemberFilter.RECEIVED, Optional.empty(), 1)).items().getFirst());
+            var repeated = new JoinContribution(events.getFirst().contributionId(), events.getFirst().kind(), UUID.randomUUID(), UUID.randomUUID(),
+                    UUID.randomUUID(), UUID.randomUUID(), SECURITY, events.getFirst().payload(), events.getFirst().payloadDigest(), NOW.plusSeconds(1));
+            assertSame(record, record.contribute(repeated, Set.of(), null, false, NOW, store.businessHistoryPolicy()));
+            assertEquals(events.getFirst().attemptId(), await(store.correlatedJoinMembers(key, JoinMemberFilter.RECEIVED, Optional.empty(), 1)).items().getFirst().attemptId());
+        }
+    }
+
+    @Test void largeManifestPagesMetadataBeforeProjectionAndBindsEverySelection() throws Exception {
+        try (var store = createStore(id(), clock())) {
+            var event = contributions(store, "large-members", "round", 1).getFirst();
+            var key = new CorrelatedJoinKey(SCOPE, "large-members", "combine", "round");
+            var ids = new TreeSet<String>(); for (int i = 0; i < 1024; i++) ids.add("item-" + String.format(java.util.Locale.ROOT, "%04d", i));
+            await(store.compareAndSetCorrelatedJoin(CorrelatedJoinRecord.open(key, ids, null, false, JoinCause.of(event), NOW, NOW.plusSeconds(60))));
+            Optional<String> cursor = Optional.empty(); var observed = new HashSet<String>(); int pages = 0;
+            do {
+                var page = await(store.correlatedJoinMembers(key, JoinMemberFilter.MISSING, cursor, 37));
+                assertTrue(page.items().size() <= 37); page.items().forEach(row -> assertTrue(observed.add(row.contributionId())));
+                cursor = page.nextCursor(); pages++;
+            } while (cursor.isPresent());
+            assertEquals(ids, observed); assertEquals(28, pages);
+            var first = await(store.correlatedJoinMembers(key, JoinMemberFilter.MISSING, Optional.empty(), 1));
+            assertThrows(ExecutionException.class, () -> await(store.correlatedJoinMembers(key, JoinMemberFilter.ALL, first.nextCursor(), 1)));
+            assertThrows(ExecutionException.class, () -> await(store.correlatedJoinMembers(
+                    new CorrelatedJoinKey(SCOPE, "large-members", "combine", "another-round"), JoinMemberFilter.MISSING, first.nextCursor(), 1)));
+            assertThrows(ExecutionException.class, () -> await(store.correlatedJoinMembers(key, JoinMemberFilter.MISSING, Optional.empty(), store.businessHistoryPolicy().maxPageSize() + 1)));
+            assertEquals(ai.ravenroot.api.history.HistoryPage.Availability.NOT_FOUND, await(store.correlatedJoinMembers(
+                    new CorrelatedJoinKey(new BusinessScope("foreign", SCOPE.deploymentId(), SCOPE.graphVersion()), key.applicationCorrelationId(), key.nodeId(), key.roundId()),
+                    JoinMemberFilter.ALL, Optional.empty(), 1)).availability());
+        }
+    }
+
     @Test void cancelledGenerationCannotReopenAndANewRoundHasIndependentContributions() throws Exception {
         try (var store = createStore(id(), clock())) {
             var events = contributions(store, "rounds", "first", 1);
@@ -164,6 +217,9 @@ public abstract class CorrelatedJoinContract {
             assertEquals(CorrelatedJoinRecord.Phase.EXPIRED, tombstone.phase());
             assertEquals(1, tombstone.receivedContributions());
             assertEquals(0, tombstone.retainedPayloadBytes());
+            assertEquals(CorrelatedJoinSummary.Expectation.COUNT, tombstone.expectation());
+            assertEquals(JoinMemberSummary.of(event, false),
+                    await(store.correlatedJoinMembers(key, JoinMemberFilter.RECEIVED, Optional.empty(), 1)).items().getFirst());
             var unavailable = assertThrows(ExecutionException.class, () -> await(store.correlatedJoin(key)));
             assertEquals(BusinessHistoryException.Reason.EXPIRED_HISTORY, ((BusinessHistoryException) unavailable.getCause()).reason());
             var late = assertThrows(ExecutionException.class, () -> contributions(store, "retention", "0", 1));
@@ -185,6 +241,8 @@ public abstract class CorrelatedJoinContract {
         }
         try (var store = createStore(id, clock())) {
             assertEquals(saved, await(store.correlatedJoin(saved.key())).orElseThrow());
+            assertEquals(JoinMemberSummary.of(saved.contributions().get("part-1"), false),
+                    await(store.correlatedJoinMembers(saved.key(), JoinMemberFilter.RECEIVED, Optional.empty(), 1)).items().getFirst());
             var page = await(store.correlatedJoins(SCOPE, null, Set.of(CorrelatedJoinRecord.Phase.READY), Optional.empty(), 1));
             assertEquals(saved.key().continuationProcessId(), page.items().getFirst().key().continuationProcessId());
             assertEquals(saved.contributions().get("part-1").traversalId(),

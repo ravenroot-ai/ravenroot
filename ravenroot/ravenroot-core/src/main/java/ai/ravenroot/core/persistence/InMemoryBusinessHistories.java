@@ -124,6 +124,7 @@ final class InMemoryBusinessHistories {
         histories.put(key, closed); cancelPending(scope, id, clock.instant()); return closed;
     }
     private final Map<CorrelatedJoinKey, CorrelatedJoinRecord> joins = new HashMap<>();
+    private final Map<CorrelatedJoinKey, NavigableMap<String, JoinMemberSummary>> joinMembers = new HashMap<>();
     private final Map<CorrelatedJoinKey, CorrelatedJoinSummary> expiredJoins = new HashMap<>();
     synchronized Optional<CorrelatedJoinRecord> join(CorrelatedJoinKey key) {
         expire(key.scope());
@@ -159,6 +160,10 @@ final class InMemoryBusinessHistories {
         }
         CorrelatedJoinCodec.encode(desired);
         joins.put(key, desired);
+        var metadata = new TreeMap<String, JoinMemberSummary>();
+        desired.expectedIds().forEach(id -> metadata.put(id, new JoinMemberSummary(id, true, false, null, null, null, null, null, null)));
+        desired.contributions().forEach((id, value) -> metadata.put(id, JoinMemberSummary.of(value, desired.expectedIds().contains(id))));
+        joinMembers.put(key, Collections.unmodifiableNavigableMap(metadata));
         if (desired.phase() == CorrelatedJoinRecord.Phase.FAILED || desired.phase() == CorrelatedJoinRecord.Phase.EXPIRED) {
             var groupKey = new Key(key.scope(), key.applicationCorrelationId());
             var current = histories.get(groupKey);
@@ -193,6 +198,20 @@ final class InMemoryBusinessHistories {
                 List.of(last.applicationCorrelationId(), last.nodeId(), last.roundId()))); }
         return new CorrelatedJoinPage(selected, next);
     }
+    synchronized ai.ravenroot.api.history.HistoryPage<JoinMemberSummary> members(CorrelatedJoinKey key,
+            JoinMemberFilter filter, Optional<String> cursor, int limit) {
+        requirePage(limit); expire(key.scope()); Objects.requireNonNull(filter);
+        String binding = "members:" + key.applicationCorrelationId() + '\0' + key.nodeId() + '\0' + key.roundId() + '\0' + filter + ':' + limit;
+        String after = cursor.map(value -> BusinessCursor.decode(key.scope(), binding, value, 1).getFirst()).orElse(null);
+        var metadata = joinMembers.get(key);
+        if (metadata == null) return ai.ravenroot.api.history.HistoryPage.missing();
+        var page = (after == null ? metadata : metadata.tailMap(after, false)).values().stream()
+                .filter(value -> value.matches(filter)).limit(limit + 1L).toList();
+        boolean more = page.size() > limit; var selected = more ? page.subList(0, limit) : page;
+        return new ai.ravenroot.api.history.HistoryPage<>(selected,
+                more ? Optional.of(BusinessCursor.encode(key.scope(), binding, List.of(selected.getLast().contributionId()))) : Optional.empty(),
+                ai.ravenroot.api.history.HistoryPage.Availability.AVAILABLE);
+    }
     private void cancelPending(BusinessScope scope, String applicationId, Instant now) {
         joins.replaceAll((key, value) -> key.scope().equals(scope) && key.applicationCorrelationId().equals(applicationId)
                 && (value.phase() == CorrelatedJoinRecord.Phase.OPEN || value.phase() == CorrelatedJoinRecord.Phase.READY)
@@ -204,7 +223,7 @@ final class InMemoryBusinessHistories {
         if (compared == 0) compared = key.roundId().compareTo(after.get(2));
         return compared;
     }
-    synchronized void clear() { histories.clear(); traversals.clear(); joins.clear(); expiredJoins.clear(); }
+    synchronized void clear() { histories.clear(); traversals.clear(); joins.clear(); expiredJoins.clear(); joinMembers.clear(); }
     private void expire(BusinessScope scope) {
         Instant now = Instant.ofEpochMilli(clock.instant().toEpochMilli());
         histories.replaceAll((key, group) -> key.scope.equals(scope) && group.lifecycle() == BusinessHistory.Lifecycle.OPEN
@@ -221,7 +240,7 @@ final class InMemoryBusinessHistories {
                     ? CorrelatedJoinRecord.Phase.EXPIRED : summary.phase();
             expiredJoins.put(key, new CorrelatedJoinSummary(key, summary.revision() + 1, phase,
                     summary.expectedContributions(), summary.receivedContributions(), summary.sealed(), 0,
-                    summary.openedAt(), summary.deadlineAt(), now));
+                    summary.openedAt(), summary.deadlineAt(), now, summary.expectation()));
             iterator.remove();
         }
     }

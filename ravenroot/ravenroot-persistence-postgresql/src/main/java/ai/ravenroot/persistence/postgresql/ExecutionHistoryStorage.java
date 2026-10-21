@@ -110,6 +110,57 @@ final class ExecutionHistoryStorage {
                 reason == null ? null : ExecutionTerminationReason.valueOf(reason), visits,
                 context.map(CorrelatedTraversal::context).orElse(null), context.map(CorrelatedTraversal::cause).orElse(null), context.map(CorrelatedTraversal::derivation).orElse(null));
     }
+    static void initializeEdges(Connection db, ExecutionKey key, ProcessInstance previous, ProcessInstance next) throws SQLException {
+        try (var statement = db.prepareStatement("INSERT INTO traversal_edge_coverage (tenant_id, process_instance_id, traversal_id) VALUES (?, ?, ?) ON CONFLICT DO NOTHING")) {
+            for (var traversal : next.traversals().keySet()) if (previous == null || !previous.traversals().containsKey(traversal)) {
+                int at = bindKey(statement, 1, key); bindUuid(statement, at, traversal); statement.addBatch();
+            }
+            statement.executeBatch();
+        }
+    }
+    static void recordEdge(Connection db, ExecutionKey key, EventEnvelope envelope) throws SQLException {
+        if (!envelope.eventType().equals("EDGE_TRAVERSED")) return;
+        var edge = EdgeTraversalEventData.edgeId(envelope.payload()); if (edge.isEmpty()) return;
+        try (var statement = db.prepareStatement("INSERT INTO traversal_edge_summary (tenant_id, process_instance_id, traversal_id, edge_id, traversal_count) VALUES (?, ?, ?, ?, 1) "
+                + "ON CONFLICT (tenant_id, process_instance_id, traversal_id, edge_id) DO UPDATE SET traversal_count = traversal_edge_summary.traversal_count + 1")) {
+            int at = bindKey(statement, 1, key); bindUuid(statement, at++, envelope.traversalId()); statement.setString(at, edge.orElseThrow()); statement.executeUpdate();
+        }
+    }
+    static HistoryPage<TraversalNodeSummary> nodes(Connection db, ExecutionKey key, UUID traversal, Optional<String> cursor, int limit, int maximum) throws SQLException {
+        requireLimit(limit, maximum); String query = "nodes:" + limit;
+        String after = cursor.map(value -> ExecutionHistoryCursor.decode(key, traversal, query, value)).orElse(null);
+        if (traversal(db, key, traversal).isEmpty()) return HistoryPage.missing();
+        var rows = new ArrayList<TraversalNodeSummary>();
+        String sql = "SELECT node_id, COUNT(*) AS visits, SUM(CASE WHEN status IN ('SCHEDULED','RUNNING','WAITING') THEN 1 ELSE 0 END) AS active, "
+                + "SUM(CASE WHEN status = 'COMPLETED' THEN 1 ELSE 0 END) AS completed, SUM(CASE WHEN status = 'FAILED' THEN 1 ELSE 0 END) AS failed, "
+                + "SUM((SELECT COUNT(*) FROM attempt a WHERE a.tenant_id = i.tenant_id AND a.process_instance_id = i.process_instance_id AND a.invocation_id = i.invocation_id)) AS attempts "
+                + "FROM invocation i WHERE " + TRAVERSAL + (after == null ? "" : " AND node_id > ?") + " GROUP BY node_id ORDER BY node_id LIMIT ?";
+        try (var statement = db.prepareStatement(sql)) {
+            int at = bindKey(statement, 1, key); bindUuid(statement, at++, traversal);
+            if (after != null) statement.setString(at++, after); statement.setInt(at, limit + 1);
+            try (var result = statement.executeQuery()) { while (result.next()) rows.add(new TraversalNodeSummary(result.getString("node_id"), result.getLong("visits"), result.getLong("active"), result.getLong("completed"), result.getLong("failed"), result.getLong("attempts"))); }
+        }
+        String last = rows.size() > limit ? rows.get(limit - 1).nodeId() : "";
+        return page(rows, limit, key, traversal, query, last);
+    }
+    static HistoryPage<TraversalEdgeSummary> edges(Connection db, ExecutionKey key, UUID traversal, Optional<String> cursor, int limit, int maximum) throws SQLException {
+        requireLimit(limit, maximum); String query = "edges:" + limit;
+        String after = cursor.map(value -> ExecutionHistoryCursor.decode(key, traversal, query, value)).orElse(null);
+        if (traversal(db, key, traversal).isEmpty()) return HistoryPage.missing();
+        try (var statement = db.prepareStatement("SELECT 1 FROM traversal_edge_coverage WHERE " + TRAVERSAL)) {
+            int at = bindKey(statement, 1, key); bindUuid(statement, at, traversal);
+            try (var result = statement.executeQuery()) { if (!result.next()) return new HistoryPage<>(List.of(), Optional.empty(), HistoryPage.Availability.NOT_RECORDED); }
+        }
+        var rows = new ArrayList<TraversalEdgeSummary>();
+        try (var statement = db.prepareStatement("SELECT edge_id, traversal_count FROM traversal_edge_summary WHERE " + TRAVERSAL
+                + (after == null ? "" : " AND edge_id > ?") + " ORDER BY edge_id LIMIT ?")) {
+            int at = bindKey(statement, 1, key); bindUuid(statement, at++, traversal);
+            if (after != null) statement.setString(at++, after); statement.setInt(at, limit + 1);
+            try (var result = statement.executeQuery()) { while (result.next()) rows.add(new TraversalEdgeSummary(result.getString("edge_id"), result.getLong("traversal_count"))); }
+        }
+        String last = rows.size() > limit ? rows.get(limit - 1).edgeId() : "";
+        return page(rows, limit, key, traversal, query, last);
+    }
     static HistoryPage<NodeVisitSummary> visits(Connection db, ExecutionKey key, UUID traversal,
             Optional<String> node, Optional<String> cursor, int limit, int maximum) throws SQLException {
         requireLimit(limit, maximum); node.ifPresent(value -> {

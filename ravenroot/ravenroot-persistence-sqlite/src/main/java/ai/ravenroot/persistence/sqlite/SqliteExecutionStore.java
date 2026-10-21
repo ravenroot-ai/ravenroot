@@ -548,6 +548,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
         writeInstanceRow(key, folded.status(), folded.terminationReason(), folded.controlState(), pin, revision, fencingToken,
                 now, createdAt, generation, origin, retainedUntil);
         AggregateStorage.write(connection, key, folded);
+        ExecutionHistoryStorage.initializeEdges(connection, key, current, folded);
         DeploymentEntryStorage.project(connection, batch, folded);
         BusinessHistoryStorage.writeClosureSignals(connection, batch, folded, now);
         if (batch.derivedEntryHandoff().isPresent()) {
@@ -5726,6 +5727,14 @@ public final class SqliteExecutionStore implements ExecutionStore {
     @Override public CompletionStage<Optional<ai.ravenroot.api.history.TraversalSummary>> executionTraversal(ExecutionKey key, UUID traversalId) {
         return async(() -> inReadTransaction(key, () -> ExecutionHistoryStorage.traversal(connection, key, traversalId)));
     }
+    @Override public CompletionStage<ai.ravenroot.api.history.HistoryPage<ai.ravenroot.api.history.TraversalNodeSummary>> executionNodeSummaries(
+            ExecutionKey key, UUID traversalId, Optional<String> cursor, int limit) {
+        return async(() -> inReadTransaction(key, () -> ExecutionHistoryStorage.nodes(connection, key, traversalId, cursor, limit, businessHistoryPolicy().maxPageSize())));
+    }
+    @Override public CompletionStage<ai.ravenroot.api.history.HistoryPage<ai.ravenroot.api.history.TraversalEdgeSummary>> executionEdgeSummaries(
+            ExecutionKey key, UUID traversalId, Optional<String> cursor, int limit) {
+        return async(() -> inReadTransaction(key, () -> ExecutionHistoryStorage.edges(connection, key, traversalId, cursor, limit, businessHistoryPolicy().maxPageSize())));
+    }
     @Override public CompletionStage<ai.ravenroot.api.history.HistoryPage<ai.ravenroot.api.history.NodeVisitSummary>> executionVisits(
             ExecutionKey key, UUID traversalId, Optional<String> nodeId, Optional<String> cursor, int limit) {
         return async(() -> inReadTransaction(key, () -> ExecutionHistoryStorage.visits(connection, key, traversalId, nodeId, cursor, limit, businessHistoryPolicy().maxPageSize())));
@@ -6078,6 +6087,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
                 StoredInstant.bindValue(statement, 20, now);
                 statement.executeUpdate();
             }
+            ExecutionHistoryStorage.recordEdge(connection, key, envelope);
             offset++;
             stream++;
         }

@@ -14,7 +14,9 @@ public record HistoryPage<T>(List<T> items, Optional<String> nextCursor, Availab
         /** The selected process, traversal or visit is not retained in the authenticated scope. */
         NOT_FOUND,
         /** The requested metadata retention window expired. */
-        EXPIRED
+        EXPIRED,
+        /** Older data predates this scalar projection; no zero counts are fabricated. */
+        NOT_RECORDED
     }
     /** Copies selected metadata and rejects rows on a missing or expired selection. */
     public HistoryPage {

@@ -860,6 +860,12 @@ public final class AuthorizedRavenrootApplication {
             @Override public ai.ravenroot.api.history.HistoryPage<ai.ravenroot.api.history.TraversalSummary> processTraversals(java.util.UUID process, java.util.Optional<String> cursor, int limit) {
                 require(context, action, resource); return reader.processTraversals(process, cursor, limit);
             }
+            @Override public ai.ravenroot.api.history.HistoryPage<ai.ravenroot.api.history.TraversalNodeSummary> nodes(java.util.UUID process, java.util.UUID traversal, java.util.Optional<String> cursor, int limit) {
+                require(context, action, resource); return reader.nodes(process, traversal, cursor, limit);
+            }
+            @Override public ai.ravenroot.api.history.HistoryPage<ai.ravenroot.api.history.TraversalEdgeSummary> edges(java.util.UUID process, java.util.UUID traversal, java.util.Optional<String> cursor, int limit) {
+                require(context, action, resource); return reader.edges(process, traversal, cursor, limit);
+            }
             @Override public ai.ravenroot.api.history.HistoryPage<ai.ravenroot.api.history.NodeVisitSummary> visits(java.util.UUID process, java.util.UUID traversal, java.util.Optional<String> node, java.util.Optional<String> cursor, int limit) {
                 require(context, action, resource); return reader.visits(process, traversal, node, cursor, limit);
             }

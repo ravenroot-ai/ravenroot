@@ -1,6 +1,7 @@
 package ai.ravenroot.server;
 
 import ai.ravenroot.api.application.*;
+import ai.ravenroot.api.correlation.*;
 import ai.ravenroot.api.history.*;
 import ai.ravenroot.api.payload.*;
 import ai.ravenroot.api.persistence.*;
@@ -58,6 +59,14 @@ class DeploymentHistoryHttpTest {
                     .apply(new ExecutionTransition.ProcessCreated(state, new GraphVersionPin(binding.graphVersion()))).build()).toCompletableFuture().get(5, TimeUnit.SECONDS);
             fixture.rejectAggregateLoads.set(true);
             var source = "processInstanceId=" + key.processInstanceId() + "&traversalId=" + traversal;
+            var scalarNodes = fixture.history("view=nodes&" + source + "&limit=1", "tenant", binding.incarnationId());
+            assertEquals(200, scalarNodes.statusCode(), scalarNodes.body());
+            assertTrue(scalarNodes.body().contains("\"visitCount\":1000"), scalarNodes.body());
+            assertTrue(scalarNodes.body().contains("\"attemptCount\":2000"), scalarNodes.body());
+            assertTrue(scalarNodes.body().getBytes(StandardCharsets.UTF_8).length < 1500, "all loop counts require one small metadata row");
+            var scalarEdges = fixture.history("view=edges&" + source + "&limit=1", "tenant", binding.incarnationId());
+            assertEquals(200, scalarEdges.statusCode(), scalarEdges.body());
+            assertTrue(scalarEdges.body().contains("\"availability\":\"AVAILABLE\""), "new traversal has complete zero-edge evidence");
             String path = "view=visits&" + source + "&limit=37";
             var ids = new HashSet<String>(); String cursor = null; int pages = 0, largest = 0;
             long began = System.nanoTime();
@@ -99,6 +108,41 @@ class DeploymentHistoryHttpTest {
             String boundCursor = text(first, "nextCursor");
             assertEquals(400, fixture.history(path + "&nodeId=loop&cursor=" + encode(boundCursor), "tenant", binding.incarnationId()).statusCode());
             assertEquals(400, fixture.history(path.replace("limit=37", "limit=101"), "tenant", binding.incarnationId()).statusCode());
+        }
+    }
+
+    @Test void pendingClosureAndDerivationKeepPublicCausalityWithoutActivityCapture() throws Exception {
+        try (var fixture = new Fixture()) {
+            var scope = new BusinessScope("tenant", "document", fixture.binding.graphVersion());
+            var context = new ApplicationCorrelationContext("derived-business", Optional.empty(), Optional.empty(), "round", Optional.of("public.csv"));
+            UUID process = UUID.randomUUID(), traversal = UUID.randomUUID(), invocation = UUID.randomUUID(), attempt = UUID.randomUUID();
+            var original = new CorrelationDerivation(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), "explicit audited derivation");
+            Instant now = Instant.now();
+            fixture.store.recordCorrelatedTraversal(new CorrelatedTraversal(scope, context, process, traversal, "close", CorrelatedTraversal.Cause.DERIVED_CONTEXT,
+                    TraversalStatus.RUNNING, null, now, now, null, original), CorrelationMapping.Mode.ACCEPT_OR_CREATE).toCompletableFuture().get(5, TimeUnit.SECONDS);
+            var key = new ExecutionKey("tenant", process);
+            var created = fixture.store.apply(ExecutionBatch.to(key).expecting(RevisionExpectation.notPresent()).recordOrigin(ExecutionOrigin.of("document", null, null))
+                    .apply(new ExecutionTransition.ProcessCreated(new ProcessInstance(process, ProcessInstanceStatus.RUNNING,
+                            Map.of(traversal, new Traversal(traversal, "close", TraversalStatus.RUNNING,
+                                    Map.of(invocation, new NodeInvocation(invocation, "close", Set.of(), NodeInvocationStatus.RUNNING,
+                                            List.of(new NodeAttempt(attempt, 1, NodeAttemptStatus.RUNNING))))))), new GraphVersionPin(fixture.binding.graphVersion()))).build())
+                    .toCompletableFuture().get(5, TimeUnit.SECONDS);
+            var lease = fixture.store.claim(key, "close-author", Duration.ofSeconds(30)).toCompletableFuture().get(5, TimeUnit.SECONDS);
+            fixture.store.apply(ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(created.revision())).fencedBy(lease)
+                    .apply(new ExecutionTransition.AttemptTransitioned(traversal, invocation, attempt, NodeAttemptStatus.COMPLETED))
+                    .apply(new ExecutionTransition.InvocationTransitioned(traversal, invocation, NodeInvocationStatus.COMPLETED))
+                    .requestBusinessClosure(new BusinessClosureSignal(scope, "derived-business", BusinessHistory.Lifecycle.COMPLETED,
+                            "declared production complete", process, traversal, invocation, attempt, now)).build()).toCompletableFuture().get(5, TimeUnit.SECONDS);
+            fixture.rejectAggregateLoads.set(true);
+            var histories = fixture.history("view=histories&limit=1", "tenant", fixture.binding.incarnationId());
+            assertEquals(200, histories.statusCode(), histories.body());
+            assertTrue(histories.body().contains("\"state\":\"RUNNING\""), histories.body()); assertTrue(histories.body().contains("\"runningTraversals\":1"), histories.body());
+            assertTrue(histories.body().contains("declared production complete"));
+            for (UUID id : List.of(process, traversal, invocation, attempt)) assertTrue(histories.body().contains(id.toString()), histories.body());
+            var traversals = fixture.history("view=traversals&applicationCorrelationId=derived-business&limit=1", "tenant", fixture.binding.incarnationId());
+            assertEquals(200, traversals.statusCode(), traversals.body()); assertTrue(traversals.body().contains("explicit audited derivation"));
+            for (UUID id : List.of(original.processInstanceId(), original.traversalId(), original.invocationId(), original.attemptId())) assertTrue(traversals.body().contains(id.toString()), traversals.body());
+            assertFalse(traversals.body().contains("\"content\"")); assertFalse(histories.body().contains("\"content\""));
         }
     }
 

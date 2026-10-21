@@ -134,10 +134,13 @@ version match.
 
 | `view` | Required selection | Optional filter |
 |---|---|---|
+| `policy` | Current deployment binding | None; one policy record, no cursor |
 | `histories` (default) | Current deployment binding | Exact `applicationCorrelationId`, `publicReference`, or `lifecycle` |
 | `traversals` | `applicationCorrelationId` | None |
 | `uncorrelated-traversals` | Current deployment binding | None; legacy records retain no invented business ID |
 | `process-traversals` | `processInstanceId` | None |
+| `nodes` | `processInstanceId`, `traversalId` | Scalar per-node visit and attempt counts |
+| `edges` | `processInstanceId`, `traversalId` | Scalar counts of actual `EDGE_TRAVERSED` IDs |
 | `visits` | `processInstanceId`, `traversalId` | Exact `nodeId` |
 | `attempts` | Process, traversal, and `invocationId` | None |
 | `parents` | Process, traversal, and `invocationId` | None |
@@ -145,12 +148,42 @@ version match.
 | `join-members` | Application ID, `nodeId`, `roundId` | `memberState`: `ALL`, `EXPECTED`, `RECEIVED`, or `MISSING` |
 | `activity` | Process and traversal | Exact `invocationId` and `attemptId`; an attempt requires its invocation |
 
-All views accept `limit` and an opaque `cursor`. Keep the source, selection, filters, and page size
+Paged views accept `limit` and an opaque `cursor`. The `policy` view accepts `limit=1` and publishes
+`maxPageSize`, `readTimeoutMillis`, and `maxResponseBytes`; it has no continuation. Keep the source, selection, filters, and page size
 unchanged while following `nextCursor`; cursors grant no authority and cannot cross a tenant,
 incarnation, or selection. Store queries apply the limit before serializing metadata. A process can
 contain several real traversal IDs, and a visit can have several retry attempts. Visit position is
 creation order, not a claim that parallel work happened sequentially. Causal parents carry their
 actual traversal IDs.
+
+Node and edge summaries are separate bounded metadata queries. Node totals distinguish active,
+completed, and failed visits from retry attempts. Edge totals count recorded traversal events by the
+stable authored edge ID. An empty `AVAILABLE` edge page proves zero recorded edges for that traversal;
+`NOT_RECORDED` means the traversal predates scalar edge coverage and must not be displayed as zero.
+These counters survive ordinary journal expiry. Queries never load contribution payloads or the
+whole process aggregate to build a page.
+
+Native Monitoring and the v2 embedded viewer share paged business-history and actual-traversal
+controls. They mount at most two requested graph previews, using the immutable deployed projection
+rather than a later editor draft. A node opens a persistent visits inspector; selecting a visit shows
+its attempts and causal parents. Captured content requires a separate action and reports its capture
+and retention availability. The graph preserves authored positions, loops, and parallel edges.
+Record details expose the allowlisted application context, requested closure, audit reason, and
+original derivation process/traversal/visit/attempt identities without loading captured content.
+A pending close request remains visible while admitted work settles; its requested result does
+not override the recorded running or failed work.
+
+Native Monitoring opens a responsive read-only surface with its own return control and a visible
+draft-divergence notice. Editing the draft does not change a pinned preview. A failed initial view
+or policy read offers an explicit retry against the same deployment; this read does not activate
+the deployment or admit START.
+
+Coverage loads one node page and one edge page when a preview opens. If more rows exist, omitted
+activity remains explicitly unknown. Use **Load more node coverage** or **Load more edge coverage**
+to extend it; the viewer does not drain pages automatically. **Refresh coverage** replaces the loaded
+coverage with the current first pages while preserving the selected inspector. Business selection,
+document replacement, workspace authority changes, and preview close retire pending reads; a late
+response cannot repaint an old selection. The operator page cap also applies when it is one record.
 
 Join summaries expose `COUNT`, `MANIFEST`, `UNANNOUNCED`, or legacy `UNKNOWN` expectation form.
 An unannounced expectation is not zero work. Manifest counts are provisional until the trusted

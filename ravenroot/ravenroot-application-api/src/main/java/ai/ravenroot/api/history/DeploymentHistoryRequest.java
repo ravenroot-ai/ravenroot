@@ -20,16 +20,19 @@ public final class DeploymentHistoryRequest {
         limit = Integer.parseInt(fields.getOrDefault("limit", "50"));
         var allowed = new HashSet<>(COMMON);
         allowed.addAll(switch (view) {
+            case "policy" -> Set.of();
             case "histories" -> Set.of("applicationCorrelationId", "publicReference", "lifecycle");
             case "traversals", "joins" -> Set.of("applicationCorrelationId");
             case "join-members" -> Set.of("applicationCorrelationId", "nodeId", "roundId", "memberState");
             case "uncorrelated-traversals" -> Set.of();
             case "process-traversals" -> Set.of("processInstanceId");
+            case "nodes", "edges" -> Set.of("processInstanceId", "traversalId");
             case "visits" -> Set.of("processInstanceId", "traversalId", "nodeId");
             case "attempts", "parents" -> Set.of("processInstanceId", "traversalId", "invocationId");
             case "activity" -> Set.of("processInstanceId", "traversalId", "invocationId", "attemptId");
             default -> throw new IllegalArgumentException("invalid history view");
         });
+        if (view.equals("policy") && fields.containsKey("cursor")) throw new IllegalArgumentException("policy has no cursor");
         if (!allowed.containsAll(fields.keySet()) || fields.values().stream().anyMatch(value ->
                 value.isBlank() || value.length() > 32768 || value.codePoints().anyMatch(Character::isISOControl)))
             throw new IllegalArgumentException("invalid history query");
@@ -61,8 +64,11 @@ public final class DeploymentHistoryRequest {
  * @return bounded JSON page with exact source, explicit availability and continuation
  */
     public String read(DeploymentHistoryReader reader, String tenantId) {
+        if (limit < 1 || limit > reader.policy().maxPageSize()) throw new IllegalArgumentException("invalid history page size");
         Optional<String> cursor = optional("cursor");
         Map<String, Object> result = switch (view) {
+            case "policy" -> page(List.of(map("maxPageSize", reader.policy().maxPageSize(), "readTimeoutMillis", reader.policy().readTimeout().toMillis(),
+                    "maxResponseBytes", reader.policy().response().maxEncodedBytes())), Optional.empty(), "AVAILABLE");
             case "histories" -> {
                 var lifecycles = optional("lifecycle").map(value -> Set.of(BusinessHistory.Lifecycle.valueOf(value))).orElse(Set.of());
                 var page = reader.histories(new BusinessHistoryQuery(optional("applicationCorrelationId"), optional("publicReference"), lifecycles, cursor, limit));
@@ -81,6 +87,15 @@ public final class DeploymentHistoryRequest {
                 yield page(page.items().stream().map(row -> map("processInstanceId", row.processInstanceId(), "traversalId", row.traversalId(),
                         "entryNodeId", row.entryNodeId(), "status", row.status(), "terminationReason", row.terminationReason(),
                         "cause", row.cause(), "visitCount", row.visitCount(), "applicationContext", context(row.applicationCorrelation()), "derivation", derivation(row.derivation()))).toList(), page.nextCursor(), page.availability());
+            }
+            case "nodes" -> {
+                var page = reader.nodes(uuid("processInstanceId"), uuid("traversalId"), cursor, limit);
+                yield page(page.items().stream().map(row -> map("nodeId", row.nodeId(), "visitCount", row.visitCount(),
+                        "activeVisits", row.activeVisits(), "completedVisits", row.completedVisits(), "failedVisits", row.failedVisits(), "attemptCount", row.attemptCount())).toList(), page.nextCursor(), page.availability());
+            }
+            case "edges" -> {
+                var page = reader.edges(uuid("processInstanceId"), uuid("traversalId"), cursor, limit);
+                yield page(page.items().stream().map(row -> map("edgeId", row.edgeId(), "traversalCount", row.traversalCount())).toList(), page.nextCursor(), page.availability());
             }
             case "visits" -> {
                 var page = reader.visits(uuid("processInstanceId"), uuid("traversalId"), optional("nodeId"), cursor, limit);

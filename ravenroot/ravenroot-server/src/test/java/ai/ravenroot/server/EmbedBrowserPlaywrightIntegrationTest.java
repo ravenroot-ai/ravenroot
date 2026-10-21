@@ -99,12 +99,14 @@ class EmbedBrowserPlaywrightIntegrationTest {
                 exchange.close();
             });
             control.start();
-            Path processOutput = Files.createTempFile("ravenroot-embed-playwright-", ".log");
+            Path evidence = Files.createDirectories(Path.of("target", "embed-browser-evidence", java.util.UUID.randomUUID().toString())).toAbsolutePath();
+            Path processOutput = evidence.resolve("playwright.log");
             var process = new ProcessBuilder(ui.resolve("node_modules/.bin/playwright").toString(),
                     "test", "--config=playwright.embed.config.js")
                     .directory(ui.toFile())
                     .redirectErrorStream(true)
                     .redirectOutput(processOutput.toFile());
+            process.environment().put("RR_VISUAL_EVIDENCE_DIR", evidence.toString());
             process.environment().put("RR_EMBED_BACKEND_ORIGIN", "http://127.0.0.1:" + server.port());
             process.environment().put("RR_EMBED_PARENT_ORIGIN", parentOrigin);
             process.environment().put("RR_EMBED_VIEWER_ORIGIN", viewerOrigin);
@@ -122,7 +124,7 @@ class EmbedBrowserPlaywrightIntegrationTest {
                     if (!browser.waitFor(5, TimeUnit.SECONDS)) browser.destroyForcibly();
                 }
                 control.stop(0);
-                Files.deleteIfExists(processOutput);
+                System.out.println("embed-browser evidence=" + evidence);
             }
         }
     }
@@ -143,6 +145,10 @@ class EmbedBrowserPlaywrightIntegrationTest {
         if (!(live instanceof EmbedProvisionOutcome.Provisioned)) {
             throw new AssertionError("the live fixture registration was refused: " + live);
         }
+        var history = registrations.provision(EmbedProvisionCommand.deploymentV2WithExecutionCapability(
+                "history-registration", 0, "browser-issuer", "browser-workload", "tenant", parent,
+                Optional.empty(), "orders", false));
+        if (!(history instanceof EmbedProvisionOutcome.Provisioned)) throw new AssertionError("history registration refused");
         var stale = registrations.provision(EmbedProvisionCommand.deploymentV2WithExecutionCapability(
                 "live-stale-registration", 0, "browser-issuer", "browser-workload", "tenant", parent,
                 Optional.empty(), "orders-stale", true));
@@ -163,8 +169,9 @@ class EmbedBrowserPlaywrightIntegrationTest {
                 new AuthorizedEmbedSessionCreation(authorization, registrations), registrations, projections,
                 event -> { }, Clock.systemUTC(), Duration.ofMinutes(1), Duration.ofMinutes(1),
                 // The suite now opens independently localized viewers alongside the original security
-                // scenarios. Bound its combined signed operations without changing production limits.
-                Duration.ofMinutes(2), Duration.ofMinutes(1), 16, 16, 64, 1, true);
+                // scenarios. Bound its combined signed history, preview and observation operations to 256 replay entries
+                // without changing production limits (whose default replay capacity is 16,384).
+                Duration.ofMinutes(2), Duration.ofMinutes(1), 16, 16, 256, 1, true);
         var environment = BehaviorEnvironment.safeDefaults();
         var application = new DefaultRavenrootApplication(engine, new ExecutionMonitor(),
                 BehaviorRegistry.standard(environment), environment.artifacts(), environment.programRuntime(),

@@ -140,7 +140,7 @@ test('deployed groups show hidden member and internal-edge activity, then expose
   await expect(projectedFinish).toHaveClass(/d3-edge--active/);
   await expect(summary).toHaveAttribute('data-member-edge-pulses', '0', { timeout: 3_000 });
   await expect(projectedFinish).not.toHaveClass(/d3-edge--active/, { timeout: 3_000 });
-  expect(Number(await projectedFinish.getAttribute('stroke-width'))).toBe(1.8);
+  expect(Number(await projectedFinish.getAttribute('stroke-width'))).toBe(3);
   await summary.click();
   const collapse = page.getByRole('button', { name: 'Collapse visual group Pipeline, 2 members' });
   await expect(collapse).toBeVisible();
@@ -333,7 +333,7 @@ for (const theme of ['dark', 'light']) for (const view of ['design', 'monitoring
     const boundaryActive = () => view === 'monitoring'
       ? page.locator('.d3-visual-edges [data-original-edge-id="finish"]').evaluate(node => node.classList.contains('d3-edge--active'))
       : page.evaluate(() => window.v2Viewer.presentationSnapshot().edges.filter(edge => edge.source !== 'worker')
-        .some(edge => Number.parseFloat(edge.style.width) > 2.5));
+        .some(edge => edge.runtimeActive));
     await paint();
     await expect.poll(boundaryActive).toBe(true);
     await expect.poll(width).toMatch(/^5(?:px)?$/);
@@ -394,3 +394,19 @@ for (const theme of ['dark', 'light']) for (const view of ['design', 'monitoring
     await summary.click(); await member.hover(); await expect(tip).toContainText('State: Unavailable');
   });
 }
+
+test('selected actual traversal ignores another traversal in the same process without clearing its own decoration', async ({ page }) => {
+  await mount(page);
+  const result = await page.evaluate(() => {
+    const viewer = window.v2Viewer;
+    const generation = viewer.selectTraversal('process-a', 'traversal-a');
+    const frame = (cursor, executionId, edgeId) => ({ type: 'execution', deploymentId: 'orders', graphVersion: 'v1', incarnationId: 'inc-2', processInstanceId: 'process-a', cursor,
+      event: edgeId ? { type: 'EDGE_TRAVERSED', edgeId, executionId, sequence: Number(cursor) } : { type: 'NODE_STARTED', nodeId: 'worker', executionId, sequence: Number(cursor) } });
+    const own = viewer.observe(frame('1', 'traversal-a'), generation);
+    const foreign = viewer.observe(frame('2', 'traversal-b', 'route'), generation);
+    return { own, foreign, continuity: document.querySelector('main').dataset.viewerContinuity, snapshot: viewer.presentationSnapshot() };
+  });
+  expect(result.own.accepted).toBe(true); expect(result.foreign).toMatchObject({ accepted: false, reason: 'traversal-selection' });
+  expect(result.continuity).toBe('live');
+  await expect(page.locator('[data-design-element="worker"]')).toBeVisible();
+});

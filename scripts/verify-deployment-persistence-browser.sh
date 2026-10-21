@@ -13,7 +13,7 @@ echo "Running the real persisted deployment browser lifecycle..." >&2
 mvn -B -f "$REACTOR_DIR/pom.xml" \
   -pl ravenroot-server -am \
   -Dravenroot.deploymentPersistence.browserTest=true \
-  -Dtest=DeploymentLifecyclePersistenceBrowserTest,FirstRunPersistenceBrowserTest \
+  -Dtest=DeploymentLifecyclePersistenceBrowserTest,FirstRunPersistenceBrowserTest,DeploymentHistoryBrowserTest \
   -Dsurefire.failIfNoSpecifiedTests=false \
   test
 

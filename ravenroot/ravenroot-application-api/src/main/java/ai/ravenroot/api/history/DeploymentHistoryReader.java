@@ -38,6 +38,26 @@ public interface DeploymentHistoryReader {
  * @return bounded actual constituent traversals of the selected original process
  */
     HistoryPage<TraversalSummary> processTraversals(UUID processInstanceId, Optional<String> cursor, int limit);
+    /** Pages complete scalar counts for each selected node of an actual traversal.
+     * @param processInstanceId original process identity
+     * @param traversalId actual traversal identity
+     * @param cursor continuation for the same query and source
+     * @param limit requested page size within published bounds
+     * @return metadata-only node counts, including repeated loop visits and attempts
+     */
+    default HistoryPage<TraversalNodeSummary> nodes(UUID processInstanceId, UUID traversalId, Optional<String> cursor, int limit) {
+        throw new HistoryReadException(HistoryReadException.Reason.UNAVAILABLE);
+    }
+    /** Pages actual stable edge dispatch counts; never infers traversal from completed nodes.
+     * @param processInstanceId original process identity
+     * @param traversalId actual traversal identity
+     * @param cursor continuation for the same query and source
+     * @param limit requested page size within published bounds
+     * @return actual edge counts or explicit older-data unavailability
+     */
+    default HistoryPage<TraversalEdgeSummary> edges(UUID processInstanceId, UUID traversalId, Optional<String> cursor, int limit) {
+        throw new HistoryReadException(HistoryReadException.Reason.UNAVAILABLE);
+    }
     /** Paged visits of a selected traversal, optionally filtered by an exact node.
  * @param processInstanceId original owning process identity, independent from a business history
  * @param traversalId actual traversal identity within the owning process

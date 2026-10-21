@@ -673,6 +673,7 @@ public final class PostgresExecutionStore implements ExecutionStore {
                     retainedUntil, existing.revision());
         }
         AggregateStorage.write(connection, key, folded);
+        ExecutionHistoryStorage.initializeEdges(connection, key, current, folded);
         DeploymentEntryStorage.project(connection, batch, folded);
         BusinessHistoryStorage.writeClosureSignals(connection, batch, folded, now);
         if (batch.derivedEntryHandoff().isPresent()) {
@@ -2365,6 +2366,14 @@ public final class PostgresExecutionStore implements ExecutionStore {
     @Override public CompletionStage<Optional<ai.ravenroot.api.history.TraversalSummary>> executionTraversal(ExecutionKey key, UUID traversalId) {
         return async(() -> read(key, connection -> ExecutionHistoryStorage.traversal(connection, key, traversalId)));
     }
+    @Override public CompletionStage<ai.ravenroot.api.history.HistoryPage<ai.ravenroot.api.history.TraversalNodeSummary>> executionNodeSummaries(
+            ExecutionKey key, UUID traversalId, Optional<String> cursor, int limit) {
+        return async(() -> read(key, connection -> ExecutionHistoryStorage.nodes(connection, key, traversalId, cursor, limit, businessHistoryPolicy().maxPageSize())));
+    }
+    @Override public CompletionStage<ai.ravenroot.api.history.HistoryPage<ai.ravenroot.api.history.TraversalEdgeSummary>> executionEdgeSummaries(
+            ExecutionKey key, UUID traversalId, Optional<String> cursor, int limit) {
+        return async(() -> read(key, connection -> ExecutionHistoryStorage.edges(connection, key, traversalId, cursor, limit, businessHistoryPolicy().maxPageSize())));
+    }
     @Override public CompletionStage<ai.ravenroot.api.history.HistoryPage<ai.ravenroot.api.history.NodeVisitSummary>> executionVisits(
             ExecutionKey key, UUID traversalId, Optional<String> nodeId, Optional<String> cursor, int limit) {
         return async(() -> read(key, connection -> ExecutionHistoryStorage.visits(connection, key, traversalId, nodeId, cursor, limit, businessHistoryPolicy().maxPageSize())));
@@ -3987,6 +3996,7 @@ public final class PostgresExecutionStore implements ExecutionStore {
                 statement.setBytes(19, envelope.digest().value());
                 StoredInstant.bindValue(statement, 20, now);
                 statement.addBatch();
+                ExecutionHistoryStorage.recordEdge(connection, key, envelope);
             }
             statement.executeBatch();
         }

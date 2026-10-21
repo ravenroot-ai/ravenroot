@@ -1,3 +1,4 @@
+import { createDeploymentHistoryMonitor } from './embed-viewer-entry.js';
 import { runOriginDeployment, persistedDeploymentRun } from './deployment-run.js';
 import { chooseRepositoryDocument, managedRepositoryLaunch } from './repository-picker.js';
 import { uiMessage, uiComputed, isUiMessage, renderUiMessage, uiErrorMessage, uiMessageOf } from './ui-message.js';
@@ -835,6 +836,7 @@ let workspaceAuthority = Object.freeze({ state: 'unverified', client: null, scop
 const SESSION_ONLY_RUNTIME_EVENT_SCOPE = Object.freeze({ tenantId: null });
 
 function beginWorkspaceAuthority(client, state = 'pending') {
+  workspace.documents.forEach(retireDocumentHistory);
   startupImportController?.runtimePending();
   workspaceAuthority = Object.freeze({ state, client, scope: null,
     generation: workspaceAuthority.generation + 1 });
@@ -3009,7 +3011,7 @@ function setGraphDocumentMaximized(document_, maximized) {
 }
 
 window.document.addEventListener('keydown', event => {
-  if (event.key !== 'Escape' || maximizedDocumentId === null) return;
+  if (event.key !== 'Escape' || maximizedDocumentId === null || event.target.closest?.('.doc-history-dialog')) return;
   const document_ = workspace.find(maximizedDocumentId);
   if (!document_) return;
   event.preventDefault();
@@ -3905,6 +3907,7 @@ function replaceActiveDocumentFromText(
 }
 
 function activateDocument(id) {
+  if (workspace.activeId !== id) retireDocumentHistory(workspace.active);
   finishVisualGroups(workspace.active);
   if (!workspace.find(id) || workspace.activeId === id) return workspace.activeId;
   if (maximizedDocumentId && maximizedDocumentId !== id) {
@@ -4798,6 +4801,7 @@ function registerCytoscapeRenderer(owner, target = owner?.cy) {
 }
 
 function destroyDocumentRenderer(owner, reason = 'destroyed') {
+  if (['closed', 'replaced', 'destroyed'].includes(reason)) retireDocumentHistory(owner);
   owner?.visualGroupsRenderer?.destroy();
   if (owner) owner.visualGroupsRenderer = null;
   if (edgeGestureSession?.owner === owner) cancelEdgeGesture({ clearMessage: true });
@@ -6094,6 +6098,7 @@ function setRenderMode(name, { skipDraftGuard = false } = {}) {
   const incoming = ensureModeViewStates(owner)[semanticMode];
   owner.visualGroupState = structuredClone(incoming?.visualGroupState || owner.visualGroupState || {});
   if (semanticMode === 'design') {
+    reconcileDocumentHistory(owner);
     stopElasticRendering(owner, 'mode-restored');
     target.nodes().unlock();
     layoutMode = incoming?.layoutMode && incoming.layoutMode !== 'elastic'
@@ -6110,7 +6115,7 @@ function setRenderMode(name, { skipDraftGuard = false } = {}) {
     owner.layoutMode = 'elastic';
     restoreMonitoringView(owner);
     target.nodes().lock();
-    startD3Elastic(owner, target, null, { startSimulation: false });
+    if (!reconcileDocumentHistory(owner)) startD3Elastic(owner, target, null, { startSimulation: false });
   }
   syncPaneLayout();
   syncLayoutChrome(owner);
@@ -6177,9 +6182,70 @@ function renderActiveMode({ skipDraftGuard = false } = {}) {
 // Normalizing the fields without reconciling that handle makes the radio truthful about state but
 // false about what is actually painted. This runs only after the target pane is visible, and only
 // when the semantic mode and renderer kind disagree; ordinary document switches do no work.
+function retireDocumentHistory(owner) {
+  owner?.historyMonitor?.destroy();
+  owner?.historyContainer?.remove(); owner?.historyDialog?.close(); owner?.historyDialog?.remove();
+  if (owner) { owner.historyMonitor = null; owner.historyContainer = null; owner.historyDialog = null; owner.historyBinding = null; }
+  owner?.pane?.classList.remove('doc-pane--history');
+}
+
+function documentHistoryDraftNotice(owner) {
+  if (owner.mode !== DOCUMENT_MODES.DRAFT) return uiText('history.deployedOnly');
+  if (!owner.deploymentRun?.graphMl) return uiText('workspace.run.draftSeparate');
+  try {
+    const current = serializeGraphML(graphForAuthorizedExecution(owner, canonicalGraphSnapshot(owner.graph)));
+    return uiText(current === owner.deploymentRun.graphMl ? 'history.draftMatches' : 'history.draftChanged');
+  } catch { return uiText('workspace.run.draftSeparate'); }
+}
+
+function reconcileDocumentHistory(owner) {
+  if (owner !== workspace.active) return false;
+  const bound = owner?.deploymentRun || owner?.graph?.viewerBinding;
+  if (!bound?.deploymentId || !bound.graphVersion || !bound.incarnationId || owner.renderMode !== 'monitoring') {
+    retireDocumentHistory(owner); return false;
+  }
+  const client = runtimeClient, authority = workspaceAuthority, incarnation = owner.incarnation;
+  if (!client || !tenantAuthorityAllows(owner, client)) { retireDocumentHistory(owner); return true; }
+  const identity = `${bound.deploymentId}:${bound.incarnationId}:${bound.graphVersion}`;
+  if (owner.historyBinding !== identity) {
+    retireDocumentHistory(owner);
+    const dialog = window.document.createElement('dialog'); dialog.className = 'doc-history-dialog';
+    dialog.setAttribute('aria-label', uiText('history.title'));
+    const bar = window.document.createElement('nav'); bar.className = 'doc-history-bar';
+    const back = window.document.createElement('button'); back.type = 'button'; back.textContent = uiText('history.return');
+    const returnToGraph = () => { dialog.close(); if (workspace.active === owner) setRenderMode('design'); };
+    back.addEventListener('click', returnToGraph);
+    const notice = window.document.createElement('p'); notice.className = 'doc-history-draft'; notice.setAttribute('role', 'status');
+    bar.append(back, notice);
+    dialog.addEventListener('cancel', event => { event.preventDefault(); returnToGraph(); });
+    const container = window.document.createElement('section'); container.className = 'doc-history';
+    dialog.append(bar, container); window.document.body.append(dialog);
+    owner.historyDialog = dialog; owner.historyContainer = container; owner.historyBinding = identity;
+    const current = () => workspace.find(owner.id) === owner && owner.incarnation === incarnation
+      && owner.historyBinding === identity && runtimeClient === client && workspaceAuthority === authority && tenantAuthorityAllows(owner, client);
+    void client.deploymentView(bound.deploymentId).then(projection => {
+      if (!current()) return;
+      const source = projection.source;
+      if (source.deploymentId !== bound.deploymentId || source.incarnationId !== bound.incarnationId || source.graphVersion !== bound.graphVersion)
+        throw new Error('History source changed');
+      owner.historyMonitor = createDeploymentHistoryMonitor({ container, projection, isCurrent: current,
+        read: (query, options) => client.deploymentHistory(source, query, options), theme: applicationTheme, t: uiText });
+    }).catch(() => {
+      if (!current()) return;
+      const message = window.document.createElement('p'); message.textContent = uiText('history.failed');
+      const retry = window.document.createElement('button'); retry.type = 'button'; retry.textContent = uiText('history.retryView');
+      retry.addEventListener('click', () => { if (current()) { retireDocumentHistory(owner); reconcileDocumentHistory(owner); } });
+      container.replaceChildren(message, retry);
+    });
+  }
+  owner.historyDialog.querySelector('.doc-history-draft').textContent = documentHistoryDraftNotice(owner);
+  owner.historyContainer.hidden = false; if (!owner.historyDialog.open) owner.historyDialog.showModal(); owner.pane.classList.add('doc-pane--history'); return true;
+}
+
 function reconcileActiveRenderModeRenderer() {
   const owner = workspace.active;
   if (!owner?.cy) return;
+  if (reconcileDocumentHistory(owner)) return;
   const kind = rendererFor(owner)?.kind;
   if (renderMode === 'monitoring' && kind !== 'elastic') {
     owner.layoutMode = 'elastic';
@@ -12758,7 +12824,7 @@ async function runCapturedDocumentDeployment(owner, client, { graphMl, payload, 
     setDocumentExecution(owner, result.intent.traversalId, result.intent.graphVersion, client, result.intent.processInstanceId);
     void reconcileTestCompletion(owner, result.intent.traversalId, client);
   }
-  void configureHumanTasks(owner); owner.historyMonitor?.refresh?.();
+  void configureHumanTasks(owner); reconcileDocumentHistory(owner); owner.historyMonitor?.refresh?.();
   syncPaneHeaders(); scheduleWorkspacePersistence();
   if (owner === workspace.active) { refreshCommands(); addActivityMessage(uiMessage('workspace.run.ready'), uiMessage('workspace.run.attached', {
     deploymentId: result.intent.deploymentId, version: shortId(result.intent.graphVersion) }), 'completed'); }
@@ -14553,6 +14619,7 @@ const capturedDeleteShortcutEvents = new WeakSet();
 function executeGlobalShortcut(event, expectedCommandId = '') {
   const id = commandRegistry.matchShortcut(event, commandContext(), 'global');
   if (!id || (expectedCommandId && id !== expectedCommandId)) return false;
+  if (event.target.closest?.('.deployment-history') && /^(edit\.|insert\.|node\.|edge\.|layout\.)/.test(id)) return false;
   event.preventDefault();
   executeCommand(id, { event, control: event.target });
   return true;
@@ -16782,6 +16849,7 @@ document.addEventListener('input', event => {
 // The panes sit INSIDE this element, so a pane that holds focus still delivers those keys here:
 // the contract is untouched by the pane layer rather than reimplemented beside it.
 document.getElementById('cy-wrap').addEventListener('keydown', event => {
+  if (event.target.closest?.('.deployment-history')) return;
   if (layoutBusy
       && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter', 'e', 'E', 'r', 'R'].includes(event.key)) {
     event.preventDefault();
@@ -17285,7 +17353,11 @@ uiLocalization.subscribe(() => {
       ? uiErrorReason(invalidStartupImportError) : uiText("workspace.app.the.graph.url.is.invalid");
   }
   drawingModelController?.refreshLocale?.();
-  workspace.documents.forEach(owner => owner.visualGroupsRenderer?.refreshLocale?.());
+  workspace.documents.forEach(owner => { owner.visualGroupsRenderer?.refreshLocale?.(); owner.historyMonitor?.refreshLocale?.();
+    if (owner.historyDialog) { owner.historyDialog.setAttribute('aria-label', uiText('history.title'));
+      owner.historyDialog.querySelector('.doc-history-bar button').textContent = uiText('history.return');
+      owner.historyDialog.querySelector('.doc-history-draft').textContent = documentHistoryDraftNotice(owner); }
+  });
   refreshCommands();
   renderShortcutHelp();
   refreshActivityLocale();

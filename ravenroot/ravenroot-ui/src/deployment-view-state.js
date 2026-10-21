@@ -13,6 +13,7 @@ export function createDeploymentViewState(binding) {
       graphVersion: binding.graphVersion,
       incarnationId: binding.incarnationId,
       processInstanceId: binding.processInstanceId || null,
+      traversalId: binding.traversalId || null,
     }),
     lifecycle: LIFECYCLE.has(binding.lifecycle) ? binding.lifecycle : 'REGISTERED',
     continuity: 'CONNECTING', cursor: null, gap: null,
@@ -27,6 +28,8 @@ export function resetDeploymentViewRuntime(state, continuity, gap = null) {
   state.nodeStates.clear();
   state.edgeStates.clear();
   state.seen.clear();
+  state.nodeHistoryAvailability = null; state.edgeHistoryAvailability = null;
+  state.nodeCoverageComplete = false; state.edgeCoverageComplete = false;
   resetMonitoringRuntimeState(state.runtime);
 }
 
@@ -74,6 +77,8 @@ export function applyDeploymentViewFrame(state, frame) {
   }
   if (frame.type !== 'execution' || !frame.event) return { accepted: false, reason: 'invalid-type' };
   const event = frame.event;
+  if (state.binding.traversalId && (event.traversalId || event.executionId) !== state.binding.traversalId)
+    return { accepted: false, reason: 'traversal-selection' };
   const identity = String(frame.cursor || event.sequence || '');
   if (!identity || state.seen.has(identity)) return { accepted: false, reason: 'duplicate' };
   state.seen.add(identity);
@@ -100,17 +105,47 @@ export function applyDeploymentViewFrame(state, frame) {
   return { accepted: true, reason: 'execution', nodeId: event.nodeId, edgeId: event.edgeId };
 }
 
+/** Publishes bounded scalar coverage without fabricating start times, durations or journal events. */
+export function applyTraversalSummaries(state, { nodes, edges, nodeAvailability = 'AVAILABLE', edgeAvailability = 'AVAILABLE', nodeCoverageComplete = true, edgeCoverageComplete = true }) {
+  if (!Array.isArray(nodes) || nodes.length > 5000 || !Array.isArray(edges) || edges.length > 10000)
+    throw new RangeError('Traversal summary render budget exceeded');
+  const nextNodes = new Map(), nextEdges = new Map();
+  for (const row of nodes) {
+    if (typeof row.nodeId !== 'string' || !row.nodeId || nextNodes.has(row.nodeId)
+        || !['visitCount', 'activeVisits', 'completedVisits', 'failedVisits', 'attemptCount'].every(name => Number.isSafeInteger(row[name]) && row[name] >= 0)
+        || row.activeVisits + row.completedVisits + row.failedVisits !== row.visitCount)
+      throw new TypeError('Invalid traversal node summary');
+    nextNodes.set(row.nodeId, { historySummary: true, runtimeObserved: true, runtimeState: row.activeVisits ? 'active' : row.failedVisits ? 'failed' : row.completedVisits ? 'completed' : 'idle',
+      activeInstances: row.activeVisits, instances: row.activeVisits, arrivals: row.visitCount, visitCount: row.visitCount,
+      completedVisits: row.completedVisits, failedVisits: row.failedVisits, attemptCount: row.attemptCount,
+      processingDuration: null, lastOccurredAt: null, lastEventType: null, fallback: false });
+  }
+  for (const row of edges) {
+    if (typeof row.edgeId !== 'string' || !row.edgeId || nextEdges.has(row.edgeId) || !Number.isSafeInteger(row.traversalCount) || row.traversalCount < 1)
+      throw new TypeError('Invalid traversal edge summary');
+    nextEdges.set(row.edgeId, { count: row.traversalCount, recent: 0 });
+  }
+  state.nodeStates = nodeAvailability === 'AVAILABLE' ? nextNodes : new Map();
+  state.edgeStates = edgeAvailability === 'AVAILABLE' ? nextEdges : new Map();
+  state.nodeHistoryAvailability = nodeAvailability; state.edgeHistoryAvailability = edgeAvailability;
+  state.nodeCoverageComplete = nodeAvailability === 'AVAILABLE' && nodeCoverageComplete;
+  state.edgeCoverageComplete = edgeAvailability === 'AVAILABLE' && edgeCoverageComplete;
+}
+
 export function applyDeploymentViewStateToRenderer(instance, state) {
   if (!instance || !state) return;
   instance.nodes().forEach(node => {
     const runtime = state.nodeStates.get(node.id());
     node.data('runtimeObserved', Boolean(runtime));
-    node.data('runtimeState', runtime?.runtimeState || 'idle');
+    node.data('runtimeState', runtime?.runtimeState || (state.nodeHistoryAvailability && !state.nodeCoverageComplete ? 'unknown' : 'idle'));
+    node.data('historyNotLoaded', Boolean(state.nodeHistoryAvailability && !runtime && !state.nodeCoverageComplete));
     node.data('activeInstances', runtime?.activeInstances || 0);
     node.data('fallback', Boolean(runtime?.fallback));
   });
   instance.edges().forEach(edge => {
-    const runtime = state.edgeStates.get(edge.id());
+    const identity = edge.data('runtimeIdentity') || edge.id();
+    const runtime = state.edgeStates.get(identity);
+    edge.data('historyNotLoaded', Boolean(state.edgeHistoryAvailability && !runtime && !state.edgeCoverageComplete));
     edge.data('runtimeActive', Boolean(runtime?.recent));
     edge.data('runtimeRecent', runtime?.recent || 0);
     edge.data('runtimeCount', runtime?.count || 0);

@@ -719,6 +719,16 @@ export class RavenrootRuntimeClient {
     return validateLocalDeploymentStatus(result, id);
   }
 
+  /** Reads one metadata or explicitly requested content page of an exact current deployment. */
+  async deploymentHistory(source, query, { signal } = {}) {
+    if (!source?.deploymentId || !source?.incarnationId || !source?.graphVersion)
+      throw runtimeClientValidationError('History requires an exact deployment source');
+    const parameters = new URLSearchParams({ ...query, graphVersion: source.graphVersion });
+    return this.#json(`/v1/deployments/${encodeURIComponent(source.deploymentId)}/history?${parameters}`, {
+      method: 'GET', headers: { Accept: 'application/json', 'X-Ravenroot-Deployment-Incarnation': source.incarnationId }, signal,
+    });
+  }
+
   /** Explicitly rehosts an existing durable registration from server-retained graph custody. */
   async restoreDeployment(deploymentId, { registrationIdentity, graphVersion }) {
     const result = await this.#json(`/v1/deployments/${encodeURIComponent(deploymentId)}/restore`, {

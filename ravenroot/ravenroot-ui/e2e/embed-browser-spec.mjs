@@ -1,10 +1,11 @@
 import { expect, test } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import path from 'node:path';
+import { writeFileSync } from 'node:fs';
 import { ENGLISH_MESSAGES } from '../src/ui-text.js';
 
 const viewerCatalog = (locale, marker) => ({ schema: 'ravenroot.ui-catalog/v1', locale, messages: Object.fromEntries(
-  Object.entries(ENGLISH_MESSAGES).filter(([key]) => key.startsWith('embed.') || key.startsWith('common.')
+  Object.entries(ENGLISH_MESSAGES).filter(([key]) => key.startsWith('embed.') || key.startsWith('history.') || key.startsWith('common.')
     || key.startsWith('visualGroup.') || key === 'workspace.node.bypassed.suffix')
     .map(([key, value]) => [key, typeof value === 'string' ? marker + value
       : Object.fromEntries(Object.entries(value).map(([plural, text]) => [plural, marker + text]))])),
@@ -360,10 +361,10 @@ test('observes a live deployment and ends truthfully on cross-origin registratio
       method: 'POST', credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer',
     }).then(response => response.status)))).toBe(204);
     await viewer.locator('[data-viewer-start]').click();
-    await expect(runs.locator('option')).toHaveCount(3);
+    await expect(runs.locator('option')).toHaveCount(1);
     await viewer.locator('[data-viewer-start]').click();
-    await expect(runs.locator('option')).toHaveCount(4);
-    await runs.selectOption({ index: 2 });
+    await expect(runs.locator('option')).toHaveCount(1);
+    await runs.selectOption({ index: 0 });
     await expect(viewer.locator('[data-viewer-status]')).not.toHaveText('No authorized runs.');
 
     const observed = observationRequests[0];
@@ -793,4 +794,58 @@ test('isolates the real bootstrap and projection flow across three origins', asy
     .every((url) => new URL(url).search === '')).toBe(true);
   expect(consoleMessages.every((message) => !message.includes('browser-secret-graph'))).toBe(true);
   expect(pageErrors).toEqual([]);
+});
+
+
+test('proof-authorized read-only history exposes actual visits and keeps localized narrow inspection usable', async ({ page }) => {
+  const historyRequests = [];
+  page.on('request', request => { if (new URL(request.url()).pathname === '/v1/embed/history') historyRequests.push(request); });
+  let lostPolicy = true;
+  await page.route('**/v1/embed/history', route => {
+    if (lostPolicy && JSON.parse(route.request().postDataJSON().query).view === 'policy') { lostPolicy = false; return route.fulfill({ status: 503, json: { error: 'TEMPORARILY_UNAVAILABLE' } }); }
+    return route.continue();
+  });
+  const viewer = await readyViewer(page, '/deployment-history');
+  await viewer.getByRole('button', { name: 'Retry history', exact: true }).click();
+  const history = viewer.locator('[data-embed-history]');
+  await expect(history.getByRole('heading', { name: 'Deployment history', exact: true })).toBeVisible();
+  const businesses = history.locator('.history-page').filter({ has: viewer.getByRole('heading', { name: 'Business histories', exact: true }) });
+  await businesses.locator('li button').first().click();
+  const traversals = history.locator('.history-page').filter({ has: viewer.getByRole('heading', { name: 'Actual traversals', exact: true }) });
+  await traversals.locator('li button').first().click();
+  const preview = history.locator('.history-traversal');
+  await preview.getByRole('button', { name: 'Expand visual group Pipeline, 2 members' }).click();
+  await preview.getByRole('button', { name: 'Inspect node worker' }).focus(); await page.keyboard.press('Enter');
+  const inspector = preview.locator('.history-inspector'); await expect(inspector.getByRole('heading', { name: 'Visits', exact: true })).toBeVisible();
+  const visits = inspector.locator('.history-page').first(); await visits.locator('li button').first().click();
+  await expect(inspector.getByRole('heading', { name: 'Attempts', exact: true })).toBeVisible();
+  expect(historyRequests.length).toBeLessThan(15);
+  for (const request of historyRequests) { const body = request.postDataJSON(); expect(body.query).toBeDefined();
+    expect(Object.keys(body).sort()).toEqual(['issuedAt', 'jti', 'nonce', 'query', 'signature']);
+    expect(request.headers().authorization).toMatch(/^Bearer /); }
+  await page.evaluate(catalog => window.postViewerLocale('en-XA', catalog), viewerCatalog('en-XA', '⟦H⟧'));
+  await expect(history.getByRole('heading', { name: '⟦H⟧Deployment history', exact: true })).toBeVisible();
+  await expect(inspector.getByRole('button', { name: '⟦H⟧Load captured content', exact: true })).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.locator('#viewer').evaluate(frame => { frame.style.width = '100%'; frame.style.height = '800px'; frame.width = '100%'; });
+  await visits.locator('li button').first().scrollIntoViewIfNeeded();
+  const bounds = await visits.locator('li button').first().boundingBox(); expect(bounds.height).toBeGreaterThanOrEqual(44);
+  expect(await history.evaluate(node => node.scrollWidth <= node.clientWidth + 2)).toBe(true);
+  const graph = preview.locator('[data-viewer-canvas]'); await graph.scrollIntoViewIfNeeded();
+  await expect.poll(() => graph.evaluate(node => { const cy = node._cyreg.cy, box = cy.elements().renderedBoundingBox(); return box.x1 >= 0 && box.y1 >= 0 && box.x2 <= node.clientWidth + 1 && box.y2 <= node.clientHeight + 1; })).toBe(true);
+  const topology = await graph.evaluate(node => { const cy = node._cyreg.cy; return { nodes: ['start', 'worker', 'end'].filter(id => cy.getElementById(id).visible()).length, edges: ['live-edge', 'finish-edge'].filter(id => cy.getElementById(id).visible()).length,
+    point: cy.getElementById('worker').renderedPosition(), count: cy.getElementById('live-edge').data('runtimeCount'),
+    renderedNodes: cy.nodes().map(n => ({ id: n.id(), role: n.data('rrVisualRole') || 'authored', label: n.style('label'), width: n.width(), height: n.height(), fontSize: n.style('font-size'), visible: n.visible(), bounds: n.renderedBoundingBox() })) }; });
+  if (evidencePath('server-embed-history-geometry.json')) writeFileSync(evidencePath('server-embed-history-geometry.json'), JSON.stringify(topology, null, 2));
+  expect(topology).toMatchObject({ nodes: 3, edges: 2, count: 1 });
+  expect(topology.renderedNodes.find(node => node.role === 'header')).toMatchObject({ label: expect.stringContaining('Pipeline'), height: 24 });
+  const graphBounds = await graph.boundingBox(); await page.mouse.click(graphBounds.x + topology.point.x, graphBounds.y + topology.point.y);
+  await expect(inspector.locator('h4')).toHaveText('worker');
+  const inspectionTarget = preview.locator('[data-design-element="worker"]');
+  expect(await inspectionTarget.evaluate(node => getComputedStyle(node).backgroundColor)).toBe('rgba(0, 0, 0, 0)');
+  const targetBox = await inspectionTarget.boundingBox(); expect(targetBox.width).toBeGreaterThanOrEqual(44); expect(targetBox.height).toBeGreaterThanOrEqual(44);
+  await page.mouse.move(graphBounds.x + 8, graphBounds.y + 8);
+  if (evidencePath('server-embed-history-graph-narrow.png')) await page.locator('#viewer').screenshot({ path: evidencePath('server-embed-history-graph-narrow.png') });
+  await visits.locator('li button').first().scrollIntoViewIfNeeded();
+  if (evidencePath('server-embed-history-narrow.png')) await page.locator('#viewer').screenshot({ path: evidencePath('server-embed-history-narrow.png') });
 });

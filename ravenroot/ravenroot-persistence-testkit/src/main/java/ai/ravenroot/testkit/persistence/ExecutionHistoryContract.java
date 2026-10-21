@@ -38,6 +38,10 @@ public abstract class ExecutionHistoryContract {
     @Test void thousandLoopVisitsAreLimitedBeforeProjectionAndCursorsCannotCrossQueries() throws Exception {
         try (var store = createStore(id(), clock())) {
             var seeded = seed(store, 1, 1000); UUID traversal = seeded.traversals.getFirst();
+            var scalar = await(store.executionNodeSummaries(seeded.key, traversal, Optional.empty(), 1));
+            assertEquals(List.of(new TraversalNodeSummary("loop", 1000, 0, 1000, 0, 2000)), scalar.items());
+            assertTrue(scalar.nextCursor().isEmpty());
+            assertEquals(HistoryPage.Availability.NOT_FOUND, await(store.executionNodeSummaries(new ExecutionKey("foreign", seeded.key.processInstanceId()), traversal, Optional.empty(), 1)).availability());
             var ids = new HashSet<UUID>(); Optional<String> cursor = Optional.empty(); int pages = 0;
             do {
                 var page = await(store.executionVisits(seeded.key, traversal, Optional.of("loop"), cursor, 37));
@@ -134,15 +138,50 @@ public abstract class ExecutionHistoryContract {
         }
     }
 
+    @Test void actualEdgeCountsSurviveJournalExpiryAndRejectDuplicateStaleWrites() throws Exception {
+        var current = new java.util.concurrent.atomic.AtomicReference<>(NOW);
+        var clock = new Clock() {
+            @Override public ZoneId getZone() { return ZoneOffset.UTC; }
+            @Override public Clock withZone(ZoneId zone) { return this; }
+            @Override public Instant instant() { return current.get(); }
+        };
+        try (var store = createStore(id(), clock)) {
+            var seeded = seed(store, 1, 3); var traversal = seeded.traversals.getFirst();
+            assertTrue(await(store.executionEdgeSummaries(seeded.key, traversal, Optional.empty(), 1)).items().isEmpty());
+            var batch = ExecutionBatch.to(seeded.key).expecting(RevisionExpectation.exactly(await(store.load(seeded.key)).revision()));
+            for (var edge : List.of("edge-a", "edge-b", "edge-a")) batch.publish(EventEnvelope.of(UUID.randomUUID(), seeded.key.tenantId(), "EDGE_TRAVERSED", seeded.key.processInstanceId(), traversal,
+                    null, null, null, "request", "version", NOW, EdgeTraversalEventData.payload(edge)));
+            var write = batch.build(); await(store.apply(write));
+            assertThrows(ExecutionException.class, () -> await(store.apply(write)));
+            var first = await(store.executionEdgeSummaries(seeded.key, traversal, Optional.empty(), 1));
+            assertEquals(List.of(new TraversalEdgeSummary("edge-a", 2)), first.items()); assertTrue(first.nextCursor().isPresent());
+            var second = await(store.executionEdgeSummaries(seeded.key, traversal, first.nextCursor(), 1));
+            assertEquals(List.of(new TraversalEdgeSummary("edge-b", 1)), second.items()); assertTrue(second.nextCursor().isEmpty());
+            assertThrows(ExecutionException.class, () -> await(store.executionNodeSummaries(seeded.key, traversal, first.nextCursor(), 1)));
+            assertThrows(ExecutionException.class, () -> await(store.executionEdgeSummaries(seeded.key, traversal, Optional.empty(), store.businessHistoryPolicy().maxPageSize() + 1)));
+            var journal = await(store.readJournal(seeded.key.tenantId(), 0, 10));
+            await(store.advanceOutboxCursor(await(store.outboxCursor(seeded.key.tenantId(), "edge-reader")), journal.getLast().journalOffset()));
+            current.set(NOW.plus(store.journalRetention()).plusSeconds(10));
+            assertEquals(3, await(store.compactJournal(seeded.key.tenantId())));
+            assertEquals(first, await(store.executionEdgeSummaries(seeded.key, traversal, Optional.empty(), 1)));
+            assertEquals(second, await(store.executionEdgeSummaries(seeded.key, traversal, first.nextCursor(), 1)));
+        }
+    }
+
     @Test void metadataPageAndCursorSurviveDurableReopen() throws Exception {
-        String id = id(); Seeded seed; HistoryPage<NodeVisitSummary> before;
+        String id = id(); Seeded seed; HistoryPage<NodeVisitSummary> before; HistoryPage<TraversalEdgeSummary> edges;
         try (var store = createStore(id, clock())) {
             assumeTrue(store.supports(StoreCapability.DURABLE)); seed = seed(store, 1, 12);
             before = await(store.executionVisits(seed.key, seed.traversals.getFirst(), Optional.empty(), Optional.empty(), 5));
+            var batch = ExecutionBatch.to(seed.key).expecting(RevisionExpectation.any());
+            for (var edge : List.of("edge-a", "edge-b")) batch.publish(EventEnvelope.of(UUID.randomUUID(), seed.key.tenantId(), "EDGE_TRAVERSED", seed.key.processInstanceId(), seed.traversals.getFirst(), null, null, null, "request", "version", NOW, EdgeTraversalEventData.payload(edge)));
+            await(store.apply(batch.build())); edges = await(store.executionEdgeSummaries(seed.key, seed.traversals.getFirst(), Optional.empty(), 1));
         }
         try (var store = createStore(id, clock())) {
             var after = await(store.executionVisits(seed.key, seed.traversals.getFirst(), Optional.empty(), before.nextCursor(), 5));
             assertEquals(5, after.items().size());
+            assertEquals(edges, await(store.executionEdgeSummaries(seed.key, seed.traversals.getFirst(), Optional.empty(), 1)));
+            assertEquals(List.of(new TraversalEdgeSummary("edge-b", 1)), await(store.executionEdgeSummaries(seed.key, seed.traversals.getFirst(), edges.nextCursor(), 1)).items());
             assertTrue(after.items().stream().noneMatch(item -> before.items().stream().anyMatch(old -> old.invocationId().equals(item.invocationId()))));
         }
     }

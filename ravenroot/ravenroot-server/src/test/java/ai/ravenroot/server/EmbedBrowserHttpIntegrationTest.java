@@ -749,7 +749,9 @@ class EmbedBrowserHttpIntegrationTest {
         try (var engine = new PekkoExecutionEngine("embed-history");
              var store = new ai.ravenroot.persistence.sqlite.SqliteExecutionStore(directory.resolve("history.db"), Clock.systemUTC())) {
             var environment = BehaviorEnvironment.safeDefaults();
-            var application = new DefaultRavenrootApplication(engine, new ExecutionMonitor(), BehaviorRegistry.standard(environment),
+            var ended = new java.util.concurrent.CountDownLatch(1); var monitor = new ExecutionMonitor();
+            monitor.subscribe(event -> { if (event.type() == ai.ravenroot.api.application.ExecutionEventType.EXECUTION_COMPLETED) ended.countDown(); });
+            var application = new DefaultRavenrootApplication(engine, monitor, BehaviorRegistry.standard(environment),
                     environment.artifacts(), environment.programRuntime(), ExecutionIdentitySource.randomUuids(), store, 8);
             var operator = new SecurityContext("register", "tenant", "operator", PrincipalType.USER, "issuer");
             application.registerLocalDeployment(operator, "orders", new ByteArrayInputStream(LIVE_GRAPH.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
@@ -768,6 +770,19 @@ class EmbedBrowserHttpIntegrationTest {
                 assertEquals(json(accepted.body(), "processInstanceId"), json(duplicate.body(), "processInstanceId"));
                 assertEquals(json(accepted.body(), "traversalId"), json(duplicate.body(), "traversalId"));
                 var read = viewerSession(client, base, "history-read", "history-read");
+                assertTrue(ended.await(5, java.util.concurrent.TimeUnit.SECONDS));
+                var binding = application.localDeploymentView("tenant", "orders").orElseThrow().source();
+                var sdk = application.deploymentHistory(operator.tenantId(), new ai.ravenroot.api.history.DeploymentHistorySource("orders", binding.incarnationId(), binding.graphVersion()));
+                for (var scalarView : List.of("nodes", "edges")) {
+                    var fields = Map.of("view", scalarView, "processInstanceId", json(accepted.body(), "processInstanceId"), "traversalId", json(accepted.body(), "traversalId"), "limit", "5");
+                    String scalarQuery = new String(ai.ravenroot.api.payload.PayloadJson.writeJava(fields, ai.ravenroot.api.payload.PayloadLimits.DEFAULTS), java.nio.charset.StandardCharsets.UTF_8);
+                    var scalarPage = send(client, viewerPost(base + EmbedBrowserHttpHandler.HISTORY_PATH, VIEWER,
+                            historyProofBody(read, "scalar-" + scalarView, scalarQuery, EmbedBrowserHttpHandler.HISTORY_PATH)).header("Authorization", "Bearer " + read.bearer()));
+                    assertEquals(200, scalarPage.statusCode(), scalarPage.body()); assertPrivate(scalarPage);
+                    assertEquals(new ai.ravenroot.api.history.DeploymentHistoryRequest(fields).read(sdk, "tenant"), scalarPage.body());
+                    assertTrue(scalarPage.body().contains(scalarView.equals("nodes") ? "\"visitCount\":1" : "\"traversalCount\":1"), scalarPage.body());
+                }
+
                 String query = "{\"view\":\"process-traversals\",\"processInstanceId\":\"" + json(accepted.body(), "processInstanceId") + "\"}";
                 String valid = historyProofBody(read, "history-page", query, EmbedBrowserHttpHandler.HISTORY_PATH);
                 var page = send(client, viewerPost(base + EmbedBrowserHttpHandler.HISTORY_PATH, VIEWER, valid).header("Authorization", "Bearer " + read.bearer()));

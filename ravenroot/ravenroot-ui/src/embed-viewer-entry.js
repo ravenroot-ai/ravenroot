@@ -1,3 +1,4 @@
+import { createDeploymentHistoryMonitor as mountDeploymentHistory } from './deployment-history-monitor.js';
 import { productError } from './product-error.js';
 import cytoscape from 'cytoscape';
 import cytoscapeDagre from 'cytoscape-dagre';
@@ -21,6 +22,7 @@ import {
 } from './viewer-presentation.js';
 import {
   applyDeploymentViewFrame,
+  applyTraversalSummaries,
   applyDeploymentViewStateToRenderer,
   createDeploymentViewState,
   resetDeploymentViewRuntime,
@@ -101,13 +103,18 @@ function requiredElement(root, selector) {
  * is passed directly and is never published on window, storage, or the DOM.
  */
 export function createEmbedViewer(container, {
-  theme = 'dark', onRunSelected = () => {}, onStartExecution = () => {}, localization = null,
+  theme = 'dark', onRunSelected = () => {}, onStartExecution = () => {}, onInspectNode = () => {}, localization = null, fitOnResize = false,
 } = {}) {
   if (!(container instanceof Element)) throw productError("workspace.error.embed.viewer.entry.embed.viewer.container.is.required", new TypeError('Embed viewer container is required.'));
   const viewerTheme = requireEmbedTheme(theme);
   const t = localization?.text || uiText;
   const palette = getRendererPalette(viewerTheme);
   const canvas = requiredElement(container, '[data-viewer-canvas]');
+  const localizeStateLabels = () => {
+    canvas.dataset.viewerLoading = t('embed.state.loading'); canvas.dataset.viewerError = t('embed.state.error');
+    canvas.dataset.viewerExpired = t('embed.state.expired'); canvas.dataset.viewerIncompatible = t('embed.state.incompatible');
+  };
+  localizeStateLabels();
   const status = requiredElement(container, '[data-viewer-status]');
   const metadata = requiredElement(container, '[data-viewer-metadata]');
   const alternative = requiredElement(container, '[data-viewer-alternative]');
@@ -126,7 +133,8 @@ export function createEmbedViewer(container, {
   mode.disabled = true;
   const controls = [...container.querySelectorAll('[data-viewer-command]')];
   const maximizeControl = requiredElement(container, '[data-viewer-maximize]');
-  const focusBoundaries = [...container.ownerDocument.querySelectorAll('.embed-focus-sentinel')];
+  const focusScope = container.closest('[data-viewer-focus-scope]') || container.ownerDocument;
+  const focusBoundaries = [...focusScope.querySelectorAll('.embed-focus-sentinel')];
   if (focusBoundaries.length !== 2) throw productError("workspace.error.embed.viewer.entry.embed.viewer.focus.boundary.unavailable", new Error('Embed viewer focus boundary unavailable.'));
   const lifecycle = createEmbedShellLifecycle({
     root: container,
@@ -199,7 +207,7 @@ export function createEmbedViewer(container, {
   };
   const designInspection = createEmbedDesignInspection({ canvas, cy: instance, tooltip: runtimeTooltip,
     snapshot: () => currentSnapshot, runtime: () => deploymentState,
-    projection: () => visualGroupsRenderer?.projection, toggle: toggleGroup, t });
+    projection: () => visualGroupsRenderer?.projection, toggle: toggleGroup, onInspect: onInspectNode, t });
   const applyGroupedRuntime = () => {
     if (!deploymentState) return;
     const projection = isMonitoring() ? elasticMount?.visualGroupProjection : visualGroupsRenderer?.projection;
@@ -210,11 +218,14 @@ export function createEmbedViewer(container, {
     for (const group of projection.groups.filter(item => item.collapsed)) {
       const runtimes = group.memberNodeIds.map(id => deploymentState.nodeStates.get(id)).filter(Boolean);
       const priority = ['failed', 'active', 'fallback', 'bypassed', 'completed'];
+      const incomplete = deploymentState.nodeHistoryAvailability && !deploymentState.nodeCoverageComplete
+        && group.memberNodeIds.some(id => !deploymentState.nodeStates.has(id));
       const state = priority.find(candidate => runtimes.some(runtime => runtime.runtimeState === candidate));
       const internalPulse = currentSnapshot.edges.some(edge => group.memberNodeIds.includes(edge.source)
         && group.memberNodeIds.includes(edge.target) && edge.runtimeIdentity
         && deploymentState.edgeStates.get(edge.runtimeIdentity)?.recent > 0);
       const summary = instance.getElementById(group.summaryId);
+      summary.data('historyNotLoaded', Boolean(incomplete));
       summary.removeStyle('border-color border-width underlay-color underlay-opacity underlay-padding');
       if (summary.nonempty() && (state || internalPulse)) summary.style({
         'border-color': state ? (state === 'active' ? palette.selection
@@ -227,10 +238,13 @@ export function createEmbedViewer(container, {
       });
     }
     for (const edge of projection.edges) {
-      const runtime = edge.originalEdgeIds.map(runtimeEdgeIdentity).filter(Boolean)
-        .map(id => deploymentState.edgeStates.get(id)).find(value => value?.recent);
+      const ids = edge.originalEdgeIds.map(runtimeEdgeIdentity).filter(Boolean);
+      const observations = ids.map(id => deploymentState.edgeStates.get(id));
+      const runtime = { recent: observations.reduce((count, row) => count + (row?.recent || 0), 0),
+        count: observations.reduce((count, row) => count + (row?.count || 0), 0) };
       const visible = instance.getElementById(edge.id);
       if (visible.nonempty()) {
+        visible.data('historyNotLoaded', Boolean(deploymentState.edgeHistoryAvailability && !deploymentState.edgeCoverageComplete && observations.some(row => !row)));
         visible.data('runtimeActive', Boolean(runtime?.recent));
         visible.data('runtimeRecent', runtime?.recent || 0);
         visible.data('runtimeCount', runtime?.count || 0);
@@ -242,7 +256,8 @@ export function createEmbedViewer(container, {
   const reducedMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
   const paintRuntimeEdgeFlow = edgeId => {
     if (destroyed || !deploymentState) return;
-    const flow = edgeFlowSnapshot(deploymentState.runtime, edgeId);
+    const flow = deploymentState.edgeHistoryAvailability ? deploymentState.edgeStates.get(edgeId) || { count: 0, recent: 0 }
+      : edgeFlowSnapshot(deploymentState.runtime, edgeId);
     deploymentState.edgeStates.set(edgeId, flow);
     const remainingPulseMs = flow.expiresAt == null ? 0 : Math.max(0, flow.expiresAt - Date.now());
     elasticMount?.updateEdgeFlow(edgeId, flow, {
@@ -266,7 +281,7 @@ export function createEmbedViewer(container, {
   const resetRuntimePresentation = () => {
     cancelPulseTimers();
     elasticMount?.nodes.forEach(node => elasticMount.updateNode(node.id, {
-      runtimeObserved: false, runtimeState: 'idle', instances: null, arrivals: null,
+      runtimeObserved: false, runtimeState: 'idle', instances: null, arrivals: null, historySummary: false, visitCount: null, attemptCount: null,
       lastEventType: null, lastOccurredAt: null, processingDuration: null,
       fallback: false, stroke: palette.runtimeIdle, strokeWidth: 1.5,
     }));
@@ -359,6 +374,7 @@ export function createEmbedViewer(container, {
       resizeFrame = null;
       instance.resize();
       elasticMount?.resize(canvas.clientWidth || 800, canvas.clientHeight || 500);
+      if (fitOnResize && mounted && canvas.clientWidth > 0 && canvas.clientHeight > 0) activeRenderer().fit(40);
       scheduleMinimap();
     });
   });
@@ -429,6 +445,7 @@ export function createEmbedViewer(container, {
       formatTime: value => formatRuntimeTime(value, localization?.dateTime || uiDateTime),
       isLive: () => !destroyed && isMonitoring(),
       onViewportChange: scheduleMinimap,
+      onInspectNode,
       initialTransform: saved?.transform || null,
       startSimulation: recompute,
     });
@@ -440,7 +457,7 @@ export function createEmbedViewer(container, {
             : state === 'bypassed' ? palette.edgeType.outcome
               : state === 'failed' ? palette.edgeType.failed : palette.runtimeIdle;
       deploymentState.nodeStates.forEach((runtime, nodeId) => elasticMount.updateNode(nodeId, {
-        runtimeObserved: true, runtimeState: runtime.runtimeState,
+        runtimeObserved: true, runtimeState: runtime.runtimeState, historySummary: runtime.historySummary, visitCount: runtime.visitCount, attemptCount: runtime.attemptCount,
         instances: runtime.activeInstances, arrivals: runtime.arrivals,
         lastEventType: runtime.lastEventType, lastOccurredAt: runtime.lastOccurredAt,
         processingDuration: runtime.processingDuration,
@@ -592,10 +609,17 @@ export function createEmbedViewer(container, {
   minimap.addEventListener('pointerdown', minimapPointer);
   minimap.addEventListener('keydown', minimapKeydown);
 
+  const inspectHistoryNode = event => {
+    const id = event.target?.id?.();
+    if (!destroyed && currentSnapshot?.nodes.some(node => node.id === id)) onInspectNode(id);
+  };
+  instance.on('tap', 'node', inspectHistoryNode);
+
   const teardown = preserveState => {
     if (destroyed) return;
     destroyed = true;
     cancelPulseTimers();
+    instance.off('tap', 'node', inspectHistoryNode);
     designInspection.destroy();
     maximizeController.destroy();
     stopElastic();
@@ -649,6 +673,7 @@ export function createEmbedViewer(container, {
         edges: instance.edges().map(edge => ({
           id: edge.id(), source: edge.source().id(), target: edge.target().id(),
           label: edge.data('label'), type: edge.data('edgeType'),
+          runtimeActive: Boolean(edge.data('runtimeActive')), runtimeCount: edge.data('runtimeCount') || 0,
           style: Object.fromEntries(edgeStyle.map(name => [name, edge.style(name)])),
         })),
       };
@@ -757,6 +782,33 @@ export function createEmbedViewer(container, {
       scheduleMinimap();
       return result;
     },
+    selectTraversal(processInstanceId, traversalId) {
+      runGeneration++;
+      if (deploymentState) {
+        deploymentState.binding = Object.freeze({ ...deploymentState.binding, processInstanceId, traversalId });
+        resetDeploymentViewRuntime(deploymentState, 'CONNECTING'); applyDeploymentViewStateToRenderer(instance, deploymentState); resetRuntimePresentation();
+      }
+      return runGeneration;
+    },
+    applyHistorySummaries(summary) {
+      if (!deploymentState || destroyed) return false;
+      applyTraversalSummaries(deploymentState, summary);
+      applyDeploymentViewStateToRenderer(instance, deploymentState);
+      if (elasticMount) for (const node of currentSnapshot?.nodes || []) {
+        const id = node.id, runtime = deploymentState.nodeStates.get(id);
+        if (!runtime) { elasticMount.updateNode(id, { runtimeObserved: false, runtimeState: deploymentState.nodeCoverageComplete ? 'idle' : 'unknown', historyNotLoaded: !deploymentState.nodeCoverageComplete, instances: null, arrivals: null, stroke: palette.runtimeIdle, strokeWidth: 1.5 }); continue; }
+        elasticMount.updateNode(id, {
+        runtimeObserved: true, runtimeState: runtime.runtimeState, historySummary: true, visitCount: runtime.visitCount, attemptCount: runtime.attemptCount, instances: runtime.activeInstances,
+        arrivals: runtime.visitCount, processingDuration: null, lastEventType: null, lastOccurredAt: null,
+        stroke: runtime.runtimeState === 'active' ? palette.selection : runtime.runtimeState === 'failed' ? palette.edgeType.failed : palette.edgeType.completed,
+        strokeWidth: runtime.runtimeState === 'active' ? 5 : 3,
+      }); }
+      for (const link of elasticMount?.links || []) { const id = link.runtimeIdentity ?? link.id;
+        elasticMount.updateEdgeFlow(id, deploymentState.edgeStates.get(id) || { count: 0, recent: 0, historyNotLoaded: !deploymentState.edgeCoverageComplete }, { reducedMotion: true });
+      }
+      applyGroupedRuntime(); designInspection.refresh(); scheduleMinimap();
+      return true;
+    },
     updateRuns(envelope, preferredProcessInstanceId = null) {
       if (!(runSelect instanceof HTMLSelectElement) || !Array.isArray(envelope?.runs)) return null;
       const previous = preferredProcessInstanceId || runSelect.value || null;
@@ -795,6 +847,7 @@ export function createEmbedViewer(container, {
       status.textContent = reason;
     },
     refreshLocale() {
+      localizeStateLabels();
       lifecycle.refreshLocale();
       maximizeController.refreshLocale();
       designInspection.refresh();
@@ -812,4 +865,9 @@ export function createEmbedViewer(container, {
     },
     destroy({ preserveState = false } = {}) { teardown(preserveState); },
   });
+}
+
+/** Mounts the same bounded history controls in native and proof-authorized embedded contexts. */
+export function createDeploymentHistoryMonitor(options) {
+  return mountDeploymentHistory({ ...options, viewerFactory: createEmbedViewer });
 }

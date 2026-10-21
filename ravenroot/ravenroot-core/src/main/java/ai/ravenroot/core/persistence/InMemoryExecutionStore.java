@@ -148,6 +148,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
      * cross-tenant structure here to accidentally read from, so an operation that forgot its tenant
      * cannot silently answer for another one.
      */
+    private final InMemoryTraversalSummaries traversalSummaries = new InMemoryTraversalSummaries();
     private final Map<String, TenantJournal> journals = new LinkedHashMap<>();
     private final Map<String, Map<UUID, ai.ravenroot.api.persistence.HumanTaskInteractionRevocation>>
             humanTaskInteractionRevocations = new LinkedHashMap<>();
@@ -652,6 +653,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                             traversal.terminationReason());
                 }
                 deploymentEntries.publish(key, projectedEntry);
+                traversalSummaries.publish(key, existing == null ? null : existing.state, folded, batch);
                 instances.put(key, next);
                 sagaReplacements.forEach(sagas::put);
                 outboxInserts.forEach(sagaOutbox::put);
@@ -1481,6 +1483,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 if (doomed.isEmpty()) {
                     return 0L;
                 }
+                doomed.forEach(traversalSummaries::purge);
                 doomed.forEach(instances::remove);
                 doomed.forEach(streamSequences::remove);
                 doomed.forEach(replayEvidence::remove);
@@ -3613,6 +3616,14 @@ public final class InMemoryExecutionStore implements ExecutionStore {
     @Override public CompletionStage<Optional<ai.ravenroot.api.history.TraversalSummary>> executionTraversal(ExecutionKey key, UUID traversalId) {
         return completeHistory(() -> InMemoryExecutionHistory.traversal(key, historyState(key), traversalId,
                 traversal -> businessHistories.traversal(key.tenantId(), key.processInstanceId(), traversal).orElse(null)));
+    }
+    @Override public CompletionStage<ai.ravenroot.api.history.HistoryPage<ai.ravenroot.api.history.TraversalNodeSummary>> executionNodeSummaries(
+            ExecutionKey key, UUID traversalId, Optional<String> cursor, int limit) {
+        return completeHistory(() -> InMemoryTraversalSummaries.nodes(key, historyState(key), traversalId, cursor, limit, businessHistoryPolicy().maxPageSize()));
+    }
+    @Override public CompletionStage<ai.ravenroot.api.history.HistoryPage<ai.ravenroot.api.history.TraversalEdgeSummary>> executionEdgeSummaries(
+            ExecutionKey key, UUID traversalId, Optional<String> cursor, int limit) {
+        return completeHistory(() -> traversalSummaries.edges(key, historyState(key), traversalId, cursor, limit, businessHistoryPolicy().maxPageSize()));
     }
     @Override public CompletionStage<ai.ravenroot.api.history.HistoryPage<ai.ravenroot.api.history.NodeVisitSummary>> executionVisits(
             ExecutionKey key, UUID traversalId, Optional<String> nodeId, Optional<String> cursor, int limit) {

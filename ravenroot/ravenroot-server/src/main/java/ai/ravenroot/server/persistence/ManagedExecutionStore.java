@@ -54,7 +54,7 @@ public final class ManagedExecutionStore implements InvocationHandler {
     private static final java.util.Set<String> SAFE_DELEGATE_METHODS = java.util.Set.of(
             "businessHistoryPolicy", "acceptDeploymentEntry", "deploymentEntry", "pendingDeploymentEntries",
             "recordCorrelatedTraversal", "businessHistory", "businessHistories",
-            "uncorrelatedDeploymentTraversals", "executionSelectionExists", "executionInvocationNodeIds", "executionTraversals", "executionTraversal", "executionVisits", "executionVisitAttempts", "executionVisitParents",
+            "uncorrelatedDeploymentTraversals", "executionSelectionExists", "executionInvocationNodeIds", "executionTraversals", "executionTraversal", "executionNodeSummaries", "executionEdgeSummaries", "executionVisits", "executionVisitAttempts", "executionVisitParents",
             "correlatedJoinMembers", "correlatedJoin", "compareAndSetCorrelatedJoin", "correlatedJoins",
             "correlatedTraversals", "correlatedTraversal", "settleCorrelatedTraversal", "closeBusinessHistory",
             "acceptInitialStart", "initialStart", "capabilities", "supports", "maxLeaseTtl", "maxPayloadBytes", "load", "renew", "release",

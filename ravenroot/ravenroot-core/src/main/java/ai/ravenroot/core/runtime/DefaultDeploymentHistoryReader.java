@@ -97,6 +97,12 @@ final class DefaultDeploymentHistoryReader implements DeploymentHistoryReader {
     @Override public HistoryPage<TraversalSummary> processTraversals(UUID process, Optional<String> cursor, int limit) {
         return read(r -> page("process-traversals", r.get(store.executionTraversals(r.process(process), cursor("process-traversals", cursor, false), limit))));
     }
+    @Override public HistoryPage<TraversalNodeSummary> nodes(UUID process, UUID traversal, Optional<String> cursor, int limit) {
+        return read(r -> page("nodes", r.get(store.executionNodeSummaries(r.selection(process, traversal, null, null), traversal, cursor("nodes", cursor, false), limit))));
+    }
+    @Override public HistoryPage<TraversalEdgeSummary> edges(UUID process, UUID traversal, Optional<String> cursor, int limit) {
+        return read(r -> page("edges", r.get(store.executionEdgeSummaries(r.selection(process, traversal, null, null), traversal, cursor("edges", cursor, false), limit))));
+    }
     @Override public HistoryPage<NodeVisitSummary> visits(UUID process, UUID traversal, Optional<String> node,
             Optional<String> cursor, int limit) {
         return read(r -> page("visits", r.get(store.executionVisits(r.selection(process, traversal, null, null), traversal, node, cursor("visits", cursor, false), limit))));

@@ -58,6 +58,7 @@ export function mountD3ElasticRenderer({
   speed = .5,
   isLive = () => true,
   onViewportChange = () => {},
+  onInspectNode = () => {},
   initialTransform = null,
   startSimulation = true,
   idleRadius = null,
@@ -156,6 +157,9 @@ export function mountD3ElasticRenderer({
     .data(nodes, node => node.id)
     .enter().append('circle')
     .attr('data-node-id', node => node.id)
+    .attr('role', 'button').attr('tabindex', 0).attr('aria-label', node => t('embed.inspect.node', { name: node.label || node.id }))
+    .on('click.inspect', (event, node) => { if (!event.defaultPrevented) onInspectNode(node.id); })
+    .on('keydown.inspect', (event, node) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onInspectNode(node.id); } })
     .attr('r', node => node.r)
     .attr('fill', node => node.color)
     .attr('stroke', node => node.stroke ?? '#8c959f')
@@ -178,7 +182,7 @@ export function mountD3ElasticRenderer({
     const nodeText = node => runtimeNodeTooltipText(node, t, formatTime);
     const edgeText = link => [link.label || link.id,
       t('embed.tooltip.recentActivity', { count: link.flow?.recent ?? 0 }),
-      t('embed.tooltip.traversals', { count: link.flow?.count ?? 0 }),
+      link.flow?.historyNotLoaded ? t('history.coverage.edgeNotLoaded') : t('embed.tooltip.traversals', { count: link.flow?.count ?? 0 }),
       known('embed.tooltip.lastTraversal', link.flow?.lastEvent),
       known('embed.tooltip.lastTraversalTime', formatTime(link.flow?.lastOccurredAt)),
       known('embed.tooltip.configuredWeight', link.configuredWeight),
@@ -234,7 +238,7 @@ export function mountD3ElasticRenderer({
 
   const paintGeometry = () => {
     edgeSelection.attr('d', arcPath)
-      .attr('stroke-width', link => edgeFlowWidth(link.flow?.recent || 0))
+      .attr('stroke-width', link => link.flow?.count > 0 && !link.flow?.recent ? 3 : edgeFlowWidth(link.flow?.recent || 0))
       .attr('opacity', link => {
         const distance = Math.hypot(link.target.x - link.source.x, link.target.y - link.source.y);
         const ratio = distance / (link.restLen || 1);
@@ -434,7 +438,7 @@ export function mountD3ElasticRenderer({
       if (!link || destroyed) return;
       link.flow = flow;
       const selection = edgeSelection.filter(candidate => runtimeIdentity(candidate) === edgeId);
-      selection.interrupt('flow').attr('stroke-width', edgeFlowWidth(flow.recent))
+      selection.interrupt('flow').attr('stroke-width', flow.count > 0 && !flow.recent ? 3 : edgeFlowWidth(flow.recent))
         .attr('opacity', flow.recent > 0 ? 1 : .82)
         .classed('d3-edge--active', flow.recent > 0);
       if (!reducedMotion && flow.recent > 0) {
@@ -501,9 +505,10 @@ export function runtimeNodeTooltipText(node, t = uiText, formatTime = formatRunt
     ? t('embed.tooltip.unavailable', { label: t(labelKey) })
     : t('embed.tooltip.value', { label: t(labelKey), value });
   const state = node.runtimeObserved ? t(`embed.runtime.state.${node.runtimeState}`) : null;
-  return [node.label, known('embed.tooltip.id', node.id), known('embed.tooltip.state', state),
+  return [node.label, ...(node.historyNotLoaded ? [t('history.coverage.nodeNotLoaded')] : []), known('embed.tooltip.id', node.id), known('embed.tooltip.state', state),
     known('embed.tooltip.activeInstances', node.runtimeObserved ? node.instances : null),
-    known('embed.tooltip.inFlightArrivals', node.runtimeObserved ? node.arrivals : null),
+    ...(node.historySummary ? [known('history.tooltip.visits', node.visitCount), known('history.tooltip.attempts', node.attemptCount)]
+      : [known('embed.tooltip.inFlightArrivals', node.runtimeObserved ? node.arrivals : null)]),
     known('embed.tooltip.lastEvent', node.lastEventType),
     known('embed.tooltip.lastEventTime', formatTime(node.lastOccurredAt)),
     known('embed.tooltip.processingDuration', node.processingDuration == null ? null : `${node.processingDuration}s`),

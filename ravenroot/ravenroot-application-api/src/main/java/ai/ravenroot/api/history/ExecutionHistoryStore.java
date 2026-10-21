@@ -34,6 +34,24 @@ public interface ExecutionHistoryStore {
  * @return actual selected traversal metadata, absent when the process or traversal is not retained
  */
     default CompletionStage<Optional<TraversalSummary>> executionTraversal(ExecutionKey key, UUID traversalId) { return unsupported(); }
+    /** Pages scalar counts of all actual node visits without loading visits or payloads.
+     * @param key authenticated tenant and original process
+     * @param traversalId actual selected traversal
+     * @param cursor opaque continuation bound to this exact query
+     * @param limit requested page size within operator limits
+     * @return complete per-node counts for the selected page of graph node identities
+     */
+    default CompletionStage<HistoryPage<TraversalNodeSummary>> executionNodeSummaries(ExecutionKey key,
+            UUID traversalId, Optional<String> cursor, int limit) { return unsupported(); }
+    /** Pages actual stable edge counts independent from optional captured content and journal expiry.
+     * @param key authenticated tenant and original process
+     * @param traversalId actual selected traversal
+     * @param cursor opaque continuation bound to this exact query
+     * @param limit requested page size within operator limits
+     * @return actual edge counts, or explicit NOT_RECORDED for older traversals
+     */
+    default CompletionStage<HistoryPage<TraversalEdgeSummary>> executionEdgeSummaries(ExecutionKey key,
+            UUID traversalId, Optional<String> cursor, int limit) { return unsupported(); }
     /** Pages actual node visits in durable creation order without reading captured payloads.
  * @param key authenticated tenant and exact original process identity
  * @param traversalId actual traversal identity within the owning process

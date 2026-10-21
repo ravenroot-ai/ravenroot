@@ -29,6 +29,7 @@ public final class DurableLocalDeploymentControl implements AutoCloseable {
     private final DeploymentReconciler reconciler;
     private final java.time.Duration reconciliationInterval;
     private final java.util.concurrent.ScheduledExecutorService recovery;
+    private final Runnable uninstallRestore;
     private final ConcurrentMap<Alias, DeploymentId> aliases = new ConcurrentHashMap<>();
 
     public DurableLocalDeploymentControl(DefaultRavenrootApplication application,
@@ -59,6 +60,7 @@ public final class DurableLocalDeploymentControl implements AutoCloseable {
             thread.setDaemon(true);
             return thread;
         });
+        this.uninstallRestore = application.installDurableLocalRegistrationRestorer(this::restore);
     }
 
     /** Creates or replays the durable aggregate before publishing its local runtime. */
@@ -90,6 +92,54 @@ public final class DurableLocalDeploymentControl implements AutoCloseable {
             reconciler.reconcileHosted(record.tenantId(), record.deploymentId());
         }
         return new Registration(status, record);
+    }
+
+    /** Rehosts an exact existing alias from bounded retained graph custody; never calls create. */
+    public Optional<LocalDeploymentStatus> restore(SecurityContext security, String localId,
+            String registrationIdentity, String graphVersion) {
+        return restore(security, localId, registrationIdentity, graphVersion, bytes -> { });
+    }
+
+    /** Adapter admission runs on retained bytes before any local runtime is published. */
+    public Optional<LocalDeploymentStatus> restore(SecurityContext security, String localId,
+            String registrationIdentity, String graphVersion, java.util.function.Consumer<byte[]> admission) {
+        Objects.requireNonNull(security); Objects.requireNonNull(admission);
+        if (localId == null || !localId.matches("[A-Za-z0-9][A-Za-z0-9._:-]{0,127}")
+                || registrationIdentity == null || registrationIdentity.length() > 256
+                || graphVersion == null || !graphVersion.matches("[a-f0-9]{64}")) throw new IllegalArgumentException("invalid durable restore binding");
+        var retained = awaitRestore(registry.retainedIdentity(security.tenantId(), "local-deployment:" + localId));
+        DeploymentId id = retained.map(DeploymentRegistry.Record::deploymentId).orElse(null);
+        if (id == null || !id.value().equals(registrationIdentity)) return Optional.empty();
+        return coordinator.withHostedRegistration(security.tenantId(), id, () -> {
+            var record = awaitRestore(registry.get(security.tenantId(), id)).orElse(null);
+            if (record == null || record.tombstone() != null) return Optional.empty();
+            int bound = application.maximumLocalDeploymentGraphBytes();
+            var version = awaitRestore(registry.version(security.tenantId(), id, record.latestVersion(), bound)).orElse(null);
+            if (version == null || !version.tenantId().equals(security.tenantId()) || !version.deploymentId().equals(id)
+                    || version.version() != record.latestVersion() || !version.canonicalDigest().equals(graphVersion)) return Optional.empty();
+            byte[] graph = version.canonicalSnapshot(); admission.accept(graph);
+            DeploymentId prior = aliases.putIfAbsent(new Alias(security.tenantId(), localId), id);
+            if (prior != null && !prior.equals(id)) throw new IllegalStateException("local deployment alias changed durable identity");
+            application.registerDurableLocalDeployment(security, localId, id, new ByteArrayInputStream(graph));
+            try {
+                if (reconciler != null && record.generation() > 0) reconciler.reconcileHosted(security.tenantId(), id);
+                var current = awaitRestore(registry.get(security.tenantId(), id)).orElseThrow();
+                if (current.tombstone() != null) {
+                    awaitRestore(application.undeployLocalDeployment(security.tenantId(), localId)); return Optional.empty();
+                }
+                return application.localDeployment(security.tenantId(), localId);
+            } catch (RuntimeException failure) {
+                awaitRestore(application.undeployLocalDeployment(security.tenantId(), localId)); throw failure;
+            }
+        });
+    }
+
+    private <T> T awaitRestore(java.util.concurrent.CompletionStage<T> operation) {
+        try { return operation.toCompletableFuture().get(application.durableDeploymentRestoreReadTimeout().toNanos(), java.util.concurrent.TimeUnit.NANOSECONDS); }
+        catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); throw new IllegalStateException("durable restore interrupted", interrupted); }
+        catch (java.util.concurrent.TimeoutException | java.util.concurrent.ExecutionException unresolved) {
+            throw new IllegalStateException("durable restore unresolved", unresolved);
+        }
     }
 
     /** Starts bounded periodic takeover/restart convergence for locally hosted aliases. */
@@ -180,6 +230,7 @@ public final class DurableLocalDeploymentControl implements AutoCloseable {
 
     @Override
     public void close() {
+        uninstallRestore.run();
         recovery.shutdownNow();
     }
 }

@@ -222,6 +222,7 @@ export function createDocumentRecord({
     },
     // Optional read-only deployment attachment. The graph remains an allowlisted projection;
     // closing the document detaches observation without controlling the server-side deployment.
+    deploymentRun: null,
     deploymentView: null,
     humanTasks: {
       deploymentId: null,
@@ -403,7 +404,8 @@ export function documentForRuntimeEvent(workspace, event, streamScope) {
     // the snapshot the document submitted; for a session, the deployment id already does, and it
     // keeps proving it after the author edits the document the session is not running.
     const listening = streamTenant !== undefined ? workspace.documents.filter(
-      doc => sourceSessionOwnsDeployment(doc, deploymentId) && doc.tenantId === streamTenant,
+      doc => doc.tenantId === streamTenant && (sourceSessionOwnsDeployment(doc, deploymentId)
+        || doc.deploymentRun?.deploymentId === deploymentId && doc.deploymentRun?.graphVersion === event.graphVersion),
     ) : [];
     // A deployment claim is useful only while it is unique in this workspace. Two open documents
     // claiming the same deployment are an ambiguity, not a reason to choose whichever was opened

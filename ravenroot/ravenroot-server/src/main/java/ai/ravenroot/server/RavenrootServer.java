@@ -4363,6 +4363,24 @@ public final class RavenrootServer implements AutoCloseable {
             }
             String deploymentId = java.net.URLDecoder.decode(segments[1], java.nio.charset.StandardCharsets.UTF_8);
 
+            if (segments.length == 3 && "restore".equals(segments[2])) {
+                if (!method(exchange, httpContext, "POST")) return;
+                authorization.requireAllowed(context, ai.ravenroot.api.security.AuthorizationAction.EXECUTION_START,
+                        ai.ravenroot.api.security.ProtectedResource.collection("deployments", context.tenantId()));
+                authorization.requireAllowed(context, ai.ravenroot.api.security.AuthorizationAction.EXECUTION_CONTROL,
+                        ai.ravenroot.api.security.ProtectedResource.owned("deployment", deploymentId, context.tenantId()));
+                var body = strictJsonMap(boundedBody(exchange, 2048), java.util.Set.of("registrationIdentity", "graphVersion"));
+                if (!(body.entries().get("registrationIdentity") instanceof PayloadValue.TextValue identity)
+                        || !(body.entries().get("graphVersion") instanceof PayloadValue.TextValue version)) {
+                    fail(exchange, httpContext, ErrorCode.INVALID_REQUEST); return;
+                }
+                var restored = durableDeploymentControl == null ? java.util.Optional.<ai.ravenroot.api.application.LocalDeploymentStatus>empty()
+                        : durableDeploymentControl.restore(ai.ravenroot.api.security.SecurityContext.of(context), deploymentId,
+                                identity.value(), version.value(), graph -> credentialAdmission.require(context, graph));
+                if (restored.isEmpty()) { fail(exchange, httpContext, ErrorCode.UNKNOWN_RESOURCE); return; }
+                deploymentJson(exchange, httpContext, 200, restored.orElseThrow(), durableDeploymentRecord(context.tenantId(), deploymentId).orElse(null));
+                return;
+            }
             if (segments.length == 3 && "view".equals(segments[2])) {
                 if (!method(exchange, httpContext, "GET")) return;
                 var view = authorizedApplication.localDeploymentView(context, deploymentId);
@@ -4389,6 +4407,21 @@ public final class RavenrootServer implements AutoCloseable {
                 return;
             }
             if (segments.length == 3 && "initial-start".equals(segments[2])) {
+                if ("GET".equals(exchange.getRequestMethod())) {
+                    var fields = new java.util.LinkedHashMap<>(query);
+                    if (!fields.keySet().equals(java.util.Set.of("incarnationId", "graphVersion", "requestId"))) {
+                        fail(exchange, httpContext, ErrorCode.INVALID_REQUEST); return;
+                    }
+                    var observed = authorizedApplication.reconcileLocalDeploymentInitialStart(context, deploymentId,
+                            fields.get("incarnationId"), fields.get("graphVersion"), fields.get("requestId"));
+                    int status = observed.outcome() == ai.ravenroot.api.application.EmbedDeploymentStart.Outcome.DUPLICATE ? 200
+                            : observed.outcome() == ai.ravenroot.api.application.EmbedDeploymentStart.Outcome.RECONCILE ? 503 : 409;
+                    exchange.getResponseHeaders().set("Cache-Control", "private, no-store");
+                    json(exchange, status, "{\"outcome\":\"" + observed.outcome() + "\",\"requestId\":\"" + escape(observed.requestId())
+                            + "\",\"processInstanceId\":" + (observed.processInstanceId() == null ? "null" : "\"" + observed.processInstanceId() + "\"")
+                            + ",\"traversalId\":" + (observed.traversalId() == null ? "null" : "\"" + observed.traversalId() + "\"") + "}");
+                    return;
+                }
                 if (!method(exchange, httpContext, "POST")) return;
                 var body = strictJsonMap(boundedBody(exchange, payloadLimits.maxEncodedBytes()),
                         java.util.Set.of("incarnationId", "graphVersion", "requestId", "input"));
@@ -4950,6 +4983,7 @@ public final class RavenrootServer implements AutoCloseable {
                 + "\",\"diagnostic\":" + diagnostic
                 + ",\"failure\":" + status.failure().map(RavenrootServer::startupFailureJson).orElse("null")
                 + ",\"continuity\":\"" + (durable == null ? "PROCESS_LOCAL" : "DURABLE") + "\""
+                + ",\"registrationIdentity\":" + (durable == null ? "null" : "\"" + escape(durable.deploymentId().value()) + "\"")
                 + ",\"deploymentRevision\":" + (durable == null ? "null" : durable.revision())
                 + ",\"desiredState\":" + (durable == null ? "null"
                         : "\"" + durable.desired().kind().name() + "\"")

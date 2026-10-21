@@ -711,6 +711,21 @@ public final class AuthorizedRavenrootApplication {
         return delegate.registerLocalDeployment(SecurityContext.of(context), deploymentId, graphMl);
     }
 
+    /** Restores only an existing durable registration under registration and lifecycle authority.
+     * @param context authenticated caller
+     * @param deploymentId exact tenant-local logical identity
+     * @param registrationIdentity saved opaque durable registration identity
+     * @param graphVersion saved immutable canonical graph digest
+     * @return restored hosted status or nondisclosing absence
+     */
+    public java.util.Optional<LocalDeploymentStatus> restoreLocalDeployment(RequestContext context,
+            String deploymentId, String registrationIdentity, String graphVersion) {
+        require(context, AuthorizationAction.EXECUTION_START, collection("deployments", context));
+        require(context, AuthorizationAction.EXECUTION_CONTROL, ProtectedResource.owned("deployment", requireText(deploymentId, "deployment id"), context.tenantId()));
+        return delegate.restoreLocalDeployment(SecurityContext.of(context), requireText(deploymentId, "deployment id"),
+                requireText(registrationIdentity, "registration identity"), requireText(graphVersion, "graph version"));
+    }
+
     /**
      * Imports caller-tenant publication bytes and registers a stopped deployment under the supplied
      * authored identity after {@link AuthorizationAction#GRAPH_ARTIFACT_DEPLOY} authorization.
@@ -1063,6 +1078,22 @@ public final class AuthorizedRavenrootApplication {
      * @param requestId bounded idempotency identity
      * @return sanitized authoritative admission outcome
      */
+    /** Reads original initial START identity under exact deployment observation authorization.
+     * @param context authenticated observation request
+     * @param deploymentId tenant-local logical deployment
+     * @param incarnationId current runtime incarnation
+     * @param graphVersion pinned deployment version
+     * @param requestId bounded original client reconciliation identity
+     * @return original identities, refusal or unresolved read; never admits a traversal
+     */
+    public EmbedDeploymentStart reconcileLocalDeploymentInitialStart(RequestContext context, String deploymentId,
+            String incarnationId, String graphVersion, String requestId) {
+        require(context, AuthorizationAction.DEPLOYMENT_OBSERVE,
+                ProtectedResource.owned("deployment-view", requireText(deploymentId, "deployment id"), context.tenantId()));
+        return delegate.reconcileLocalDeploymentInitialStart(SecurityContext.of(context), deploymentId,
+                requireText(incarnationId, "incarnation id"), requireText(graphVersion, "graph version"), requireText(requestId, "request id"));
+    }
+
     /** Starts or reconciles initial START under ordinary execution authorization.
  * @param context authenticated request identity supplying the tenant and action authority
  * @param deploymentId logical deployment identity; a new incarnation does not change it

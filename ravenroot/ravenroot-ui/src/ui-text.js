@@ -3,6 +3,16 @@ import { STATIC_ENGLISH_MESSAGES } from './ui-static-text.js';
 import { DYNAMIC_ENGLISH_MESSAGES } from './ui-dynamic-text.js';
 
 export const ENGLISH_MESSAGES = Object.freeze({
+  'workspace.run.persistenceRequired': 'Run needs a saved workspace association before creating a deployment. Restore workspace storage, then retry.',
+  'workspace.run.confirmDeployment': 'Run “{name}” as one pinned deployment? Its sources start listening and its initial START runs once. Later Run actions reconcile this same deployment.',
+  'workspace.run.attached': 'Deployment {deploymentId} · Pinned {version}',
+  'workspace.run.draftSeparate': 'Monitoring uses the pinned deployment. Local draft edits remain separate.',
+  'workspace.run.reconciling': 'Reconciling the saved deployment and its original initial START.',
+  'workspace.run.ready': 'Deployment ready. The initial traversal identity is retained across retry and reload.',
+  'workspace.run.failed': 'Deployment Run could not be reconciled. Retry uses the same saved deployment identity.',
+
+  'workspace.run.associationChanged': 'The deployment association or workspace authority changed. Your saved deployment identity is retained. Reconcile it before retrying.',
+
   ...STATIC_ENGLISH_MESSAGES,
   ...DYNAMIC_ENGLISH_MESSAGES,
   'repository.open.preserved': 'This source is already open. Your local graph and undo history were kept.',

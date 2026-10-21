@@ -278,6 +278,30 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
      */
     private final ConcurrentHashMap<LocalDeploymentKey, LocalDeploymentRecord> localDeployments =
             new ConcurrentHashMap<>();
+    /** Trusted host composition seam; authorization belongs to the public adapter. */
+    @FunctionalInterface public interface DurableLocalRegistrationRestorer {
+        java.util.Optional<LocalDeploymentStatus> restore(SecurityContext security, String logicalId, String registrationIdentity, String graphVersion);
+    }
+    private final java.util.concurrent.atomic.AtomicReference<DurableLocalRegistrationRestorer> durableRegistrationRestorer =
+            new java.util.concurrent.atomic.AtomicReference<>();
+    /** Finite configured store read wait for durable host restoration. */
+    public java.time.Duration durableDeploymentRestoreReadTimeout() {
+        return executionStore == null ? ai.ravenroot.api.correlation.BusinessHistoryPolicy.DEFAULTS.readTimeout()
+                : executionStore.businessHistoryPolicy().readTimeout();
+    }
+    /** Exact configured graph byte limit used by durable host restoration. */
+    public int maximumLocalDeploymentGraphBytes() { return graphExecutionLimits.graphMl().maxBytes(); }
+    /** Installs one durable host authority and returns its exact uninstaller. */
+    public Runnable installDurableLocalRegistrationRestorer(DurableLocalRegistrationRestorer restorer) {
+        java.util.Objects.requireNonNull(restorer);
+        if (!durableRegistrationRestorer.compareAndSet(null, restorer)) throw new IllegalStateException("durable restore authority already installed");
+        return () -> durableRegistrationRestorer.compareAndSet(restorer, null);
+    }
+    @Override public java.util.Optional<LocalDeploymentStatus> restoreLocalDeployment(SecurityContext security,
+            String deploymentId, String registrationIdentity, String graphVersion) {
+        var restorer = durableRegistrationRestorer.get();
+        return restorer == null ? java.util.Optional.empty() : restorer.restore(security, deploymentId, registrationIdentity, graphVersion);
+    }
     private final Object localDeploymentLock = new Object();
     /**
      * Serializes the admission decision against concurrent activations. A {@link ConcurrentHashMap}
@@ -3450,7 +3474,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         byte[] graphBytes = readGraphMlBytes(graphMl);
         int sourceCount = inspectEffectiveSources(graphBytes,
                 ai.ravenroot.api.application.GraphAdmissionPurpose.LOCAL_DEPLOYMENT);
-        Registration registration = register(key, graphBytes, sourceCount, lifecycleId);
+        Registration registration = register(key, graphBytes, sourceCount, lifecycleId, true);
         bindLifecycleIdentity(registration.record(), security);
         return localDeploymentStatus(key.deploymentId(), registration.record());
     }
@@ -3582,6 +3606,33 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         return startLocalDeploymentExecution(security, deploymentId, incarnationId, graphVersion,
                 requestId, ai.ravenroot.api.payload.PayloadValue.fromJava(java.util.Map.of(),
                         ai.ravenroot.api.payload.PayloadLimits.DEFAULTS));
+    }
+
+    @Override
+    public EmbedDeploymentStart reconcileLocalDeploymentInitialStart(SecurityContext security, String deploymentId,
+            String incarnationId, String graphVersion, String requestId) {
+        java.util.Objects.requireNonNull(security);
+        if (requestId == null || !requestId.matches("[A-Za-z0-9][A-Za-z0-9._:-]{0,127}")) throw new IllegalArgumentException("invalid initial START reconciliation id");
+        var key = new LocalDeploymentKey(requireTenant(security.tenantId()), requireLocalDeploymentId(deploymentId));
+        var record = localDeployments.get(key);
+        if (record == null || deployments.get(record.engineId()) != record.deployment()
+                || !record.deployment().incarnationId().equals(incarnationId) || !record.graphHash().equals(graphVersion)
+                || executionStore == null || !executionStore.supports(ai.ravenroot.api.persistence.StoreCapability.DURABLE)
+                || !executionStore.supports(ai.ravenroot.api.persistence.StoreCapability.INITIAL_START_ADMISSION))
+            return new EmbedDeploymentStart(EmbedDeploymentStart.Outcome.REFUSED, requestId);
+        try {
+            var original = executionStore.initialStart(security.tenantId(), record.lifecycleId().value()).toCompletableFuture()
+                    .get(executionStore.businessHistoryPolicy().readTimeout().toNanos(), java.util.concurrent.TimeUnit.NANOSECONDS);
+            if (localDeployments.get(key) != record || deployments.get(record.engineId()) != record.deployment()
+                    || !record.deployment().incarnationId().equals(incarnationId) || original.isEmpty()
+                    || !original.orElseThrow().graphVersion().equals(graphVersion)) return new EmbedDeploymentStart(EmbedDeploymentStart.Outcome.REFUSED, requestId);
+            return new EmbedDeploymentStart(EmbedDeploymentStart.Outcome.DUPLICATE, requestId,
+                    original.orElseThrow().processInstanceId(), original.orElseThrow().traversalId());
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt(); return new EmbedDeploymentStart(EmbedDeploymentStart.Outcome.RECONCILE, requestId);
+        } catch (java.util.concurrent.ExecutionException | java.util.concurrent.TimeoutException unresolved) {
+            return new EmbedDeploymentStart(EmbedDeploymentStart.Outcome.RECONCILE, requestId);
+        }
     }
 
     @Override
@@ -3808,6 +3859,11 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
 
     private Registration register(LocalDeploymentKey key, byte[] graphBytes, int sourceCount,
                                   DeploymentId lifecycleId) {
+        return register(key, graphBytes, sourceCount, lifecycleId, false);
+    }
+
+    private Registration register(LocalDeploymentKey key, byte[] graphBytes, int sourceCount,
+                                  DeploymentId lifecycleId, boolean durableRegistration) {
         if (closed.get()) {
             throw new IllegalStateException("Ravenroot application is closed");
         }
@@ -3820,7 +3876,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                 if (!existing.graphHash().equals(graphHash)) {
                     throw new LocalDeploymentException(LocalDeploymentException.Reason.GRAPH_CONFLICT);
                 }
-                if (!existing.lifecycleId().equals(lifecycleId)) {
+                if (!existing.lifecycleId().equals(lifecycleId) || existing.durableRegistration() != durableRegistration) {
                     throw new LocalDeploymentException(LocalDeploymentException.Reason.GRAPH_CONFLICT);
                 }
                 return new Registration(existing, false);
@@ -3835,7 +3891,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
             var deployment = (DefaultGraphDeployment) registerDeployment(
                     engineId, graphBytes, lifecycleId.value());
             var created = new LocalDeploymentRecord(
-                    graphHash, engineId, lifecycleId, sourceCount, deployment);
+                    graphHash, engineId, lifecycleId, sourceCount, deployment, durableRegistration);
             localDeployments.put(key, created);
             return new Registration(created, true);
         }
@@ -3844,15 +3900,15 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
     private LocalDeploymentStatus localDeploymentStatus(String deploymentId, LocalDeploymentRecord record) {
         GraphDeployment deployment = deployments.get(record.engineId());
         if (deployment == null) {
-            return LocalDeploymentStatus.withGraph(deploymentId, LocalDeploymentState.STOPPED,
-                    record.sourceCount(), record.graphHash());
+            var stopped = LocalDeploymentStatus.withGraph(deploymentId, LocalDeploymentState.STOPPED, record.sourceCount(), record.graphHash());
+            return record.durableRegistration() ? stopped.withRegistrationIdentity(record.lifecycleId().value()) : stopped;
         }
         // The diagnostics are fixed strings chosen here, not the engine's own DeploymentStatus.cause().
         // That cause is sanitized for an operator log, and the degraded one originates in an inbound
         // adapter; neither has been reviewed for a client-facing wire surface, and widening this
         // response to carry adapter-authored text is a decision for whoever needs it, not a side
         // effect of adding the route.
-        return switch (deployment.status().state()) {
+        var result = switch (deployment.status().state()) {
             case COLD -> LocalDeploymentStatus.withGraph(
                     deploymentId, LocalDeploymentState.REGISTERED, record.sourceCount(), record.graphHash());
             case STARTING -> LocalDeploymentStatus.withGraph(
@@ -3872,6 +3928,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
             case STOPPED -> LocalDeploymentStatus.withGraph(
                     deploymentId, LocalDeploymentState.STOPPED, record.sourceCount(), record.graphHash());
         };
+        return record.durableRegistration() ? result.withRegistrationIdentity(record.lifecycleId().value()) : result;
     }
 
     /**
@@ -4095,7 +4152,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
 
     private record LocalDeploymentRecord(String graphHash, DeploymentId engineId,
                                          DeploymentId lifecycleId, int sourceCount,
-                                         DefaultGraphDeployment deployment) { }
+                                         DefaultGraphDeployment deployment, boolean durableRegistration) { }
 
     /** A registration plus whether this call is the one that created it. */
     private record Registration(LocalDeploymentRecord record, boolean created) { }

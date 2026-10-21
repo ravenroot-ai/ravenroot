@@ -195,6 +195,12 @@ public final class InMemoryDeploymentRegistry implements DeploymentRegistry {
     }
 
     @Override
+    public synchronized CompletionStage<Optional<GraphVersion>> version(String tenant, DeploymentId id, long version, int maximumBytes) {
+        if (maximumBytes < 1) throw new IllegalArgumentException("maximumBytes must be positive");
+        return version(tenant, id, version).thenApply(found -> found.filter(value -> value.canonicalSnapshot().length <= maximumBytes));
+    }
+
+    @Override
     public synchronized CompletionStage<Page> list(String tenant, String cursor, int limit) {
         return complete(() -> {
             if (tenant == null || tenant.isBlank() || limit < 1 || limit > limits.maximumPageSize()) throw invalid("limit or tenant");

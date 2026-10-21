@@ -150,6 +150,10 @@ public final class DeploymentCoordinator {
                 () -> answer(tenantId, deploymentId, command, expectedGeneration));
     }
 
+    <T> T withHostedRegistration(String tenant, DeploymentId id, java.util.function.Supplier<T> work) {
+        return singleFlight.inFlight(tenant, id, work);
+    }
+
     private DeploymentCommandOutcome answer(String tenantId, DeploymentId deploymentId,
                                             LifecycleCommand command,
                                             GenerationExpectation expectedGeneration) {

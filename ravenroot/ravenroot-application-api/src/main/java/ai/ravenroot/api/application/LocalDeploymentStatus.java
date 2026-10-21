@@ -35,10 +35,11 @@ import java.util.Optional;
  * @param diagnostic fixed, bounded, operator-safe explanation, present only for degraded or failed
  *                   deployments
  * @param failure structured startup failure, present only for failed startup when available
+ * @param registrationIdentity immutable opaque durable-registry identity, absent for process-local registrations
  */
 public record LocalDeploymentStatus(String deploymentId, LocalDeploymentState state, int sourceCount,
                                     Optional<String> graphVersion, Optional<String> diagnostic,
-                                    Optional<ai.ravenroot.api.deployment.StartupFailure> failure) {
+                                    Optional<ai.ravenroot.api.deployment.StartupFailure> failure, Optional<String> registrationIdentity) {
     /** Honest ownership label returned on the wire; intentionally makes no multi-replica claim. */
     public static final String SCOPE = "LOCAL_PROCESS";
     /** Defense in depth for implementations other than the reference implementation. */
@@ -60,6 +61,8 @@ public record LocalDeploymentStatus(String deploymentId, LocalDeploymentState st
                 .map(String::trim).filter(text -> !text.isEmpty())
                 .map(text -> text.substring(0, Math.min(text.length(), MAX_DIAGNOSTIC_CHARACTERS)));
         failure = failure == null ? Optional.empty() : failure;
+        registrationIdentity = registrationIdentity == null ? Optional.empty() : registrationIdentity
+                .map(value -> ai.ravenroot.api.persistence.HandlerRegistration.requireBoundedKey(value, "registrationIdentity"));
         if (diagnostic.isPresent() && state != LocalDeploymentState.DEGRADED
                 && state != LocalDeploymentState.FAILED) {
             throw new IllegalArgumentException("only degraded and failed deployments carry diagnostics");
@@ -67,6 +70,28 @@ public record LocalDeploymentStatus(String deploymentId, LocalDeploymentState st
         if (failure.isPresent() && state != LocalDeploymentState.FAILED) {
             throw new IllegalArgumentException("only failed deployments carry startup failures");
         }
+    }
+
+    /** Creates a status without a durable registration identity.
+     * @param deploymentId tenant-local logical deployment identity
+     * @param state current lifecycle state
+     * @param sourceCount effective source count
+     * @param graphVersion immutable pinned version
+     * @param diagnostic bounded safe diagnostic
+     * @param failure structured startup failure when available
+     */
+    public LocalDeploymentStatus(String deploymentId, LocalDeploymentState state, int sourceCount,
+            Optional<String> graphVersion, Optional<String> diagnostic,
+            Optional<ai.ravenroot.api.deployment.StartupFailure> failure) {
+        this(deploymentId, state, sourceCount, graphVersion, diagnostic, failure, Optional.empty());
+    }
+
+    /** Projects the existing durable registration authority, independently of a runtime incarnation.
+     * @param identity immutable opaque registry deployment identity
+     * @return this observation with its durable registration identity
+     */
+    public LocalDeploymentStatus withRegistrationIdentity(String identity) {
+        return new LocalDeploymentStatus(deploymentId, state, sourceCount, graphVersion, diagnostic, failure, Optional.of(identity));
     }
 
     /**

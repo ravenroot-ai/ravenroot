@@ -401,6 +401,9 @@ export function validateLocalDeploymentStatus(value, expectedDeploymentId = '') 
       || (value.graphVersion !== null && value.graphVersion !== undefined
         && (typeof value.graphVersion !== 'string' || !value.graphVersion))
       || !['PROCESS_LOCAL', 'DURABLE'].includes(value.continuity)
+      || (value.registrationIdentity !== null && value.registrationIdentity !== undefined
+        && (value.continuity !== 'DURABLE' || typeof value.registrationIdentity !== 'string'
+          || !value.registrationIdentity || value.registrationIdentity.length > 256))
       || (value.deploymentRevision !== null && (!safeGeneration(value.deploymentRevision)
         || value.deploymentRevision < 1))
       || (value.desiredState !== null && (typeof value.desiredState !== 'string' || !value.desiredState))
@@ -714,6 +717,44 @@ export class RavenrootRuntimeClient {
       method: 'GET', headers: { Accept: 'application/json' }, signal,
     });
     return validateLocalDeploymentStatus(result, id);
+  }
+
+  /** Explicitly rehosts an existing durable registration from server-retained graph custody. */
+  async restoreDeployment(deploymentId, { registrationIdentity, graphVersion }) {
+    const result = await this.#json(`/v1/deployments/${encodeURIComponent(deploymentId)}/restore`, {
+      method: 'POST', headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ registrationIdentity, graphVersion }),
+    });
+    return validateLocalDeploymentStatus(result, deploymentId);
+  }
+
+  /** Reads original initial START identities without admitting work, including after rehydration. */
+  async reconcileInitialStartDeployment(deploymentId, { incarnationId, graphVersion, requestId }) {
+    const query = new URLSearchParams({ incarnationId, graphVersion, requestId });
+    const value = await this.#json(`/v1/deployments/${encodeURIComponent(deploymentId)}/initial-start?${query}`, {
+      method: 'GET', headers: { Accept: 'application/json' },
+    });
+    if (!value || value.outcome !== 'DUPLICATE' || value.requestId !== requestId
+        || ![value.processInstanceId, value.traversalId].every(id => typeof id === 'string'
+          && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)))
+      throw runtimeClientValidationError('Invalid permanent initial START observation');
+    return value;
+  }
+
+  /** Runs or reconciles the permanent initial START of this exact deployment incarnation. */
+  async initialStartDeployment(deploymentId, request) {
+    if (typeof deploymentId !== 'string' || !deploymentId || !request || typeof request.incarnationId !== 'string'
+        || !request.incarnationId || typeof request.graphVersion !== 'string' || !request.graphVersion
+        || typeof request.requestId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(request.requestId)
+        || !Object.hasOwn(request, 'input')) throw runtimeClientValidationError('Invalid deployment initial START request');
+    const result = await this.#json(`/v1/deployments/${encodeURIComponent(deploymentId)}/initial-start`, {
+      method: 'POST', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: JSON.stringify(request),
+    });
+    if (!result || !['ACCEPTED', 'DUPLICATE'].includes(result.outcome) || result.requestId !== request.requestId
+        || ![result.processInstanceId, result.traversalId].every(value => typeof value === 'string'
+          && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)))
+      throw runtimeClientValidationError('Invalid deployment initial START response');
+    return result;
   }
 
   /** Resolves one immutable, tenant-scoped deployment presentation without returning raw GraphML. */

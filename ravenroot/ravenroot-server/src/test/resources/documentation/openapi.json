@@ -522,6 +522,29 @@
       }
     },
     "/v1/deployments/{id}/initial-start": {
+      "get": {
+        "summary": "Reads the retained permanent initial START marker under current incarnation/version observation authority. Requires incarnationId, graphVersion and requestId query fields. Returns original process/traversal IDs without admitting work; missing or unavailable custody is explicit and never becomes an empty initial execution.",
+        "x-assistant-posture": "READ",
+        "security": [{"bearerAuth": []}],
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name":"incarnationId","in":"query","required":true,"schema":{"type":"string","minLength":1,"maxLength":256}},
+          {"name":"graphVersion","in":"query","required":true,"schema":{"type":"string","minLength":1,"maxLength":256}},
+          {"name":"requestId","in":"query","required":true,"schema":{"type":"string","minLength":1,"maxLength":128}}
+        ],
+        "responses": {
+          "200": {"description": "success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/InitialStartResponse"}}}},
+          "401": {"description": "AUTHENTICATION_REQUIRED"},
+          "403": {"description": "ACCESS_DENIED"},
+          "405": {"description": "METHOD_NOT_ALLOWED"},
+          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
+          "414": {"description": "QUERY_TOO_LARGE"},
+          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
+          "400": {"description": "INVALID_REQUEST"},
+          "409": {"description": "CONFLICT"},
+          "503": {"description": "REQUEST_INTERRUPTED"}
+        }
+      },
       "post": {
         "summary": "Accepts or reconciles the single initial START for the authorized deployment. Requires exact incarnationId and graphVersion, a bounded requestId and structured input. Distinct requests reconcile the original processInstanceId and traversalId; restart, completion, failure and retention never restore eligibility. A permanent initial-start-capable execution store is required before effects.",
         "x-assistant-posture": "NEVER",
@@ -589,6 +612,29 @@
           "404": {"description": "UNKNOWN_RESOURCE"},
           "400": {"description": "INVALID_REQUEST"},
           "503": {"description": "REQUEST_INTERRUPTED"}
+        }
+      }
+    },
+    "/v1/deployments/{id}/restore": {
+      "post": {
+        "summary": "Explicitly restores only an exact retained durable registration and canonical graph under registration and lifecycle authority; creates no registration or initial START.",
+        "x-assistant-posture": "NEVER",
+        "security": [{"bearerAuth": []}],
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DeploymentRestoreRequest"}}}},
+        "responses": {
+          "200": {"description": "success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/LocalDeploymentStatus"}}}},
+          "401": {"description": "AUTHENTICATION_REQUIRED"},
+          "403": {"description": "ACCESS_DENIED"},
+          "405": {"description": "METHOD_NOT_ALLOWED"},
+          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
+          "414": {"description": "QUERY_TOO_LARGE"},
+          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
+          "400": {"description": "INVALID_REQUEST"},
+          "404": {"description": "UNKNOWN_RESOURCE"},
+          "409": {"description": "CONFLICT"}
         }
       }
     },
@@ -2447,7 +2493,7 @@
       "SourceSessionStatus": {"type":"object","required":["sessionId","deploymentId","state","sourceCount","scope","diagnostic","failure"],"properties":{"sessionId":{"type":"string"},"deploymentId":{"type":"string"},"state":{"type":"string","enum":["STARTING","LISTENING","DEGRADED","STOPPING","STOPPED","FAILED"]},"sourceCount":{"type":"integer","minimum":1},"scope":{"type":"string","enum":["LOCAL_PROCESS"]},"diagnostic":{"type":"string","maxLength":192,"nullable":true},"failure":{"allOf":[{"$ref":"#/components/schemas/StartupFailure"}],"nullable":true}}},
       "LifecycleCommandCapability": {"type":"object","required":["command","available","reasonRequired","unavailableReason"],"properties":{"command":{"type":"string","enum":["START","PAUSE","RESUME","CANCEL","DRAIN","STOP","RESTART","UNDEPLOY"]},"available":{"type":"boolean"},"reasonRequired":{"type":"boolean"},"unavailableReason":{"type":"string","nullable":true}}},
       "LifecycleCapabilities": {"type":"object","required":["contractVersion","scope","commands"],"properties":{"contractVersion":{"type":"integer","enum":[1]},"scope":{"type":"string","enum":["DEPLOYMENT","PROCESS"]},"commands":{"type":"array","items":{"$ref":"#/components/schemas/LifecycleCommandCapability"}},"drainBound":{"type":"string"}}},
-      "LocalDeploymentStatus": {"type":"object","required":["deploymentId","tenantId","state","sourceCount","graphVersion","scope","diagnostic","failure","continuity","deploymentRevision","desiredState","observedState","recoveryFailure","lifecycleCapabilities"],"properties":{"deploymentId":{"type":"string"},"tenantId":{"type":"string"},"state":{"type":"string","enum":["REGISTERED","STARTING","READY","DEGRADED","STOPPING","STOPPED","FAILED"]},"sourceCount":{"type":"integer","minimum":0},"graphVersion":{"type":"string","nullable":true},"scope":{"type":"string","enum":["LOCAL_PROCESS"]},"diagnostic":{"type":"string","maxLength":192,"nullable":true},"failure":{"allOf":[{"$ref":"#/components/schemas/StartupFailure"}],"nullable":true},"continuity":{"type":"string","enum":["PROCESS_LOCAL","DURABLE"]},"deploymentRevision":{"type":"integer","format":"int64","minimum":1,"nullable":true},"desiredState":{"type":"string","nullable":true},"observedState":{"type":"string","nullable":true},"recoveryFailure":{"type":"string","nullable":true},"deploymentGeneration":{"type":"integer","format":"int64","minimum":0,"description":"Present only when this deployment is governed by durable lifecycle authority."},"lifecycleCapabilities":{"$ref":"#/components/schemas/LifecycleCapabilities"}}},
+      "LocalDeploymentStatus": {"type":"object","required":["deploymentId","tenantId","state","sourceCount","graphVersion","scope","diagnostic","failure","continuity","deploymentRevision","desiredState","observedState","recoveryFailure","lifecycleCapabilities"],"properties":{"deploymentId":{"type":"string"},"tenantId":{"type":"string"},"state":{"type":"string","enum":["REGISTERED","STARTING","READY","DEGRADED","STOPPING","STOPPED","FAILED"]},"sourceCount":{"type":"integer","minimum":0},"graphVersion":{"type":"string","nullable":true},"scope":{"type":"string","enum":["LOCAL_PROCESS"]},"diagnostic":{"type":"string","maxLength":192,"nullable":true},"failure":{"allOf":[{"$ref":"#/components/schemas/StartupFailure"}],"nullable":true},"continuity":{"type":"string","enum":["PROCESS_LOCAL","DURABLE"]},"registrationIdentity":{"type":"string","nullable":true,"description":"Immutable opaque durable registration identity. Survives rehydration; absent for process-local authority. It is distinct from runtime incarnation."},"deploymentRevision":{"type":"integer","format":"int64","minimum":1,"nullable":true},"desiredState":{"type":"string","nullable":true},"observedState":{"type":"string","nullable":true},"recoveryFailure":{"type":"string","nullable":true},"deploymentGeneration":{"type":"integer","format":"int64","minimum":0,"description":"Present only when this deployment is governed by durable lifecycle authority."},"lifecycleCapabilities":{"$ref":"#/components/schemas/LifecycleCapabilities"}}},
       "LocalDeploymentStatusList": {"type":"object","required":["scope","deployments"],"properties":{"scope":{"type":"string","enum":["LOCAL_PROCESS"]},"deployments":{"type":"array","items":{"$ref":"#/components/schemas/LocalDeploymentStatus"}}}},
       "DeploymentCommandOutcome": {"type":"object","required":["outcome"],"properties":{"outcome":{"type":"string","enum":["ACCEPTED","CONVERGED","REPLAYED","IDEMPOTENCY_CONFLICT","STALE_GENERATION","SUPERSEDED","REFUSED","FAILED","TERMINAL"]},"commandId":{"type":"string"},"fromGeneration":{"type":"integer","format":"int64","minimum":0},"generation":{"type":"integer","format":"int64","minimum":0},"expected":{"type":"integer","format":"int64","minimum":0},"observed":{"type":"string"},"key":{"type":"string"},"by":{"type":"string"},"reason":{"type":"string"},"cause":{"type":"string"},"original":{"$ref":"#/components/schemas/DeploymentCommandOutcome"}}},
       "DeploymentCommandResponse": {"oneOf":[{"$ref":"#/components/schemas/LocalDeploymentStatus"},{"$ref":"#/components/schemas/DeploymentCommandOutcome"}],"description":"Legacy deployments return status; deployments that expose deploymentGeneration return a durable outcome."},
@@ -2478,6 +2524,7 @@
 "CorrelatedJoinSummary":{"type":"object","additionalProperties":false,"required":["applicationCorrelationId","nodeId","roundId","revision","phase","expectedContributions","receivedContributions","sealed","retainedPayloadBytes","openedAt","deadlineAt","updatedAt","continuationProcessInstanceId","continuationTraversalId","expectation"],"properties":{"applicationCorrelationId":{"type":"string"},"nodeId":{"type":"string"},"roundId":{"type":"string"},"revision":{"type":"integer","format":"int64","minimum":0},"phase":{"type":"string"},"expectedContributions":{"type":"integer","format":"int64","minimum":0},"receivedContributions":{"type":"integer","format":"int64","minimum":0},"sealed":{"type":"boolean"},"retainedPayloadBytes":{"type":"integer","format":"int64","minimum":0},"openedAt":{"type":"string","format":"date-time"},"deadlineAt":{"type":"string","format":"date-time"},"updatedAt":{"type":"string","format":"date-time"},"continuationProcessInstanceId":{"type":"string","format":"uuid"},"continuationTraversalId":{"type":"string","format":"uuid"},"expectation":{"type":"string","enum":["COUNT","MANIFEST","UNANNOUNCED","UNKNOWN"]}}},
 "HistoryActivityObservation":{"type":"object","additionalProperties":false,"required":["eventId","nodeId","invocationId","attemptId","attemptOrdinal","contentKind","command","outcome","occurredAt","expiresAt","contentType","content"],"properties":{"eventId":{"type":"string"},"nodeId":{"type":"string"},"invocationId":{"type":"string","format":"uuid"},"attemptId":{"type":"string","format":"uuid"},"attemptOrdinal":{"type":"integer","format":"int64","minimum":1},"contentKind":{"type":"string"},"command":{"type":"string"},"outcome":{"type":"string","nullable":true},"occurredAt":{"type":"string","format":"date-time"},"expiresAt":{"type":"string","format":"date-time"},"contentType":{"type":"string"},"content":{}}},
 "DeploymentHistoryPage":{"type":"object","additionalProperties":false,"required":["source","view","items","nextCursor","availability"],"properties":{"source":{"$ref":"#/components/schemas/DeploymentHistorySource"},"view":{"type":"string","enum":["histories","traversals","uncorrelated-traversals","process-traversals","visits","attempts","parents","joins","activity","join-members"]},"items":{"type":"array","maxItems":1000,"items":{"oneOf":[{"$ref":"#/components/schemas/BusinessHistorySummary"},{"$ref":"#/components/schemas/CorrelatedTraversalSummary"},{"$ref":"#/components/schemas/ExecutionTraversalSummary"},{"$ref":"#/components/schemas/NodeVisitSummary"},{"$ref":"#/components/schemas/NodeAttemptSummary"},{"$ref":"#/components/schemas/VisitParent"},{"$ref":"#/components/schemas/CorrelatedJoinSummary"},{"$ref":"#/components/schemas/HistoryActivityObservation"},{"$ref":"#/components/schemas/JoinMemberSummary"}]}},"nextCursor":{"type":"string","nullable":true,"description":"Opaque cursor bound to source incarnation, tenant, exact selection, filters and page size."},"availability":{"type":"string","enum":["AVAILABLE","NOT_FOUND","EXPIRED","CAPTURE_DISABLED","NOT_RETAINED"]},"gap":{"type":"boolean"},"contentPolicy":{"type":"string","enum":["REDACTED_BOUNDED_CAPTURE"]}}},
+"DeploymentRestoreRequest":{"type":"object","additionalProperties":false,"required":["registrationIdentity","graphVersion"],"properties":{"registrationIdentity":{"type":"string","maxLength":256},"graphVersion":{"type":"string","pattern":"^[a-f0-9]{64}$"}}},
 "InitialStartRequest":{"type":"object","additionalProperties":false,"required":["incarnationId","graphVersion","requestId","input"],"properties":{"incarnationId":{"type":"string"},"graphVersion":{"type":"string"},"requestId":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},"input":{}}},
 "InitialStartResponse":{"type":"object","additionalProperties":false,"required":["outcome","requestId","processInstanceId","traversalId"],"properties":{"outcome":{"type":"string","enum":["ACCEPTED","DUPLICATE","REFUSED","RECONCILE"]},"requestId":{"type":"string"},"processInstanceId":{"type":"string","nullable":true,"format":"uuid"},"traversalId":{"type":"string","nullable":true,"format":"uuid"}}},
 "EmbedHistoryRequest":{"type":"object","additionalProperties":false,"required":["nonce","jti","issuedAt","signature","query"],"properties":{"nonce":{"type":"string"},"jti":{"type":"string"},"issuedAt":{"type":"string","format":"date-time"},"signature":{"type":"string"},"query":{"type":"string","maxLength":8192,"description":"JSON object of text-valued history query fields. Deployment binding and tenant come only from the authorized session."}}},

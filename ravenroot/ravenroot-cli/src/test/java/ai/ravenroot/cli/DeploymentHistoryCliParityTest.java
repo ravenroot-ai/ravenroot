@@ -40,6 +40,7 @@ class DeploymentHistoryCliParityTest {
             try (var server = new RavenrootServer(app, new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), null, new DisabledLoopbackAuthenticator())) {
                 server.start(); var remote = new RemoteBackend(URI.create("http://127.0.0.1:" + server.port()), "local-test", Duration.ofSeconds(10));
                 var first = object(embedded.initialStart(source, "embedded", "{}".getBytes(StandardCharsets.UTF_8)));
+                assertEquals(object(embedded.observeInitialStart(source, "observe")), object(remote.observeInitialStart(source, "observe")));
                 var second = object(remote.initialStart(source, "remote", "{\"ignoredReplacement\":true}".getBytes(StandardCharsets.UTF_8)));
                 assertEquals(first.entries().get("processInstanceId"), second.entries().get("processInstanceId"));
                 assertEquals(first.entries().get("traversalId"), second.entries().get("traversalId"));
@@ -59,9 +60,45 @@ class DeploymentHistoryCliParityTest {
                         "--graph-version", source.graphVersion(), "--view", "visits", "--process-instance-id", process,
                         "--traversal-id", traversal, "--limit", "1"), errors.toString(StandardCharsets.UTF_8));
                 assertEquals(object(page), object(output.toString(StandardCharsets.UTF_8).strip()));
+                output.reset();
+                assertEquals(0, cli.run("deployments", "observe-initial", "document", "--incarnation", source.incarnationId(),
+                        "--graph-version", source.graphVersion(), "--request-id", "cli-observe"), errors.toString(StandardCharsets.UTF_8));
+                assertEquals(object(embedded.observeInitialStart(source, "cli-observe")), object(output.toString(StandardCharsets.UTF_8).strip()));
             }
         }
     }
+    @Test void durableRestoreEmbeddedRemoteAndCliUseOnlyTheSameSavedRegistrationAuthority() throws Exception {
+        try (var engine = new PekkoExecutionEngine("restore-cli");
+             var registry = new ai.ravenroot.core.deployment.registry.InMemoryDeploymentRegistry(Clock.systemUTC(),
+                     tenant -> ai.ravenroot.api.deployment.DeploymentId.of(UUID.randomUUID().toString()))) {
+            var app = new DefaultRavenrootApplication(engine, new ExecutionMonitor());
+            var context = new RequestContext("restore-cli", "operator", PrincipalType.USER, "issuer", "local", Set.of(Role.PLATFORM_ADMIN),
+                    Arrays.stream(AuthorizationAction.values()).filter(AuthorizationAction::available).map(AuthorizationAction::requiredScope).collect(java.util.stream.Collectors.toSet()));
+            var authorized = new AuthorizedRavenrootApplication(app, new DefaultAuthorizationService(event -> {}), event -> {}, true);
+            var embedded = new EmbeddedBackend(authorized, context);
+            var single = new ai.ravenroot.core.deployment.DeploymentSingleFlight();
+            var coordinator = new ai.ravenroot.core.deployment.DeploymentCoordinator(registry, app.localDeploymentTargets(), single,
+                    ai.ravenroot.core.deployment.ServiceShutdownIntent.RUNNING, "cli-owner", Duration.ofMinutes(1), Duration.ofSeconds(1), Clock.systemUTC());
+            try (var control = new ai.ravenroot.core.deployment.DurableLocalDeploymentControl(app, registry, coordinator, Clock.systemUTC())) {
+                var registered = control.register(SecurityContext.of(context), "restore", GRAPH.getBytes(StandardCharsets.UTF_8));
+                String identity = registered.durable().deploymentId().value(), version = registered.local().graphVersion().orElseThrow();
+                app.undeployLocalDeployment("local", "restore").toCompletableFuture().join();
+                var restored = embedded.restoreDeployment("restore", identity, version);
+                assertEquals(identity, restored.registrationIdentity());
+                try (var server = new RavenrootServer(app, new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), null, new DisabledLoopbackAuthenticator())) {
+                    var install = RavenrootServer.class.getDeclaredMethod("installDurableDeploymentControl", ai.ravenroot.core.deployment.DurableLocalDeploymentControl.class);
+                    install.setAccessible(true); install.invoke(server, control); server.start();
+                    var remote = new RemoteBackend(URI.create("http://127.0.0.1:" + server.port()), "local-test", Duration.ofSeconds(10));
+                    assertEquals(restored.registrationIdentity(), remote.restoreDeployment("restore", identity, version).registrationIdentity());
+                    var output = new java.io.ByteArrayOutputStream(); var errors = new java.io.ByteArrayOutputStream();
+                    var cli = new RavenrootCli(remote, new java.io.PrintStream(output), new java.io.PrintStream(errors));
+                    assertEquals(0, cli.run("deployments", "restore", "restore", "--registration-identity", identity, "--graph-version", version), errors.toString(StandardCharsets.UTF_8));
+                    assertTrue(output.toString(StandardCharsets.UTF_8).contains("registration-identity=" + identity));
+                }
+            } finally { app.close(); }
+        }
+    }
+
     @Test void embeddedRemoteAndCliPreviewUseSameBoundedSampleEvaluation() throws Exception {
         try (var engine = new PekkoExecutionEngine("preview-cli")) {
             var app = new DefaultRavenrootApplication(engine, new ExecutionMonitor());

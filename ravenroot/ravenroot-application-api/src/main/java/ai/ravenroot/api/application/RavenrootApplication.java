@@ -576,6 +576,33 @@ public interface RavenrootApplication extends AutoCloseable {
      * @param requestId bounded idempotency identity
      * @return sanitized authoritative admission outcome
      */
+    /** Restores an existing durable registration from retained canonical graph custody.
+     * This explicit operation creates neither a registration nor an initial START. Unsupported
+     * process-local hosts refuse by returning empty.
+     * @param security authenticated owning tenant and principal
+     * @param deploymentId tenant-local logical deployment identity
+     * @param registrationIdentity exact retained opaque registration identity
+     * @param graphVersion exact canonical graph digest
+     * @return current hosted status, or empty when existing authority does not match
+     */
+    default java.util.Optional<LocalDeploymentStatus> restoreLocalDeployment(SecurityContext security,
+            String deploymentId, String registrationIdentity, String graphVersion) {
+        return java.util.Optional.empty();
+    }
+
+    /** Reads the permanent initial START marker without admitting work or returning input.
+     * @param security authenticated tenant and principal
+     * @param deploymentId tenant-scoped logical deployment
+     * @param incarnationId current runtime incarnation
+     * @param graphVersion exact pinned graph version
+     * @param requestId bounded caller reconciliation identity; never an admission
+     * @return DUPLICATE and original identities when retained, otherwise explicit refusal or unresolved read
+     */
+    default EmbedDeploymentStart reconcileLocalDeploymentInitialStart(SecurityContext security, String deploymentId,
+            String incarnationId, String graphVersion, String requestId) {
+        return new EmbedDeploymentStart(EmbedDeploymentStart.Outcome.REFUSED, requestId);
+    }
+
     /**
      * Accepts or reconciles the one initial START of an exact deployment binding with bounded input.
      * A retry or a distinct request ID cannot replace the original work. Requires a store supporting

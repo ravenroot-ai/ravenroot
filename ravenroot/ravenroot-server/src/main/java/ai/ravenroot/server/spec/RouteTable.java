@@ -503,6 +503,16 @@ public final class RouteTable {
                     true, false, 200,
                     concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(), ErrorCode.UNKNOWN_RESOURCE.code(),
                             ErrorCode.CONFLICT.code(), ErrorCode.REQUEST_INTERRUPTED.code()), READ, true),
+            new RouteDescriptor(Set.of("POST"), "/v1/deployments/{id}/restore",
+                    "Explicitly restores only an exact retained durable registration and canonical graph under registration and lifecycle authority; creates no registration or initial START.",
+                    true, false, 200, concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(), ErrorCode.UNKNOWN_RESOURCE.code(),
+                            ErrorCode.CONFLICT.code()), NEVER, false),
+            new RouteDescriptor(Set.of("GET"), "/v1/deployments/{id}/initial-start",
+                    "Reads the retained permanent initial START marker under current incarnation/version observation authority. "
+                            + "Requires incarnationId, graphVersion and requestId query fields. Returns original process/traversal IDs "
+                            + "without admitting work; missing or unavailable custody is explicit and never becomes an empty initial execution.",
+                    true, false, 200, concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(), ErrorCode.CONFLICT.code(),
+                            ErrorCode.REQUEST_INTERRUPTED.code()), READ, true),
             new RouteDescriptor(Set.of("POST"), "/v1/deployments/{id}/initial-start",
                     "Accepts or reconciles the single initial START for the authorized deployment. "
                             + "Requires exact incarnationId and graphVersion, a bounded requestId and structured input. "

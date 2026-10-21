@@ -135,7 +135,8 @@ public final class OpenApiSpecGenerator {
         if (isHumanTaskCapabilityCompletion(route, method)) {
             entry.append(jsonRequestBody("HumanTaskCapabilityCompletion"));
         }
-        if ("/v1/deployments/{id}/initial-start".equals(route.path())) entry.append(jsonRequestBody("InitialStartRequest"));
+        if ("POST".equals(method) && "/v1/deployments/{id}/initial-start".equals(route.path())) entry.append(jsonRequestBody("InitialStartRequest"));
+        if ("/v1/deployments/{id}/restore".equals(route.path())) entry.append(jsonRequestBody("DeploymentRestoreRequest"));
         if ("/v1/correlation/preview".equals(route.path())) entry.append(jsonRequestBody("CorrelationPreviewRequest"));
         if ("/v1/embed/executions".equals(route.path())) entry.append(jsonRequestBody("EmbedInitialStartRequest"));
         if ("/v1/embed/history".equals(route.path())) entry.append(jsonRequestBody("EmbedHistoryRequest"));
@@ -250,6 +251,11 @@ public final class OpenApiSpecGenerator {
             for (String field : new String[]{"view", "applicationCorrelationId", "publicReference", "lifecycle", "processInstanceId", "traversalId", "invocationId", "attemptId", "nodeId", "roundId", "memberState", "cursor", "limit"})
                 parameters.add(queryParameter(field, "limit".equals(field) ? "integer" : "string", "History view field; invalid combinations are refused. Page size is bounded by the operator history policy."));
         }
+        if ("GET".equals(method) && "/v1/deployments/{id}/initial-start".equals(route.path())) {
+            for (String field : java.util.List.of("incarnationId", "graphVersion", "requestId"))
+                parameters.add("          {\"name\":\"" + field + "\",\"in\":\"query\",\"required\":true,\"schema\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":"
+                        + (field.equals("requestId") ? 128 : 256) + "}}");
+        }
         if (isDeploymentCommand(route, method)) {
             parameters.add(deploymentHeader("Idempotency-Key", "string",
                     "Required for a durable deployment; one unique key per operator intent."));
@@ -320,7 +326,7 @@ public final class OpenApiSpecGenerator {
 
     private static boolean isDeploymentCommand(RouteDescriptor route, String method) {
         return ("POST".equals(method) && route.path().startsWith("/v1/deployments/{id}/")
-                && !route.path().endsWith("/initial-start"))
+                && !route.path().endsWith("/initial-start") && !route.path().endsWith("/restore"))
                 || ("DELETE".equals(method) && "/v1/deployments/{id}".equals(route.path()));
     }
 
@@ -379,7 +385,8 @@ public final class OpenApiSpecGenerator {
         } else if ("/v1/executions/inventory".equals(route.path()) && "GET".equals(method)) {
             schema = "ProcessInventoryPage";
         } else if (("/v1/deployments".equals(route.path()) && "POST".equals(method))
-                || ("/v1/deployments/{id}".equals(route.path()) && "GET".equals(method))) {
+                || ("/v1/deployments/{id}".equals(route.path()) && "GET".equals(method))
+                || "/v1/deployments/{id}/restore".equals(route.path())) {
             schema = "LocalDeploymentStatus";
         } else if ("/v1/correlation/preview".equals(route.path())) {
             schema = "CorrelationPreviewResponse";
@@ -418,7 +425,7 @@ public final class OpenApiSpecGenerator {
                 + "      \"LocalDeploymentStatus\": {\"type\":\"object\",\"required\":[\"deploymentId\",\"tenantId\",\"state\",\"sourceCount\",\"graphVersion\",\"scope\",\"diagnostic\",\"failure\",\"continuity\",\"deploymentRevision\",\"desiredState\",\"observedState\",\"recoveryFailure\",\"lifecycleCapabilities\"],\"properties\":{"
                 + "\"deploymentId\":{\"type\":\"string\"},\"tenantId\":{\"type\":\"string\"},\"state\":{\"type\":\"string\",\"enum\":[\"REGISTERED\",\"STARTING\",\"READY\",\"DEGRADED\",\"STOPPING\",\"STOPPED\",\"FAILED\"]},"
                 + "\"sourceCount\":{\"type\":\"integer\",\"minimum\":0},\"graphVersion\":{\"type\":\"string\",\"nullable\":true},\"scope\":{\"type\":\"string\",\"enum\":[\"LOCAL_PROCESS\"]},"
-                + "\"diagnostic\":{\"type\":\"string\",\"maxLength\":192,\"nullable\":true},\"failure\":{\"allOf\":[{\"$ref\":\"#/components/schemas/StartupFailure\"}],\"nullable\":true},\"continuity\":{\"type\":\"string\",\"enum\":[\"PROCESS_LOCAL\",\"DURABLE\"]},\"deploymentRevision\":{\"type\":\"integer\",\"format\":\"int64\",\"minimum\":1,\"nullable\":true},\"desiredState\":{\"type\":\"string\",\"nullable\":true},\"observedState\":{\"type\":\"string\",\"nullable\":true},\"recoveryFailure\":{\"type\":\"string\",\"nullable\":true},\"deploymentGeneration\":{\"type\":\"integer\",\"format\":\"int64\",\"minimum\":0,\"description\":\"Present only when this deployment is governed by durable lifecycle authority.\"},\"lifecycleCapabilities\":{\"$ref\":\"#/components/schemas/LifecycleCapabilities\"}}},\n"
+                + "\"diagnostic\":{\"type\":\"string\",\"maxLength\":192,\"nullable\":true},\"failure\":{\"allOf\":[{\"$ref\":\"#/components/schemas/StartupFailure\"}],\"nullable\":true},\"continuity\":{\"type\":\"string\",\"enum\":[\"PROCESS_LOCAL\",\"DURABLE\"]},\"registrationIdentity\":{\"type\":\"string\",\"nullable\":true,\"description\":\"Immutable opaque durable registration identity. Survives rehydration; absent for process-local authority. It is distinct from runtime incarnation.\"},\"deploymentRevision\":{\"type\":\"integer\",\"format\":\"int64\",\"minimum\":1,\"nullable\":true},\"desiredState\":{\"type\":\"string\",\"nullable\":true},\"observedState\":{\"type\":\"string\",\"nullable\":true},\"recoveryFailure\":{\"type\":\"string\",\"nullable\":true},\"deploymentGeneration\":{\"type\":\"integer\",\"format\":\"int64\",\"minimum\":0,\"description\":\"Present only when this deployment is governed by durable lifecycle authority.\"},\"lifecycleCapabilities\":{\"$ref\":\"#/components/schemas/LifecycleCapabilities\"}}},\n"
                 + "      \"LocalDeploymentStatusList\": {\"type\":\"object\",\"required\":[\"scope\",\"deployments\"],\"properties\":{\"scope\":{\"type\":\"string\",\"enum\":[\"LOCAL_PROCESS\"]},\"deployments\":{\"type\":\"array\",\"items\":{\"$ref\":\"#/components/schemas/LocalDeploymentStatus\"}}}},\n"
                 + "      \"DeploymentCommandOutcome\": {\"type\":\"object\",\"required\":[\"outcome\"],\"properties\":{\"outcome\":{\"type\":\"string\",\"enum\":[\"ACCEPTED\",\"CONVERGED\",\"REPLAYED\",\"IDEMPOTENCY_CONFLICT\",\"STALE_GENERATION\",\"SUPERSEDED\",\"REFUSED\",\"FAILED\",\"TERMINAL\"]},\"commandId\":{\"type\":\"string\"},\"fromGeneration\":{\"type\":\"integer\",\"format\":\"int64\",\"minimum\":0},\"generation\":{\"type\":\"integer\",\"format\":\"int64\",\"minimum\":0},\"expected\":{\"type\":\"integer\",\"format\":\"int64\",\"minimum\":0},\"observed\":{\"type\":\"string\"},\"key\":{\"type\":\"string\"},\"by\":{\"type\":\"string\"},\"reason\":{\"type\":\"string\"},\"cause\":{\"type\":\"string\"},\"original\":{\"$ref\":\"#/components/schemas/DeploymentCommandOutcome\"}}},\n"
                 + "      \"DeploymentCommandResponse\": {\"oneOf\":[{\"$ref\":\"#/components/schemas/LocalDeploymentStatus\"},{\"$ref\":\"#/components/schemas/DeploymentCommandOutcome\"}],\"description\":\"Legacy deployments return status; deployments that expose deploymentGeneration return a durable outcome.\"}";

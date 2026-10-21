@@ -532,6 +532,22 @@ public final class RemoteBackend implements CliBackend {
                 ai.ravenroot.api.payload.PayloadJson.writeJava(body, ai.ravenroot.api.payload.PayloadLimits.DEFAULTS), "application/json");
     }
 
+    @Override public DeploymentView restoreDeployment(String deploymentId, String registrationIdentity, String graphVersion) throws IOException {
+        return deploymentFrom(MinimalJson.asObject(MinimalJson.parse(post("/v1/deployments/"
+                + java.net.URLEncoder.encode(deploymentId, StandardCharsets.UTF_8) + "/restore",
+                ai.ravenroot.api.payload.PayloadJson.writeJava(java.util.Map.of("registrationIdentity", registrationIdentity,
+                        "graphVersion", graphVersion), ai.ravenroot.api.payload.PayloadLimits.DEFAULTS), "application/json"))));
+    }
+    @Override public String observeInitialStart(ai.ravenroot.api.history.DeploymentHistorySource source,
+            String requestId) throws IOException {
+        if (requestId == null || !requestId.matches("[A-Za-z0-9][A-Za-z0-9._:-]{0,127}"))
+            throw new IllegalArgumentException("invalid initial START observation id");
+        var query = java.util.Map.of("incarnationId", source.incarnationId(), "graphVersion", source.graphVersion(), "requestId", requestId);
+        return get("/v1/deployments/" + java.net.URLEncoder.encode(source.deploymentId(), StandardCharsets.UTF_8) + "/initial-start?"
+                + query.entrySet().stream().map(entry -> java.net.URLEncoder.encode(entry.getKey(), StandardCharsets.UTF_8) + "="
+                + java.net.URLEncoder.encode(entry.getValue(), StandardCharsets.UTF_8)).collect(java.util.stream.Collectors.joining("&")));
+    }
+
     @Override
     public DeploymentView deployment(String deploymentId) throws IOException {
         return deploymentFrom(MinimalJson.asObject(MinimalJson.parse(
@@ -634,7 +650,7 @@ public final class RemoteBackend implements CliBackend {
             }
         }
         return new DeploymentView(observed.deploymentId(), observed.state(), observed.sourceCount(),
-                observed.scope(), observed.diagnostic(), observed.deploymentGeneration(), outcomeName, detail);
+                observed.scope(), observed.diagnostic(), observed.deploymentGeneration(), outcomeName, detail, observed.registrationIdentity());
     }
 
     private DeploymentView reconcileAmbiguousDeploymentCommand(String deploymentId, String command,
@@ -643,13 +659,13 @@ public final class RemoteBackend implements CliBackend {
             DeploymentView observed = deployment(deploymentId);
             return new DeploymentView(observed.deploymentId(), observed.state(), observed.sourceCount(),
                     observed.scope(), observed.diagnostic(), observed.deploymentGeneration(), null,
-                    "delivery=AMBIGUOUS,reconciliation=AUTHORITATIVE_STATE");
+                    "delivery=AMBIGUOUS,reconciliation=AUTHORITATIVE_STATE", observed.registrationIdentity());
         } catch (IOException missing) {
             if ("undeploy".equals(command) && missing.getMessage() != null
                     && missing.getMessage().startsWith("404 ")) {
                 return new DeploymentView(deploymentId, "REMOVED", 0, before.scope(), null,
                         before.deploymentGeneration(), null,
-                        "delivery=AMBIGUOUS,reconciliation=AUTHORITATIVE_NOT_FOUND");
+                        "delivery=AMBIGUOUS,reconciliation=AUTHORITATIVE_NOT_FOUND", before.registrationIdentity());
             }
             throw missing;
         }
@@ -683,7 +699,7 @@ public final class RemoteBackend implements CliBackend {
                 MinimalJson.asString(body.get("state")), (int) MinimalJson.asLong(body.get("sourceCount")),
                 MinimalJson.asString(body.get("scope")),
                 diagnostic == null ? null : MinimalJson.asString(diagnostic),
-                parsedGeneration, null, null);
+                parsedGeneration, null, null, body.get("registrationIdentity") == null ? null : MinimalJson.asString(body.get("registrationIdentity")));
     }
 
     private static final java.util.Set<String> DEPLOYMENT_OUTCOMES = java.util.Set.of(

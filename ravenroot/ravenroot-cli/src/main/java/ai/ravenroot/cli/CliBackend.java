@@ -177,6 +177,16 @@ public interface CliBackend {
         throw new IOException("initial START requires a capable backend");
     }
 
+    /** Explicitly restores an exact existing durable registration without creating another one. */
+    default DeploymentView restoreDeployment(String deploymentId, String registrationIdentity, String graphVersion) throws IOException {
+        throw new IOException("durable restore requires a capable backend");
+    }
+    /** Reads the permanent original START identities without admitting another traversal. */
+    default String observeInitialStart(ai.ravenroot.api.history.DeploymentHistorySource source,
+            String requestId) throws IOException {
+        throw new IOException("initial START observation requires a capable backend");
+    }
+
     DeploymentView deployment(String deploymentId) throws IOException;
 
     /**
@@ -524,7 +534,11 @@ public interface CliBackend {
      */
     record DeploymentView(String deploymentId, String state, int sourceCount, String scope,
                           String diagnostic, Long deploymentGeneration, String commandOutcome,
-                          String commandDetail) {
+                          String commandDetail, String registrationIdentity) {
+        public DeploymentView(String deploymentId, String state, int sourceCount, String scope,
+                              String diagnostic, Long deploymentGeneration, String commandOutcome, String commandDetail) {
+            this(deploymentId, state, sourceCount, scope, diagnostic, deploymentGeneration, commandOutcome, commandDetail, null);
+        }
         public DeploymentView(String deploymentId, String state, int sourceCount, String scope,
                               String diagnostic) {
             this(deploymentId, state, sourceCount, scope, diagnostic, null, null, null);

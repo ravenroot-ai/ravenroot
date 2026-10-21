@@ -1,3 +1,4 @@
+import { persistedDeploymentRun } from './deployment-run.js';
 import { productError } from './product-error.js';
 import {
   documentModeViewStates,
@@ -73,9 +74,10 @@ export function persistedDocument(document_) {
   if (!document_.graph || !Array.isArray(document_.graph.nodes) || !Array.isArray(document_.graph.edges)) {
     throw productError("workspace.error.workspace.persistence.workspace.document.graph.is.invalid", new TypeError('Workspace document graph is invalid'));
   }
-  if (document_.graph.format === 'deployment') {
+  if (document_.graph.format === 'deployment' && !document_.deploymentRun) {
     throw productError("workspace.error.workspace.persistence.live.deployment.attachments.are.session.only.workspace.documents", new TypeError('Live deployment attachments are session-only workspace documents'));
   }
+  if (document_.deploymentRun && document_.deploymentRun.tenantId !== tenantId) throw productError('workspace.run.associationChanged', new Error('RUN_TENANT_MISMATCH'));
   const graph = canonicalGraphSnapshot(document_.graph);
   return Object.freeze({
     documentId,
@@ -91,6 +93,7 @@ export function persistedDocument(document_) {
       sourceGraphVersion: nullableString(document_.provenance?.sourceGraphVersion, 'sourceGraphVersion'),
       deploymentId: nullableString(document_.provenance?.deploymentId, 'deploymentId'),
     }),
+    deploymentRun: persistedDeploymentRun(document_.deploymentRun),
     authoring: persistedAuthoring(document_.authoring, document_.history
       ? document_.history.isDirty() || document_.visualGroupPresentationDirty || document_.authoring?.localChanges
       : document_.authoring?.localChanges),
@@ -118,7 +121,7 @@ export function persistedDocument(document_) {
 
 export function workspaceSnapshot(scope, documents, activeDocumentId) {
   const storedDocuments = documents.filter(document_ => document_.tenantId === scope.tenantId
-      && document_.graph?.format !== 'deployment')
+      && (document_.graph?.format !== 'deployment' || document_.deploymentRun))
     .map(persistedDocument);
   return Object.freeze({
     key: scope.key,

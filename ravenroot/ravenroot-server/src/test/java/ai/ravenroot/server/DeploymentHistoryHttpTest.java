@@ -181,6 +181,27 @@ class DeploymentHistoryHttpTest {
             assertEquals("DUPLICATE", text(object(second.body()), "outcome"));
         }
     }
+    @Test void initialStartObservationIsReadOnlyScopedAndReturnsOnlyPermanentIdentities() throws Exception {
+        try (var fixture = new Fixture()) {
+            assertEquals(409, fixture.initialObservation("before", "tenant", fixture.binding.incarnationId()).statusCode());
+            assertTrue(fixture.store.initialStart("tenant", "document").toCompletableFuture().join().isEmpty());
+            var first = fixture.initial("original", "{\"secret\":\"retained-input-only\"}");
+            assertEquals(202, first.statusCode(), first.body());
+            var read = fixture.initialObservation("observed", "tenant", fixture.binding.incarnationId());
+            assertEquals(200, read.statusCode(), read.body());
+            assertEquals("DUPLICATE", text(object(read.body()), "outcome"));
+            assertEquals("observed", text(object(read.body()), "requestId"));
+            assertEquals(text(object(first.body()), "processInstanceId"), text(object(read.body()), "processInstanceId"));
+            assertEquals(text(object(first.body()), "traversalId"), text(object(read.body()), "traversalId"));
+            assertEquals(Set.of("outcome", "requestId", "processInstanceId", "traversalId"), object(read.body()).entries().keySet());
+            assertFalse(read.body().contains("retained-input-only"));
+            assertEquals(403, fixture.initialObservation("denied", "denied", fixture.binding.incarnationId()).statusCode());
+            assertEquals(409, fixture.initialObservation("foreign", "foreign", fixture.binding.incarnationId()).statusCode());
+            assertEquals(409, fixture.initialObservation("stale", "tenant", "stale").statusCode());
+            var sdk = fixture.application.reconcileLocalDeploymentInitialStart(IDENTITY, "document", fixture.binding.incarnationId(), fixture.binding.graphVersion(), "sdk");
+            assertEquals(text(object(first.body()), "processInstanceId"), sdk.processInstanceId().toString());
+        }
+    }
     @Test void correlationPreviewUsesConfiguredBoundAndCatalogAuthorityWithoutHistoryLookup() throws Exception {
         var defaults = ai.ravenroot.api.correlation.BusinessHistoryPolicy.DEFAULTS;
         var limits = new ai.ravenroot.api.correlation.CorrelationLimits(12, 128, 8, 32, PayloadLimits.DEFAULTS);
@@ -248,6 +269,11 @@ class DeploymentHistoryHttpTest {
             return client.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + "/v1/correlation/preview"))
                     .header("X-Test-Tenant", tenant).header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(body)).build(), HttpResponse.BodyHandlers.ofString());
+        }
+        HttpResponse<String> initialObservation(String id, String tenant, String incarnation) throws Exception {
+            return client.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + "/v1/deployments/document/initial-start?incarnationId=" + encode(incarnation)
+                    + "&graphVersion=" + encode(binding.graphVersion()) + "&requestId=" + encode(id)))
+                    .header("X-Test-Tenant", tenant).GET().build(), HttpResponse.BodyHandlers.ofString());
         }
         HttpResponse<String> initial(String id, String input) throws Exception {
             String body = "{\"incarnationId\":\"" + binding.incarnationId() + "\",\"graphVersion\":\"" + binding.graphVersion() + "\",\"requestId\":\"" + id + "\",\"input\":" + input + "}";

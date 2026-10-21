@@ -341,6 +341,18 @@ final class EmbeddedBackend implements CliBackend {
         var value = ai.ravenroot.api.payload.PayloadJson.read(input, ai.ravenroot.api.payload.PayloadLimits.DEFAULTS);
         var result = application.startLocalDeploymentExecution(requestContext, source.deploymentId(), source.incarnationId(),
                 source.graphVersion(), requestId, value);
+        return initialStartJson(result);
+    }
+    @Override public DeploymentView restoreDeployment(String deploymentId, String registrationIdentity, String graphVersion) throws IOException {
+        return application.restoreLocalDeployment(requestContext, deploymentId, registrationIdentity, graphVersion)
+                .map(EmbeddedBackend::deploymentView).orElseThrow(EmbeddedBackend::unknownDeployment);
+    }
+    @Override public String observeInitialStart(ai.ravenroot.api.history.DeploymentHistorySource source,
+            String requestId) {
+        return initialStartJson(application.reconcileLocalDeploymentInitialStart(requestContext, source.deploymentId(),
+                source.incarnationId(), source.graphVersion(), requestId));
+    }
+    private static String initialStartJson(ai.ravenroot.api.application.EmbedDeploymentStart result) {
         var fields = new java.util.LinkedHashMap<String, Object>();
         fields.put("outcome", result.outcome().name()); fields.put("requestId", result.requestId());
         fields.put("processInstanceId", result.processInstanceId() == null ? null : result.processInstanceId().toString());
@@ -411,7 +423,7 @@ final class EmbeddedBackend implements CliBackend {
 
     private static DeploymentView deploymentView(ai.ravenroot.api.application.LocalDeploymentStatus status) {
         return new DeploymentView(status.deploymentId(), status.state().name(), status.sourceCount(),
-                ai.ravenroot.api.application.LocalDeploymentStatus.SCOPE, status.diagnostic().orElse(null));
+                ai.ravenroot.api.application.LocalDeploymentStatus.SCOPE, status.diagnostic().orElse(null), null, null, null, status.registrationIdentity().orElse(null));
     }
 
     /**

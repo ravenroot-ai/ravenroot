@@ -72,6 +72,43 @@ class DeploymentLifecycleHttpTest {
     private static final String CORRELATION_PLACEHOLDER = "<correlation>";
 
     @Test
+    void explicitDurableRestoreUsesOnlyRetainedAuthorityAndRollsBackFailedListeners() throws Exception {
+        try (var fixture = new Fixture(true)) {
+            var registered = fixture.request("POST", "/v1/deployments?id=restore", SOURCE_GRAPH.replace("<node id=\"end\">", "<node id=\"listener-b\"><data key=\"kind\">BEHAVIOR</data><data key=\"behavior\">test.http.source</data></node><node id=\"end\">"), "tenant-a");
+            assertEquals(200, registered.statusCode(), registered.body());
+            var metadata = (ai.ravenroot.api.payload.PayloadValue.MapValue) ai.ravenroot.api.payload.PayloadJson.read(
+                    registered.body().getBytes(java.nio.charset.StandardCharsets.UTF_8), ai.ravenroot.api.payload.PayloadLimits.DEFAULTS);
+            String identity = ((ai.ravenroot.api.payload.PayloadValue.TextValue) metadata.entries().get("registrationIdentity")).value();
+            String version = ((ai.ravenroot.api.payload.PayloadValue.TextValue) metadata.entries().get("graphVersion")).value();
+            String body = "{\"registrationIdentity\":\"" + identity + "\",\"graphVersion\":\"" + version + "\"}";
+            assertEquals(200, fixture.command("/v1/deployments/restore/start", "tenant-a", "activate", 0, null).statusCode());
+            assertEquals(2, fixture.source.active.get());
+            fixture.application.undeployLocalDeployment("tenant-a", "restore").toCompletableFuture().join();
+            assertEquals(0, fixture.source.active.get());
+            assertEquals(404, fixture.request("GET", "/v1/deployments/restore", "", "tenant-a").statusCode());
+            assertEquals(403, fixture.request("POST", "/v1/deployments/restore/restore", body, "tenant-a-viewer").statusCode());
+            assertEquals(404, fixture.request("POST", "/v1/deployments/restore/restore", body, "tenant-b").statusCode());
+            assertEquals(404, fixture.request("POST", "/v1/deployments/restore/restore", body.replace(identity, UUID.randomUUID().toString()), "tenant-a").statusCode());
+            assertEquals(404, fixture.request("POST", "/v1/deployments/restore/restore", body.replace(version, "f".repeat(64)), "tenant-a").statusCode());
+            assertTrue(fixture.application.localDeployment("tenant-a", "restore").isEmpty());
+            var restored = fixture.request("POST", "/v1/deployments/restore/restore", body, "tenant-a");
+            assertState(restored, "READY"); assertEquals(2, fixture.source.active.get());
+            int starts = fixture.source.starts.get();
+            assertState(fixture.request("POST", "/v1/deployments/restore/restore", body, "tenant-a"), "READY");
+            assertEquals(starts, fixture.source.starts.get(), "repeat restore must not duplicate listeners");
+            var sdk = fixture.application.restoreLocalDeployment(new ai.ravenroot.api.security.SecurityContext("sdk", "tenant-a", "tenant-a", ai.ravenroot.api.security.PrincipalType.USER, "urn:ravenroot:test"), "restore", identity, version).orElseThrow();
+            assertEquals(identity, sdk.registrationIdentity().orElseThrow()); assertEquals(starts, fixture.source.starts.get());
+            fixture.application.undeployLocalDeployment("tenant-a", "restore").toCompletableFuture().join();
+            fixture.source.failStart.set(true);
+            assertState(fixture.request("POST", "/v1/deployments/restore/restore", body, "tenant-a"), "FAILED");
+            assertEquals(0, fixture.source.active.get(), "failed rehost must leave no active listener");
+            assertEquals(200, fixture.undeploy("/v1/deployments/restore", "tenant-a", "retire", 1, "retired", "CANCEL_IN_FLIGHT").statusCode());
+            assertEquals(404, fixture.request("POST", "/v1/deployments/restore/restore", body, "tenant-a").statusCode());
+            assertTrue(fixture.application.localDeployment("tenant-a", "restore").isEmpty());
+        }
+    }
+
+    @Test
     void durableLifecycleHttpCommandsExposeGenerationAndIdempotentOutcomes() throws Exception {
         try (var fixture = new Fixture(true)) {
             var registered = fixture.request(
@@ -589,6 +626,7 @@ class DeploymentLifecycleHttpTest {
         private final PekkoExecutionEngine engine;
         private final DefaultRavenrootApplication application;
         private final RavenrootServer server;
+        private final SourceBehavior source = new SourceBehavior();
 
         Fixture() throws Exception {
             this(false, null);
@@ -603,7 +641,7 @@ class DeploymentLifecycleHttpTest {
         }
 
         private Fixture(boolean durable, DeploymentViewRace race) throws Exception {
-            var behavior = new SourceBehavior();
+            var behavior = source;
             NodePackage nodePackage = new NodePackage() {
                 @Override public String id() { return "test.deployment.http.package"; }
                 @Override public String version() { return "1.0.0"; }
@@ -633,7 +671,9 @@ class DeploymentLifecycleHttpTest {
                         "http-owner", Duration.ofMinutes(1), Duration.ofSeconds(1), clock);
                 server.installDurableDeploymentControl(
                         new ai.ravenroot.core.deployment.DurableLocalDeploymentControl(
-                                application, registry, coordinator, clock));
+                                application, registry, coordinator,
+                                new ai.ravenroot.core.deployment.DeploymentReconciler(registry, application.localDeploymentTargets(), singleFlight,
+                                        List.of(), "http-owner", Duration.ofMinutes(1), Duration.ofSeconds(1), 32, clock), Duration.ofSeconds(1), clock));
             }
             server.start();
         }
@@ -747,6 +787,9 @@ class DeploymentLifecycleHttpTest {
     }
 
     private static final class SourceBehavior implements NodeBehavior, InboundSourceCapable {
+        private final java.util.concurrent.atomic.AtomicInteger active = new java.util.concurrent.atomic.AtomicInteger();
+        private final java.util.concurrent.atomic.AtomicInteger starts = new java.util.concurrent.atomic.AtomicInteger();
+        private final AtomicBoolean failStart = new AtomicBoolean();
         private final CopyOnWriteArrayList<InboundSourceContext> contexts = new CopyOnWriteArrayList<>();
 
         @Override
@@ -764,11 +807,16 @@ class DeploymentLifecycleHttpTest {
         @Override
         public InboundSource createSource(NodeConfiguration configuration, InboundSourceContext context) {
             return new InboundSource() {
+                private boolean running;
                 @Override public CompletionStage<Void> start(InboundSourceContext started) {
+                    starts.incrementAndGet();
+                    if (failStart.get() && configuration.nodeId().equals("listener-b")) return CompletableFuture.failedFuture(new IllegalStateException("restore startup fixture"));
+                    if (!running) { active.incrementAndGet(); running = true; }
                     contexts.add(started);
                     return CompletableFuture.completedFuture(null);
                 }
                 @Override public CompletionStage<Void> stop() {
+                    if (running) { active.decrementAndGet(); running = false; }
                     return CompletableFuture.completedFuture(null);
                 }
             };

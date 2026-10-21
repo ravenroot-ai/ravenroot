@@ -538,6 +538,20 @@ jobs:
           -Dtest=HumanTaskConfirmationBrowserProcessIntegrationTest,HumanTaskExternalProviderProcessIntegrationTest
           -Dravenroot.humanTaskConfirmation.browserTest=true
           -Dsurefire.failIfNoSpecifiedTests=false test
+      - name: Verify durable first Run across real server process crashes
+        working-directory: ravenroot
+        run: >-
+          mvn -B --no-transfer-progress -pl ravenroot-server -am
+          -Dtest=FirstRunPersistenceBrowserTest
+          -Dravenroot.deploymentPersistence.browserTest=true
+          -Dsurefire.failIfNoSpecifiedTests=false test
+      - name: Archive durable first Run browser evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: first-run-persistence-browser
+          path: ravenroot/ravenroot-server/target/first-run-persistence-browser/
+          if-no-files-found: warn
       # Archive unconditionally: this evidence is the only record of a real restart, and a failure
       # here is exactly when it is needed. The UUID keeps repeated harness invocations separate.
       - name: Archive Human Task confirmation browser evidence

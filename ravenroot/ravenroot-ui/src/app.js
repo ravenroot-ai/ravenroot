@@ -1,3 +1,4 @@
+import { runOriginDeployment, persistedDeploymentRun } from './deployment-run.js';
 import { chooseRepositoryDocument, managedRepositoryLaunch } from './repository-picker.js';
 import { uiMessage, uiComputed, isUiMessage, renderUiMessage, uiErrorMessage, uiMessageOf } from './ui-message.js';
 import { productError } from './product-error.js';
@@ -1022,7 +1023,7 @@ async function switchWorkspacePersistence(configuration, client) {
           name: stored.name, displayName: stored.displayName, graph: stored.graph,
           documentId: stored.documentId, tenantId: stored.tenantId, mode: stored.mode,
           provenance: stored.provenance, presentation: stored.presentation,
-          authoring: stored.authoring,
+          authoring: stored.authoring, deploymentRun: stored.deploymentRun,
         });
       }
       if (restored.activeDocumentId && workspace.activeId !== restored.activeDocumentId) {
@@ -3127,6 +3128,19 @@ function syncPaneHeaders() {
       continuity: deployment.state.continuity.toLowerCase(),
     }) : '';
 
+    let runBinding = header.querySelector('.doc-run-binding');
+    if (document_.deploymentRun) {
+      if (!runBinding) { runBinding = document.createElement('span'); runBinding.className = 'doc-run-binding'; header.append(runBinding); }
+      runBinding.textContent = uiText('workspace.run.attached', { deploymentId: document_.deploymentRun.deploymentId,
+        version: shortId(document_.deploymentRun.graphVersion) });
+      runBinding.title = uiText('workspace.run.draftSeparate');
+      pane.dataset.deploymentId = document_.deploymentRun.deploymentId;
+      pane.dataset.deploymentVersion = document_.deploymentRun.graphVersion || '';
+      pane.dataset.deploymentRunPhase = document_.deploymentRun.phase;
+    } else {
+      runBinding?.remove(); delete pane.dataset.deploymentId; delete pane.dataset.deploymentVersion; delete pane.dataset.deploymentRunPhase;
+    }
+
     const label = header.querySelector('.doc-pane-name');
     label.textContent = name;
     // The name is ellipsised when the pane is tight, so the full one stays reachable.
@@ -3672,12 +3686,13 @@ function initLoadedGraph(graph, currentStyle) {
 }
 
 function openDocument({ name = defaultDocumentName(), displayName, graph = null, documentId, tenantId,
-  mode = DOCUMENT_MODES.DRAFT, provenance = null, presentation = null, authoring = null } = {}) {
+  mode = DOCUMENT_MODES.DRAFT, provenance = null, presentation = null, authoring = null, deploymentRun = null } = {}) {
   const graphPresentation = graph && !presentation ? documentPresentationState({ graph }) : null;
   const document_ = addDocumentRecord(name, displayName || allocateDocumentDisplayName(name), {
     documentId, tenantId, mode, provenance,
     presentation: presentation || graphPresentation,
   });
+  document_.deploymentRun = persistedDeploymentRun(deploymentRun);
   if (authoring) Object.assign(document_.authoring, structuredClone(authoring));
   if (graph) {
     graphName = name;
@@ -3816,6 +3831,7 @@ function completeReplaceActiveDocument(target, graph, name) {
   destroyDocumentRenderer(target, 'replaced');
   detachExecution(target);
   target.incarnation = createDocumentIncarnation();
+  target.deploymentRun = null;
   target.visualGroupState = {};
   target.canvasState = null;
   target.viewStates = { design: null, monitoring: null };
@@ -12717,6 +12733,38 @@ async function presentRuntimeRefusal(owner, finding, title = uiMessage('workspac
   await focusRuntimeFinding(owner, finding);
 }
 
+async function runCapturedDocumentDeployment(owner, client, { graphMl, payload, displayName, attachment }) {
+  const authority = workspaceAuthority, scope = activeWorkspaceScope, persistenceGeneration = workspacePersistenceGeneration;
+  const incarnation = owner.incarnation;
+  const current = () => workspace.find(owner.id) === owner && owner.incarnation === incarnation
+    && workspaceAuthority === authority && tenantAuthorityAllows(owner, client)
+    && scope === activeWorkspaceScope && persistenceGeneration === workspacePersistenceGeneration;
+  const persist = async () => {
+    if (!current() || !scope || !workspacePersistenceWritable || workspacePersistenceSuspended
+        || owner.tenantId !== scope.tenantId) throw productError('workspace.run.persistenceRequired', new Error('RUN_STORAGE_UNAVAILABLE'));
+    scheduleWorkspacePersistence(); const requiredRevision = workspacePersistenceRevision;
+    await flushWorkspacePersistence();
+    if (!current() || !workspacePersistenceWritable || workspacePersistedRevision < requiredRevision)
+      throw productError('workspace.run.persistenceRequired', new Error('RUN_STORAGE_NOT_COMMITTED'));
+  };
+  if (owner === workspace.active) addActivityMessage(uiMessage('workspace.run.reconciling'), uiMessage('workspace.run.draftSeparate'));
+  const result = await runOriginDeployment(owner, { client, serviceUrl: scope?.serviceUrl || normalizedWorkspaceServiceUrl(client),
+    tenantId: owner.tenantId, graphMl, inputJson: JSON.stringify(payload), attachment,
+    persist, isCurrent: current, onPhase: () => syncPaneHeaders() });
+  if (!current()) return false;
+  owner.humanTasks.deploymentId = result.intent.deploymentId; owner.humanTasks.graphVersion = result.intent.graphVersion;
+  owner.provenance.deploymentId = result.intent.deploymentId; owner.provenance.sourceGraphVersion = result.intent.graphVersion;
+  if (result.intent.traversalId && owner.execution.executionId !== result.intent.traversalId) {
+    setDocumentExecution(owner, result.intent.traversalId, result.intent.graphVersion, client, result.intent.processInstanceId);
+    void reconcileTestCompletion(owner, result.intent.traversalId, client);
+  }
+  void configureHumanTasks(owner); owner.historyMonitor?.refresh?.();
+  syncPaneHeaders(); scheduleWorkspacePersistence();
+  if (owner === workspace.active) { refreshCommands(); addActivityMessage(uiMessage('workspace.run.ready'), uiMessage('workspace.run.attached', {
+    deploymentId: result.intent.deploymentId, version: shortId(result.intent.graphVersion) }), 'completed'); }
+  return true;
+}
+
 async function playGraph(mode = 'test') {
   const owner = workspace.active;
   const ownerGraph = graphData;
@@ -12724,8 +12772,20 @@ async function playGraph(mode = 'test') {
   if (!tenantAuthorityAllows(owner)) {
     return showInspectorMessage(uiText("workspace.notice.wait.for.this.document.workspace.authority.to.be.verified.3"));
   }
+  const originIncarnation = owner.incarnation;
+  if (workspace.active === owner && documentIsEditable(owner)) syncGraphPositions();
+  const submissionGraph = canonicalGraphSnapshot(ownerGraph);
+  const programSignature = programNodes(ownerGraph).length ? programBuildPlan(owner).signature : null;
+  let graphMl = ownerGraph.format === 'deployment' ? '' : serializeGraphML(graphForAuthorizedExecution(owner, submissionGraph));
+  const payload = document.getElementById('execution-payload').value;
+  const displayName = owner.displayName;
+  const ownerCy = owner.cy || cy;
+  const ownerLayoutMode = owner.layoutMode;
+  const ownerVisualStyle = owner.visualStyle;
+  const attachment = !owner.deploymentRun && owner.provenance?.deploymentId && owner.provenance?.sourceGraphVersion
+    ? { deploymentId: owner.provenance.deploymentId, graphVersion: owner.provenance.sourceGraphVersion } : null;
   owner.execution.intentGeneration += 1;
-  if (programNodes(ownerGraph).length) {
+  if (programNodes(ownerGraph).length && !(mode === 'run' && (owner.deploymentRun || attachment))) {
     const ready = await ensureProgramGraphReady(owner, { automatic: true });
     if (!ready) {
       const phases = programReadiness(owner).phases;
@@ -12739,6 +12799,9 @@ async function playGraph(mode = 'test') {
         'failed');
       return;
     }
+    if (workspace.find(owner.id) !== owner || owner.incarnation !== originIncarnation
+        || programBuildPlan(owner).signature !== programSignature) return;
+    graphMl = serializeGraphML(graphForAuthorizedExecution(owner, submissionGraph));
   }
   const flight = acquireExecutionCommand(owner.execution);
   if (!flight) {
@@ -12747,15 +12810,9 @@ async function playGraph(mode = 'test') {
     return;
   }
 
-  // Everything a later POST can consume is captured before the first await. The graph is serialized
-  // now, not read from whichever document may become active while a delayed terminal GET is pending.
-  syncGraphPositions();
-  const graphMl = serializeGraphML(graphForAuthorizedExecution(owner, ownerGraph));
-  const payload = document.getElementById('execution-payload').value;
-  const displayName = graphDisplayName;
-  const ownerCy = cy;
-  const ownerLayoutMode = layoutMode;
-  const ownerVisualStyle = visualStyle;
+  // The origin graph and input were captured before readiness. Only governed artifact references
+  // from the same unchanged program plan were overlaid after readiness.
+
   renderWorkflowValidationAdvisory(ownerGraph, owner);
   if (mode === 'run' && (!nodeCatalogLoaded || nodeCatalogFailure)) {
     releaseExecutionCommand(flight);
@@ -12767,8 +12824,8 @@ async function playGraph(mode = 'test') {
   if (!runtimeClient) connectRuntime();
   const executionClient = runtimeClient;
   try {
-    const inspection = await executionClient.inspectGraph(graphMl,
-      sourceCount > 0 ? 'SOURCE_SESSION' : 'EXECUTION');
+    const inspection = graphMl && !(mode === 'run' && (owner.deploymentRun || attachment))
+      ? await executionClient.inspectGraph(graphMl, mode === 'run' ? 'LOCAL_DEPLOYMENT' : 'EXECUTION') : { valid: true };
     if (!inspection.valid && inspection.findings[0]) {
       releaseExecutionCommand(flight);
       await presentRuntimeRefusal(owner, inspection.findings[0], uiMessage('workspace.refusal.graphAdmission'));
@@ -12785,14 +12842,7 @@ async function playGraph(mode = 'test') {
       return;
     }
   }
-  // Run has two meanings. A graph with an
-  // effective SOURCE starts a local listener session (unchanged below). Every other graph gets
-  // a real one-shot execution with effects (mode=run). The deployments panel lets that graph also be
-  // "registered and controlled as a local deployment" without
-  // hijacking this button. This is the Deployments-window contract.
-  const confirmation = sourceCount > 0
-    ? uiText("workspace.execution.localSession.confirm", { name: displayName, count: sourceCount })
-    : uiText("workspace.execution.run.confirm", { name: displayName });
+  const confirmation = uiText('workspace.run.confirmDeployment', { name: displayName });
   if (mode === 'run' && !globalThis.confirm(confirmation)) {
     releaseExecutionCommand(flight);
     return;
@@ -12801,37 +12851,22 @@ async function playGraph(mode = 'test') {
     releaseExecutionCommand(flight);
     return;
   }
-  const ownerStillActive = workspace.activeId === owner.id && workspace.find(owner.id) === owner
-    && tenantAuthorityAllows(owner, executionClient);
+  const ownerStillActive = (mode === 'run' || workspace.activeId === owner.id) && workspace.find(owner.id) === owner
+    && owner.incarnation === originIncarnation && tenantAuthorityAllows(owner, executionClient);
   if (!ownerStillActive || !executionCommandIsCurrent(flight)) {
     releaseExecutionCommand(flight);
     return;
   }
 
-  // Only a graph with an effective SOURCE
-  // starts a listener session here; a source-less Run falls through to the one-shot submission below,
-  // as required by the confirmation-text contract above.
-  if (sourceCount > 0) {
+  if (mode === 'run') {
     try {
-      // The canvas is cleared for a listener session exactly as it is for a run. Before this, a
-      // source start left the previous run's colours in place -- and once a session can actually
-      // paint, stale paint is no longer harmless decoration but a claim about traffic that is not
-      // this session's.
-      resetRuntimeState(owner, ownerCy, ownerGraph, ownerLayoutMode, ownerVisualStyle);
-      await startSourceSession(owner, executionClient, graphMl, sourceCount);
+      await runCapturedDocumentDeployment(owner, executionClient, { graphMl, payload, displayName, attachment });
     } catch (error) {
-      // startSourceSession normally converts request failures to an honest, fenced lifecycle state.
-      // Keep this guard for unexpected programming failures without mutating an unrelated binding.
-      if (workspace.find(owner.id) === owner && sourceSessionIsActive(owner.sourceSession)) {
-        const token = captureSourceSessionToken(owner.sourceSession);
-        updateSourceSession(owner, {
-          state: 'UNKNOWN', sourceCount: owner.sourceSession.sourceCount, diagnostic: '',
-        }, token, { observationUnavailable: true });
+      if (workspace.find(owner.id) === owner && owner === workspace.active) {
+        if (error?.finding) await presentRuntimeRefusal(owner, error.finding, uiMessage('workspace.app.execution.refused'));
+        else addActivityMessage(uiMessage('workspace.run.failed'), uiErrorMessage(error), 'failed');
       }
-    } finally {
-      releaseExecutionCommand(flight);
-      refreshCommands();
-    }
+    } finally { releaseExecutionCommand(flight); syncPaneHeaders(); refreshCommands(); }
     return;
   }
 
@@ -12935,6 +12970,10 @@ function handleRuntimeEvent(event, client = runtimeClient) {
     if (isActive && (binding === event.executionId || binding === PENDING_EXECUTION)) {
       refreshCommands();
     }
+  }
+
+  if (target.deploymentRun && target.deploymentRun.deploymentId === event.deploymentId) {
+    target.historyMonitor?.notify?.(event); return;
   }
 
   // Past this point the event paints nodes, and it paints them on the document that owns the run —

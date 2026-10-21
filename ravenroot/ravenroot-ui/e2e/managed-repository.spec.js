@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { keepAuthenticationInMemory } from './memory-only-auth.mjs';
+import { PID, deferred, deploymentService } from './deployment-run-fixture.mjs';
 
 test.use({ viewport: { width: 1600, height: 1000 } });
 
@@ -568,4 +569,34 @@ test('a delayed discard response cannot replace local work after the configured 
     expect(requests.filter(r => r.path.endsWith('/discard'))).toHaveLength(1);
     expect(requests.filter(r => r.method !== 'GET' && !r.path.endsWith('/discard'))).toHaveLength(0);
   } finally { releaseDiscard(); }
+});
+
+for (const kind of ['dirty reopen', 'clean successor']) test(`pending first Run respects managed ${kind} incarnation`, async ({ page }) => {
+  const gate = deferred(), backend = await deploymentService(page, { gate });
+  const requests = await setup(page, { configuration: { tenantId: 'tenant' } });
+  page.on('dialog', dialog => dialog.accept());
+  await page.goto('/?repositoryDocument=orders.graphml&source=draft');
+  await expect(page.locator('#graph-mode-label')).toContainText('Repository draft · v1');
+  if (kind === 'dirty reopen') await addUnsavedNode(page, 'Keep local draft');
+  const before = await activeManagedState(page);
+  await page.locator('#btn-run').click(); const id = await backend.registered;
+  if (kind === 'clean successor') requests.setDraft(2);
+  await selectRepositorySource(page);
+  if (kind === 'dirty reopen') {
+    await expect(page.locator('#repository-notice')).toContainText('Your local graph and undo history were kept');
+    expect((await activeManagedState(page)).incarnation).toBe(before.incarnation);
+  } else {
+    await expect(page.locator('#graph-mode-label')).toContainText('Repository draft · v2');
+    expect((await activeManagedState(page)).incarnation).not.toBe(before.incarnation);
+  }
+  gate.resolve();
+  if (kind === 'dirty reopen') {
+    await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().deploymentRun?.processInstanceId)).toBe(PID);
+    expect(await page.evaluate(() => window.ravenroot.activeDocument().deploymentRun.deploymentId)).toBe(id);
+    expect(backend.calls.filter(c => c.action === 'initial-start')).toHaveLength(1);
+  } else {
+    await expect.poll(() => backend.calls.filter(c => c.method === 'POST' && !c.action).length).toBe(1);
+    expect(await page.evaluate(() => window.ravenroot.activeDocument().deploymentRun)).toBeNull();
+    expect(backend.calls.filter(c => c.action === 'start' || c.action === 'initial-start')).toHaveLength(0);
+  }
 });

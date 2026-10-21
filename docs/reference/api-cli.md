@@ -93,6 +93,37 @@ returns 409, and `RECONCILE` returns 503 when admission cannot yet be establishe
 be null for refused or unresolved requests. Durable initial START requires a durable execution
 store with initial-admission support.
 
+`GET /v1/deployments/{id}/initial-start?incarnationId=...&graphVersion=...&requestId=...`
+observes the permanent marker under deployment observation authority. It never admits work or
+returns retained input. A retained marker returns `DUPLICATE` and its original identities; an absent
+marker or stale binding returns `REFUSED`. Reads carry `Cache-Control: private, no-store`.
+
+Durable deployment status includes an opaque `registrationIdentity`, retained independently of the
+runtime `incarnationId`. After a server restart, the process-local hosted projection may be absent
+while the durable registration remains. On a later explicit Run the editor uses
+`POST /v1/deployments/{id}/restore` with only `registrationIdentity` and `graphVersion`. This operation
+requires both registration and lifecycle authority. It resolves the existing retained tenant alias,
+refuses tombstones and mismatched identities or versions, checks bounded canonical graph bytes and
+their digest in durable custody, and reapplies current credential admission before rehosting. It
+creates no registry aggregate or initial START. Existing fenced lifecycle reconciliation governs
+listener activation; repeated restore does not duplicate listeners. A failed activation remains a
+truthful failed status and rolls back its listeners. Hosts without durable restore support refuse.
+The ordinary SDK exposes `restoreLocalDeployment`; embedded and remote CLI backends expose
+`deployments restore`. Read-only embed sessions have no restore authority: their host must restore
+the deployment and establish a current authorized embed binding.
+
+The editor saves the originating document's deployment, exact version,
+activation request, initial request and bounded input before its first network effect. Reload only
+restores this association. A later explicit Run may rebind a changed runtime incarnation only after
+matching tenant, logical deployment, pinned version and durable registration identity. Saved process
+and traversal identities must match the read-only permanent marker. When no admission identities
+were received, the original request and input may complete initial admission; the same permanent
+marker returns the original traversal if the earlier response was lost. Process-local registrations
+provide no durable rebind proof. Retained durable aliases and tombstones prevent logical deployment
+reuse after command-ledger expiry; deleting and recreating authority cannot silently inherit a saved
+association. A fresh identical file creates an independent deployment only through an explicit Run.
+The document header shows its deployment and pinned version separately from later draft edits.
+
 `GET /v1/deployments/{id}/history` reads one page under ordinary execution-read authorization.
 Supply the current immutable `graphVersion` query parameter and the captured
 `X-Ravenroot-Deployment-Incarnation` header. Every response carries that exact `source` tuple.
@@ -160,6 +191,8 @@ the deployment and tenant come from the authorized session. A read-only grant ca
 The CLI provides the same ordinary application and HTTP operations:
 
 ```text
+ravenroot deployments restore orders --registration-identity SAVED_REGISTRY_ID --graph-version PINNED_VERSION
+ravenroot deployments observe-initial orders --incarnation CAPTURED_ID --graph-version PINNED_VERSION --request-id observe-1
 ravenroot deployments run-initial orders --incarnation CAPTURED_ID --graph-version PINNED_VERSION --request-id run-1 --input-file input.json
 ravenroot deployments history orders --incarnation CAPTURED_ID --graph-version PINNED_VERSION --view histories --limit 50
 ravenroot deployments history orders --incarnation CAPTURED_ID --graph-version PINNED_VERSION --view visits --process-instance-id PROCESS_ID --traversal-id TRAVERSAL_ID --limit 50

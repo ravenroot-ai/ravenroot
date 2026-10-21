@@ -2746,3 +2746,5 @@
 .repository-picker-list button { text-align: left; padding: 12px; white-space: normal; }
 #repository-notice { padding: 12px 20px; background: #522b20; color: #fff; border: 2px solid #efb17d; }
 #repository-next-version { margin-left: 12px; }
+
+.doc-run-binding { max-width: 18rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .7rem; color: var(--text-muted); }

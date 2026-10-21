@@ -645,6 +645,21 @@ public interface DeploymentRegistry extends AutoCloseable {
  */
     CompletionStage<Optional<GraphVersion>> version(String tenantId, DeploymentId deploymentId, long version);
 /**
+ * Retrieves one immutable version only when its canonical bytes fit the supplied bound.
+ * Implementations must apply the bound before loading stored byte content; unsupported adapters
+ * refuse rather than silently performing an unbounded read.
+ * @param tenantId authenticated owning tenant
+ * @param deploymentId exact durable registration identity
+ * @param version exact retained version number
+ * @param maximumBytes positive maximum encoded graph bytes
+ * @return retained bounded version, or empty when absent or beyond the bound
+ */
+    default CompletionStage<Optional<GraphVersion>> version(String tenantId, DeploymentId deploymentId,
+            long version, int maximumBytes) {
+        return java.util.concurrent.CompletableFuture.failedFuture(new UnsupportedOperationException("bounded graph version read unavailable"));
+    }
+
+/**
  * Lists a bounded page of a tenant's deployments.
  * @param tenantId stable tenant id for this declaration.
  * @param cursor opaque continuation cursor, or {@code null} for the first page.

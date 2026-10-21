@@ -1171919,6 +1171919,18 @@
           }
         }
       ]
+    },
+    {
+      "id": "issue-591-authoring-cancellation-cleanup-test-proof",
+      "issue": "#591",
+      "sourceRevision": "ec8a7ad76bfa0e4a721641f0ff9b6ec85ef1012f",
+      "targetRevision": "9ca66ab9fb50b4d8d51681382b306efae8f37bb6",
+      "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+      "sourceInventoryDigest": "2b442c3b25dc586f0d00d7f8a1f8d4a87f6d561f4694768866409cf65880b678",
+      "targetCandidateDigest": "8dd1ec883158f188095992053dfd7a951cf51c435fea72a3e28430960e8fa257",
+      "mappings": [],
+      "retirements": [],
+      "additions": []
     }
   ],
   "semanticReviewHistory": [
@@ -1253554,7 +1253566,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/AuthoringReadConcurrencyTest.java",
-          "digest": "8bd499485f2a9cc27e9c2b1be10241d4693984e1cdbce37101ce5c9b540a6a68"
+          "digest": "48bd6737a6f6fd2b7b48caeeb74a21a6b3d97628c042c2ae495119da35263ecc"
         },
         {
           "path": "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/AuthoringReadIdentityTest.java",

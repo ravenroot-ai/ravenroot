@@ -139,14 +139,15 @@ public final class GraphAdmissionValidator {
         }
         try {
             if (!SagaGraphContract.validate(graph, behaviors).isEmpty() && !durableSagasAvailable) {
-                throw refuse(GraphAdmissionPhase.CAPABILITY, GraphAdmissionReason.CAPABILITY_UNAVAILABLE,
-                        null, SagaGraphContract.SCOPE);
+                throw refuse(GraphAdmissionPhase.CAPABILITY, GraphAdmissionReason.SAGA_DURABILITY_REQUIRED,
+                        graph.nodes().stream().filter(SagaGraphContract::forward).map(GraphNode::id)
+                                .sorted().findFirst().orElse(null), SagaGraphContract.SCOPE);
             }
         } catch (GraphAdmissionException refusal) {
             throw refusal;
-        } catch (IllegalArgumentException refusal) {
-            throw refuse(GraphAdmissionPhase.SEMANTIC_STRUCTURE, GraphAdmissionReason.INVALID_STRUCTURE,
-                    null, null);
+        } catch (SagaConfigurationException refusal) {
+            throw refuse(GraphAdmissionPhase.SEMANTIC_STRUCTURE, refusal.reason(),
+                    refusal.nodeId(), refusal.propertyName());
         }
         int sources = 0;
         for (GraphNode node : graph.nodes().stream().sorted(Comparator.comparing(GraphNode::id)).toList()) {

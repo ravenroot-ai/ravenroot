@@ -14,7 +14,7 @@ export default defineConfig({
   // config never starts, and the stub fixture server has no source session to observe.
   testIgnore: ['**/plugin-ui/**', '**/human-task-confirmation-real/**',
     '**/source-session-activity-real/**', '**/launch-profile-real/**',
-    '**/deployment-persistence-real/**'],
+    '**/deployment-persistence-real/**', '**/saga-authoring-real/**'],
   fullyParallel: false,
   forbidOnly: true,
   retries: 0,

@@ -1,5 +1,6 @@
 // Generated from the annotated progressive-enhancement shell. Keys are stable DOM contracts.
 export const STATIC_ENGLISH_MESSAGES = Object.freeze({
+  "shell.saga-scopes.text": "Saga scopes",
   "shell.dropzone.instruction": "Drop .graphml or .json (graphify) file here",
   "shell.derived-authorize-effects.text": "I am authorized to repeat selected downstream external effects.",
   "shell.bottom.nodes": "nodes",

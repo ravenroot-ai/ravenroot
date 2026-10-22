@@ -1,3 +1,4 @@
+import { migrateLegacySagaDefaults } from './saga-authoring.js';
 import { uiMessage, withUiMessage, uiMessageOf } from './ui-message.js';
 import { productError } from './product-error.js';
 import {
@@ -133,10 +134,10 @@ export function createNodeForInsertion(graph, position, options = {}) {
     // other reader of this catalog already treats as absent. This file must import the shared
     // predicate instead of keeping a copy that only happens to agree with it.
     node.properties = Object.fromEntries((descriptor.properties || [])
-      .filter(catalogPropertyHasDeclaredDefault)
+      .filter(property => !property.name.startsWith('saga.') && catalogPropertyHasDeclaredDefault(property))
       .map(property => [property.name, property.defaultValue]));
     node.propertyTypes = Object.fromEntries((descriptor.properties || [])
-      .filter(catalogPropertyHasDeclaredDefault)
+      .filter(property => !property.name.startsWith('saga.') && catalogPropertyHasDeclaredDefault(property))
       .map(property => [property.name, graphMlType(property.type)]));
   }
   return node;
@@ -145,7 +146,7 @@ export function createNodeForInsertion(graph, position, options = {}) {
 /** Inserts an immutable saved template as one fresh, disconnected node and one undo step. */
 export function addTemplateNodeAt(graph, position, template, history = null) {
   if (!canModifyGraph(graph)) return { node: null, reason: uiText('workspace.graphEditing.notEditable') };
-  const saved = template?.node;
+  const saved = template?.node ? migrateLegacySagaDefaults(template.node) : null;
   const kind = String(saved?.kind || '').toUpperCase();
   if (!['START', 'PASSTHROUGH', 'BEHAVIOR', 'END', 'ERROR'].includes(kind)) {
     return { node: null, reason: uiText('workspace.graphEditing.unsupportedTemplateKind') };

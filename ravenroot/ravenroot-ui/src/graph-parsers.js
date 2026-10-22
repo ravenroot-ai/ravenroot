@@ -1,3 +1,4 @@
+import { migrateLegacySagaDefaults } from './saga-authoring.js';
 import { productError } from './product-error.js';
 // The parser's fallback-kind guard used to be a second, hand-written copy of the canonical
 // kind list (graph-document.js's NODE_KINDS) that nobody kept in sync -- ERROR was added to the
@@ -895,7 +896,7 @@ export function parseGraphML(xmlText) {
       kind = isStart ? 'START' : isEnd ? 'END' : behavior ? 'BEHAVIOR' : 'PASSTHROUGH';
     }
 
-    const node = { id, name, isStart, isEnd, isActor, classname,
+    const node = migrateLegacySagaDefaults({ id, name, isStart, isEnd, isActor, classname,
                    fillColor, shapeType, ox, oy, ow, oh, nodeType, description, instances,
                    kind, behavior, properties: simple.properties, propertyTypes: simple.propertyTypes,
                    _positionIsCenter: positionIsCenter,
@@ -904,7 +905,7 @@ export function parseGraphML(xmlText) {
                      name, kind, behavior, classname, classification: nodeType, description,
                      layoutX: ox, layoutY: oy, layoutWidth: ow, layoutHeight: oh,
                      start: kind === 'START', end: kind === 'END',
-                   } };
+                   } });
     nodes.push(node);
     nodeMap[id] = node;
   });

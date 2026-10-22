@@ -170,15 +170,15 @@ Canonical runtime rules: [amqp091 bundle reference](bundles/amqp091.md).
 | `recovery.repeatable` | Repeatable after an unknown outcome | Whether republishing this message after a crash of unknown outcome is safe. The broker does not deduplicate; say repeatable only where the consumer discards a message id it has already handled. | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
 | `saga.scope` | Saga scope | Versioned saga scope. Leave empty outside a saga. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `saga.step` | Saga step | Logical step identity retained across transport retries. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.participant` | Participant contract | pure, jdbc-receipt-v1, amqp-inbox-v1, or http-idempotency-v1. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.adapter` | Saga adapter | Trusted runtime adapter identifier required by effectful participant protocols. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `saga.participant` | Participant contract | Explicit participant contract supported by this trusted behavior. | `STRING` | false | Not declared | amqp-inbox-v1 | false | Not declared | Not declared | Not declared |
+| `saga.adapter` | Saga adapter | Required trusted adapter: ravenroot.amqp-inbox.v1. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `saga.receiptStatement` | Receipt statement | Operator-owned JDBC query that binds operation id and payload fingerprint. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `saga.inboxBinding` | Inbox binding | Operator-governed AMQP consumer inbox binding checked again by the outbox worker. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `saga.compensation` | Compensation node | Node id for the explicit compensation operation. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `saga.dependsOn` | Depends on | Comma-separated logical steps that must complete first. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.role` | Saga role | Whether this node is a forward or compensation operation. | `STRING` | false | forward | forward,compensation | false | Not declared | Not declared | Not declared |
-| `saga.irreversible` | Irreversible | Explicitly admits a step that cannot be compensated. | `BOOLEAN` | false | false | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.businessCompletionRequired` | Wait for business completion | Wait beyond broker acceptance for an inbox/effect receipt. | `BOOLEAN` | false | false | Not declared | false | Not declared | Not declared | Not declared |
+| `saga.role` | Saga role | Whether this node is a forward or compensation operation. | `STRING` | false | Not declared | forward,compensation | false | Not declared | Not declared | Not declared |
+| `saga.irreversible` | Irreversible | Explicitly admits a step that cannot be compensated. | `BOOLEAN` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `saga.businessCompletionRequired` | Wait for business completion | Wait beyond broker acceptance for an inbox/effect receipt. | `BOOLEAN` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `saga.deadlineMs` | Saga deadline (ms) | Maximum elapsed time for this saga scope before durable cancellation and compensation. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `saga.commandType` | Saga command type | Versioned application command type inserted into an AMQP body. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
@@ -381,19 +381,6 @@ Canonical runtime rules: [discord bundle reference](bundles/discord.md).
 | `maxAttachments` | Attachment count | May only tighten the operator profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `maxConcurrency` | Concurrency | May only tighten the operator profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `retries` | Rate-limit retries | May only tighten the operator profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.scope` | Saga scope | Versioned saga scope. Leave empty outside a saga. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.step` | Saga step | Logical step identity retained across transport retries. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.participant` | Participant contract | pure, jdbc-receipt-v1, amqp-inbox-v1, or http-idempotency-v1. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.adapter` | Saga adapter | Trusted runtime adapter identifier required by effectful participant protocols. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.receiptStatement` | Receipt statement | Operator-owned JDBC query that binds operation id and payload fingerprint. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.inboxBinding` | Inbox binding | Operator-governed AMQP consumer inbox binding checked again by the outbox worker. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.compensation` | Compensation node | Node id for the explicit compensation operation. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.dependsOn` | Depends on | Comma-separated logical steps that must complete first. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.role` | Saga role | Whether this node is a forward or compensation operation. | `STRING` | false | forward | forward,compensation | false | Not declared | Not declared | Not declared |
-| `saga.irreversible` | Irreversible | Explicitly admits a step that cannot be compensated. | `BOOLEAN` | false | false | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.businessCompletionRequired` | Wait for business completion | Wait beyond broker acceptance for an inbox/effect receipt. | `BOOLEAN` | false | false | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.deadlineMs` | Saga deadline (ms) | Maximum elapsed time for this saga scope before durable cancellation and compensation. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.commandType` | Saga command type | Versioned application command type inserted into an AMQP body. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
 ## `filesystem.read` {#node-filesystem-read}
 
@@ -450,19 +437,6 @@ Canonical runtime rules: [filesystem bundle reference](bundles/filesystem.md).
 | `maxBytes` | Maximum bytes | May only tighten the profile byte ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `deadlineMs` | Deadline (ms) | May only tighten the profile total deadline. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `recovery.repeatable` | Repeatable after an unknown outcome | Whether repeating the complete atomic publication is safe after an ambiguous final move. | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
-| `saga.scope` | Saga scope | Versioned saga scope. Leave empty outside a saga. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.step` | Saga step | Logical step identity retained across transport retries. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.participant` | Participant contract | pure, jdbc-receipt-v1, amqp-inbox-v1, or http-idempotency-v1. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.adapter` | Saga adapter | Trusted runtime adapter identifier required by effectful participant protocols. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.receiptStatement` | Receipt statement | Operator-owned JDBC query that binds operation id and payload fingerprint. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.inboxBinding` | Inbox binding | Operator-governed AMQP consumer inbox binding checked again by the outbox worker. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.compensation` | Compensation node | Node id for the explicit compensation operation. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.dependsOn` | Depends on | Comma-separated logical steps that must complete first. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.role` | Saga role | Whether this node is a forward or compensation operation. | `STRING` | false | forward | forward,compensation | false | Not declared | Not declared | Not declared |
-| `saga.irreversible` | Irreversible | Explicitly admits a step that cannot be compensated. | `BOOLEAN` | false | false | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.businessCompletionRequired` | Wait for business completion | Wait beyond broker acceptance for an inbox/effect receipt. | `BOOLEAN` | false | false | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.deadlineMs` | Saga deadline (ms) | Maximum elapsed time for this saga scope before durable cancellation and compensation. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.commandType` | Saga command type | Versioned application command type inserted into an AMQP body. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
 ## `git-workspace` {#node-git-workspace}
 
@@ -486,19 +460,6 @@ Canonical runtime rules: [git-workspace bundle reference](bundles/git-workspace.
 | Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---|---|---:|---|---|---:|---|---|---|
 | `workspaceProfile` | Workspace profile | Opaque tenant-scoped operator profile; roots, remotes and credentials never come from the graph. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.scope` | Saga scope | Versioned saga scope. Leave empty outside a saga. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.step` | Saga step | Logical step identity retained across transport retries. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.participant` | Participant contract | pure, jdbc-receipt-v1, amqp-inbox-v1, or http-idempotency-v1. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.adapter` | Saga adapter | Trusted runtime adapter identifier required by effectful participant protocols. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.receiptStatement` | Receipt statement | Operator-owned JDBC query that binds operation id and payload fingerprint. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.inboxBinding` | Inbox binding | Operator-governed AMQP consumer inbox binding checked again by the outbox worker. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.compensation` | Compensation node | Node id for the explicit compensation operation. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.dependsOn` | Depends on | Comma-separated logical steps that must complete first. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.role` | Saga role | Whether this node is a forward or compensation operation. | `STRING` | false | forward | forward,compensation | false | Not declared | Not declared | Not declared |
-| `saga.irreversible` | Irreversible | Explicitly admits a step that cannot be compensated. | `BOOLEAN` | false | false | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.businessCompletionRequired` | Wait for business completion | Wait beyond broker acceptance for an inbox/effect receipt. | `BOOLEAN` | false | false | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.deadlineMs` | Saga deadline (ms) | Maximum elapsed time for this saga scope before durable cancellation and compensation. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.commandType` | Saga command type | Versioned application command type inserted into an AMQP body. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
 ## `github-app-review` {#node-github-app-review}
 
@@ -523,19 +484,6 @@ Canonical runtime rules: [github bundle reference](bundles/github.md).
 |---|---|---|---|---:|---|---|---:|---|---|---|
 | `githubProfile` | GitHub profile | Opaque tenant-scoped operator profile; authority never comes from graph content. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `recovery.repeatable` | Repeatable after an unknown outcome | Recovery repeats only the same content-bound operation and reconciles durable remote state first. | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
-| `saga.scope` | Saga scope | Versioned saga scope. Leave empty outside a saga. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.step` | Saga step | Logical step identity retained across transport retries. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.participant` | Participant contract | pure, jdbc-receipt-v1, amqp-inbox-v1, or http-idempotency-v1. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.adapter` | Saga adapter | Trusted runtime adapter identifier required by effectful participant protocols. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.receiptStatement` | Receipt statement | Operator-owned JDBC query that binds operation id and payload fingerprint. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.inboxBinding` | Inbox binding | Operator-governed AMQP consumer inbox binding checked again by the outbox worker. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.compensation` | Compensation node | Node id for the explicit compensation operation. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.dependsOn` | Depends on | Comma-separated logical steps that must complete first. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.role` | Saga role | Whether this node is a forward or compensation operation. | `STRING` | false | forward | forward,compensation | false | Not declared | Not declared | Not declared |
-| `saga.irreversible` | Irreversible | Explicitly admits a step that cannot be compensated. | `BOOLEAN` | false | false | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.businessCompletionRequired` | Wait for business completion | Wait beyond broker acceptance for an inbox/effect receipt. | `BOOLEAN` | false | false | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.deadlineMs` | Saga deadline (ms) | Maximum elapsed time for this saga scope before durable cancellation and compensation. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.commandType` | Saga command type | Versioned application command type inserted into an AMQP body. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
 ## `github-events-source` {#node-github-events-source}
 
@@ -618,15 +566,15 @@ Canonical runtime rules: [core behavior reference](core-nodes.md).
 | `recovery.repeatable` | Repeatable after an unknown outcome | Whether repeating this request after a crash of unknown outcome is safe. Required for methods that change state. | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | method:ONE_OF:POST,PUT,PATCH,DELETE | Not declared |
 | `saga.scope` | Saga scope | Versioned saga scope. Leave empty outside a saga. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `saga.step` | Saga step | Logical step identity retained across transport retries. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.participant` | Participant contract | pure, jdbc-receipt-v1, amqp-inbox-v1, or http-idempotency-v1. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.adapter` | Saga adapter | Trusted runtime adapter identifier required by effectful participant protocols. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `saga.participant` | Participant contract | Explicit participant contract supported by this trusted behavior. | `STRING` | false | Not declared | http-idempotency-v1 | false | Not declared | Not declared | Not declared |
+| `saga.adapter` | Saga adapter | Required trusted adapter: ravenroot.http-idempotency.v1. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `saga.receiptStatement` | Receipt statement | Operator-owned JDBC query that binds operation id and payload fingerprint. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `saga.inboxBinding` | Inbox binding | Operator-governed AMQP consumer inbox binding checked again by the outbox worker. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `saga.compensation` | Compensation node | Node id for the explicit compensation operation. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `saga.dependsOn` | Depends on | Comma-separated logical steps that must complete first. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.role` | Saga role | Whether this node is a forward or compensation operation. | `STRING` | false | forward | forward,compensation | false | Not declared | Not declared | Not declared |
-| `saga.irreversible` | Irreversible | Explicitly admits a step that cannot be compensated. | `BOOLEAN` | false | false | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.businessCompletionRequired` | Wait for business completion | Wait beyond broker acceptance for an inbox/effect receipt. | `BOOLEAN` | false | false | Not declared | false | Not declared | Not declared | Not declared |
+| `saga.role` | Saga role | Whether this node is a forward or compensation operation. | `STRING` | false | Not declared | forward,compensation | false | Not declared | Not declared | Not declared |
+| `saga.irreversible` | Irreversible | Explicitly admits a step that cannot be compensated. | `BOOLEAN` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `saga.businessCompletionRequired` | Wait for business completion | Wait beyond broker acceptance for an inbox/effect receipt. | `BOOLEAN` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `saga.deadlineMs` | Saga deadline (ms) | Maximum elapsed time for this saga scope before durable cancellation and compensation. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `saga.commandType` | Saga command type | Versioned application command type inserted into an AMQP body. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
@@ -708,15 +656,15 @@ Canonical runtime rules: [jdbc bundle reference](bundles/jdbc.md).
 | `statement` | Statement | Operator-approved statement id. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `saga.scope` | Saga scope | Versioned saga scope. Leave empty outside a saga. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `saga.step` | Saga step | Logical step identity retained across transport retries. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.participant` | Participant contract | pure, jdbc-receipt-v1, amqp-inbox-v1, or http-idempotency-v1. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.adapter` | Saga adapter | Trusted runtime adapter identifier required by effectful participant protocols. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `saga.participant` | Participant contract | Explicit participant contract supported by this trusted behavior. | `STRING` | false | Not declared | jdbc-receipt-v1 | false | Not declared | Not declared | Not declared |
+| `saga.adapter` | Saga adapter | Required trusted adapter: ravenroot.jdbc-receipt.v1. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `saga.receiptStatement` | Receipt statement | Operator-owned JDBC query that binds operation id and payload fingerprint. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `saga.inboxBinding` | Inbox binding | Operator-governed AMQP consumer inbox binding checked again by the outbox worker. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `saga.compensation` | Compensation node | Node id for the explicit compensation operation. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `saga.dependsOn` | Depends on | Comma-separated logical steps that must complete first. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.role` | Saga role | Whether this node is a forward or compensation operation. | `STRING` | false | forward | forward,compensation | false | Not declared | Not declared | Not declared |
-| `saga.irreversible` | Irreversible | Explicitly admits a step that cannot be compensated. | `BOOLEAN` | false | false | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.businessCompletionRequired` | Wait for business completion | Wait beyond broker acceptance for an inbox/effect receipt. | `BOOLEAN` | false | false | Not declared | false | Not declared | Not declared | Not declared |
+| `saga.role` | Saga role | Whether this node is a forward or compensation operation. | `STRING` | false | Not declared | forward,compensation | false | Not declared | Not declared | Not declared |
+| `saga.irreversible` | Irreversible | Explicitly admits a step that cannot be compensated. | `BOOLEAN` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `saga.businessCompletionRequired` | Wait for business completion | Wait beyond broker acceptance for an inbox/effect receipt. | `BOOLEAN` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `saga.deadlineMs` | Saga deadline (ms) | Maximum elapsed time for this saga scope before durable cancellation and compensation. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `saga.commandType` | Saga command type | Versioned application command type inserted into an AMQP body. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
@@ -855,19 +803,6 @@ Canonical runtime rules: [kafka bundle reference](bundles/kafka.md).
 | `maxRecordBytes` | Record bytes | May only tighten the serialized record ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `correlationId` | Correlation id | Safe result correlation metadata. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `recovery.repeatable` | Repeatable after an unknown outcome | Whether producing this record again after a crash of unknown outcome is safe. Producer idempotence does not cover this; say repeatable only where the consumer discards a record it has already processed. | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
-| `saga.scope` | Saga scope | Versioned saga scope. Leave empty outside a saga. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.step` | Saga step | Logical step identity retained across transport retries. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.participant` | Participant contract | pure, jdbc-receipt-v1, amqp-inbox-v1, or http-idempotency-v1. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.adapter` | Saga adapter | Trusted runtime adapter identifier required by effectful participant protocols. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.receiptStatement` | Receipt statement | Operator-owned JDBC query that binds operation id and payload fingerprint. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.inboxBinding` | Inbox binding | Operator-governed AMQP consumer inbox binding checked again by the outbox worker. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.compensation` | Compensation node | Node id for the explicit compensation operation. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.dependsOn` | Depends on | Comma-separated logical steps that must complete first. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.role` | Saga role | Whether this node is a forward or compensation operation. | `STRING` | false | forward | forward,compensation | false | Not declared | Not declared | Not declared |
-| `saga.irreversible` | Irreversible | Explicitly admits a step that cannot be compensated. | `BOOLEAN` | false | false | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.businessCompletionRequired` | Wait for business completion | Wait beyond broker acceptance for an inbox/effect receipt. | `BOOLEAN` | false | false | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.deadlineMs` | Saga deadline (ms) | Maximum elapsed time for this saga scope before durable cancellation and compensation. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.commandType` | Saga command type | Versioned application command type inserted into an AMQP body. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
 ## `llm-prompt` {#node-llm-prompt}
 
@@ -921,19 +856,6 @@ Canonical runtime rules: [core behavior reference](core-nodes.md).
 | Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---|---|---:|---|---|---:|---|---|---|
 | `message` | Message | Supports <code>{% raw %}{{payload}}{% endraw %}</code>, <code>{% raw %}{{attributes.name}}{% endraw %}</code> and <code>{% raw %}{{properties.name}}{% endraw %}</code> placeholders. | `TEXT` | false | <code>{% raw %}{{payload}}{% endraw %}</code> | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.scope` | Saga scope | Versioned saga scope. Leave empty outside a saga. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.step` | Saga step | Logical step identity retained across transport retries. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.participant` | Participant contract | pure, jdbc-receipt-v1, amqp-inbox-v1, or http-idempotency-v1. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.adapter` | Saga adapter | Trusted runtime adapter identifier required by effectful participant protocols. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.receiptStatement` | Receipt statement | Operator-owned JDBC query that binds operation id and payload fingerprint. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.inboxBinding` | Inbox binding | Operator-governed AMQP consumer inbox binding checked again by the outbox worker. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.compensation` | Compensation node | Node id for the explicit compensation operation. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.dependsOn` | Depends on | Comma-separated logical steps that must complete first. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.role` | Saga role | Whether this node is a forward or compensation operation. | `STRING` | false | forward | forward,compensation | false | Not declared | Not declared | Not declared |
-| `saga.irreversible` | Irreversible | Explicitly admits a step that cannot be compensated. | `BOOLEAN` | false | false | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.businessCompletionRequired` | Wait for business completion | Wait beyond broker acceptance for an inbox/effect receipt. | `BOOLEAN` | false | false | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.deadlineMs` | Saga deadline (ms) | Maximum elapsed time for this saga scope before durable cancellation and compensation. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.commandType` | Saga command type | Versioned application command type inserted into an AMQP body. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
 ## `mail.imap.consume` {#node-mail-imap-consume}
 
@@ -999,19 +921,6 @@ Canonical runtime rules: [mail bundle reference](bundles/mail.md).
 | `hardDeleteAcknowledgement` | Permanent-delete acknowledgement | Required for HARD_DELETE; payload authorization is required separately at runtime. | `STRING` | false | Not declared | I_UNDERSTAND_EXPUNGE_IS_PERMANENT | false | deleteMode:EQUALS:HARD_DELETE | deleteMode:EQUALS:HARD_DELETE | Not declared |
 | `maxConcurrency` | Concurrency limit | Optional 1–16 action limit; blank uses the profile ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `recovery.repeatable` | Repeatable after an unknown outcome | TRASH is effect-idempotent by immutable source UID. HARD_DELETE must be declared not-repeatable because a disconnect after expunge is ambiguous. | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
-| `saga.scope` | Saga scope | Versioned saga scope. Leave empty outside a saga. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.step` | Saga step | Logical step identity retained across transport retries. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.participant` | Participant contract | pure, jdbc-receipt-v1, amqp-inbox-v1, or http-idempotency-v1. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.adapter` | Saga adapter | Trusted runtime adapter identifier required by effectful participant protocols. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.receiptStatement` | Receipt statement | Operator-owned JDBC query that binds operation id and payload fingerprint. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.inboxBinding` | Inbox binding | Operator-governed AMQP consumer inbox binding checked again by the outbox worker. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.compensation` | Compensation node | Node id for the explicit compensation operation. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.dependsOn` | Depends on | Comma-separated logical steps that must complete first. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.role` | Saga role | Whether this node is a forward or compensation operation. | `STRING` | false | forward | forward,compensation | false | Not declared | Not declared | Not declared |
-| `saga.irreversible` | Irreversible | Explicitly admits a step that cannot be compensated. | `BOOLEAN` | false | false | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.businessCompletionRequired` | Wait for business completion | Wait beyond broker acceptance for an inbox/effect receipt. | `BOOLEAN` | false | false | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.deadlineMs` | Saga deadline (ms) | Maximum elapsed time for this saga scope before durable cancellation and compensation. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.commandType` | Saga command type | Versioned application command type inserted into an AMQP body. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
 ## `mail.imap.move` {#node-mail-imap-move}
 
@@ -1039,19 +948,6 @@ Canonical runtime rules: [mail bundle reference](bundles/mail.md).
 | `destinationFolder` | Destination folder | Requested destination; the operator policy must allow it. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `maxConcurrency` | Concurrency limit | Optional 1–16 action limit; blank uses the profile ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `recovery.repeatable` | Repeatable after an unknown outcome | Move is effect-idempotent by immutable source UID: a repeat cannot move a second message. Declare repeatable only when a missing-on-repeat outcome is acceptable. | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
-| `saga.scope` | Saga scope | Versioned saga scope. Leave empty outside a saga. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.step` | Saga step | Logical step identity retained across transport retries. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.participant` | Participant contract | pure, jdbc-receipt-v1, amqp-inbox-v1, or http-idempotency-v1. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.adapter` | Saga adapter | Trusted runtime adapter identifier required by effectful participant protocols. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.receiptStatement` | Receipt statement | Operator-owned JDBC query that binds operation id and payload fingerprint. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.inboxBinding` | Inbox binding | Operator-governed AMQP consumer inbox binding checked again by the outbox worker. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.compensation` | Compensation node | Node id for the explicit compensation operation. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.dependsOn` | Depends on | Comma-separated logical steps that must complete first. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.role` | Saga role | Whether this node is a forward or compensation operation. | `STRING` | false | forward | forward,compensation | false | Not declared | Not declared | Not declared |
-| `saga.irreversible` | Irreversible | Explicitly admits a step that cannot be compensated. | `BOOLEAN` | false | false | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.businessCompletionRequired` | Wait for business completion | Wait beyond broker acceptance for an inbox/effect receipt. | `BOOLEAN` | false | false | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.deadlineMs` | Saga deadline (ms) | Maximum elapsed time for this saga scope before durable cancellation and compensation. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.commandType` | Saga command type | Versioned application command type inserted into an AMQP body. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
 ## `mail.imap.query` {#node-mail-imap-query}
 
@@ -1123,19 +1019,6 @@ Canonical runtime rules: [mail bundle reference](bundles/mail.md).
 | `maxEncodedAttachmentBytes` | Base64 aggregate limit | May only tighten profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `maxConcurrency` | Concurrency limit | Optional 1–16 limit; blank uses the mail profile ceiling and a value may only tighten it. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `defaultFrom` | Default sender | Legacy exact-match only. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.scope` | Saga scope | Versioned saga scope. Leave empty outside a saga. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.step` | Saga step | Logical step identity retained across transport retries. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.participant` | Participant contract | pure, jdbc-receipt-v1, amqp-inbox-v1, or http-idempotency-v1. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.adapter` | Saga adapter | Trusted runtime adapter identifier required by effectful participant protocols. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.receiptStatement` | Receipt statement | Operator-owned JDBC query that binds operation id and payload fingerprint. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.inboxBinding` | Inbox binding | Operator-governed AMQP consumer inbox binding checked again by the outbox worker. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.compensation` | Compensation node | Node id for the explicit compensation operation. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.dependsOn` | Depends on | Comma-separated logical steps that must complete first. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.role` | Saga role | Whether this node is a forward or compensation operation. | `STRING` | false | forward | forward,compensation | false | Not declared | Not declared | Not declared |
-| `saga.irreversible` | Irreversible | Explicitly admits a step that cannot be compensated. | `BOOLEAN` | false | false | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.businessCompletionRequired` | Wait for business completion | Wait beyond broker acceptance for an inbox/effect receipt. | `BOOLEAN` | false | false | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.deadlineMs` | Saga deadline (ms) | Maximum elapsed time for this saga scope before durable cancellation and compensation. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.commandType` | Saga command type | Versioned application command type inserted into an AMQP body. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
 ## `matrix.send` {#node-matrix-send}
 
@@ -1163,19 +1046,6 @@ Canonical runtime rules: [matrix bundle reference](bundles/matrix.md).
 | `requestTimeoutMs` | Request timeout | May only tighten the operator profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `maxTextChars` | Text limit | May only tighten the operator profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `maxConcurrency` | Concurrency | May only tighten the operator profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.scope` | Saga scope | Versioned saga scope. Leave empty outside a saga. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.step` | Saga step | Logical step identity retained across transport retries. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.participant` | Participant contract | pure, jdbc-receipt-v1, amqp-inbox-v1, or http-idempotency-v1. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.adapter` | Saga adapter | Trusted runtime adapter identifier required by effectful participant protocols. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.receiptStatement` | Receipt statement | Operator-owned JDBC query that binds operation id and payload fingerprint. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.inboxBinding` | Inbox binding | Operator-governed AMQP consumer inbox binding checked again by the outbox worker. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.compensation` | Compensation node | Node id for the explicit compensation operation. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.dependsOn` | Depends on | Comma-separated logical steps that must complete first. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.role` | Saga role | Whether this node is a forward or compensation operation. | `STRING` | false | forward | forward,compensation | false | Not declared | Not declared | Not declared |
-| `saga.irreversible` | Irreversible | Explicitly admits a step that cannot be compensated. | `BOOLEAN` | false | false | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.businessCompletionRequired` | Wait for business completion | Wait beyond broker acceptance for an inbox/effect receipt. | `BOOLEAN` | false | false | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.deadlineMs` | Saga deadline (ms) | Maximum elapsed time for this saga scope before durable cancellation and compensation. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.commandType` | Saga command type | Versioned application command type inserted into an AMQP body. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
 ## `matrix.sync` {#node-matrix-sync}
 
@@ -1252,19 +1122,6 @@ Canonical runtime rules: [mattermost bundle reference](bundles/mattermost.md).
 | `maxTextChars` | Text limit | May only tighten the operator profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `maxConcurrency` | Concurrency | May only tighten the operator profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `retries` | Rate-limit retries | May only tighten the operator profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.scope` | Saga scope | Versioned saga scope. Leave empty outside a saga. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.step` | Saga step | Logical step identity retained across transport retries. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.participant` | Participant contract | pure, jdbc-receipt-v1, amqp-inbox-v1, or http-idempotency-v1. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.adapter` | Saga adapter | Trusted runtime adapter identifier required by effectful participant protocols. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.receiptStatement` | Receipt statement | Operator-owned JDBC query that binds operation id and payload fingerprint. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.inboxBinding` | Inbox binding | Operator-governed AMQP consumer inbox binding checked again by the outbox worker. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.compensation` | Compensation node | Node id for the explicit compensation operation. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.dependsOn` | Depends on | Comma-separated logical steps that must complete first. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.role` | Saga role | Whether this node is a forward or compensation operation. | `STRING` | false | forward | forward,compensation | false | Not declared | Not declared | Not declared |
-| `saga.irreversible` | Irreversible | Explicitly admits a step that cannot be compensated. | `BOOLEAN` | false | false | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.businessCompletionRequired` | Wait for business completion | Wait beyond broker acceptance for an inbox/effect receipt. | `BOOLEAN` | false | false | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.deadlineMs` | Saga deadline (ms) | Maximum elapsed time for this saga scope before durable cancellation and compensation. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.commandType` | Saga command type | Versioned application command type inserted into an AMQP body. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
 ## `object.delete` {#node-object-delete}
 
@@ -1292,19 +1149,6 @@ Canonical runtime rules: [object-storage bundle reference](bundles/object-storag
 | `timeoutMs` | Deadline | May only tighten the profile deadline. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `maxConcurrency` | Concurrency | May only tighten the profile ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `recovery.repeatable` | Repeatable after an unknown outcome | Declare repeatable only when this exact delete is safe to repeat after an unknown outcome. | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
-| `saga.scope` | Saga scope | Versioned saga scope. Leave empty outside a saga. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.step` | Saga step | Logical step identity retained across transport retries. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.participant` | Participant contract | pure, jdbc-receipt-v1, amqp-inbox-v1, or http-idempotency-v1. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.adapter` | Saga adapter | Trusted runtime adapter identifier required by effectful participant protocols. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.receiptStatement` | Receipt statement | Operator-owned JDBC query that binds operation id and payload fingerprint. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.inboxBinding` | Inbox binding | Operator-governed AMQP consumer inbox binding checked again by the outbox worker. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.compensation` | Compensation node | Node id for the explicit compensation operation. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.dependsOn` | Depends on | Comma-separated logical steps that must complete first. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.role` | Saga role | Whether this node is a forward or compensation operation. | `STRING` | false | forward | forward,compensation | false | Not declared | Not declared | Not declared |
-| `saga.irreversible` | Irreversible | Explicitly admits a step that cannot be compensated. | `BOOLEAN` | false | false | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.businessCompletionRequired` | Wait for business completion | Wait beyond broker acceptance for an inbox/effect receipt. | `BOOLEAN` | false | false | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.deadlineMs` | Saga deadline (ms) | Maximum elapsed time for this saga scope before durable cancellation and compensation. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.commandType` | Saga command type | Versioned application command type inserted into an AMQP body. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
 ## `object.get` {#node-object-get}
 
@@ -1390,19 +1234,6 @@ Canonical runtime rules: [object-storage bundle reference](bundles/object-storag
 | `maxBytes` | Maximum bytes | May only tighten the profile ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `timeoutMs` | Deadline | May only tighten the profile deadline. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `maxConcurrency` | Concurrency | May only tighten the profile ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.scope` | Saga scope | Versioned saga scope. Leave empty outside a saga. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.step` | Saga step | Logical step identity retained across transport retries. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.participant` | Participant contract | pure, jdbc-receipt-v1, amqp-inbox-v1, or http-idempotency-v1. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.adapter` | Saga adapter | Trusted runtime adapter identifier required by effectful participant protocols. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.receiptStatement` | Receipt statement | Operator-owned JDBC query that binds operation id and payload fingerprint. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.inboxBinding` | Inbox binding | Operator-governed AMQP consumer inbox binding checked again by the outbox worker. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.compensation` | Compensation node | Node id for the explicit compensation operation. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.dependsOn` | Depends on | Comma-separated logical steps that must complete first. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.role` | Saga role | Whether this node is a forward or compensation operation. | `STRING` | false | forward | forward,compensation | false | Not declared | Not declared | Not declared |
-| `saga.irreversible` | Irreversible | Explicitly admits a step that cannot be compensated. | `BOOLEAN` | false | false | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.businessCompletionRequired` | Wait for business completion | Wait beyond broker acceptance for an inbox/effect receipt. | `BOOLEAN` | false | false | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.deadlineMs` | Saga deadline (ms) | Maximum elapsed time for this saga scope before durable cancellation and compensation. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.commandType` | Saga command type | Versioned application command type inserted into an AMQP body. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
 ## `ocr.extract` {#node-ocr-extract}
 
@@ -1459,19 +1290,6 @@ Canonical runtime rules: [openapi-client bundle reference](bundles/openapi-clien
 | `maxRequestBytes` | Request bytes | May only tighten the request ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `maxResponseBytes` | Response bytes | May only tighten the response ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `maxConcurrency` | Concurrency | May only tighten the profile concurrency. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.scope` | Saga scope | Versioned saga scope. Leave empty outside a saga. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.step` | Saga step | Logical step identity retained across transport retries. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.participant` | Participant contract | pure, jdbc-receipt-v1, amqp-inbox-v1, or http-idempotency-v1. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.adapter` | Saga adapter | Trusted runtime adapter identifier required by effectful participant protocols. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.receiptStatement` | Receipt statement | Operator-owned JDBC query that binds operation id and payload fingerprint. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.inboxBinding` | Inbox binding | Operator-governed AMQP consumer inbox binding checked again by the outbox worker. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.compensation` | Compensation node | Node id for the explicit compensation operation. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.dependsOn` | Depends on | Comma-separated logical steps that must complete first. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.role` | Saga role | Whether this node is a forward or compensation operation. | `STRING` | false | forward | forward,compensation | false | Not declared | Not declared | Not declared |
-| `saga.irreversible` | Irreversible | Explicitly admits a step that cannot be compensated. | `BOOLEAN` | false | false | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.businessCompletionRequired` | Wait for business completion | Wait beyond broker acceptance for an inbox/effect receipt. | `BOOLEAN` | false | false | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.deadlineMs` | Saga deadline (ms) | Maximum elapsed time for this saga scope before durable cancellation and compensation. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.commandType` | Saga command type | Versioned application command type inserted into an AMQP body. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
 ## `openapi.receive` {#node-openapi-receive}
 
@@ -1579,19 +1397,6 @@ Canonical runtime rules: [github bundle reference](bundles/github.md).
 |---|---|---|---|---:|---|---|---:|---|---|---|
 | `githubProfile` | GitHub profile | Opaque tenant-scoped operator profile; authority never comes from graph content. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `recovery.repeatable` | Repeatable after an unknown outcome | Recovery repeats only the same content-bound operation and reconciles durable remote state first. | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
-| `saga.scope` | Saga scope | Versioned saga scope. Leave empty outside a saga. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.step` | Saga step | Logical step identity retained across transport retries. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.participant` | Participant contract | pure, jdbc-receipt-v1, amqp-inbox-v1, or http-idempotency-v1. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.adapter` | Saga adapter | Trusted runtime adapter identifier required by effectful participant protocols. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.receiptStatement` | Receipt statement | Operator-owned JDBC query that binds operation id and payload fingerprint. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.inboxBinding` | Inbox binding | Operator-governed AMQP consumer inbox binding checked again by the outbox worker. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.compensation` | Compensation node | Node id for the explicit compensation operation. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.dependsOn` | Depends on | Comma-separated logical steps that must complete first. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.role` | Saga role | Whether this node is a forward or compensation operation. | `STRING` | false | forward | forward,compensation | false | Not declared | Not declared | Not declared |
-| `saga.irreversible` | Irreversible | Explicitly admits a step that cannot be compensated. | `BOOLEAN` | false | false | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.businessCompletionRequired` | Wait for business completion | Wait beyond broker acceptance for an inbox/effect receipt. | `BOOLEAN` | false | false | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.deadlineMs` | Saga deadline (ms) | Maximum elapsed time for this saga scope before durable cancellation and compensation. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.commandType` | Saga command type | Versioned application command type inserted into an AMQP body. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
 ## `release-prepare` {#node-release-prepare}
 
@@ -1690,19 +1495,6 @@ Canonical runtime rules: [slack bundle reference](bundles/slack.md).
 | `maxTextChars` | Text limit | May only tighten the operator profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `maxConcurrency` | Concurrency | May only tighten the operator profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `retries` | Rate-limit retries | May only tighten the operator profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.scope` | Saga scope | Versioned saga scope. Leave empty outside a saga. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.step` | Saga step | Logical step identity retained across transport retries. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.participant` | Participant contract | pure, jdbc-receipt-v1, amqp-inbox-v1, or http-idempotency-v1. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.adapter` | Saga adapter | Trusted runtime adapter identifier required by effectful participant protocols. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.receiptStatement` | Receipt statement | Operator-owned JDBC query that binds operation id and payload fingerprint. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.inboxBinding` | Inbox binding | Operator-governed AMQP consumer inbox binding checked again by the outbox worker. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.compensation` | Compensation node | Node id for the explicit compensation operation. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.dependsOn` | Depends on | Comma-separated logical steps that must complete first. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.role` | Saga role | Whether this node is a forward or compensation operation. | `STRING` | false | forward | forward,compensation | false | Not declared | Not declared | Not declared |
-| `saga.irreversible` | Irreversible | Explicitly admits a step that cannot be compensated. | `BOOLEAN` | false | false | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.businessCompletionRequired` | Wait for business completion | Wait beyond broker acceptance for an inbox/effect receipt. | `BOOLEAN` | false | false | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.deadlineMs` | Saga deadline (ms) | Maximum elapsed time for this saga scope before durable cancellation and compensation. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.commandType` | Saga command type | Versioned application command type inserted into an AMQP body. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
 ## `spel.decision` {#node-spel-decision}
 
@@ -1826,19 +1618,6 @@ Canonical runtime rules: [teams bundle reference](bundles/teams.md).
 | `requestTimeoutMs` | Request timeout | May only tighten the operator profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `maxTextChars` | Text limit | May only tighten the operator profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `maxConcurrency` | Concurrency | May only tighten the operator profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.scope` | Saga scope | Versioned saga scope. Leave empty outside a saga. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.step` | Saga step | Logical step identity retained across transport retries. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.participant` | Participant contract | pure, jdbc-receipt-v1, amqp-inbox-v1, or http-idempotency-v1. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.adapter` | Saga adapter | Trusted runtime adapter identifier required by effectful participant protocols. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.receiptStatement` | Receipt statement | Operator-owned JDBC query that binds operation id and payload fingerprint. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.inboxBinding` | Inbox binding | Operator-governed AMQP consumer inbox binding checked again by the outbox worker. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.compensation` | Compensation node | Node id for the explicit compensation operation. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.dependsOn` | Depends on | Comma-separated logical steps that must complete first. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.role` | Saga role | Whether this node is a forward or compensation operation. | `STRING` | false | forward | forward,compensation | false | Not declared | Not declared | Not declared |
-| `saga.irreversible` | Irreversible | Explicitly admits a step that cannot be compensated. | `BOOLEAN` | false | false | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.businessCompletionRequired` | Wait for business completion | Wait beyond broker acceptance for an inbox/effect receipt. | `BOOLEAN` | false | false | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.deadlineMs` | Saga deadline (ms) | Maximum elapsed time for this saga scope before durable cancellation and compensation. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.commandType` | Saga command type | Versioned application command type inserted into an AMQP body. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
 ## `telegram.answer.callback` {#node-telegram-answer-callback}
 
@@ -1867,19 +1646,6 @@ Canonical runtime rules: [telegram bundle reference](bundles/telegram.md).
 | `maxConcurrency` | Concurrency | May only tighten the operator profile (1–16). | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `retries` | Pre-accept retries | May only tighten the operator profile (0–3). | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `recovery.repeatable` | Repeatable after an unknown outcome | Whether repeating this acknowledgement after a crash of unknown outcome is safe. A repeat is refused as an expired or invalid query id and leaves the first acknowledgement standing. | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
-| `saga.scope` | Saga scope | Versioned saga scope. Leave empty outside a saga. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.step` | Saga step | Logical step identity retained across transport retries. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.participant` | Participant contract | pure, jdbc-receipt-v1, amqp-inbox-v1, or http-idempotency-v1. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.adapter` | Saga adapter | Trusted runtime adapter identifier required by effectful participant protocols. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.receiptStatement` | Receipt statement | Operator-owned JDBC query that binds operation id and payload fingerprint. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.inboxBinding` | Inbox binding | Operator-governed AMQP consumer inbox binding checked again by the outbox worker. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.compensation` | Compensation node | Node id for the explicit compensation operation. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.dependsOn` | Depends on | Comma-separated logical steps that must complete first. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.role` | Saga role | Whether this node is a forward or compensation operation. | `STRING` | false | forward | forward,compensation | false | Not declared | Not declared | Not declared |
-| `saga.irreversible` | Irreversible | Explicitly admits a step that cannot be compensated. | `BOOLEAN` | false | false | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.businessCompletionRequired` | Wait for business completion | Wait beyond broker acceptance for an inbox/effect receipt. | `BOOLEAN` | false | false | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.deadlineMs` | Saga deadline (ms) | Maximum elapsed time for this saga scope before durable cancellation and compensation. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.commandType` | Saga command type | Versioned application command type inserted into an AMQP body. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
 ## `telegram.delete.message` {#node-telegram-delete-message}
 
@@ -1907,19 +1673,6 @@ Canonical runtime rules: [telegram bundle reference](bundles/telegram.md).
 | `maxConcurrency` | Concurrency | May only tighten the operator profile (1–16). | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `retries` | Pre-accept retries | May only tighten the operator profile (0–3). | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `recovery.repeatable` | Repeatable after an unknown outcome | Whether repeating this deletion after a crash of unknown outcome is safe. A repeat is answered 'message to delete not found' and the message is gone either way. | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
-| `saga.scope` | Saga scope | Versioned saga scope. Leave empty outside a saga. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.step` | Saga step | Logical step identity retained across transport retries. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.participant` | Participant contract | pure, jdbc-receipt-v1, amqp-inbox-v1, or http-idempotency-v1. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.adapter` | Saga adapter | Trusted runtime adapter identifier required by effectful participant protocols. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.receiptStatement` | Receipt statement | Operator-owned JDBC query that binds operation id and payload fingerprint. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.inboxBinding` | Inbox binding | Operator-governed AMQP consumer inbox binding checked again by the outbox worker. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.compensation` | Compensation node | Node id for the explicit compensation operation. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.dependsOn` | Depends on | Comma-separated logical steps that must complete first. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.role` | Saga role | Whether this node is a forward or compensation operation. | `STRING` | false | forward | forward,compensation | false | Not declared | Not declared | Not declared |
-| `saga.irreversible` | Irreversible | Explicitly admits a step that cannot be compensated. | `BOOLEAN` | false | false | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.businessCompletionRequired` | Wait for business completion | Wait beyond broker acceptance for an inbox/effect receipt. | `BOOLEAN` | false | false | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.deadlineMs` | Saga deadline (ms) | Maximum elapsed time for this saga scope before durable cancellation and compensation. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.commandType` | Saga command type | Versioned application command type inserted into an AMQP body. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
 ## `telegram.edit.message` {#node-telegram-edit-message}
 
@@ -1949,19 +1702,6 @@ Canonical runtime rules: [telegram bundle reference](bundles/telegram.md).
 | `maxConcurrency` | Concurrency | May only tighten the operator profile (1–16). | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `retries` | Pre-accept retries | May only tighten the operator profile (0–3). | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `recovery.repeatable` | Repeatable after an unknown outcome | Whether repeating this edit after a crash of unknown outcome is safe. A replay of the same edit is answered 'message is not modified'; declare it repeatable only where nothing else edits this message. | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
-| `saga.scope` | Saga scope | Versioned saga scope. Leave empty outside a saga. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.step` | Saga step | Logical step identity retained across transport retries. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.participant` | Participant contract | pure, jdbc-receipt-v1, amqp-inbox-v1, or http-idempotency-v1. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.adapter` | Saga adapter | Trusted runtime adapter identifier required by effectful participant protocols. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.receiptStatement` | Receipt statement | Operator-owned JDBC query that binds operation id and payload fingerprint. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.inboxBinding` | Inbox binding | Operator-governed AMQP consumer inbox binding checked again by the outbox worker. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.compensation` | Compensation node | Node id for the explicit compensation operation. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.dependsOn` | Depends on | Comma-separated logical steps that must complete first. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.role` | Saga role | Whether this node is a forward or compensation operation. | `STRING` | false | forward | forward,compensation | false | Not declared | Not declared | Not declared |
-| `saga.irreversible` | Irreversible | Explicitly admits a step that cannot be compensated. | `BOOLEAN` | false | false | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.businessCompletionRequired` | Wait for business completion | Wait beyond broker acceptance for an inbox/effect receipt. | `BOOLEAN` | false | false | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.deadlineMs` | Saga deadline (ms) | Maximum elapsed time for this saga scope before durable cancellation and compensation. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.commandType` | Saga command type | Versioned application command type inserted into an AMQP body. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
 ## `telegram.send` {#node-telegram-send}
 
@@ -1991,19 +1731,6 @@ Canonical runtime rules: [telegram bundle reference](bundles/telegram.md).
 | `maxButtons` | Button limit | May only tighten the operator profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `maxConcurrency` | Concurrency | May only tighten the operator profile (1–16). | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `retries` | Pre-accept retries | May only tighten the operator profile (0–3). | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.scope` | Saga scope | Versioned saga scope. Leave empty outside a saga. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.step` | Saga step | Logical step identity retained across transport retries. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.participant` | Participant contract | pure, jdbc-receipt-v1, amqp-inbox-v1, or http-idempotency-v1. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.adapter` | Saga adapter | Trusted runtime adapter identifier required by effectful participant protocols. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.receiptStatement` | Receipt statement | Operator-owned JDBC query that binds operation id and payload fingerprint. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.inboxBinding` | Inbox binding | Operator-governed AMQP consumer inbox binding checked again by the outbox worker. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.compensation` | Compensation node | Node id for the explicit compensation operation. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.dependsOn` | Depends on | Comma-separated logical steps that must complete first. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.role` | Saga role | Whether this node is a forward or compensation operation. | `STRING` | false | forward | forward,compensation | false | Not declared | Not declared | Not declared |
-| `saga.irreversible` | Irreversible | Explicitly admits a step that cannot be compensated. | `BOOLEAN` | false | false | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.businessCompletionRequired` | Wait for business completion | Wait beyond broker acceptance for an inbox/effect receipt. | `BOOLEAN` | false | false | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.deadlineMs` | Saga deadline (ms) | Maximum elapsed time for this saga scope before durable cancellation and compensation. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.commandType` | Saga command type | Versioned application command type inserted into an AMQP body. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
 ## `template` {#node-template}
 
@@ -2106,19 +1833,6 @@ Canonical runtime rules: [websocket bundle reference](bundles/websocket.md).
 | `maxMessageBytes` | Maximum message bytes | May only tighten the operator profile ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `maxFragments` | Maximum fragments | May only tighten the operator profile ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `timeoutMs` | Deadline (ms) | May only tighten the operator profile ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.scope` | Saga scope | Versioned saga scope. Leave empty outside a saga. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.step` | Saga step | Logical step identity retained across transport retries. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.participant` | Participant contract | pure, jdbc-receipt-v1, amqp-inbox-v1, or http-idempotency-v1. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.adapter` | Saga adapter | Trusted runtime adapter identifier required by effectful participant protocols. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.receiptStatement` | Receipt statement | Operator-owned JDBC query that binds operation id and payload fingerprint. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.inboxBinding` | Inbox binding | Operator-governed AMQP consumer inbox binding checked again by the outbox worker. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.compensation` | Compensation node | Node id for the explicit compensation operation. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.dependsOn` | Depends on | Comma-separated logical steps that must complete first. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.role` | Saga role | Whether this node is a forward or compensation operation. | `STRING` | false | forward | forward,compensation | false | Not declared | Not declared | Not declared |
-| `saga.irreversible` | Irreversible | Explicitly admits a step that cannot be compensated. | `BOOLEAN` | false | false | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.businessCompletionRequired` | Wait for business completion | Wait beyond broker acceptance for an inbox/effect receipt. | `BOOLEAN` | false | false | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.deadlineMs` | Saga deadline (ms) | Maximum elapsed time for this saga scope before durable cancellation and compensation. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `saga.commandType` | Saga command type | Versioned application command type inserted into an AMQP body. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
 ## Governed Workspace and named Agent variant
 

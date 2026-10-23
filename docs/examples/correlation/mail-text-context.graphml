@@ -17,17 +17,19 @@
 <key id="message" for="node" attr.name="message" attr.type="string"/>
 <key id="outcome" for="edge" attr.name="outcome" attr.type="string"/>
 <key id="join.semantics" for="graph" attr.name="join.semantics" attr.type="string"/>
-<key id="layoutX" for="node" attr.name="layoutX" attr.type="string"/>
-<key id="layoutY" for="node" attr.name="layoutY" attr.type="string"/>
+<key id="layoutX" for="node" attr.name="layoutX" attr.type="double"/>
+<key id="layoutY" for="node" attr.name="layoutY" attr.type="double"/>
+<key id="layoutWidth" for="node" attr.name="layoutWidth" attr.type="double"/>
+<key id="layoutHeight" for="node" attr.name="layoutHeight" attr.type="double"/>
 <graph id="bounded-email-context" edgedefault="directed"><data key="join.semantics">declared</data>
-<node id="start"><data key="kind">START</data><data key="layoutX">80</data><data key="layoutY">40</data></node>
-<node id="mail"><data key="kind">BEHAVIOR</data><data key="behavior">mail.imap.consume</data><data key="profile">replace-with-operator-profile</data><data key="previewChars">1024</data><data key="contentMode">preview</data><data key="correlation.mode">GENERATE_NEW</data><data key="layoutX">80</data><data key="layoutY">180</data></node>
-<node id="complete-text"><data key="kind">BEHAVIOR</data><data key="behavior">cel-decision</data><data key="expression">payload.kind == 'message' &amp;&amp; !payload.truncated</data><data key="layoutX">280</data><data key="layoutY">180</data></node>
-<node id="parse-text"><data key="kind">BEHAVIOR</data><data key="behavior">json-parse</data><data key="source">{{payload.content.textPreview}}</data><data key="layoutX">480</data><data key="layoutY">180</data></node>
-<node id="derive"><data key="kind">BEHAVIOR</data><data key="behavior">correlation-derive</data><data key="correlation.mode">ACCEPT_OR_CREATE</data><data key="correlation.selector">/ingestionId</data><data key="correlation.contributionSelector">/partition</data><data key="correlation.kindSelector">/stage</data><data key="correlation.roundSelector">/round</data><data key="correlation.referenceSelector">/filename</data><data key="auditReason">Map the declared complete bounded JSON text email format</data><data key="layoutX">680</data><data key="layoutY">180</data></node>
-<node id="store-result"><data key="kind">BEHAVIOR</data><data key="behavior">log</data><data key="message">Accepted explicit email operation {{payload.ingestionId}}</data><data key="layoutX">880</data><data key="layoutY">180</data></node>
-<node id="end"><data key="kind">END</data><data key="layoutX">1080</data><data key="layoutY">180</data></node>
-<node id="error"><data key="kind">ERROR</data><data key="layoutX">480</data><data key="layoutY">360</data></node>
+<node id="start"><data key="kind">START</data><data key="layoutX">80</data><data key="layoutY">40</data><data key="layoutWidth">140</data><data key="layoutHeight">70</data></node>
+<node id="mail"><data key="kind">BEHAVIOR</data><data key="behavior">mail.imap.consume</data><data key="profile">replace-with-operator-profile</data><data key="previewChars">1024</data><data key="contentMode">preview</data><data key="correlation.mode">GENERATE_NEW</data><data key="layoutX">80</data><data key="layoutY">180</data><data key="layoutWidth">140</data><data key="layoutHeight">70</data></node>
+<node id="complete-text"><data key="kind">BEHAVIOR</data><data key="behavior">cel-decision</data><data key="expression">payload.kind == 'message' &amp;&amp; !payload.truncated</data><data key="layoutX">280</data><data key="layoutY">180</data><data key="layoutWidth">140</data><data key="layoutHeight">70</data></node>
+<node id="parse-text"><data key="kind">BEHAVIOR</data><data key="behavior">json-parse</data><data key="source">{{payload.content.textPreview}}</data><data key="layoutX">480</data><data key="layoutY">180</data><data key="layoutWidth">140</data><data key="layoutHeight">70</data></node>
+<node id="derive"><data key="kind">BEHAVIOR</data><data key="behavior">correlation-derive</data><data key="correlation.mode">ACCEPT_OR_CREATE</data><data key="correlation.selector">/ingestionId</data><data key="correlation.contributionSelector">/partition</data><data key="correlation.kindSelector">/stage</data><data key="correlation.roundSelector">/round</data><data key="correlation.referenceSelector">/filename</data><data key="auditReason">Map the declared complete bounded JSON text email format</data><data key="layoutX">680</data><data key="layoutY">180</data><data key="layoutWidth">140</data><data key="layoutHeight">70</data></node>
+<node id="store-result"><data key="kind">BEHAVIOR</data><data key="behavior">log</data><data key="message">Accepted explicit email operation {{payload.ingestionId}}</data><data key="layoutX">880</data><data key="layoutY">180</data><data key="layoutWidth">140</data><data key="layoutHeight">70</data></node>
+<node id="end"><data key="kind">END</data><data key="layoutX">1080</data><data key="layoutY">180</data><data key="layoutWidth">140</data><data key="layoutHeight">70</data></node>
+<node id="error"><data key="kind">ERROR</data><data key="layoutX">480</data><data key="layoutY">360</data><data key="layoutWidth">140</data><data key="layoutHeight">70</data></node>
 <edge id="route-0" source="start" target="end"><data key="outcome">continue</data></edge>
 <edge id="route-1" source="mail" target="complete-text"><data key="outcome">continue</data></edge>
 <edge id="route-2" source="complete-text" target="parse-text"><data key="outcome">true</data></edge>

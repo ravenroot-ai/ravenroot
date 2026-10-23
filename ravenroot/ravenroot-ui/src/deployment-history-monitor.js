@@ -42,7 +42,8 @@ export function createDeploymentHistoryMonitor({ container, projection, read, vi
       position: row.position ?? unavailable, time: row.startedAt || unavailable, status: row.status || unavailable });
     if (view === 'attempts') return t('history.row.attempt', { id: identity(row.attemptId), ordinal: row.ordinal,
       time: row.startedAt || unavailable, status: row.status || unavailable });
-    if (view === 'joins') return t('history.row.join', { node: row.nodeId, round: row.roundId, phase: row.phase });
+    if (view === 'joins') return t('history.row.join', { node: row.nodeId, round: row.roundId, phase: row.phase, received: row.receivedContributions ?? unavailable,
+      expected: ['COUNT', 'MANIFEST'].includes(row.expectation) ? row.expectedContributions : unavailable });
     return row.contributionId || row.invocationId || row.attemptId || row.nodeId || unavailable;
   };
   const setRowLabel = (node, view, row) => { node.textContent = label(view, row, true); node.setAttribute('aria-label', label(view, row)); node.title = label(view, row); node.dataset.historyRowView = view; rowArguments.set(node, row); return node; };
@@ -88,6 +89,10 @@ export function createDeploymentHistoryMonitor({ container, projection, read, vi
         const item = element('li');
         if (onSelect) { const select = labelElement('button', query.view, row); select.type = 'button'; select.addEventListener('click', () => onSelect(row)); item.append(select);
           const details = element('details'); details.append(localize(element('summary'), 'history.details'), facts(row)); item.append(details); }
+        else if (query.view === 'join-members') {
+          item.append(localize(element('strong'), row.received ? 'history.member.received' : 'history.member.missing', { id: row.contributionId }));
+          const details = element('details'); details.append(localize(element('summary'), 'history.details'), facts(row)); item.append(details);
+        }
         else { item.append(facts(row)); if (query.view === 'activity' && row.content != null) item.append(element('pre', JSON.stringify(row.content, null, 2))); }
         rows.append(item);
       }

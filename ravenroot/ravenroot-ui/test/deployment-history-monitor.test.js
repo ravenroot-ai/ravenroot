@@ -108,3 +108,17 @@ it('exposes only public closure and derivation facts without reading activity ca
   expect(container.textContent).not.toContain('never expose'); expect(queries).not.toContain('activity');
   monitor.destroy();
 });
+it('shows known contribution progress and keeps an unannounced expectation explicit', async () => {
+  const { monitor, container } = fixture(async query => {
+    if (query.view === 'policy') return response(query.view, [{ maxPageSize: 10 }]);
+    if (query.view === 'histories') return response(query.view, [{ applicationCorrelationId: 'ingestion', publicReference: 'sales.csv', state: 'AWAITING_EXTERNAL_EVENT', lifecycle: 'OPEN' }]);
+    if (query.view === 'joins') return response(query.view, [
+      { nodeId: 'six', roundId: 'one', phase: 'OPEN', expectedContributions: 6, receivedContributions: 4, expectation: 'MANIFEST' },
+      { nodeId: 'dynamic', roundId: 'two', phase: 'OPEN', expectedContributions: 0, receivedContributions: 2, expectation: 'UNANNOUNCED' },
+    ]);
+    return response(query.view, []);
+  });
+  await monitor.ready; await flush(); container.querySelector('.history-page li button').click(); await flush();
+  expect(container.textContent).toContain('4/6 contributions'); expect(container.textContent).toContain('2/unavailable contributions');
+  expect(container.textContent).not.toContain('2/0 contributions'); monitor.destroy();
+});

@@ -60,5 +60,10 @@ concurrent scope quotas, scalar keyset paging, original causal checkpoints, term
 strict versioned encoding. Memory does not claim durable reopen. Connector tests additionally exercise
 each transport's verification, acknowledgement, cursor and backpressure rules.
 
+`LakehouseExampleBrowserTest` exercises an actual managed HTTP callback through its START-disconnected
+SOURCE into core HTTP effects with the embedded no-manifest composition. That explicit composition
+binds the trusted policy snapshot captured at runner startup. Manifest-backed hosted runners still
+require the exact resolved execution policy; missing authority is not replaced by startup defaults.
+
 Explicit business close barriers and computed context derivation are described in
 [Business context operations](business-correlation-operations.md).

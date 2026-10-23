@@ -1292,8 +1292,14 @@ public final class GraphRunner implements AutoCloseable {
             throw new IllegalStateException("Traversal " + traversalId + " is already running on this runner");
         }
         try {
+            // A hosted application composed without manifests has no per-execution policy read.
+            // Bind the trusted snapshot captured when this runner was constructed, just as the
+            // ordinary execute overload does. Manifest-backed runners must still supply their
+            // exact execution pin; a missing pin is never replaced by current startup defaults.
+            var boundPolicy = executionOperationalPolicy == null && !executionScopedExternalIo
+                    ? operationalPolicy : executionOperationalPolicy;
             behaviors.bindOperationalPolicy(new ai.ravenroot.api.persistence.ExecutionKey(
-                    security.tenantId(), processInstanceId), traversalId, executionOperationalPolicy,
+                    security.tenantId(), processInstanceId), traversalId, boundPolicy,
                     graph.nodes(), executionScopedExternalIo);
         } catch (RuntimeException refused) {
             coordinators.remove(traversalId, coordinator);

@@ -541,8 +541,8 @@ jobs:
       - name: Verify durable first Run and native and embedded history in real browsers
         working-directory: ravenroot
         run: >-
-          mvn -B --no-transfer-progress -pl ravenroot-server -am
-          -Dtest=FirstRunPersistenceBrowserTest,DeploymentHistoryBrowserTest,EmbedBrowserPlaywrightIntegrationTest
+          mvn -B --no-transfer-progress -pl ravenroot-server,ravenroot-extensions/ravenroot-openapi-server -am
+          -Dtest=FirstRunPersistenceBrowserTest,DeploymentHistoryBrowserTest,EmbedBrowserPlaywrightIntegrationTest,LakehouseExampleBrowserTest
           -Dravenroot.deploymentPersistence.browserTest=true
           -Dravenroot.embed.browserTest=true
           -Dsurefire.failIfNoSpecifiedTests=false test
@@ -555,6 +555,7 @@ jobs:
             ravenroot/ravenroot-server/target/first-run-persistence-browser/
             ravenroot/ravenroot-server/target/history-monitor-browser/
             ravenroot/ravenroot-server/target/embed-browser-evidence/
+            ravenroot/ravenroot-extensions/ravenroot-openapi-server/target/lakehouse-example/
           if-no-files-found: warn
       # Archive unconditionally: this evidence is the only record of a real restart, and a failure
       # here is exactly when it is needed. The UUID keeps repeated harness invocations separate.

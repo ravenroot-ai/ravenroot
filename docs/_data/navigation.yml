@@ -39,6 +39,8 @@
       url: /examples/intergraph/
     - title: Illustrated lakehouse scenario
       url: /examples/lakehouse/
+    - title: Execute six correlated file results
+      url: /examples/correlation/lakehouse.html
     - title: Credentials, providers, and artifacts
       url: /user-guide/integrations-artifacts.html
     - title: Embedded viewing and accessibility

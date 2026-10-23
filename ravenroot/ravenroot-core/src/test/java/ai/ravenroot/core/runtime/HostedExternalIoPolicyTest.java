@@ -34,6 +34,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** A deployment runner selects one exact node-I/O snapshot for each overlapping execution. */
 class HostedExternalIoPolicyTest {
@@ -46,6 +47,26 @@ class HostedExternalIoPolicyTest {
 
     @Test void newThenOldPinsCoexistOnOneHostedRunner() {
         assertCoexistingPins(true);
+    }
+
+    @Test void manifestBackedHostedEntryNeverFallsBackWhenItsExecutionPolicyIsMissing() {
+        var behavior = new CapacityBehavior();
+        BehaviorRegistry registry = NodePackages.register(new BehaviorRegistry(), nodePackage(behavior));
+        var definition = new GraphDefinition(List.of(GraphNode.start("start"),
+                new GraphNode("socket", NodeKind.BEHAVIOR, "test.io", Map.of()),
+                GraphNode.error("error"), GraphNode.end("end")), List.of(
+                GraphEdge.to("start", "socket"), GraphEdge.to("socket", "end")));
+        var engine = new SameThreadExecutionEngine();
+        try (var manager = GraphManager.from(definition);
+             var runner = new GraphRunner(manager, engine, null, registry, new ExecutionMonitor(),
+                     ExecutionIdentitySource.randomUuids(), Duration.ofSeconds(1),
+                     GraphExecutionLimits.DEFAULTS, true)) {
+            assertThrows(ai.ravenroot.api.node.service.NodePackageServiceException.class,
+                    () -> execute(runner, "missing pin", null));
+            assertEquals(0, behavior.resolutions.get());
+            assertEquals(0, behavior.actionCreations.get());
+            assertEquals(0, registry.activeOperationalPolicyCount());
+        } finally { engine.close(); }
     }
 
     @Test void bypassedWebSocketSendNeverResolvesItsMissingProfileOrCreatesAnAction() {

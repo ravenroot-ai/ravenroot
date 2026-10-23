@@ -1445,9 +1445,13 @@ def java_record_components(source: str, symbol: str) -> tuple[str, ...]:
 
 
 def java_record_default_expression_span(source: str, symbol: str, instance_symbol: str,
-                                        field: str) -> tuple[str, int, int] | None:
+                                        field: str, *, compatible_components: tuple[str, ...] | None = None) -> tuple[str, int, int] | None:
     """Read one positional component expression and span from a unique direct record default."""
     components = java_record_components(source, symbol)
+    if compatible_components is not None:
+        if components != compatible_components + ("businessHistories",):
+            return None
+        components = compatible_components
     if field not in components:
         return None
     span = java_type_span(source, symbol)
@@ -2872,6 +2876,11 @@ def helm_authority_from_source(root: Path, candidates: tuple[Candidate, ...]) ->
 def helm_authority_errors(root: Path, authorities: object,
                           entries: dict[str, dict[str, object]],
                           candidates: tuple[Candidate, ...]) -> list[str]:
+    if (root / next(iter(HISTORY_POLICY_SOURCE_LOCKS))).is_file():
+        history_authority = history_policy_authority_from_source(root, current)
+        if history_authority is None:
+            return None, ["cannot derive the reviewed business history policy authority"]
+        refreshed["businessHistoryAuthorities"] = {HISTORY_POLICY_AUTHORITY_ID: history_authority}
     chart_present = helm_chart_present(root, candidates)
     expected = helm_authority_from_source(root, candidates)
     helm_entries = [entry for entry in entries.values() if entry.get("helmAuthority") is not None]
@@ -5662,6 +5671,110 @@ def deployment_carrier_evidence_errors(setting: str, contract: dict[str, object]
 
 
 PERSISTENCE_POLICY_AUTHORITY_ID = "ravenroot-persistence-policy-v1"
+HISTORY_POLICY_AUTHORITY_ID = "ravenroot-business-history-policy-v1"
+HISTORY_POLICY_SOURCE_LOCKS = {'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/correlation/BusinessHistoryPolicy.java': '12a8db0efaca7d441cc599656110db9aaeaa892a081afeb16b9eb68a0038a1b9',
+ 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/correlation/CorrelationLimits.java': '178a53f8d8ed973657051e90443b7dd1eb74645ce57c1ea55ab6819d4a00ac3f',
+ 'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/persistence/BusinessHistoryConfiguration.java': 'de5caa2a572d31a6bd2af100f08a0b5e8e083e6031060ec911bf4cade7b80d04',
+ 'ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/persistence/InMemoryExecutionStorePolicy.java': '60d7d3d81e89d0f427407db92427608b1c70a340d44fa01b68a6dad640d201d5',
+ 'ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteStoreConfig.java': '08df36cb5d53a6d3a870c1d96c0d02cec88a1fa63496d19bfb18c02f6181d7d8',
+ 'ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/PostgresStoreConfig.java': 'c8bd164325090978da0e07f17fb4fa6eb3ab294b8528523277ffea2e859554d7',
+ 'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/persistence/ExecutionStoreConfiguration.java': '4776fad161017b979debc96383b9afdb705c5fedd4afc5395a5ee5f0104c6eab',
+ 'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/persistence/ExecutionStoreBootstrap.java': '58507f92ec4e0bd3190aba108134d815589b6d68847474ce5a97730a484870d7'}
+HISTORY_POLICY_REVIEW = {'status': 'already-centralized',
+ 'classification': 'operator-configurable',
+ 'validation': 'Positive finite value within BusinessHistoryPolicy, CorrelationLimits and PayloadLimits '
+               'constructor ceilings; retained joins >= open joins, join deadline <= retention and response '
+               'projection must cover the requested page.',
+ 'scope': 'Execution-store history policy shared by deployments using that store; response and selection '
+          'limits are dedicated history policy values.',
+ 'pinning': 'Resolved once at store/server composition; an authored graph cannot alter this policy.',
+ 'coverage': 'BusinessHistoryConfigurationTest, DeploymentHistoryHttpIntegrationTest, '
+             'BusinessHistoryContract, ExecutionHistoryContract and CoreSettingsPublicationContractTest '
+             'execute bounds/defaults and generated configuration. SDK-only response tree dimensions are '
+             'constrained by the typed PayloadLimits constructor.',
+ 'historyPolicyAuthority': 'ravenroot-business-history-policy-v1'}
+HISTORY_POLICY_SETTINGS = (
+    ('history.response-max-values', 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/payload/PayloadLimits.java#PayloadLimits', 'maxValueCount', '100000', ['ravenroot.history.response-max-values', 'RAVENROOT_HISTORY_RESPONSE_MAX_VALUES'], ['oc-f04d08c5b1aa69b9946e'], ['oc-f04d08c5b1aa69b9946e', 'oc-e29efec895607177d9cf']),
+    ('history.response-max-bytes', 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/payload/PayloadLimits.java#PayloadLimits', 'maxEncodedBytes', '4194304', ['ravenroot.history.response-max-bytes', 'RAVENROOT_HISTORY_RESPONSE_MAX_BYTES'], ['oc-b3c10967fdbd397e5ab2', 'oc-97408d0cc104796179cf', 'oc-b5005c679beee2ff36de'], ['oc-97408d0cc104796179cf', 'oc-b5005c679beee2ff36de', 'oc-b3c10967fdbd397e5ab2', 'oc-3449f08b8f081f8b063c']),
+    ('history.response-max-collection-size', 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/payload/PayloadLimits.java#PayloadLimits', 'maxCollectionSize', '2000', ['BusinessHistoryPolicy.response / PayloadLimits SDK composition'], ['oc-ff1361a6c999254b8c71'], ['oc-ff1361a6c999254b8c71']),
+    ('history.response-max-key-length', 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/payload/PayloadLimits.java#PayloadLimits', 'maxKeyLength', '256', ['BusinessHistoryPolicy.response / PayloadLimits SDK composition'], ['oc-4dfc03fbe1984bbbd48b'], ['oc-4dfc03fbe1984bbbd48b']),
+    ('history.response-max-text-length', 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/payload/PayloadLimits.java#PayloadLimits', 'maxTextLength', '262144', ['BusinessHistoryPolicy.response / PayloadLimits SDK composition'], ['oc-c62fe5fe92b8f6e256ea'], ['oc-c62fe5fe92b8f6e256ea']),
+    ('history.response-max-depth', 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/payload/PayloadLimits.java#PayloadLimits', 'maxDepth', '64', ['BusinessHistoryPolicy.response / PayloadLimits SDK composition'], ['oc-bb9ffdbdfc7dcf720736'], ['oc-bb9ffdbdfc7dcf720736']),
+    ('history.max-histories-per-scope', 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/correlation/BusinessHistoryPolicy.java#BusinessHistoryPolicy', 'maxHistoriesPerScope', '100000', ['ravenroot.history.max-histories-per-scope', 'RAVENROOT_HISTORY_MAX_HISTORIES_PER_SCOPE'], ['oc-e4f03313723b19baae95'], ['oc-e4f03313723b19baae95', 'oc-d2f4fe23b7ecfcfb23af']),
+    ('history.max-retained-joins', 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/correlation/BusinessHistoryPolicy.java#BusinessHistoryPolicy', 'maxRetainedJoinsPerHistory', '1024', ['ravenroot.history.max-retained-joins', 'RAVENROOT_HISTORY_MAX_RETAINED_JOINS'], ['oc-4ec8dfe31922dd12b2ec'], ['oc-4ec8dfe31922dd12b2ec', 'oc-7b013a0728695830dcf7']),
+    ('history.max-contributions', 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/correlation/BusinessHistoryPolicy.java#BusinessHistoryPolicy', 'maxContributionsPerJoin', '1024', ['ravenroot.history.max-contributions', 'RAVENROOT_HISTORY_MAX_CONTRIBUTIONS'], ['oc-5470a3a61fbf7d1b85a8'], ['oc-5470a3a61fbf7d1b85a8', 'oc-e4f70605c07789ca6e42']),
+    ('history.max-join-payload-bytes', 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/correlation/BusinessHistoryPolicy.java#BusinessHistoryPolicy', 'maxJoinPayloadBytes', '16777216', ['ravenroot.history.max-join-payload-bytes', 'RAVENROOT_HISTORY_MAX_JOIN_PAYLOAD_BYTES'], ['oc-d7cf92f376cbc462c658', 'oc-e38270eea94eb5d00af3', 'oc-52d3a8bde58bd7be4c7f'], ['oc-e38270eea94eb5d00af3', 'oc-52d3a8bde58bd7be4c7f', 'oc-d7cf92f376cbc462c658', 'oc-14344e9dfd06c5b288e6']),
+    ('history.max-open-joins', 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/correlation/BusinessHistoryPolicy.java#BusinessHistoryPolicy', 'maxOpenJoinsPerHistory', '64', ['ravenroot.history.max-open-joins', 'RAVENROOT_HISTORY_MAX_OPEN_JOINS'], ['oc-84bafee6a0c78da43a1a'], ['oc-84bafee6a0c78da43a1a', 'oc-06d23297c8f75047f4da']),
+    ('history.max-page-size', 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/correlation/BusinessHistoryPolicy.java#BusinessHistoryPolicy', 'maxPageSize', '100', ['ravenroot.history.max-page-size', 'RAVENROOT_HISTORY_MAX_PAGE_SIZE'], ['oc-715e3adf8b8c6d254afc'], ['oc-715e3adf8b8c6d254afc', 'oc-6f6aca1094618f9a1565']),
+    ('history.max-cas-attempts', 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/correlation/BusinessHistoryPolicy.java#BusinessHistoryPolicy', 'maxJoinCasAttempts', '128', ['ravenroot.history.max-cas-attempts', 'RAVENROOT_HISTORY_MAX_CAS_ATTEMPTS'], ['oc-cfeaef7d595a75b11b24'], ['oc-cfeaef7d595a75b11b24', 'oc-1a8e40dfe48ffb62e399']),
+    ('history.join-deadline-seconds', 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/correlation/BusinessHistoryPolicy.java#BusinessHistoryPolicy', 'joinDeadline', '86400', ['ravenroot.history.join-deadline-seconds', 'RAVENROOT_HISTORY_JOIN_DEADLINE_SECONDS'], ['oc-ad6f7c0124de50a2c50c'], ['oc-ad6f7c0124de50a2c50c', 'oc-9685402d88aa59c5cf01']),
+    ('history.retention-seconds', 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/correlation/BusinessHistoryPolicy.java#BusinessHistoryPolicy', 'historyRetention', '2592000', ['ravenroot.history.retention-seconds', 'RAVENROOT_HISTORY_RETENTION_SECONDS'], ['oc-60d865b65a4de0d41736'], ['oc-60d865b65a4de0d41736', 'oc-aa6bbf9e0240b32bf19f']),
+    ('history.read-timeout-ms', 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/correlation/BusinessHistoryPolicy.java#BusinessHistoryPolicy', 'readTimeout', '10000', ['ravenroot.history.read-timeout-ms', 'RAVENROOT_HISTORY_READ_TIMEOUT_MS'], ['oc-26239eaf1c8f97502a01'], ['oc-26239eaf1c8f97502a01', 'oc-ecc231c0339353a41907']),
+    ('history.max-selector-characters', 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/correlation/CorrelationLimits.java#CorrelationLimits', 'maxSelectorCharacters', '1024', ['ravenroot.history.max-selector-characters', 'RAVENROOT_HISTORY_MAX_SELECTOR_CHARACTERS'], ['oc-0efc705ce3c680ab19d0'], ['oc-0efc705ce3c680ab19d0', 'oc-1527abd06b79ca01108b']),
+    ('history.max-manifest-items', 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/correlation/CorrelationLimits.java#CorrelationLimits', 'maxManifestItems', '1024', ['ravenroot.history.max-manifest-items', 'RAVENROOT_HISTORY_MAX_MANIFEST_ITEMS'], ['oc-a2ba29e920cc6e971d10'], ['oc-a2ba29e920cc6e971d10', 'oc-c30f3fa923f3aae61ed2']),
+    ('history.max-id-characters', 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/correlation/CorrelationLimits.java#CorrelationLimits', 'maxIdCharacters', '256', ['ravenroot.history.max-id-characters', 'RAVENROOT_HISTORY_MAX_ID_CHARACTERS'], ['oc-c30bb46065c3ee7e2dd1'], ['oc-c30bb46065c3ee7e2dd1', 'oc-377918c79869d13fd670']),
+    ('history.max-selector-segments', 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/correlation/CorrelationLimits.java#CorrelationLimits', 'maxSelectorSegments', '32', ['ravenroot.history.max-selector-segments', 'RAVENROOT_HISTORY_MAX_SELECTOR_SEGMENTS'], ['oc-b875fa4cc310b07559e8'], ['oc-b875fa4cc310b07559e8', 'oc-d5e5852c859609ca1522']),
+    ('history.max-pending-entries', 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/correlation/BusinessHistoryPolicy.java#BusinessHistoryPolicy', 'maxPendingEntriesPerScope', '1024', ['ravenroot.history.max-pending-entries', 'RAVENROOT_HISTORY_MAX_PENDING_ENTRIES'], ['oc-46e354595466fcbaefec'], ['oc-46e354595466fcbaefec']),
+    ('history.max-pending-entry-bytes', 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/correlation/BusinessHistoryPolicy.java#BusinessHistoryPolicy', 'maxPendingEntryBytesPerScope', '16777216', ['ravenroot.history.max-pending-entry-bytes', 'RAVENROOT_HISTORY_MAX_PENDING_ENTRY_BYTES'], ['oc-97ceb106d8bbb0cb8759'], ['oc-97ceb106d8bbb0cb8759']),
+)
+
+
+def history_policy_authority_from_source(root: Path, discovered: dict[str, Candidate]) -> dict[str, object] | None:
+    """Lock the reviewed computed bindings, nested budgets and source-compatible constructors.
+
+    Unlike the generic direct environment adapter, these eighteen bindings compose their names
+    and delegate defaults through nested records. Exact reviewed source locks prevent a refresh
+    from approving changed precedence, defaults, constructor order or ignored configuration.
+    The four remaining response dimensions are explicit SDK-only PayloadLimits composition.
+    """
+    proofs = []
+    for path, digest in HISTORY_POLICY_SOURCE_LOCKS.items():
+        try:
+            actual = hashlib.sha256((root / path).read_bytes()).hexdigest()
+        except OSError:
+            return None
+        if actual != digest:
+            return None
+        proofs.append({"path": path, "digest": actual})
+    contracts = []
+    for setting, owner, field, default, bindings, default_ids, reviewed_ids in HISTORY_POLICY_SETTINGS:
+        metadata = {**HISTORY_POLICY_REVIEW, "setting": setting, "owner": owner, "field": field,
+                    "default": default, "bindings": bindings, "defaultEvidence": default_ids,
+                    "rationale": "Typed history policy owns this finite " + field + " budget; the server resolves its documented property/environment binding before deployment and graph content cannot raise it."}
+        identifiers = sorted(reviewed_ids)
+        if any(identifier not in discovered for identifier in identifiers):
+            return None
+        contracts.append({"setting": setting, "metadata": metadata, "candidateIds": identifiers})
+    return {"kind": "java-business-history-policy-family-v1", "sourceDigests": proofs,
+            "contracts": contracts}
+
+
+def history_policy_authority_errors(root: Path, authorities: object,
+                                    entries: dict[str, dict[str, object]],
+                                    discovered: dict[str, Candidate]) -> list[str]:
+    present = (root / next(iter(HISTORY_POLICY_SOURCE_LOCKS))).is_file()
+    if not present:
+        return [] if authorities in (None, {}) else ["history authority exists without its policy source"]
+    expected = history_policy_authority_from_source(root, discovered)
+    if expected is None:
+        return ["business history policy source, nested defaults or composition has drifted"]
+    errors = []
+    if authorities != {HISTORY_POLICY_AUTHORITY_ID: expected}:
+        errors.append("history settings require the exact reviewed source-derived authority")
+    expected_ids = {identifier for contract in expected["contracts"] for identifier in contract["candidateIds"]}
+    actual_ids = {identifier for identifier, entry in entries.items()
+                  if entry.get("historyPolicyAuthority") is not None
+                  or str(entry.get("setting", "")).startswith("history.")}
+    if actual_ids != expected_ids:
+        errors.append("history policy candidate partition is incomplete or foreign")
+    for contract in expected["contracts"]:
+        for identifier in contract["candidateIds"]:
+            entry = entries.get(identifier, {})
+            if any(entry.get(key) != value for key, value in contract["metadata"].items()):
+                errors.append(f"{identifier}: history setting owner, field, binding, default or coverage has drifted")
+    return errors
+
+
 EXTERNAL_IO_POLICY_AUTHORITY_ID = "ravenroot-external-io-policy-v1"
 EXTERNAL_IO_LIMITS_PATH = Path(
     "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/node/service/ExternalIoLimits.java")
@@ -6217,18 +6330,18 @@ def persistence_policy_authority_from_source(
     default_application = sources[PERSISTENCE_DEFAULT_APPLICATION_PATH]
     pg_components = tuple(field for _setting, field, _property, _environment, _helper, _constraint, _default
                           in PERSISTENCE_POSTGRES_FIELDS)
-    if java_record_components(pg, "PostgresStoreConfig") != pg_components \
+    if java_record_components(pg, "PostgresStoreConfig") != pg_components + ("businessHistories",) \
             or java_record_components(in_memory, "InMemoryExecutionStorePolicy") != tuple(
-                field for _setting, field, _default in PERSISTENCE_IN_MEMORY_FIELDS) \
+                field for _setting, field, _default in PERSISTENCE_IN_MEMORY_FIELDS) + ("businessHistories",) \
             or java_record_components(sqlite, "SqliteStoreConfig") != tuple(
-                field for _setting, field, _default in PERSISTENCE_SQLITE_FIELDS) \
+                field for _setting, field, _default in PERSISTENCE_SQLITE_FIELDS) + ("businessHistories",) \
             or java_record_components(registry, "DeploymentRegistryPolicy") != ("commandRetention", "limits") \
             or java_record_components(sqlite_connection, "SqliteConnectionPolicy") != ("busyTimeout",):
         return None
-    resolver_components = java_record_components(pg, "PostgresStoreConfig")
+    resolver_components = pg_components
     contracts: list[dict[str, object]] = []
     for setting, field, property_name, environment, helper, constraint, approved_default in PERSISTENCE_POSTGRES_FIELDS:
-        default_span = java_record_default_expression_span(pg, "PostgresStoreConfig", "DEFAULTS", field)
+        default_span = java_record_default_expression_span(pg, "PostgresStoreConfig", "DEFAULTS", field, compatible_components=pg_components)
         call = java_constructor_component_call(
             resolver, "PostgresStoreConfiguration", "fromSources", "PostgresStoreConfig",
             resolver_components, field)
@@ -6261,7 +6374,8 @@ def persistence_policy_authority_from_source(
         })
     for setting, field, approved_default in PERSISTENCE_IN_MEMORY_FIELDS:
         span = java_record_default_expression_span(
-            in_memory, "InMemoryExecutionStorePolicy", "DEFAULTS", field)
+            in_memory, "InMemoryExecutionStorePolicy", "DEFAULTS", field,
+            compatible_components=tuple(item[1] for item in PERSISTENCE_IN_MEMORY_FIELDS))
         if span is None or normalized(span[0]) != normalized(approved_default):
             return None
         contracts.append({
@@ -6274,7 +6388,8 @@ def persistence_policy_authority_from_source(
                 PERSISTENCE_IN_MEMORY_POLICY_PATH, in_memory, span[1], span[2], discovered)),
         })
     for setting, field, approved_default in PERSISTENCE_SQLITE_FIELDS:
-        span = java_record_default_expression_span(sqlite, "SqliteStoreConfig", "DEFAULTS", field)
+        span = java_record_default_expression_span(sqlite, "SqliteStoreConfig", "DEFAULTS", field,
+            compatible_components=tuple(item[1] for item in PERSISTENCE_SQLITE_FIELDS))
         if span is None or normalized(span[0]) != normalized(approved_default):
             return None
         default_ids = numeric_candidate_ids_in_source_span(
@@ -6361,7 +6476,7 @@ def persistence_policy_authority_from_source(
     # generated whole-file digest in inventory metadata.
     approved_method_digests = (
         (PERSISTENCE_STORE_CONFIGURATION_PATH, "ExecutionStoreConfiguration", "fromSources",
-         "a039ad53983628039513d754eab7915736c73ae4fd62d5a3622070cae12ecf3d"),
+         "1e9fd9817f0dd53f5f71b61aec3c185365f7cdecf11feccdde321605cd6c81a9"),
         (PERSISTENCE_STORE_CONFIGURATION_PATH, "ExecutionStoreConfiguration", "selectorIn",
          "7c2c5afebf35bf617e1cc3ed71e83f8ee0389484a80a32457ffdc2af54ef6af7"),
         (PERSISTENCE_SHARED_CONNECTION_PATH, "SharedStoreConnection", "fromSources",
@@ -17641,6 +17756,9 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
     errors.extend(helm_authority_errors(
         root, document.get("helmAuthorities"), entries, candidates,
     ))
+    errors.extend(history_policy_authority_errors(
+        root, document.get("businessHistoryAuthorities"), entries, discovered,
+    ))
     errors.extend(persistence_policy_authority_errors(
         root, document.get("persistencePolicyAuthorities"), entries, discovered,
     ))
@@ -17689,6 +17807,10 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
                         if evidence_id not in setting_ids:
                             errors.append(
                                 f"{entry['id']}: defaultEvidence {evidence_id} is not assigned to {setting}")
+            continue
+        if representative.get("historyPolicyAuthority") == HISTORY_POLICY_AUTHORITY_ID:
+            # The mandatory closed authority above checks every exact field/binding/default and
+            # rejects source changes even if a caller also regenerates inventory fingerprints.
             continue
         if representative.get("persistenceAuthority") == PERSISTENCE_POLICY_AUTHORITY_ID:
             continue

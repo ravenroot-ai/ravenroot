@@ -33,7 +33,7 @@ import static org.junit.jupiter.api.Assertions.*;
 /** Real built editor, HTTP admission, durable execution store and engine; no mocked graph APIs. */
 class SagaAuthoringBrowserTest {
     @ParameterizedTest
-    @ValueSource(strings = { "New, default Log", "scope authoring selects", "mixed sagas survive", "Log before a real source" })
+    @ValueSource(strings = { "New, default Log", "scope authoring selects", "mixed sagas survive", "Log before a real source", "catalog and kind transitions" })
     void ordinaryLogAndExplicitMixedSagaRoundTripThroughTheRealEditorAndServer(String scenario) throws Exception {
         Assumptions.assumeTrue(Boolean.getBoolean("ravenroot.sagaAuthoring.browserTest"),
                 "build ravenroot-ui and enable ravenroot.sagaAuthoring.browserTest for browser proof");

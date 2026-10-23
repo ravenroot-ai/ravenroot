@@ -18,7 +18,8 @@ async function inspect(page) {
 }
 async function run(page, button) {
   const started = page.waitForResponse(response => response.request().method() === 'POST'
-    && new URL(response.url()).pathname === '/v1/executions');
+    && (button === '#btn-run' ? new URL(response.url()).pathname.endsWith('/initial-start')
+      : new URL(response.url()).pathname === '/v1/executions'));
   await page.locator(button).click();
   expect((await started).status()).toBe(202);
 }
@@ -134,8 +135,44 @@ test('Log before a real source remains ordinary for Test and source-session Run'
   expect((await inspect(page)).summary.valid).toBe(true);
   await run(page, '#btn-play');
   await expect(page.locator('#btn-run')).toBeEnabled();
-  const start = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === '/v1/source-sessions');
+  const mutations = [];
+  page.on('request', request => { if (request.method() === 'POST') mutations.push(new URL(request.url()).pathname); });
+  const start = page.waitForResponse(response => response.request().method() === 'POST'
+    && new URL(response.url()).pathname.endsWith('/initial-start'));
   await page.locator('#btn-run').click();
   expect((await start).status()).toBe(202);
+  expect(mutations.filter(path => path.endsWith('/initial-start'))).toHaveLength(1);
+  expect(mutations).not.toContain('/v1/source-sessions');
+  await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().deploymentRun?.phase)).toBe('READY');
+  const binding = await page.evaluate(() => window.ravenroot.activeDocument().deploymentRun);
+  expect(binding.processInstanceId).toBeTruthy(); expect(binding.traversalId).toBeTruthy();
   expect((await inspect(page)).xml).not.toContain('<data key="scope">');
+});
+
+test('catalog and kind transitions preserve correlation controls and explicit saga opt-in independently', async ({ page }) => {
+  await connect(page); await importGraph(page, graph(), 'combined-authoring.graphml');
+  await page.locator('#btn-modify').click();
+  await page.evaluate(() => { const cy = window.ravenroot.activeDocument().cy; cy.elements().unselect(); cy.getElementById('transform').select(); });
+  await expect(page.locator('#node-editor [name="id"]')).toHaveValue('transform');
+  await expect(page.locator('[data-saga-enabled]')).not.toBeChecked();
+  await page.locator('[data-saga-enabled]').check();
+  await page.locator('[data-catalog-property="saga.scope"]').fill('order');
+  await page.locator('[data-catalog-property="saga.step"]').fill('reserve');
+  await page.locator('[data-catalog-property="saga.participant"]').selectOption('pure');
+  await page.locator('#node-editor [name="kind"]').selectOption('START');
+  await expect(page.locator('[data-saga-enabled]')).toHaveCount(0);
+  await page.locator('[data-catalog-property="correlation.mode"]').selectOption('ACCEPT_OR_CREATE');
+  await page.locator('[data-catalog-property="correlation.selector"]').fill('/businessId');
+  await page.locator('#node-editor [name="catalogBehavior"]').selectOption('timer');
+  await expect(page.locator('[data-catalog-property="correlation.selector"]')).toHaveValue('/businessId');
+  await expect(page.locator('[data-catalog-property="correlation.mode"]')).toHaveCount(1);
+  await expect(page.locator('[data-saga-enabled]')).toHaveCount(0);
+  await page.locator('#node-editor [name="catalogBehavior"]').selectOption('http-request');
+  await expect(page.locator('[data-saga-enabled]')).not.toBeChecked();
+  await expect(page.locator('[data-catalog-property="saga.scope"]')).toBeDisabled();
+  await expect(page.locator('[data-catalog-property="saga.scope"]')).toHaveCount(1);
+  await page.locator('[data-saga-enabled]').check();
+  await expect(page.locator('[data-catalog-property="saga.scope"]')).toBeEnabled();
+  await page.locator('[data-saga-enabled]').uncheck();
+  await expect(page.locator('[data-catalog-property="saga.scope"]')).toBeDisabled();
 });

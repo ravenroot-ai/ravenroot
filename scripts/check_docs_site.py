@@ -15,7 +15,7 @@ NAVIGATION_URL = re.compile(
     r"^\s+url:\s*(?:\"([^\"]+)\"|'([^']+)'|([^\s#]+))\s*$"
 )
 RAVENROOT_TEMPLATE = re.compile(
-    r"\{\{(?:payload|attributes\.[A-Za-z0-9_.-]+|properties\.[A-Za-z0-9_.-]+)\}\}"
+    r"\{\{(?:payload(?:\.[A-Za-z0-9_.-]+)?|attributes\.[A-Za-z0-9_.-]+|properties\.[A-Za-z0-9_.-]+)\}\}"
 )
 RENDERED_CODE_LITERALS = {
     "/get-started/first-graph.html": {"{{payload}}"},
@@ -25,6 +25,7 @@ RENDERED_CODE_LITERALS = {
     },
     "/reference/node-contracts.html": {"{{payload}}"},
     "/reference/bundles/ai.html": {"{{payload}}"},
+    "/user-guide/email-business-context.html": {"{{payload.content.textPreview}}"},
 }
 
 

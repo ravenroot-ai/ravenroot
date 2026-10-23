@@ -28,7 +28,7 @@ The graph performs these explicit steps:
    existing application ID.
 2. `cel-decision` requires `payload.kind == 'message' && !payload.truncated`. A poison projection or
    truncated preview goes to ERROR, rather than establishing an ID from incomplete text.
-3. `json-parse` reads exactly `{{payload.content.textPreview}}`. Its normal finite UTF-8 byte, depth,
+3. `json-parse` reads exactly `{% raw %}{{payload.content.textPreview}}{% endraw %}`. Its normal finite UTF-8 byte, depth,
    value-count and text limits apply while parsing. Malformed JSON fails the node.
 4. `correlation-derive` maps `/ingestionId`, `/partition`, `/stage`, `/round` and `/filename` from that
    parsed dictionary. It uses `ACCEPT_OR_CREATE` and a literal audit reason. Missing required selected

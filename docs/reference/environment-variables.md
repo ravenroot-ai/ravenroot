@@ -1,6 +1,7 @@
 # Production environment-variable inventory
 
-This generated inventory covers every literal `RAVENROOT_*` environment name read by
+This generated inventory covers every literal `RAVENROOT_*` environment name and the reviewed
+finite history bindings assembled by the shared policy loader, read by
 production Java at the documented development baseline. Published prefixes ending in `_` are dynamic
 families completed by a profile, tenant, credential, or package key as described by the linked
 contract. Reviewed namespace guards that do not read a key or define a dynamic family are excluded.
@@ -305,6 +306,31 @@ Detailed contract: [Human Task policy](configuration.md#human-task-operational-p
 | `RAVENROOT_HUMAN_TASK_RESPONSE_MAX_VALUE_COUNT` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_HUMAN_TASK_WRITE_ATTEMPTS` | See the linked contract for exact type, default, and applicability. |
 
+## Business history and correlated joins
+
+Detailed contract: [Business history and correlated joins](configuration.md#business-history-and-correlated-join-limits).
+
+| Variable or family | Applicability and default boundary |
+|---|---|
+| `RAVENROOT_HISTORY_JOIN_DEADLINE_SECONDS` | startup positive integer; system property `ravenroot.history.join-deadline-seconds` takes precedence, blank delegates to environment; incomplete join deadline; default `86400` seconds, no longer than history retention |
+| `RAVENROOT_HISTORY_MAX_CAS_ATTEMPTS` | startup positive integer; system property `ravenroot.history.max-cas-attempts` takes precedence, blank delegates to environment; join revision-conflict attempts per arrival; default `128` |
+| `RAVENROOT_HISTORY_MAX_CONTRIBUTIONS` | startup positive integer; system property `ravenroot.history.max-contributions` takes precedence, blank delegates to environment; distinct contributions per join; default `1024` |
+| `RAVENROOT_HISTORY_MAX_HISTORIES_PER_SCOPE` | startup positive integer; system property `ravenroot.history.max-histories-per-scope` takes precedence, blank delegates to environment; retained business identities per tenant/deployment/version; default `100000` |
+| `RAVENROOT_HISTORY_MAX_ID_CHARACTERS` | startup positive integer; system property `ravenroot.history.max-id-characters` takes precedence, blank delegates to environment; application/contribution/round identifier ceiling; default `256` characters |
+| `RAVENROOT_HISTORY_MAX_JOIN_PAYLOAD_BYTES` | startup positive integer; system property `ravenroot.history.max-join-payload-bytes` takes precedence, blank delegates to environment; retained contribution payload bytes per join; default `16777216` |
+| `RAVENROOT_HISTORY_MAX_MANIFEST_ITEMS` | startup positive integer; system property `ravenroot.history.max-manifest-items` takes precedence, blank delegates to environment; distinct announced manifest members; default `1024` |
+| `RAVENROOT_HISTORY_MAX_OPEN_JOINS` | startup positive integer; system property `ravenroot.history.max-open-joins` takes precedence, blank delegates to environment; open join generations per history; default `64` |
+| `RAVENROOT_HISTORY_MAX_PAGE_SIZE` | startup positive integer; system property `ravenroot.history.max-page-size` takes precedence, blank delegates to environment; metadata rows per requested page; default `100`, maximum `1000` |
+| `RAVENROOT_HISTORY_MAX_PENDING_ENTRIES` | startup positive integer; system property `ravenroot.history.max-pending-entries` takes precedence, blank delegates to environment; pending source/derivation entries per scope; default `1024`, maximum `100000` |
+| `RAVENROOT_HISTORY_MAX_PENDING_ENTRY_BYTES` | startup positive integer; system property `ravenroot.history.max-pending-entry-bytes` takes precedence, blank delegates to environment; retained entry input/identity/checkpoint bytes per scope; default `16777216`, maximum `67108864` |
+| `RAVENROOT_HISTORY_MAX_RETAINED_JOINS` | startup positive integer; system property `ravenroot.history.max-retained-joins` takes precedence, blank delegates to environment; all retained join generations including terminal tombstones; default `1024` |
+| `RAVENROOT_HISTORY_MAX_SELECTOR_CHARACTERS` | startup positive integer; system property `ravenroot.history.max-selector-characters` takes precedence, blank delegates to environment; authored JSON Pointer ceiling; default `1024` characters |
+| `RAVENROOT_HISTORY_MAX_SELECTOR_SEGMENTS` | startup positive integer; system property `ravenroot.history.max-selector-segments` takes precedence, blank delegates to environment; JSON Pointer depth ceiling; default `32` segments |
+| `RAVENROOT_HISTORY_READ_TIMEOUT_MS` | startup positive integer; system property `ravenroot.history.read-timeout-ms` takes precedence, blank delegates to environment; one SDK history operation wait budget; default `10000`, maximum `60000` milliseconds |
+| `RAVENROOT_HISTORY_RESPONSE_MAX_BYTES` | startup positive integer; system property `ravenroot.history.response-max-bytes` takes precedence, blank delegates to environment; encoded history response ceiling; default `4194304`, maximum `16777216` bytes; oversize responses are refused |
+| `RAVENROOT_HISTORY_RESPONSE_MAX_VALUES` | startup positive integer; system property `ravenroot.history.response-max-values` takes precedence, blank delegates to environment; history response tree ceiling; default `100000`, maximum `1000000` values; must accommodate the maximum metadata page |
+| `RAVENROOT_HISTORY_RETENTION_SECONDS` | startup positive integer; system property `ravenroot.history.retention-seconds` takes precedence, blank delegates to environment; business metadata retention; default `2592000` seconds; compact closure tombstones remain |
+
 ## Identity and HTTP boundary
 
 Detailed contract: [Identity and HTTP boundary](configuration.md#identity-and-browser-controls).
@@ -388,24 +414,6 @@ Detailed contract: [Persistence and recovery](../operator-guide/persistence-life
 | `RAVENROOT_EXECUTION_STORE_POOL_TIMEOUT_MS` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_EXECUTION_STORE_URL` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_EXECUTION_STORE_USER` | See the linked contract for exact type, default, and applicability. |
-| `RAVENROOT_HISTORY_MAX_HISTORIES_PER_SCOPE` | [Business history policy](configuration.md#business-history-and-correlated-join-limits): default `100000`. |
-| `RAVENROOT_HISTORY_MAX_OPEN_JOINS` | [Business history policy](configuration.md#business-history-and-correlated-join-limits): default `64`. |
-| `RAVENROOT_HISTORY_MAX_RETAINED_JOINS` | [Business history policy](configuration.md#business-history-and-correlated-join-limits): default `1024`. |
-| `RAVENROOT_HISTORY_MAX_CONTRIBUTIONS` | [Business history policy](configuration.md#business-history-and-correlated-join-limits): default `1024`. |
-| `RAVENROOT_HISTORY_MAX_JOIN_PAYLOAD_BYTES` | [Business history policy](configuration.md#business-history-and-correlated-join-limits): default `16777216`. |
-| `RAVENROOT_HISTORY_MAX_PENDING_ENTRIES` | [Business history policy](configuration.md#business-history-and-correlated-join-limits): default `1024`. |
-| `RAVENROOT_HISTORY_MAX_PENDING_ENTRY_BYTES` | [Business history policy](configuration.md#business-history-and-correlated-join-limits): default `16777216`. |
-| `RAVENROOT_HISTORY_MAX_PAGE_SIZE` | [Business history policy](configuration.md#business-history-and-correlated-join-limits): default `100`. |
-| `RAVENROOT_HISTORY_RETENTION_SECONDS` | [Business history policy](configuration.md#business-history-and-correlated-join-limits): default `2592000`. |
-| `RAVENROOT_HISTORY_JOIN_DEADLINE_SECONDS` | [Business history policy](configuration.md#business-history-and-correlated-join-limits): default `86400`. |
-| `RAVENROOT_HISTORY_MAX_ID_CHARACTERS` | [Business history policy](configuration.md#business-history-and-correlated-join-limits): default `256`. |
-| `RAVENROOT_HISTORY_MAX_SELECTOR_CHARACTERS` | [Business history policy](configuration.md#business-history-and-correlated-join-limits): default `1024`. |
-| `RAVENROOT_HISTORY_MAX_SELECTOR_SEGMENTS` | [Business history policy](configuration.md#business-history-and-correlated-join-limits): default `32`. |
-| `RAVENROOT_HISTORY_MAX_MANIFEST_ITEMS` | [Business history policy](configuration.md#business-history-and-correlated-join-limits): default `1024`. |
-| `RAVENROOT_HISTORY_MAX_CAS_ATTEMPTS` | [Business history policy](configuration.md#business-history-and-correlated-join-limits): default `128`. |
-| `RAVENROOT_HISTORY_READ_TIMEOUT_MS` | [Business history policy](configuration.md#business-history-and-correlated-join-limits): default `10000`. |
-| `RAVENROOT_HISTORY_RESPONSE_MAX_BYTES` | [Business history policy](configuration.md#business-history-and-correlated-join-limits): default `4194304`. |
-| `RAVENROOT_HISTORY_RESPONSE_MAX_VALUES` | [Business history policy](configuration.md#business-history-and-correlated-join-limits): default `100000`. |
 | `RAVENROOT_POSTGRES_EXECUTION_RESULT_RETENTION_SECONDS` | PostgreSQL durable-result retention; default `604800` seconds |
 | `RAVENROOT_POSTGRES_GRAPH_DEFINITION_UPSERT_ATTEMPTS` | PostgreSQL definition insert/removal race attempts; default `3` |
 | `RAVENROOT_POSTGRES_JOURNAL_RETENTION_SECONDS` | PostgreSQL journal retention; default `86400` seconds |
@@ -538,8 +546,9 @@ Detailed contract: [Tool and approval policy](configuration.md#tool-and-approval
 
 ## Validation
 
-`python3 scripts/publish_environment_reference.py --check` re-extracts literal names
-from production Java, refuses any unclassified name, and compares this page byte-for-byte.
+`python3 scripts/publish_environment_reference.py --check` re-extracts literal names and the
+closed history loader's concrete bindings from production Java, verifies the reviewed source
+fingerprint, refuses any unclassified name, and compares this page byte-for-byte.
 Dynamic suffixes and settings assembled outside Java literals remain covered by their
 maintained parser or command-help checks rather than being invented here.
 

@@ -40,6 +40,37 @@ NAMESPACE_GUARDS = {
     ),
 }
 
+# A closed loader, not an operator-selected dynamic family. Review the complete
+# loader before changing this fingerprint: it proves the suffix transformation,
+# finite call sites, property precedence, and environment lookup belong together.
+HISTORY_BINDING_SOURCE = (
+    Path("ravenroot-server/src/main/java/ai/ravenroot/server/persistence/BusinessHistoryConfiguration.java"),
+    "de5caa2a572d31a6bd2af100f08a0b5e8e083e6031060ec911bf4cade7b80d04",
+)
+HISTORY_BOUNDARIES = {
+    "max-histories-per-scope": "retained business identities per tenant/deployment/version; default `100000`",
+    "max-open-joins": "open join generations per history; default `64`",
+    "max-retained-joins": "all retained join generations including terminal tombstones; default `1024`",
+    "max-contributions": "distinct contributions per join; default `1024`",
+    "max-join-payload-bytes": "retained contribution payload bytes per join; default `16777216`",
+    "max-pending-entries": "pending source/derivation entries per scope; default `1024`, maximum `100000`",
+    "max-pending-entry-bytes": "retained entry input/identity/checkpoint bytes per scope; default `16777216`, maximum `67108864`",
+    "max-page-size": "metadata rows per requested page; default `100`, maximum `1000`",
+    "retention-seconds": "business metadata retention; default `2592000` seconds; compact closure tombstones remain",
+    "join-deadline-seconds": "incomplete join deadline; default `86400` seconds, no longer than history retention",
+    "max-id-characters": "application/contribution/round identifier ceiling; default `256` characters",
+    "max-selector-characters": "authored JSON Pointer ceiling; default `1024` characters",
+    "max-selector-segments": "JSON Pointer depth ceiling; default `32` segments",
+    "max-manifest-items": "distinct announced manifest members; default `1024`",
+    "max-cas-attempts": "join revision-conflict attempts per arrival; default `128`",
+    "read-timeout-ms": "one SDK history operation wait budget; default `10000`, maximum `60000` milliseconds",
+    "response-max-bytes": "encoded history response ceiling; default `4194304`, maximum `16777216` bytes; oversize responses are refused",
+    "response-max-values": "history response tree ceiling; default `100000`, maximum `1000000` values; must accommodate the maximum metadata page",
+}
+HISTORY_VARIABLES = frozenset(
+    "RAVENROOT_HISTORY_" + suffix.upper().replace("-", "_") for suffix in HISTORY_BOUNDARIES
+)
+
 
 @dataclass(frozen=True)
 class Group:
@@ -65,6 +96,7 @@ GROUPS = {
     ),
     "graph": Group("Graph execution", "configuration.md#graph-execution-resource-limits"),
     "human-task": Group("Human Task policy", "configuration.md#human-task-operational-policy"),
+    "history": Group("Business history and correlated joins", "configuration.md#business-history-and-correlated-join-limits"),
     "identity": Group("Identity and HTTP boundary", "configuration.md#identity-and-browser-controls"),
     "interaction-websocket": Group("Interaction WebSocket", "interactions-websocket.md#configuration"),
     "observability": Group("Observability", "configuration.md#observability"),
@@ -279,6 +311,10 @@ ROW_BOUNDARIES = {
 
 
 def boundary(name: str) -> str:
+    if name in HISTORY_VARIABLES:
+        suffix = name.removeprefix("RAVENROOT_HISTORY_").lower().replace("_", "-")
+        return ("startup positive integer; system property `ravenroot.history." + suffix
+                + "` takes precedence, blank delegates to environment; " + HISTORY_BOUNDARIES[suffix])
     return ROW_BOUNDARIES.get(name, "See the linked contract for exact type, default, and applicability.")
 
 BUNDLE_PREFIXES = (
@@ -363,7 +399,18 @@ def variables() -> dict[str, tuple[Path, ...]]:
     for source in sorted(SOURCE.rglob("src/main/java/**/*.java")):
         content = source.read_bytes()
         source_identity = (source.relative_to(SOURCE), hashlib.sha256(content).hexdigest())
+        if source_identity[0] == HISTORY_BINDING_SOURCE[0]:
+            if source_identity != HISTORY_BINDING_SOURCE:
+                raise ValueError("history environment binding source changed; review the closed loader before publication")
+            suffixes = re.findall(r'integer\(properties, environment, "([a-z-]+)"', content.decode("utf-8"))
+            if len(suffixes) != len(HISTORY_BOUNDARIES) or set(suffixes) != set(HISTORY_BOUNDARIES):
+                raise ValueError("history environment binding suffixes differ from the reviewed finite settings")
+            for suffix in suffixes:
+                name = "RAVENROOT_HISTORY_" + suffix.upper().replace("-", "_")
+                found.setdefault(name, set()).add(source)
         for name in VARIABLE.findall(content.decode("utf-8")):
+            if name == "RAVENROOT_HISTORY_" and source_identity == HISTORY_BINDING_SOURCE:
+                continue
             if NAMESPACE_GUARDS.get(name) == source_identity:
                 continue
             found.setdefault(name, set()).add(source)
@@ -383,6 +430,8 @@ def undocumented_variables() -> list[str]:
 
 
 def group(name: str) -> str:
+    if name in HISTORY_VARIABLES:
+        return "history"
     if name in GRAPH_AUTHORING_VARIABLES:
         return "graph-authoring"
     if name in ACTIVITY_CAPTURE_VARIABLES:
@@ -486,7 +535,8 @@ def render() -> str:
         rows[group(name)].append(name)
     body = [
         "# Production environment-variable inventory", "",
-        "This generated inventory covers every literal `RAVENROOT_*` environment name read by",
+        "This generated inventory covers every literal `RAVENROOT_*` environment name and the reviewed",
+        "finite history bindings assembled by the shared policy loader, read by",
         "production Java at the documented development baseline. Published prefixes ending in `_` are dynamic",
         "families completed by a profile, tenant, credential, or package key as described by the linked",
         "contract. Reviewed namespace guards that do not read a key or define a dynamic family are excluded.",
@@ -510,8 +560,9 @@ def render() -> str:
         body.extend(f"| `{name}` | {boundary(name)} |" for name in names)
         body.append("")
     body.extend(("## Validation", "",
-                 "`python3 scripts/publish_environment_reference.py --check` re-extracts literal names",
-                 "from production Java, refuses any unclassified name, and compares this page byte-for-byte.",
+                 "`python3 scripts/publish_environment_reference.py --check` re-extracts literal names and the",
+                 "closed history loader's concrete bindings from production Java, verifies the reviewed source",
+                 "fingerprint, refuses any unclassified name, and compares this page byte-for-byte.",
                  "Dynamic suffixes and settings assembled outside Java literals remain covered by their",
                  "maintained parser or command-help checks rather than being invented here.", ""))
     body.extend(("## Independent UI web server", "",
@@ -540,7 +591,7 @@ def main() -> int:
             return 1
     else:
         OUTPUT.write_text(expected, encoding="utf-8")
-    print(f"Production environment reference is current ({len(variables())} literal names).")
+    print(f"Production environment reference is current ({len(variables())} names and families).")
     return 0
 
 

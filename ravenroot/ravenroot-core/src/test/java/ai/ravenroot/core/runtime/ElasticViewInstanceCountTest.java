@@ -49,17 +49,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * instances for a nature that runs in parallel — because the question it answers is "how much work is
  * this role carrying right now". The count of arrivals is a different quantity and gets its own field.
  *
- * <p><b>Why the divergence is demonstrated on the resident nature and not on {@code WORKER}.</b> An
- * ordinary worker node mints one instance per invocation, so its live-instance count and its
- * in-flight-arrival count hold the same value by construction — the eager-worker defect
- * describes ("queued behind one") is no longer reachable there. It is still reachable, unchanged, for
- * a nature that is resident by contract: {@code GraphRunner} spawns exactly one actor per resident node
- * at construction and every arrival shares it. So a resident node under concurrent load is the state in
- * which the two quantities genuinely disagree, and {@link #tenArrivalsQueuedBehindOneResidentActorAreNotTenInstances}
- * distinguishes the live-instance metric from the arrival counter: the resident case must report
- * one live instance for ten queued arrivals. The {@code WORKER} case below asserts
- * the agreement, which is a real property and not a tautology: it is what proves the new number is
- * being read from the instance registry rather than from the arrival counter that happens to match it.
+ * <p>SOURCE emissions are runtime-owned and never invoke an ordinary node handler. Holding ten
+ * independent source roots at their actual NODE_STARTED observation proves ten in-flight arrivals
+ * share one resident SOURCE instance. Workers instead own one instance per invocation. Both paths
+ * assert settlement counts, so an arrival counter cannot masquerade as an instance counter.
  */
 class ElasticViewInstanceCountTest {
 
@@ -67,25 +60,33 @@ class ElasticViewInstanceCountTest {
     private static final int ARRIVALS = 10;
 
     /**
-     * Ten concurrent arrivals at one resident node, with a single thread to run them.
+     * Ten concurrent runtime-owned SOURCE emissions at one resident node.
      *
-     * <p>Ten traversals are dispatched while the one resident actor is blocked, so ten arrivals are
+     * <p>Ten SOURCE-root traversals are held at their published start boundary, so ten arrivals are
      * in flight and exactly one actor exists. Reading the arrival count for both values reports
      * "10 active", which is the mislabelling: it reports the depth of the queue as the size of the
      * workforce.
      */
     @Test
-    void tenArrivalsQueuedBehindOneResidentActorAreNotTenInstances() throws Exception {
+    void tenConcurrentSourceEmissionsAreNotTenInstances() throws Exception {
         var release = new CountDownLatch(1);
         var arrived = new CountDownLatch(ARRIVALS);
-        // One thread, so nine of the ten arrivals are provably waiting rather than running.
+        // SOURCE emission bypasses its ordinary handler. Hold the actual runtime start boundary,
+        // not a fake SOURCE action, until all ten concurrent emissions have arrived.
         ExecutorService pool = Executors.newFixedThreadPool(1);
+        ExecutorService emissions = Executors.newVirtualThreadPerTaskExecutor();
         var monitor = new ExecutionMonitor();
         var started = new CopyOnWriteArrayList<ExecutionEvent>();
         monitor.subscribe(event -> {
             if (event.type() == ExecutionEventType.NODE_STARTED && "probe".equals(event.nodeId())) {
                 started.add(event);
                 arrived.countDown();
+                try {
+                    if (!release.await(30, TimeUnit.SECONDS)) throw new AssertionError("SOURCE start gate timed out");
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new AssertionError(interrupted);
+                }
             }
         });
 
@@ -94,7 +95,10 @@ class ElasticViewInstanceCountTest {
         var traversals = new CopyOnWriteArrayList<CompletableFuture<?>>();
         try (var runner = new GraphRunner(graph, engine, blockingRegistry(release), monitor)) {
             for (int i = 0; i < ARRIVALS; i++) {
-                traversals.add(runner.execute(TestIdentities.TENANT_A, "payload").toCompletableFuture());
+                traversals.add(CompletableFuture.supplyAsync(() -> runner.executeIngress(TestIdentities.TENANT_A,
+                        UUID.randomUUID(), UUID.randomUUID(), "probe", "payload", "fixture-version",
+                        "fixture-deployment", "fixture-workload", null, null, GraphExecutionLimits.DEFAULTS)
+                        .toCompletableFuture().join(), emissions));
             }
             assertTrue(arrived.await(30, TimeUnit.SECONDS),
                     "all " + ARRIVALS + " arrivals must have been dispatched before the counts are read");
@@ -112,12 +116,13 @@ class ElasticViewInstanceCountTest {
                             + "under its own name");
             assertTrue(peakArrivals > peakInstances,
                     "the two quantities must be able to disagree, or nothing distinguishes them: "
-                            + peakArrivals + " arrivals queued behind " + peakInstances + " instance");
+                            + peakArrivals + " concurrent arrivals sharing " + peakInstances + " instance");
 
             release.countDown();
             CompletableFuture.allOf(traversals.toArray(new CompletableFuture[0])).get(30, TimeUnit.SECONDS);
         } finally {
             release.countDown();
+            emissions.shutdownNow();
             pool.shutdownNow();
             engine.close();
             graph.close();
@@ -239,7 +244,9 @@ class ElasticViewInstanceCountTest {
         var engine = new PooledEngine(pool);
         var graph = GraphManager.from(residentProbeGraph());
         try (var runner = new GraphRunner(graph, engine, blockingRegistry(new CountDownLatch(0)), monitor)) {
-            runner.execute(TestIdentities.TENANT_A, "payload").toCompletableFuture().get(30, TimeUnit.SECONDS);
+            runner.executeIngress(TestIdentities.TENANT_A, UUID.randomUUID(), UUID.randomUUID(), "probe",
+                    "payload", "fixture-version", "fixture-deployment", "fixture-workload", null, null,
+                    GraphExecutionLimits.DEFAULTS).toCompletableFuture().get(30, TimeUnit.SECONDS);
         } finally {
             pool.shutdownNow();
             engine.close();
@@ -293,6 +300,8 @@ class ElasticViewInstanceCountTest {
 
             @Override
             public NodeHandler create(GraphNode node) {
+                if (NodeRuntimeNature.SOURCE.name().equals(node.properties().get(NodeRuntimeNatureProperty.NAME)))
+                    throw new AssertionError("runtime-owned SOURCE emission must never compose an ordinary handler");
                 return message -> {
                     try {
                         release.await(30, TimeUnit.SECONDS);

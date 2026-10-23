@@ -938,6 +938,13 @@ class DefaultRavenrootApplicationLocalDeploymentTest {
             @Override public List<NodeBehavior> behaviors() { return List.of(behavior); }
         };
         BehaviorRegistry registry = NodePackages.register(new BehaviorRegistry(), nodePackage);
+        registry.register("source-probe", message -> {
+            if (behavior instanceof RecordingSourceBehavior recording) {
+                recording.onPayload.accept(message.payload());
+            }
+            return CompletableFuture.completedFuture(
+                    ai.ravenroot.api.execution.NodeResult.continueWith(message.payload()));
+        });
         return new DefaultRavenrootApplication(engine, monitor, registry, new InMemoryArtifactRegistry(),
                 new DisabledProgramRuntime(), ExecutionIdentitySource.randomUuids(), null,
                 maxActiveDeployments, UnknownBehaviorPolicy.passThrough(), definitions);
@@ -1101,7 +1108,9 @@ class DefaultRavenrootApplicationLocalDeploymentTest {
                 <node id="end"><data key="kind">end</data></node>
                 <node id="error"><data key="kind">error</data></node>
                 <edge source="start" target="listener"><data key="outcome">continue</data></edge>
-                <edge source="listener" target="end"><data key="outcome">continue</data></edge>
+                <node id="source-probe"><data key="kind">behavior</data><data key="behavior">source-probe</data></node>
+                <edge source="listener" target="source-probe"><data key="outcome">continue</data></edge>
+                <edge source="source-probe" target="end"><data key="outcome">continue</data></edge>
               </graph>
             </graphml>
             """;

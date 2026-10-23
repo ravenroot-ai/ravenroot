@@ -39,9 +39,11 @@ import java.util.concurrent.CompletionStage;
  * capability, for a caller such as {@link AuditedExecutionResultPurgeTest} that (correctly, per the
  * port's own contract) calls the operation without checking {@code supports(...)} first.
  */
-final class NoExecutionResultsExecutionStore implements ExecutionStore {
+final class NoExecutionResultsExecutionStore implements ForwardingHistoryExecutionStore {
 
     private final ExecutionStore delegate;
+
+    @Override public ExecutionStore delegate() { return delegate; }
 
     NoExecutionResultsExecutionStore(ExecutionStore delegate) {
         this.delegate = delegate;

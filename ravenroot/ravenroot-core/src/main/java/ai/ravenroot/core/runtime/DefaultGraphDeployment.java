@@ -3411,6 +3411,7 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
         public IngressDisposition offer(SecurityContext security, IngressTarget target, Object payload) {
             Objects.requireNonNull(security, "security");
             Objects.requireNonNull(target, "target");
+            if (definition == null) return IngressDisposition.REJECTED_NOT_READY;
             String entryNodeId = ingressEntry(target);
             if (entryNodeId == null && executionStore != null) {
                 var receipt = offerDurably(security, target, payload, "initial-start-v1", "initial-start");
@@ -3561,6 +3562,7 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
             }
             Objects.requireNonNull(security, "security");
             Objects.requireNonNull(target, "target");
+            if (definition == null) return new ai.ravenroot.api.deployment.IngressReceipt.Refused("not ready");
             String entryNodeId = ingressEntry(target);
             String tenantId = security.tenantId();
             String destination = entryNodeId == null ? executionContextDeploymentId + "/initial-start-v1"

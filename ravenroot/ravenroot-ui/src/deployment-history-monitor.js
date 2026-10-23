@@ -226,7 +226,33 @@ export function createDeploymentHistoryMonitor({ container, projection, read, vi
     const max = page.items[0]?.maxPageSize;
     if (!Number.isSafeInteger(max) || max < 1 || max > 1000) throw new TypeError('Invalid history policy');
     limit = Math.min(10, max); initialized = true; retry.hidden = true; status.textContent = t('history.limit', { limit });
-    section(roots, 'history.business', { view: 'histories' }, chooseBusiness);
+    const businesses = section(roots, 'history.business', { view: 'histories' }, chooseBusiness);
+    const search = element('form', null, 'history-search');
+    const field = key => {
+      const label = element('label'), input = element('input'); input.type = 'text'; input.maxLength = 4096;
+      label.append(localize(element('span'), key), input); search.append(label); return input;
+    };
+    const applicationId = field('history.search.applicationId'), reference = field('history.search.reference');
+    const submit = localize(element('button'), 'history.search.submit'); submit.type = 'submit';
+    const apply = async () => {
+      if (applicationId.value.length > 4096 || reference.value.length > 4096) { status.textContent = t('history.search.invalid'); return; }
+      selectionEpoch++; selectionKind = null;
+      for (const state of [...previews.values()]) state.retire();
+      for (const old of selectedSections) old.destroy(); selectedSections = [];
+      selectionDisclosure.hidden = true; rootDisclosure.open = true;
+      localize(rootSummary, 'history.choose'); delete rootSummary.dataset.historyRowView; rowArguments.delete(rootSummary);
+      // Exact filters are sent to the scoped store query. Replacing a selection discards its
+      // cursor trail and fences ignored-abort responses; no downloaded rows are filtered here.
+      return businesses.pager.reset({ view: 'histories',
+        ...(applicationId.value ? { applicationCorrelationId: applicationId.value } : {}),
+        ...(reference.value ? { publicReference: reference.value } : {}) });
+    };
+    search.addEventListener('submit', event => { event.preventDefault(); apply().catch(error => {
+      if (!destroyed && error?.name !== 'AbortError') status.textContent = t('history.failed');
+    }); });
+    search.append(submit, button('history.search.clear', () => { applicationId.value = ''; reference.value = ''; return apply(); }),
+      localize(element('p'), 'history.search.help'));
+    businesses.root.insertBefore(search, businesses.root.querySelector('ul'));
     section(roots, 'history.uncorrelated', { view: 'uncorrelated-traversals' }, row => {
       if (selectionKind !== 'uncorrelated') { selectionEpoch++; for (const state of [...previews.values()]) state.retire();
         for (const old of selectedSections) old.destroy(); selectedSections = []; }

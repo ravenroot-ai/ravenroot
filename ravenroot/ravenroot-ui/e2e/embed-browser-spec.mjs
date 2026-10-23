@@ -810,6 +810,14 @@ test('proof-authorized read-only history exposes actual visits and keeps localiz
   const history = viewer.locator('[data-embed-history]');
   await expect(history.getByRole('heading', { name: 'Deployment history', exact: true })).toBeVisible();
   const businesses = history.locator('.history-page').filter({ has: viewer.getByRole('heading', { name: 'Business histories', exact: true }) });
+  const applicationId = await businesses.locator('li').first().locator('dt').filter({ hasText: /^applicationCorrelationId$/ })
+    .evaluate(node => node.nextElementSibling.textContent);
+  await businesses.getByLabel('Exact application ID', { exact: true }).fill(applicationId);
+  await businesses.getByRole('button', { name: 'Search histories', exact: true }).click();
+  await expect(businesses.locator('li')).toHaveCount(1);
+  await expect(businesses.locator('li button')).toHaveAccessibleName(new RegExp(applicationId));
+  await businesses.getByRole('button', { name: 'Clear search', exact: true }).click();
+  await expect(businesses.locator('li')).toHaveCount(1);
   await businesses.locator('li button').first().click();
   const traversals = history.locator('.history-page').filter({ has: viewer.getByRole('heading', { name: 'Actual traversals', exact: true }) });
   await traversals.locator('li button').first().click();

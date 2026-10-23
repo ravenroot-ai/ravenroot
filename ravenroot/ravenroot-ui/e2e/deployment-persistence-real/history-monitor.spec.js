@@ -56,6 +56,7 @@ test('native monitor reads bounded real persistent histories, visits and retry a
     const url = new URL(response.url()); if (!url.pathname.endsWith('/history')) return;
     pending.push((async () => { const body = await response.body(), data = JSON.parse(body);
       pages.push({ view: url.searchParams.get('view'), requestLimit: Number(url.searchParams.get('limit')), bytes: body.length,
+        applicationCorrelationId: url.searchParams.get('applicationCorrelationId'), publicReference: url.searchParams.get('publicReference'), cursor: url.searchParams.get('cursor'),
         rows: data.items?.length, status: response.status(), duration: response.request().timing().responseEnd }); })());
   });
   await page.goto(ORIGIN); await expect(page.locator('#runtime-connection')).toHaveClass(/connected/, { timeout: 30_000 });
@@ -76,6 +77,14 @@ test('native monitor reads bounded real persistent histories, visits and retry a
   await expect(histories.locator('li button').first()).toContainText('same-file.csv');
   await expect(histories.locator('li button').first()).toContainText('operation-0000');
   await expect(histories.locator('li button').first()).toContainText('AWAITING_EXTERNAL_EVENT');
+  await histories.getByLabel('Exact application ID', { exact: true }).fill('operation-1999');
+  await histories.getByLabel('Exact public reference', { exact: true }).fill('same-file.csv');
+  await histories.getByRole('button', { name: 'Search histories', exact: true }).click();
+  await expect(histories.locator('li')).toHaveCount(1);
+  await expect(histories.locator('li button')).toContainText('operation-1999');
+  await histories.getByRole('button', { name: 'Clear search', exact: true }).click();
+  await expect(histories.locator('li')).toHaveCount(CAP);
+  await expect(histories.locator('li button').first()).toContainText('operation-0000');
   const firstBusiness = await histories.locator('li button').first().innerText();
   await histories.getByRole('button', { name: 'Next page' }).click();
   await expect(histories.locator('li button').first()).not.toHaveText(firstBusiness);
@@ -132,7 +141,11 @@ test('native monitor reads bounded real persistent histories, visits and retry a
   const dom = await monitor.evaluate(node => ({ elements: node.querySelectorAll('*').length, rows: node.querySelectorAll('.history-page li').length,
     previews: node.querySelectorAll('.history-preview').length, scrollWidth: node.scrollWidth, width: node.clientWidth }));
   await Promise.all(pending);
-  expect(failures).toEqual([]); expect(pages.length).toBeLessThan(25); expect(pages.every(page => page.status === 200 && page.rows <= page.requestLimit && page.requestLimit <= CAP)).toBe(true);
+  const exactSearch = pages.filter(page => page.view === 'histories' && page.applicationCorrelationId);
+  expect(exactSearch).toHaveLength(1); expect(exactSearch[0]).toMatchObject({ applicationCorrelationId: 'operation-1999', publicReference: 'same-file.csv', cursor: null, rows: 1 });
+  // Two new explicit reads exercise exact search and clear. The prior navigation/inspection
+  // budget remains 24; neither action may trigger a background drain of history pages.
+  expect(failures).toEqual([]); expect(pages.length - 2).toBeLessThan(25); expect(pages.every(page => page.status === 200 && page.rows <= page.requestLimit && page.requestLimit <= CAP)).toBe(true);
   expect(Math.max(...pages.map(page => page.bytes))).toBeLessThan(20_000); expect(dom.elements).toBeLessThan(1400); expect(dom.rows).toBeLessThanOrEqual(CAP * 7); expect(dom.previews).toBe(1); expect(dom.scrollWidth).toBeLessThanOrEqual(dom.width + 2);
   writeFileSync(join(OUTPUT, `history-bounds-cap-${CAP}.json`), JSON.stringify({ seededHistories: 2000, workerVisits: 1000, workerAttempts: 2000, reopenedSqlite: CAP === 1, contrast, topology, dom, pages }, null, 2));
   await monitor.evaluate(node => { node.scrollTop = 0; });

@@ -122,3 +122,30 @@ it('shows known contribution progress and keeps an unannounced expectation expli
   expect(container.textContent).toContain('4/6 contributions'); expect(container.textContent).toContain('2/unavailable contributions');
   expect(container.textContent).not.toContain('2/0 contributions'); monitor.destroy();
 });
+
+it('searches exact IDs and references on the server and fences a prior page that ignores abort', async () => {
+  const queries = []; let finishOld;
+  const { monitor, container } = fixture(async query => {
+    queries.push(query);
+    if (query.view === 'policy') return response(query.view, [{ maxPageSize: 1 }]);
+    if (query.view === 'histories') {
+      if (query.cursor) return new Promise(resolve => { finishOld = resolve; });
+      return response(query.view, [{ applicationCorrelationId: query.applicationCorrelationId || 'first', publicReference: query.publicReference || 'same.csv' }], query.applicationCorrelationId ? null : 'previous-query');
+    }
+    return response(query.view, []);
+  });
+  await monitor.ready; await flush();
+  const form = container.querySelector('.history-search'), inputs = form.querySelectorAll('input');
+  const business = container.querySelector('.history-page');
+  [...business.querySelectorAll('button')].find(button => button.textContent === 'Next page').click(); await flush();
+  inputs[0].value = 'ingestion-1999'; inputs[1].value = 'same.csv'; form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); await flush();
+  expect(queries.at(-1)).toEqual({ view: 'histories', applicationCorrelationId: 'ingestion-1999', publicReference: 'same.csv', limit: '1' });
+  expect(business.querySelector('li').textContent).toContain('ingestion-1999');
+  finishOld(response('histories', [{ applicationCorrelationId: 'stale' }])); await flush();
+  expect(business.querySelector('li').textContent).not.toContain('stale');
+  const count = queries.length; inputs[0].value = 'x'.repeat(4097); form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); await flush();
+  expect(queries).toHaveLength(count); expect(container.textContent).toContain('at most 4,096');
+  [...form.querySelectorAll('button')].find(button => button.textContent === 'Clear search').click(); await flush();
+  expect(queries.at(-1)).toEqual({ view: 'histories', limit: '1' });
+  expect(business.querySelector('li').textContent).toContain('first'); monitor.destroy();
+});

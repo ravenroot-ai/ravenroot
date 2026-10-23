@@ -34,6 +34,20 @@ lifecycle capabilities. A disabled command is evidence that a precondition is no
 
 ## Read Monitoring mode
 
+For a bound deployment, Monitoring opens **Deployment history** for its exact deployed version.
+Search **Exact application ID** or **Exact public reference** (for example a filename), or provide
+both. Submit **Search histories** to run the scoped server query. The resulting list remains paginated;
+it does not download and filter every retained history. **Clear search** restores the first bounded
+page. Search does not admit START or activate a deployment. Selecting another search retires old
+previews and delayed responses, so an earlier result cannot decorate the new selection.
+
+Choose a business history, then an actual traversal. Each expanded preview preserves the original
+deployed graph and highlights only that traversal's evidence. A maximum of two previews can be open;
+other traversals and node visits load in bounded pages. Select a node to open its persistent inspector,
+then select a visit and attempt. Explicit coverage controls distinguish omitted rows from known zero
+visits. Activity content is a separate authorized bounded read with capture/redaction availability.
+See the executed [six-callback walkthrough](../examples/correlation/lakehouse.md) for real screenshots.
+
 Monitoring overlays activity on the graph selected in the current document or deployment view.
 Confirm the selected deployment and execution before interpreting highlights. A highlighted node or
 edge means matching evidence exists for that scope; it does not by itself prove business completion,

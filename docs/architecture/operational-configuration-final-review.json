@@ -1345,7 +1345,7 @@
         {
           "path": "deploy/kubernetes/ravenroot.yaml",
           "digest": "7195249396e1b3f4dec696a38ca1df9de24492ef19f983c4b8461f1625af804b",
-          "assertion": "Empty values deliberately select application defaults for declared carriers. Issue #575 adds only the separately owned Workbench framing binding and preserves this group\u2019s prior semantics."
+          "assertion": "Empty values deliberately select application defaults for declared carriers. Issue #575 adds only the separately owned Workbench framing binding and preserves this group’s prior semantics."
         }
       ],
       "candidateCount": 81,
@@ -1448,12 +1448,12 @@
         {
           "path": "compose.yaml",
           "digest": "5267de14045b1c0ad52de0d3518fcc9d66bfd782e6e4d1aeda03273c7535a127",
-          "assertion": "Compose carries supported environment key identities. Issue #575 adds only the separately owned Workbench framing binding and preserves this group\u2019s prior semantics."
+          "assertion": "Compose carries supported environment key identities. Issue #575 adds only the separately owned Workbench framing binding and preserves this group’s prior semantics."
         },
         {
           "path": "deploy/kubernetes/ravenroot.yaml",
           "digest": "7195249396e1b3f4dec696a38ca1df9de24492ef19f983c4b8461f1625af804b",
-          "assertion": "Kubernetes carries supported environment key identities. Issue #575 adds only the separately owned Workbench framing binding and preserves this group\u2019s prior semantics."
+          "assertion": "Kubernetes carries supported environment key identities. Issue #575 adds only the separately owned Workbench framing binding and preserves this group’s prior semantics."
         }
       ],
       "candidateCount": 90,
@@ -1705,12 +1705,12 @@
         {
           "path": "compose.yaml",
           "digest": "5267de14045b1c0ad52de0d3518fcc9d66bfd782e6e4d1aeda03273c7535a127",
-          "assertion": "Compose declares explicit local runtime defaults and external carriers. Issue #575 adds only the separately owned Workbench framing binding and preserves this group\u2019s prior semantics."
+          "assertion": "Compose declares explicit local runtime defaults and external carriers. Issue #575 adds only the separately owned Workbench framing binding and preserves this group’s prior semantics."
         },
         {
           "path": "deploy/kubernetes/ravenroot.yaml",
           "digest": "7195249396e1b3f4dec696a38ca1df9de24492ef19f983c4b8461f1625af804b",
-          "assertion": "Kubernetes manifest declares runtime resources, security identity, and probes. Issue #575 adds only the separately owned Workbench framing binding and preserves this group\u2019s prior semantics."
+          "assertion": "Kubernetes manifest declares runtime resources, security identity, and probes. Issue #575 adds only the separately owned Workbench framing binding and preserves this group’s prior semantics."
         }
       ],
       "candidateCount": 20,
@@ -1814,7 +1814,7 @@
         {
           "path": "docs/reference/configuration.md",
           "digest": "8db4183c4264036159093492f2d1a6c8c887886c6af30fbea4036285b914db9d",
-          "assertion": "The operator reference publishes strict Boolean syntax and false default. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #575 adds only the separately owned Workbench framing binding and preserves this group\u2019s prior semantics. Rechecked for #590 source alignment: the retained atom keeps its reviewed meaning alongside explicit deployment, business history and correlation additions; new candidates have separate row-level review."
+          "assertion": "The operator reference publishes strict Boolean syntax and false default. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #575 adds only the separately owned Workbench framing binding and preserves this group’s prior semantics. Rechecked for #590 source alignment: the retained atom keeps its reviewed meaning alongside explicit deployment, business history and correlation additions; new candidates have separate row-level review."
         }
       ],
       "candidateCount": 5,
@@ -5473,7 +5473,7 @@
         {
           "path": "docs/reference/configuration.md",
           "digest": "8db4183c4264036159093492f2d1a6c8c887886c6af30fbea4036285b914db9d",
-          "assertion": "Operator reference publishes supported extension bindings. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #575 adds only the separately owned Workbench framing binding and preserves this group\u2019s prior semantics. Rechecked for #590 source alignment: the retained atom keeps its reviewed meaning alongside explicit deployment, business history and correlation additions; new candidates have separate row-level review."
+          "assertion": "Operator reference publishes supported extension bindings. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #575 adds only the separately owned Workbench framing binding and preserves this group’s prior semantics. Rechecked for #590 source alignment: the retained atom keeps its reviewed meaning alongside explicit deployment, business history and correlation additions; new candidates have separate row-level review."
         }
       ],
       "candidateCount": 44,
@@ -5767,7 +5767,7 @@
         {
           "path": "docs/reference/configuration.md",
           "digest": "8db4183c4264036159093492f2d1a6c8c887886c6af30fbea4036285b914db9d",
-          "assertion": "Operator reference publishes supported server bindings. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #575 adds only the separately owned Workbench framing binding and preserves this group\u2019s prior semantics. Rechecked for #590 source alignment: the retained atom keeps its reviewed meaning alongside explicit deployment, business history and correlation additions; new candidates have separate row-level review."
+          "assertion": "Operator reference publishes supported server bindings. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #575 adds only the separately owned Workbench framing binding and preserves this group’s prior semantics. Rechecked for #590 source alignment: the retained atom keeps its reviewed meaning alongside explicit deployment, business history and correlation additions; new candidates have separate row-level review."
         }
       ],
       "candidateCount": 95,
@@ -8378,8 +8378,8 @@
       "sourceAndConsumerProof": [
         {
           "path": "scripts/publish_environment_reference.py",
-          "digest": "0488d901c11ffa30b78c75f8e5ac2ace3c4c2ef2795b4ea26d2bb42e3f5d9009",
-          "assertion": "Reference publisher enumerates environment vocabulary. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds only explicit native attestation and readiness vocabulary; existing binding authority is unchanged. Issue #552 adds the exact optional System One dynamic profile family while preserving every existing binding identity. Issue #555 preserves the existing reviewed member identities and semantics while adding explicit browser connection persistence and the independent UI server token reference; unrelated settings, defaults and consumers remain unchanged. Issue #575 adds only the separately owned Workbench framing binding and preserves this group\u2019s prior semantics."
+          "digest": "fc2d7d73397ad96e818d62261b744f13b2b4b45927f725a7705703fb8b5d94bf",
+          "assertion": "Reference publisher enumerates environment vocabulary. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds only explicit native attestation and readiness vocabulary; existing binding authority is unchanged. Issue #552 adds the exact optional System One dynamic profile family while preserving every existing binding identity. Issue #555 preserves the existing reviewed member identities and semantics while adding explicit browser connection persistence and the independent UI server token reference; unrelated settings, defaults and consumers remain unchanged. Issue #575 adds only the separately owned Workbench framing binding and preserves this group’s prior semantics. Issue #590 publication correction reviews the closed eighteen-key history loader separately; the prior tooling vocabulary and this historical cohort remain unchanged."
         },
         {
           "path": "scripts/check_release_configuration.py",
@@ -11499,12 +11499,12 @@
         {
           "path": "docs/reference/configuration.md",
           "digest": "8db4183c4264036159093492f2d1a6c8c887886c6af30fbea4036285b914db9d",
-          "assertion": "The operator table publishes the timeout types, bounds, and defaults. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #575 adds only the separately owned Workbench framing binding and preserves this group\u2019s prior semantics. Rechecked for #590 source alignment: the retained atom keeps its reviewed meaning alongside explicit deployment, business history and correlation additions; new candidates have separate row-level review."
+          "assertion": "The operator table publishes the timeout types, bounds, and defaults. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #575 adds only the separately owned Workbench framing binding and preserves this group’s prior semantics. Rechecked for #590 source alignment: the retained atom keeps its reviewed meaning alongside explicit deployment, business history and correlation additions; new candidates have separate row-level review."
         },
         {
           "path": "docs/reference/environment-variables.md",
-          "digest": "18fbea7843e889fa44f6b14b453db08d34b391913f64c4358c25bdd70a653ad2",
-          "assertion": "The environment reference publishes each exact binding name. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds native runner rows; all existing JWKS binding names, ranges, defaults and consumers remain unchanged. Issue #552 adds only the unrelated optional System One profile row; the JWKS bindings and boundaries remain unchanged. Issue #555 preserves the existing reviewed member identities and semantics while adding explicit browser connection persistence and the independent UI server token reference; unrelated settings, defaults and consumers remain unchanged. Issue #575 adds only the separately owned Workbench framing binding and preserves this group\u2019s prior semantics. Rechecked for #590 source alignment: the retained atom keeps its reviewed meaning alongside explicit deployment, business history and correlation additions; new candidates have separate row-level review."
+          "digest": "f2024c10b0b967b5d695cfb5512519f7b53d7622a3834478b9443dc42fbb637b",
+          "assertion": "The environment reference publishes each exact binding name. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds native runner rows; all existing JWKS binding names, ranges, defaults and consumers remain unchanged. Issue #552 adds only the unrelated optional System One profile row; the JWKS bindings and boundaries remain unchanged. Issue #555 preserves the existing reviewed member identities and semantics while adding explicit browser connection persistence and the independent UI server token reference; unrelated settings, defaults and consumers remain unchanged. Issue #575 adds only the separately owned Workbench framing binding and preserves this group’s prior semantics. Rechecked for #590 source alignment: the retained atom keeps its reviewed meaning alongside explicit deployment, business history and correlation additions; new candidates have separate row-level review. Issue #590 publication correction regenerates only the separate history section; all original JWKS rows, defaults, bounds and consumers remain exact."
         }
       ],
       "candidateCount": 4,
@@ -11573,12 +11573,12 @@
         {
           "path": "docs/reference/configuration.md",
           "digest": "8db4183c4264036159093492f2d1a6c8c887886c6af30fbea4036285b914db9d",
-          "assertion": "The operator table publishes the timeout types, bounds, and defaults. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #575 adds only the separately owned Workbench framing binding and preserves this group\u2019s prior semantics. Rechecked for #590 source alignment: the retained atom keeps its reviewed meaning alongside explicit deployment, business history and correlation additions; new candidates have separate row-level review."
+          "assertion": "The operator table publishes the timeout types, bounds, and defaults. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #575 adds only the separately owned Workbench framing binding and preserves this group’s prior semantics. Rechecked for #590 source alignment: the retained atom keeps its reviewed meaning alongside explicit deployment, business history and correlation additions; new candidates have separate row-level review."
         },
         {
           "path": "docs/reference/environment-variables.md",
-          "digest": "18fbea7843e889fa44f6b14b453db08d34b391913f64c4358c25bdd70a653ad2",
-          "assertion": "The environment reference publishes each exact binding name. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds native runner rows; all existing JWKS binding names, ranges, defaults and consumers remain unchanged. Issue #552 adds only the unrelated optional System One profile row; the JWKS bindings and boundaries remain unchanged. Issue #555 preserves the existing reviewed member identities and semantics while adding explicit browser connection persistence and the independent UI server token reference; unrelated settings, defaults and consumers remain unchanged. Issue #575 adds only the separately owned Workbench framing binding and preserves this group\u2019s prior semantics. Rechecked for #590 source alignment: the retained atom keeps its reviewed meaning alongside explicit deployment, business history and correlation additions; new candidates have separate row-level review."
+          "digest": "f2024c10b0b967b5d695cfb5512519f7b53d7622a3834478b9443dc42fbb637b",
+          "assertion": "The environment reference publishes each exact binding name. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds native runner rows; all existing JWKS binding names, ranges, defaults and consumers remain unchanged. Issue #552 adds only the unrelated optional System One profile row; the JWKS bindings and boundaries remain unchanged. Issue #555 preserves the existing reviewed member identities and semantics while adding explicit browser connection persistence and the independent UI server token reference; unrelated settings, defaults and consumers remain unchanged. Issue #575 adds only the separately owned Workbench framing binding and preserves this group’s prior semantics. Rechecked for #590 source alignment: the retained atom keeps its reviewed meaning alongside explicit deployment, business history and correlation additions; new candidates have separate row-level review. Issue #590 publication correction regenerates only the separate history section; all original JWKS rows, defaults, bounds and consumers remain exact."
         }
       ],
       "candidateCount": 1,
@@ -11644,12 +11644,12 @@
         {
           "path": "docs/reference/configuration.md",
           "digest": "8db4183c4264036159093492f2d1a6c8c887886c6af30fbea4036285b914db9d",
-          "assertion": "The operator table publishes the timeout types, bounds, and defaults. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #575 adds only the separately owned Workbench framing binding and preserves this group\u2019s prior semantics. Rechecked for #590 source alignment: the retained atom keeps its reviewed meaning alongside explicit deployment, business history and correlation additions; new candidates have separate row-level review."
+          "assertion": "The operator table publishes the timeout types, bounds, and defaults. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #575 adds only the separately owned Workbench framing binding and preserves this group’s prior semantics. Rechecked for #590 source alignment: the retained atom keeps its reviewed meaning alongside explicit deployment, business history and correlation additions; new candidates have separate row-level review."
         },
         {
           "path": "docs/reference/environment-variables.md",
-          "digest": "18fbea7843e889fa44f6b14b453db08d34b391913f64c4358c25bdd70a653ad2",
-          "assertion": "The environment reference publishes each exact binding name. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds native runner rows; all existing JWKS binding names, ranges, defaults and consumers remain unchanged. Issue #552 adds only the unrelated optional System One profile row; the JWKS bindings and boundaries remain unchanged. Issue #555 preserves the existing reviewed member identities and semantics while adding explicit browser connection persistence and the independent UI server token reference; unrelated settings, defaults and consumers remain unchanged. Issue #575 adds only the separately owned Workbench framing binding and preserves this group\u2019s prior semantics. Rechecked for #590 source alignment: the retained atom keeps its reviewed meaning alongside explicit deployment, business history and correlation additions; new candidates have separate row-level review."
+          "digest": "f2024c10b0b967b5d695cfb5512519f7b53d7622a3834478b9443dc42fbb637b",
+          "assertion": "The environment reference publishes each exact binding name. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds native runner rows; all existing JWKS binding names, ranges, defaults and consumers remain unchanged. Issue #552 adds only the unrelated optional System One profile row; the JWKS bindings and boundaries remain unchanged. Issue #555 preserves the existing reviewed member identities and semantics while adding explicit browser connection persistence and the independent UI server token reference; unrelated settings, defaults and consumers remain unchanged. Issue #575 adds only the separately owned Workbench framing binding and preserves this group’s prior semantics. Rechecked for #590 source alignment: the retained atom keeps its reviewed meaning alongside explicit deployment, business history and correlation additions; new candidates have separate row-level review. Issue #590 publication correction regenerates only the separate history section; all original JWKS rows, defaults, bounds and consumers remain exact."
         }
       ],
       "candidateCount": 1,

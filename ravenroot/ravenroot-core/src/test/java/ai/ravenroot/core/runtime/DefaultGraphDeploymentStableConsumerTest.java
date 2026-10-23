@@ -48,6 +48,46 @@ class DefaultGraphDeploymentStableConsumerTest {
             </graphml>
             """;
 
+    @Test void successorTransportReplayKeepsPendingCustodyWithItsOriginalScopeAndRefusesMissingInput() throws Exception {
+        try (var store = new SqliteExecutionStore(directory.resolve("pending-successor.db"), Clock.systemUTC());
+             var engine = new SameThreadExecutionEngine()) {
+            var hideInput = new java.util.concurrent.atomic.AtomicBoolean();
+            var observed = (ExecutionStore) Proxy.newProxyInstance(ExecutionStore.class.getClassLoader(), new Class<?>[]{ExecutionStore.class},
+                    (proxy, method, arguments) -> {
+                        if (method.getName().equals("deploymentEntry") && hideInput.get()) return CompletableFuture.completedFuture(java.util.Optional.empty());
+                        try { return method.invoke(store, arguments); }
+                        catch (InvocationTargetException wrapped) { throw wrapped.getCause(); }
+                    });
+            var behavior = new SourceBehavior(); var deployment = deployment(engine, observed, behavior, GRAPH);
+            deployment.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
+            try (var consumer = behavior.context.ingress().openDurableConsumer("reader")) {
+                String namespace = sourcePart("test.source") + "/" + sourcePart("source") + "/reader";
+                String destination = "source-v1:" + sourcePart(namespace) + "." + sourcePart("mailbox/42");
+                UUID process = UUID.nameUUIDFromBytes((IDENTITY.tenantId() + '\0' + destination + '\0' + "pending-original").getBytes(StandardCharsets.UTF_8));
+                UUID traversal = UUID.nameUUIDFromBytes((process + "\0traversal").getBytes(StandardCharsets.UTF_8));
+                var originalScope = new ai.ravenroot.api.correlation.BusinessScope(IDENTITY.tenantId(), "original-deployment", "original-version");
+                var context = new ai.ravenroot.api.correlation.ApplicationCorrelationContext("original-business", java.util.Optional.empty(),
+                        java.util.Optional.empty(), "round-1", java.util.Optional.empty());
+                var now = java.time.Instant.now();
+                var proposed = new ai.ravenroot.api.persistence.DeploymentEntryIntent(originalScope, process, traversal, "source", context, IDENTITY,
+                        ai.ravenroot.api.persistence.OpaquePayload.of("\"original input\"".getBytes(StandardCharsets.UTF_8), "application/json"), now, now.plusSeconds(60),
+                        ai.ravenroot.api.correlation.CorrelatedTraversal.Cause.SOURCE_EVENT, null, "", null);
+                var original = store.acceptDeploymentEntry(proposed, ai.ravenroot.api.correlation.CorrelationMapping.Mode.ACCEPT_OR_CREATE)
+                        .toCompletableFuture().join().intent().orElseThrow();
+                assertInstanceOf(IngressReceipt.Duplicate.class, consumer.offerDurably(IDENTITY, IngressTarget.start(),
+                        "new caller input cannot replace original custody", "mailbox/42", "pending-original"));
+                assertEquals(original, store.deploymentEntry(original.key()).toCompletableFuture().join().orElseThrow());
+                var successorScope = new ai.ravenroot.api.correlation.BusinessScope(IDENTITY.tenantId(), deployment.id().value(), deployment.graphVersion());
+                assertTrue(store.businessHistories(successorScope, ai.ravenroot.api.correlation.BusinessHistoryQuery.first(10)).toCompletableFuture().join().items().isEmpty());
+                hideInput.set(true);
+                assertInstanceOf(IngressReceipt.Ambiguous.class, consumer.offerDurably(IDENTITY, IngressTarget.start(),
+                        "cannot fabricate missing original input", "mailbox/42", "pending-original"));
+                assertEquals(original, store.deploymentEntry(original.key()).toCompletableFuture().join().orElseThrow());
+                assertTrue(store.businessHistories(successorScope, ai.ravenroot.api.correlation.BusinessHistoryQuery.first(10)).toCompletableFuture().join().items().isEmpty());
+            } finally { deployment.stop().toCompletableFuture().get(10, TimeUnit.SECONDS); }
+        }
+    }
+
     @Test void newDeploymentAndStoreResumeCursorAndInboxWhileRetiredContextCannotWrite() throws Exception {
         Path database = directory.resolve("consumer.db");
         JournalCursor recorded;
@@ -62,8 +102,7 @@ class DefaultGraphDeploymentStableConsumerTest {
             assertEquals(0, initial.deliveredThrough());
             assertEquals(DurableIngressStartState.ABSENT,
                     retired.startState(IDENTITY, "mailbox/42", "uid-7").toCompletableFuture().join());
-            String namespace = sourcePart("stable-consumer") + "/" + sourcePart(deployment.graphVersion()) + "/"
-                    + sourcePart("test.source") + "/" + sourcePart("source") + "/reader";
+            String namespace = sourcePart("test.source") + "/" + sourcePart("source") + "/reader";
             String destination = "source-v1:" + sourcePart(namespace) + "." + sourcePart("mailbox/42");
             UUID inboxOnlyId = UUID.nameUUIDFromBytes((IDENTITY.tenantId() + '\0' + destination + '\0'
                     + "uid-inbox-only").getBytes(StandardCharsets.UTF_8));
@@ -93,12 +132,20 @@ class DefaultGraphDeploymentStableConsumerTest {
         }
         try (var store = new SqliteExecutionStore(database, Clock.systemUTC()); var engine = new SameThreadExecutionEngine()) {
             var behavior = new SourceBehavior();
-            var deployment = deployment(engine, store, behavior, GRAPH);
+            var deployment = deployment(engine, store, behavior, GRAPH.replace("graph id=\"stable\"", "graph id=\"stable-successor\""));
             deployment.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
             try (var resumed = behavior.context.ingress().openDurableConsumer("reader")) {
                 assertEquals(recorded, resumed.sourceCheckpoint(IDENTITY, "mailbox/42").toCompletableFuture().join());
                 assertInstanceOf(IngressReceipt.Duplicate.class, resumed.offerDurably(IDENTITY,
                         IngressTarget.start(), "mail", "mailbox/42", "uid-7"));
+                var currentScope = new ai.ravenroot.api.correlation.BusinessScope(IDENTITY.tenantId(), deployment.id().value(), deployment.graphVersion());
+                assertTrue(store.businessHistories(currentScope, ai.ravenroot.api.correlation.BusinessHistoryQuery.first(10))
+                        .toCompletableFuture().join().items().isEmpty(), "old transport replay must not create a business history in the successor scope");
+                assertInstanceOf(IngressReceipt.DurablyCommitted.class, resumed.offerDurably(IDENTITY,
+                        IngressTarget.start(), "new mail", "mailbox/42", "uid-8"));
+                awaitStarted(resumed, "uid-8");
+                assertEquals(1, store.businessHistories(currentScope, ai.ravenroot.api.correlation.BusinessHistoryQuery.first(10))
+                        .toCompletableFuture().join().items().size());
                 assertInstanceOf(IngressReceipt.Refused.class, retired.offerDurably(IDENTITY,
                         IngressTarget.start(), "late", "mailbox/42", "uid-8"));
                 assertThrows(CompletionException.class, () -> resumed.advanceSourceCheckpoint(
@@ -257,7 +304,7 @@ class DefaultGraphDeploymentStableConsumerTest {
             @Override public String sdkContract() { return NodeSdk.CONTRACT; }
             @Override public List<NodeBehavior> behaviors() { return List.of(behavior); }
         };
-        return new DefaultGraphDeployment(DeploymentId.of("stable-consumer"), engine,
+        return new DefaultGraphDeployment(DeploymentId.of(UUID.randomUUID().toString()), engine,
                 NodePackages.register(new BehaviorRegistry(), nodePackage), new ExecutionMonitor(),
                 ExecutionIdentitySource.randomUuids(), graph.getBytes(StandardCharsets.UTF_8),
                 DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY, store,

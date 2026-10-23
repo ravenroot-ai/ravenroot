@@ -44,6 +44,14 @@ receipt. For the durable rows, SQLite and PostgreSQL retain the original input a
 before returning a committed receipt. Recovery input is independent of activity capture and is never
 copied into history metadata. See [source custody and restart](../operator-guide/deployment-startup.md#source-receipt-custody-and-restart).
 
+An explicit stable consumer identity is a transport stream, keyed by tenant, trusted behavior,
+source node and consumer ID. It deliberately preserves exclusive checkpoint/inbox continuity across
+replacement deployment IDs and graph versions. That does not merge business histories: a fresh event
+is admitted into the current deployment/version, while replay of an earlier accepted receipt keeps
+its original scope and pending custody. It cannot pin a successor manifest, execute the old input in
+the successor or create a successor business history. Missing nonterminal original input is an
+explicit ambiguous reconciliation outcome. Legacy empty consumer IDs remain deployment-scoped.
+
 ## Runtime conformance
 
 `SourceLocalTraversalTest` exercises source ownership, independent source events, source-to-source
@@ -68,6 +76,12 @@ require the exact resolved execution policy; missing authority is not replaced b
 `AmqpMixedDeploymentExampleTest` executes the [mixed graph](../examples/correlation/mixed.md) against
 actual RabbitMQ, HTTP, SMTP, Pekko and SQLite. It checks four listeners alongside a bounded START
 cycle, sibling email completion, exact source entries and source-to-source boundaries.
+
+`DefaultGraphDeploymentStableConsumerTest` verifies different deployment IDs and changed graph
+versions, exact stream ownership, retired-generation refusal, original pending custody and explicit
+missing-input behavior. `InstalledMailImapConsumeContainerTest` executes the installed mail bundle in
+a JDK 21 container with actual IMAPS, SQLite and Pekko for earliest, latest and empty-latest bootstrap,
+store reopen, new deployment IDs, offline mail and independent shared consumers.
 
 Explicit business close barriers and computed context derivation are described in
 [Business context operations](business-correlation-operations.md).

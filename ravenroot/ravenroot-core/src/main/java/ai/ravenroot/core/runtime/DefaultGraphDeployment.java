@@ -2242,8 +2242,9 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
             boolean releaseOpening = true;
             try {
                 lockUntil(context.lifecycleLock.writeLock(), deadlineNanos, "source ownership reservation");
-                String namespace = encodeSourcePart(executionContextDeploymentId) + "/"
-                        + encodeSourcePart(graphVersion) + "/" + encodeSourcePart(context.behavior) + "/"
+                // An explicit consumer ID is a stable transport stream, including across new
+                // deployment IDs and graph versions. Business admission remains scoped separately.
+                String namespace = encodeSourcePart(context.behavior) + "/"
                         + encodeSourcePart(context.nodeId) + "/" + consumerId;
                 try {
                     if (!context.activeUnderLifecycleLock(deadlineNanos))
@@ -3676,6 +3677,28 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
                         return new ai.ravenroot.api.deployment.IngressReceipt.Refused("store lacks durable source input custody");
                     }
                     try {
+                        if (sourceStore != null) {
+                            var prior = awaitStore(executionStore.correlatedTraversal(tenantId, processInstanceId, traversalId),
+                                    deadlineNanos, "stable consumer original admission");
+                            if (prior.isPresent() && (!prior.orElseThrow().scope().deploymentId().equals(executionContextDeploymentId)
+                                    || !prior.orElseThrow().scope().graphVersion().equals(graphVersion))) {
+                                var original = prior.orElseThrow();
+                                if (!original.entryNodeId().equals(entryNodeId)
+                                        || original.cause() != ai.ravenroot.api.correlation.CorrelatedTraversal.Cause.SOURCE_EVENT)
+                                    throw new ai.ravenroot.api.correlation.BusinessHistoryException(
+                                            ai.ravenroot.api.correlation.BusinessHistoryException.Reason.CONTEXT_CONFLICT);
+                                // Stable transport replay cannot move an earlier receipt, context,
+                                // payload or pending dispatch into this deployment/version. Keep
+                                // custody with its original owner; disclose no foreign history IDs.
+                                boolean retained = original.status().terminal() || awaitStore(executionStore.deploymentEntry(
+                                        new ai.ravenroot.api.persistence.ExecutionKey(tenantId, processInstanceId)),
+                                        deadlineNanos, "stable consumer original custody").isPresent();
+                                releaseAdmission(traversalId, permits);
+                                return retained ? new ai.ravenroot.api.deployment.IngressReceipt.Duplicate(idempotentKey)
+                                        : new ai.ravenroot.api.deployment.IngressReceipt.Ambiguous(idempotentKey,
+                                                "original source input is unavailable; reconciliation required");
+                            }
+                        }
                         recordGraphDefinition(security, deadlineNanos);
                         recordExecutionManifest(new ai.ravenroot.api.persistence.ExecutionKey(tenantId, processInstanceId), deadlineNanos);
                         var snapshot = ai.ravenroot.api.payload.PayloadValue.fromJava(payload, graphExecutionLimits.payload());

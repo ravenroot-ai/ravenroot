@@ -14020,13 +14020,13 @@ SAGA_OUTBOX_CAPACITY_SOURCE_PROOFS = {
         "159cf602178d4cd65038cdbc1949fd2f1d097826fde3a2c52a3347fb5dddaa93",
     "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/persistence/"
     "InMemoryExecutionStore.java":
-        "690aaed8f9a257fc33a3d32567d6a2e585916a1d81725feaa98fa84897890235",
+        "7d3e4de5e0b68cc646628c3f4fc850c36449d29e2b5b1b2dd5e659478c91020c",
     "ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/"
     "SqliteExecutionStore.java":
-        "4da9cc0c08f46491f7c65a2dae5cf63d78a98339e0c9d65a09a68c63b69c7b48",
+        "7c3eec67692602d3837ecb838d40527de6a52161906d85bd09d8a96b8d1bbcc3",
     "ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/"
     "postgresql/PostgresExecutionStore.java":
-        "c40b44108a1f6dac54d025495c8da0923c77a08d64e80937bb194596d9cfba85",
+        "63b6423c24837893bf1498fb79f47fadb9965cf4677cab0fb7c83d63ff8f6a5d",
     "ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/"
     "ExecutionStoreContract.java":
         "5ee3bc4bd46a9aad8f11c59071c5004f5b21469dfb3dceefe03e171b85a0a5c0",

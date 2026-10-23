@@ -43,14 +43,15 @@ bundle references rather than inferred from the descriptor snapshot.
 Each property table may scroll horizontally on a narrow viewport. Jump directly to a node:
 
 - [`agent`](#node-agent) · [`amqp.consume`](#node-amqp-consume) · [`amqp.publish`](#node-amqp-publish) · [`bigint-op`](#node-bigint-op) · [`boundary-guard`](#node-boundary-guard) · [`cel-decision`](#node-cel-decision) · [`cel-transform`](#node-cel-transform)
-- [`crontab`](#node-crontab) · [`delay`](#node-delay) · [`discord.interactions`](#node-discord-interactions) · [`discord.send`](#node-discord-send) · [`filesystem.read`](#node-filesystem-read) · [`filesystem.write`](#node-filesystem-write) · [`git-workspace`](#node-git-workspace)
-- [`github-app-review`](#node-github-app-review) · [`github-events-source`](#node-github-events-source) · [`github-workflow-watch`](#node-github-workflow-watch) · [`http-request`](#node-http-request) · [`human-task`](#node-human-task) · [`jdbc.insert`](#node-jdbc-insert) · [`jdbc.query`](#node-jdbc-query)
-- [`json-parse`](#node-json-parse) · [`json-path`](#node-json-path) · [`kafka.consume`](#node-kafka-consume) · [`kafka.produce`](#node-kafka-produce) · [`llm-prompt`](#node-llm-prompt) · [`log`](#node-log) · [`mail.imap.consume`](#node-mail-imap-consume)
-- [`mail.imap.delete`](#node-mail-imap-delete) · [`mail.imap.move`](#node-mail-imap-move) · [`mail.imap.query`](#node-mail-imap-query) · [`mail.send`](#node-mail-send) · [`matrix.send`](#node-matrix-send) · [`matrix.sync`](#node-matrix-sync) · [`mattermost.outgoing-webhook`](#node-mattermost-outgoing-webhook)
-- [`mattermost.send`](#node-mattermost-send) · [`object.delete`](#node-object-delete) · [`object.get`](#node-object-get) · [`object.list`](#node-object-list) · [`object.put`](#node-object-put) · [`ocr.extract`](#node-ocr-extract) · [`openapi.call`](#node-openapi-call)
-- [`openapi.receive`](#node-openapi-receive) · [`openapi.request-reply`](#node-openapi-request-reply) · [`program`](#node-program) · [`project-transition`](#node-project-transition) · [`release-prepare`](#node-release-prepare) · [`slack.commands`](#node-slack-commands) · [`slack.events`](#node-slack-events)
-- [`slack.post-message`](#node-slack-post-message) · [`spel.decision`](#node-spel-decision) · [`spel.transform`](#node-spel-transform) · [`system-one-evaluate`](#node-system-one-evaluate) · [`teams.outgoing-webhook`](#node-teams-outgoing-webhook) · [`teams.send`](#node-teams-send) · [`telegram.answer.callback`](#node-telegram-answer-callback)
-- [`telegram.delete.message`](#node-telegram-delete-message) · [`telegram.edit.message`](#node-telegram-edit-message) · [`telegram.send`](#node-telegram-send) · [`template`](#node-template) · [`timer`](#node-timer) · [`websocket.receive`](#node-websocket-receive) · [`websocket.send`](#node-websocket-send)
+- [`correlation-close`](#node-correlation-close) · [`correlation-derive`](#node-correlation-derive) · [`crontab`](#node-crontab) · [`delay`](#node-delay) · [`discord.interactions`](#node-discord-interactions) · [`discord.send`](#node-discord-send) · [`filesystem.read`](#node-filesystem-read)
+- [`filesystem.write`](#node-filesystem-write) · [`git-workspace`](#node-git-workspace) · [`github-app-review`](#node-github-app-review) · [`github-events-source`](#node-github-events-source) · [`github-workflow-watch`](#node-github-workflow-watch) · [`http-request`](#node-http-request) · [`human-task`](#node-human-task)
+- [`jdbc.insert`](#node-jdbc-insert) · [`jdbc.query`](#node-jdbc-query) · [`json-parse`](#node-json-parse) · [`json-path`](#node-json-path) · [`kafka.consume`](#node-kafka-consume) · [`kafka.produce`](#node-kafka-produce) · [`llm-prompt`](#node-llm-prompt)
+- [`log`](#node-log) · [`mail.imap.consume`](#node-mail-imap-consume) · [`mail.imap.delete`](#node-mail-imap-delete) · [`mail.imap.move`](#node-mail-imap-move) · [`mail.imap.query`](#node-mail-imap-query) · [`mail.send`](#node-mail-send) · [`matrix.send`](#node-matrix-send)
+- [`matrix.sync`](#node-matrix-sync) · [`mattermost.outgoing-webhook`](#node-mattermost-outgoing-webhook) · [`mattermost.send`](#node-mattermost-send) · [`object.delete`](#node-object-delete) · [`object.get`](#node-object-get) · [`object.list`](#node-object-list) · [`object.put`](#node-object-put)
+- [`ocr.extract`](#node-ocr-extract) · [`openapi.call`](#node-openapi-call) · [`openapi.receive`](#node-openapi-receive) · [`openapi.request-reply`](#node-openapi-request-reply) · [`program`](#node-program) · [`project-transition`](#node-project-transition) · [`release-prepare`](#node-release-prepare)
+- [`slack.commands`](#node-slack-commands) · [`slack.events`](#node-slack-events) · [`slack.post-message`](#node-slack-post-message) · [`spel.decision`](#node-spel-decision) · [`spel.transform`](#node-spel-transform) · [`system-one-evaluate`](#node-system-one-evaluate) · [`teams.outgoing-webhook`](#node-teams-outgoing-webhook)
+- [`teams.send`](#node-teams-send) · [`telegram.answer.callback`](#node-telegram-answer-callback) · [`telegram.delete.message`](#node-telegram-delete-message) · [`telegram.edit.message`](#node-telegram-edit-message) · [`telegram.send`](#node-telegram-send) · [`template`](#node-template) · [`timer`](#node-timer)
+- [`websocket.receive`](#node-websocket-receive) · [`websocket.send`](#node-websocket-send)
 
 ## `agent` {#node-agent}
 
@@ -106,7 +107,7 @@ Canonical runtime rules: [amqp091 bundle reference](bundles/amqp091.md).
 | Declared allowed natures | SOURCE |
 | Application command allowlist | Not declared |
 | Runtime concurrency | default 64; ceiling 256 |
-| Outcomes | Not declared |
+| Outcomes | continue: An admitted event enters this SOURCE and follows its outgoing flow. |
 
 | Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---|---|---:|---|---|---:|---|---|---|
@@ -125,6 +126,13 @@ Canonical runtime rules: [amqp091 bundle reference](bundles/amqp091.md).
 | `deadLetterMode` | Dead-letter mode | Confirms broker DLX rejection; topology remains operator-owned. | `STRING` | false | Not declared | broker-dlx | false | poisonPolicy:EQUALS:dead-letter | poisonPolicy:EQUALS:dead-letter | Not declared |
 | `checkpointPolicy` | Checkpoint policy | Not declared | `STRING` | false | require-durable | require-durable | false | Not declared | Not declared | Not declared |
 | `resourceMode` | Resource mode | Shared allows independent sources to consume the authorized queue. Exclusive permits only one process-local source for the tenant, profile and queue. | `STRING` | false | shared | shared,exclusive | false | mode:EQUALS:Consumer | Not declared | Not declared |
+| `correlation.mode` | Application ID policy | Generate a new history, accept an external ID or require an existing authorized history. | `STRING` | false | GENERATE_NEW | GENERATE_NEW,ACCEPT_OR_CREATE,REQUIRE_EXISTING | false | Not declared | Not declared | Not declared |
+| `correlation.contributionSelector` | Contribution ID selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.kindSelector` | Contribution kind selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.referenceSelector` | Public reference selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.roundSelector` | Join round selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.secondarySelector` | Confirming ID selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.selector` | Application ID selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
 
 ## `amqp.publish` {#node-amqp-publish}
 
@@ -167,6 +175,11 @@ Canonical runtime rules: [amqp091 bundle reference](bundles/amqp091.md).
 | `confirmTimeoutMs` | Confirm timeout | One total deadline; may only tighten the operator profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `maxConcurrency` | Concurrency | May only tighten the operator profile (1-16). | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `retries` | Pre-publish retries | Only proven connection-establishment failures are retried (0-3). | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `correlation.outgoing.applicationHeader` | Application ID outgoing header | Optional dedicated X-* header, outside reserved X-Ravenroot-*. Copies established context only; existing connector/profile limits still apply. Blank disables this mapping. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 64; max items 1; max item UTF-8 bytes 64 |
+| `correlation.outgoing.contributionHeader` | Contribution ID outgoing header | Optional dedicated X-* header, outside reserved X-Ravenroot-*. Copies established context only; existing connector/profile limits still apply. Blank disables this mapping. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 64; max items 1; max item UTF-8 bytes 64 |
+| `correlation.outgoing.kindHeader` | Contribution kind outgoing header | Optional dedicated X-* header, outside reserved X-Ravenroot-*. Copies established context only; existing connector/profile limits still apply. Blank disables this mapping. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 64; max items 1; max item UTF-8 bytes 64 |
+| `correlation.outgoing.referenceHeader` | Public reference outgoing header | Optional dedicated X-* header, outside reserved X-Ravenroot-*. Copies established context only; existing connector/profile limits still apply. Blank disables this mapping. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 64; max items 1; max item UTF-8 bytes 64 |
+| `correlation.outgoing.roundHeader` | Join round outgoing header | Optional dedicated X-* header, outside reserved X-Ravenroot-*. Copies established context only; existing connector/profile limits still apply. Blank disables this mapping. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 64; max items 1; max item UTF-8 bytes 64 |
 | `recovery.repeatable` | Repeatable after an unknown outcome | Whether republishing this message after a crash of unknown outcome is safe. The broker does not deduplicate; say repeatable only where the consumer discards a message id it has already handled. | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
 | `saga.scope` | Saga scope | Versioned saga scope. Leave empty outside a saga. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `saga.step` | Saga step | Logical step identity retained across transport retries. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
@@ -281,6 +294,60 @@ Canonical runtime rules: [core behavior reference](core-nodes.md).
 |---|---|---|---|---:|---|---|---:|---|---|---|
 | `expression` | CEL expression | Expression result becomes the outgoing payload. | `CEL_EXPRESSION` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
+## `correlation-close` {#node-correlation-close}
+
+Canonical runtime rules: [core behavior reference](core-nodes.md).
+[Complete GraphML example](../examples/nodes/correlation-close.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Close business history |
+| Category | Correlation |
+| Description | Requests explicit closure after already-admitted causal work settles; new external events are refused immediately. |
+| Visual type | actor |
+| Agentic | false |
+| Capabilities | application-correlation,durable |
+| Declared default nature | Not declared |
+| Declared allowed natures | Not declared |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | continue: The original causal close signal and node completion committed together. |
+
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `disposition` | Requested business outcome | Blocks new external admissions while existing causal work settles. Missing contributions or failures cannot become success. | `STRING` | false | COMPLETED | COMPLETED,FAILED,CANCELLED | false | Not declared | Not declared | Not declared |
+| `auditReason` | Audit reason | Literal non-secret reason for this explicit authored operation; retained with original process, traversal, visit and attempt identities. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 500; max items 1; max item UTF-8 bytes 500 |
+
+## `correlation-derive` {#node-correlation-derive}
+
+Canonical runtime rules: [core behavior reference](core-nodes.md).
+[Complete GraphML example](../examples/nodes/correlation-derive.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Derive business context |
+| Category | Correlation |
+| Description | Extracts a new business identity from structured input and transfers bounded custody to one authored successor. The original context stays immutable. |
+| Visual type | actor |
+| Agentic | false |
+| Capabilities | application-correlation,durable |
+| Declared default nature | Not declared |
+| Declared allowed natures | Not declared |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | continue: One pinned successor begins a distinct traversal with audited original causality. |
+
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `auditReason` | Audit reason | Literal non-secret reason for this explicit authored operation; retained with original process, traversal, visit and attempt identities. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 500; max items 1; max item UTF-8 bytes 500 |
+| `correlation.mode` | Application ID policy | Generate a new history, accept an external ID or require an existing authorized history. | `STRING` | false | GENERATE_NEW | GENERATE_NEW,ACCEPT_OR_CREATE,REQUIRE_EXISTING | false | Not declared | Not declared | Not declared |
+| `correlation.contributionSelector` | Contribution ID selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.kindSelector` | Contribution kind selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.referenceSelector` | Public reference selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.roundSelector` | Join round selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.secondarySelector` | Confirming ID selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.selector` | Application ID selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+
 ## `crontab` {#node-crontab}
 
 Canonical runtime rules: [core behavior reference](core-nodes.md).
@@ -305,6 +372,13 @@ Canonical runtime rules: [core behavior reference](core-nodes.md).
 | `zoneId` | Timezone | IANA timezone ID, for example Europe/Rome or UTC. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 128; max items 1; max item UTF-8 bytes 128 |
 | `entries` | Cron entries | Up to 128 five-field numeric entries. Blank lines and full-line # comments are allowed. | `TEXT` | true | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 16384 |
 | `misfirePolicy` | Misfire policy | How occurrences missed while unavailable are handled. | `STRING` | false | LATEST_ONLY | SKIP,LATEST_ONLY | false | Not declared | Not declared | max UTF-8 bytes 32; max items 1; max item UTF-8 bytes 32 |
+| `correlation.mode` | Application ID policy | Generate a new history, accept an external ID or require an existing authorized history. | `STRING` | false | GENERATE_NEW | GENERATE_NEW,ACCEPT_OR_CREATE,REQUIRE_EXISTING | false | Not declared | Not declared | Not declared |
+| `correlation.contributionSelector` | Contribution ID selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.kindSelector` | Contribution kind selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.referenceSelector` | Public reference selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.roundSelector` | Join round selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.secondarySelector` | Confirming ID selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.selector` | Application ID selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
 
 ## `delay` {#node-delay}
 
@@ -346,11 +420,18 @@ Canonical runtime rules: [discord bundle reference](bundles/discord.md).
 | Declared allowed natures | SOURCE |
 | Application command allowlist | Not declared |
 | Runtime concurrency | default 64; ceiling 256 |
-| Outcomes | Not declared |
+| Outcomes | continue: An admitted event enters this SOURCE and follows its outgoing flow. |
 
 | Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---|---|---:|---|---|---:|---|---|---|
 | `discordProfile` | Discord profile | Opaque tenant-scoped operator profile; graph content cannot create provider authority. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `correlation.mode` | Application ID policy | Generate a new history, accept an external ID or require an existing authorized history. | `STRING` | false | GENERATE_NEW | GENERATE_NEW,ACCEPT_OR_CREATE,REQUIRE_EXISTING | false | Not declared | Not declared | Not declared |
+| `correlation.contributionSelector` | Contribution ID selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.kindSelector` | Contribution kind selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.referenceSelector` | Public reference selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.roundSelector` | Join round selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.secondarySelector` | Confirming ID selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.selector` | Application ID selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
 
 ## `discord.send` {#node-discord-send}
 
@@ -502,11 +583,18 @@ Canonical runtime rules: [github bundle reference](bundles/github.md).
 | Declared allowed natures | SOURCE |
 | Application command allowlist | Not declared |
 | Runtime concurrency | default 64; ceiling 256 |
-| Outcomes | Not declared |
+| Outcomes | continue: An admitted event enters this SOURCE and follows its outgoing flow. |
 
 | Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---|---|---:|---|---|---:|---|---|---|
 | `githubProfile` | GitHub profile | Opaque tenant-scoped operator profile; authority never comes from graph content. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `correlation.mode` | Application ID policy | Generate a new history, accept an external ID or require an existing authorized history. | `STRING` | false | GENERATE_NEW | GENERATE_NEW,ACCEPT_OR_CREATE,REQUIRE_EXISTING | false | Not declared | Not declared | Not declared |
+| `correlation.contributionSelector` | Contribution ID selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.kindSelector` | Contribution kind selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.referenceSelector` | Public reference selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.roundSelector` | Join round selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.secondarySelector` | Confirming ID selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.selector` | Application ID selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
 
 ## `github-workflow-watch` {#node-github-workflow-watch}
 
@@ -564,6 +652,11 @@ Canonical runtime rules: [core behavior reference](core-nodes.md).
 | `failureOutcome` | Failure outcome | Outcome for non-2xx responses. | `STRING` | false | error | Not declared | false | Not declared | Not declared | Not declared |
 | `saga.outcomeLookupUrl` | Saga outcome lookup URL | Participant lookup URL rendered after an unknown HTTP result. Supports <code>{% raw %}{{attributes.sagaOperationId}}{% endraw %}</code>. | `TEXT` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `recovery.repeatable` | Repeatable after an unknown outcome | Whether repeating this request after a crash of unknown outcome is safe. Required for methods that change state. | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | method:ONE_OF:POST,PUT,PATCH,DELETE | Not declared |
+| `correlation.outgoing.applicationHeader` | Application ID outgoing header | Optional dedicated X-* header, outside reserved X-Ravenroot-*. Copies established context only; existing connector/profile limits still apply. Blank disables this mapping. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 64; max items 1; max item UTF-8 bytes 64 |
+| `correlation.outgoing.contributionHeader` | Contribution ID outgoing header | Optional dedicated X-* header, outside reserved X-Ravenroot-*. Copies established context only; existing connector/profile limits still apply. Blank disables this mapping. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 64; max items 1; max item UTF-8 bytes 64 |
+| `correlation.outgoing.kindHeader` | Contribution kind outgoing header | Optional dedicated X-* header, outside reserved X-Ravenroot-*. Copies established context only; existing connector/profile limits still apply. Blank disables this mapping. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 64; max items 1; max item UTF-8 bytes 64 |
+| `correlation.outgoing.referenceHeader` | Public reference outgoing header | Optional dedicated X-* header, outside reserved X-Ravenroot-*. Copies established context only; existing connector/profile limits still apply. Blank disables this mapping. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 64; max items 1; max item UTF-8 bytes 64 |
+| `correlation.outgoing.roundHeader` | Join round outgoing header | Optional dedicated X-* header, outside reserved X-Ravenroot-*. Copies established context only; existing connector/profile limits still apply. Blank disables this mapping. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 64; max items 1; max item UTF-8 bytes 64 |
 | `saga.scope` | Saga scope | Versioned saga scope. Leave empty outside a saga. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `saga.step` | Saga step | Logical step identity retained across transport retries. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `saga.participant` | Participant contract | Explicit participant contract supported by this trusted behavior. | `STRING` | false | Not declared | http-idempotency-v1 | false | Not declared | Not declared | Not declared |
@@ -755,7 +848,7 @@ Canonical runtime rules: [kafka bundle reference](bundles/kafka.md).
 | Declared allowed natures | SOURCE |
 | Application command allowlist | Not declared |
 | Runtime concurrency | default 64; ceiling 256 |
-| Outcomes | Not declared |
+| Outcomes | continue: An admitted event enters this SOURCE and follows its outgoing flow. |
 
 | Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---|---|---:|---|---|---:|---|---|---|
@@ -774,6 +867,13 @@ Canonical runtime rules: [kafka bundle reference](bundles/kafka.md).
 | `poisonPolicy` | Poison policy | Not declared | `STRING` | false | profile | profile,halt,dead-letter | false | Not declared | Not declared | Not declared |
 | `deadLetterTopic` | Dead-letter topic | Logical confirmation of the operator-authorized dead-letter topic. | `STRING` | false | Not declared | Not declared | false | poisonPolicy:EQUALS:dead-letter | poisonPolicy:EQUALS:dead-letter | Not declared |
 | `checkpointPolicy` | Checkpoint policy | Not declared | `STRING` | false | require-durable | require-durable | false | Not declared | Not declared | Not declared |
+| `correlation.mode` | Application ID policy | Generate a new history, accept an external ID or require an existing authorized history. | `STRING` | false | GENERATE_NEW | GENERATE_NEW,ACCEPT_OR_CREATE,REQUIRE_EXISTING | false | Not declared | Not declared | Not declared |
+| `correlation.contributionSelector` | Contribution ID selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.kindSelector` | Contribution kind selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.referenceSelector` | Public reference selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.roundSelector` | Join round selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.secondarySelector` | Confirming ID selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.selector` | Application ID selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
 
 ## `kafka.produce` {#node-kafka-produce}
 
@@ -874,7 +974,7 @@ Canonical runtime rules: [mail bundle reference](bundles/mail.md).
 | Declared allowed natures | SOURCE |
 | Application command allowlist | Not declared |
 | Runtime concurrency | default 64; ceiling 256 |
-| Outcomes | Not declared |
+| Outcomes | continue: An admitted event enters this SOURCE and follows its outgoing flow. |
 
 | Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---|---|---:|---|---|---:|---|---|---|
@@ -893,6 +993,13 @@ Canonical runtime rules: [mail bundle reference](bundles/mail.md).
 | `allowedHeaders` | Allowed headers | Optional comma-separated tightening of the operator-authorized inbound header allowlist. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `checkpointPolicy` | Checkpoint policy | Only durable checkpointing is supported. | `STRING` | false | require-durable | require-durable | false | Not declared | Not declared | Not declared |
 | `resourceMode` | Resource mode | Shared allows independent sources to consume the authorized folder. Exclusive permits only one process-local source for the tenant, profile and folder. | `STRING` | false | shared | shared,exclusive | false | Not declared | Not declared | Not declared |
+| `correlation.mode` | Application ID policy | Generate a new history, accept an external ID or require an existing authorized history. | `STRING` | false | GENERATE_NEW | GENERATE_NEW,ACCEPT_OR_CREATE,REQUIRE_EXISTING | false | Not declared | Not declared | Not declared |
+| `correlation.contributionSelector` | Contribution ID selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.kindSelector` | Contribution kind selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.referenceSelector` | Public reference selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.roundSelector` | Join round selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.secondarySelector` | Confirming ID selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.selector` | Application ID selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
 
 ## `mail.imap.delete` {#node-mail-imap-delete}
 
@@ -1019,6 +1126,11 @@ Canonical runtime rules: [mail bundle reference](bundles/mail.md).
 | `maxEncodedAttachmentBytes` | Base64 aggregate limit | May only tighten profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `maxConcurrency` | Concurrency limit | Optional 1–16 limit; blank uses the mail profile ceiling and a value may only tighten it. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `defaultFrom` | Default sender | Legacy exact-match only. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `correlation.outgoing.applicationHeader` | Application ID outgoing header | Optional dedicated X-* header, outside reserved X-Ravenroot-*. Copies established context only; existing connector/profile limits still apply. Blank disables this mapping. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 64; max items 1; max item UTF-8 bytes 64 |
+| `correlation.outgoing.contributionHeader` | Contribution ID outgoing header | Optional dedicated X-* header, outside reserved X-Ravenroot-*. Copies established context only; existing connector/profile limits still apply. Blank disables this mapping. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 64; max items 1; max item UTF-8 bytes 64 |
+| `correlation.outgoing.kindHeader` | Contribution kind outgoing header | Optional dedicated X-* header, outside reserved X-Ravenroot-*. Copies established context only; existing connector/profile limits still apply. Blank disables this mapping. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 64; max items 1; max item UTF-8 bytes 64 |
+| `correlation.outgoing.referenceHeader` | Public reference outgoing header | Optional dedicated X-* header, outside reserved X-Ravenroot-*. Copies established context only; existing connector/profile limits still apply. Blank disables this mapping. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 64; max items 1; max item UTF-8 bytes 64 |
+| `correlation.outgoing.roundHeader` | Join round outgoing header | Optional dedicated X-* header, outside reserved X-Ravenroot-*. Copies established context only; existing connector/profile limits still apply. Blank disables this mapping. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 64; max items 1; max item UTF-8 bytes 64 |
 
 ## `matrix.send` {#node-matrix-send}
 
@@ -1064,13 +1176,20 @@ Canonical runtime rules: [matrix bundle reference](bundles/matrix.md).
 | Declared allowed natures | SOURCE |
 | Application command allowlist | Not declared |
 | Runtime concurrency | default 64; ceiling 256 |
-| Outcomes | Not declared |
+| Outcomes | continue: An admitted event enters this SOURCE and follows its outgoing flow. |
 
 | Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---|---|---:|---|---|---:|---|---|---|
 | `matrixProfile` | Matrix profile | Opaque tenant-scoped operator profile; graph content cannot create provider authority. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `pollTimeoutMs` | Poll timeout | May only tighten the operator profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `maxEventsPerSync` | Events per sync | May only tighten the operator profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `correlation.mode` | Application ID policy | Generate a new history, accept an external ID or require an existing authorized history. | `STRING` | false | GENERATE_NEW | GENERATE_NEW,ACCEPT_OR_CREATE,REQUIRE_EXISTING | false | Not declared | Not declared | Not declared |
+| `correlation.contributionSelector` | Contribution ID selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.kindSelector` | Contribution kind selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.referenceSelector` | Public reference selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.roundSelector` | Join round selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.secondarySelector` | Confirming ID selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.selector` | Application ID selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
 
 ## `mattermost.outgoing-webhook` {#node-mattermost-outgoing-webhook}
 
@@ -1089,11 +1208,18 @@ Canonical runtime rules: [mattermost bundle reference](bundles/mattermost.md).
 | Declared allowed natures | SOURCE |
 | Application command allowlist | Not declared |
 | Runtime concurrency | default 64; ceiling 256 |
-| Outcomes | Not declared |
+| Outcomes | continue: An admitted event enters this SOURCE and follows its outgoing flow. |
 
 | Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---|---|---:|---|---|---:|---|---|---|
 | `mattermostProfile` | Mattermost profile | Opaque tenant-scoped operator profile; graph content cannot create provider authority. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `correlation.mode` | Application ID policy | Generate a new history, accept an external ID or require an existing authorized history. | `STRING` | false | GENERATE_NEW | GENERATE_NEW,ACCEPT_OR_CREATE,REQUIRE_EXISTING | false | Not declared | Not declared | Not declared |
+| `correlation.contributionSelector` | Contribution ID selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.kindSelector` | Contribution kind selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.referenceSelector` | Public reference selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.roundSelector` | Join round selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.secondarySelector` | Confirming ID selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.selector` | Application ID selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
 
 ## `mattermost.send` {#node-mattermost-send}
 
@@ -1308,7 +1434,7 @@ Canonical runtime rules: [openapi-server bundle reference](bundles/openapi-serve
 | Declared allowed natures | SOURCE |
 | Application command allowlist | Not declared |
 | Runtime concurrency | default 64; ceiling 256 |
-| Outcomes | Not declared |
+| Outcomes | continue: An admitted event enters this SOURCE and follows its outgoing flow. |
 
 | Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---|---|---:|---|---|---:|---|---|---|
@@ -1318,6 +1444,13 @@ Canonical runtime rules: [openapi-server bundle reference](bundles/openapi-serve
 | `maxIdempotencyBytes` | Idempotency bytes | May only tighten the operator profile ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `deadlineMs` | Deadline | May only tighten the operator profile ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `maxConcurrency` | Concurrency | May only tighten the operator profile ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `correlation.mode` | Application ID policy | Generate a new history, accept an external ID or require an existing authorized history. | `STRING` | false | GENERATE_NEW | GENERATE_NEW,ACCEPT_OR_CREATE,REQUIRE_EXISTING | false | Not declared | Not declared | Not declared |
+| `correlation.contributionSelector` | Contribution ID selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.kindSelector` | Contribution kind selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.referenceSelector` | Public reference selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.roundSelector` | Join round selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.secondarySelector` | Confirming ID selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.selector` | Application ID selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
 
 ## `openapi.request-reply` {#node-openapi-request-reply}
 
@@ -1336,7 +1469,7 @@ Canonical runtime rules: [openapi-server bundle reference](bundles/openapi-serve
 | Declared allowed natures | SOURCE |
 | Application command allowlist | respond |
 | Runtime concurrency | default 64; ceiling 256 |
-| Outcomes | responded: A declared response was accepted for the active HTTP exchange. |
+| Outcomes | continue: An admitted request enters this SOURCE and continues downstream.; responded: An explicit respond command accepted a response for the active HTTP exchange. |
 
 | Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---|---|---:|---|---|---:|---|---|---|
@@ -1347,6 +1480,13 @@ Canonical runtime rules: [openapi-server bundle reference](bundles/openapi-serve
 | `maxResponseBytes` | Response bytes | May only tighten the operator profile ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `deadlineMs` | Deadline | May only tighten the operator profile ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `maxConcurrency` | Concurrency | May only tighten the operator profile ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `correlation.mode` | Application ID policy | Generate a new history, accept an external ID or require an existing authorized history. | `STRING` | false | GENERATE_NEW | GENERATE_NEW,ACCEPT_OR_CREATE,REQUIRE_EXISTING | false | Not declared | Not declared | Not declared |
+| `correlation.contributionSelector` | Contribution ID selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.kindSelector` | Contribution kind selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.referenceSelector` | Public reference selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.roundSelector` | Join round selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.secondarySelector` | Confirming ID selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.selector` | Application ID selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
 
 ## `program` {#node-program}
 
@@ -1439,11 +1579,18 @@ Canonical runtime rules: [slack bundle reference](bundles/slack.md).
 | Declared allowed natures | SOURCE |
 | Application command allowlist | Not declared |
 | Runtime concurrency | default 64; ceiling 256 |
-| Outcomes | Not declared |
+| Outcomes | continue: An admitted event enters this SOURCE and follows its outgoing flow. |
 
 | Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---|---|---:|---|---|---:|---|---|---|
 | `slackProfile` | Slack profile | Opaque tenant-scoped operator profile; graph content cannot create provider authority. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `correlation.mode` | Application ID policy | Generate a new history, accept an external ID or require an existing authorized history. | `STRING` | false | GENERATE_NEW | GENERATE_NEW,ACCEPT_OR_CREATE,REQUIRE_EXISTING | false | Not declared | Not declared | Not declared |
+| `correlation.contributionSelector` | Contribution ID selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.kindSelector` | Contribution kind selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.referenceSelector` | Public reference selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.roundSelector` | Join round selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.secondarySelector` | Confirming ID selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.selector` | Application ID selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
 
 ## `slack.events` {#node-slack-events}
 
@@ -1462,11 +1609,18 @@ Canonical runtime rules: [slack bundle reference](bundles/slack.md).
 | Declared allowed natures | SOURCE |
 | Application command allowlist | Not declared |
 | Runtime concurrency | default 64; ceiling 256 |
-| Outcomes | Not declared |
+| Outcomes | continue: An admitted event enters this SOURCE and follows its outgoing flow. |
 
 | Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---|---|---:|---|---|---:|---|---|---|
 | `slackProfile` | Slack profile | Opaque tenant-scoped operator profile; graph content cannot create provider authority. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `correlation.mode` | Application ID policy | Generate a new history, accept an external ID or require an existing authorized history. | `STRING` | false | GENERATE_NEW | GENERATE_NEW,ACCEPT_OR_CREATE,REQUIRE_EXISTING | false | Not declared | Not declared | Not declared |
+| `correlation.contributionSelector` | Contribution ID selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.kindSelector` | Contribution kind selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.referenceSelector` | Public reference selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.roundSelector` | Join round selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.secondarySelector` | Confirming ID selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.selector` | Application ID selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
 
 ## `slack.post-message` {#node-slack-post-message}
 
@@ -1586,11 +1740,18 @@ Canonical runtime rules: [teams bundle reference](bundles/teams.md).
 | Declared allowed natures | SOURCE |
 | Application command allowlist | Not declared |
 | Runtime concurrency | default 64; ceiling 256 |
-| Outcomes | Not declared |
+| Outcomes | continue: An admitted event enters this SOURCE and follows its outgoing flow. |
 
 | Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---|---|---:|---|---|---:|---|---|---|
 | `teamsProfile` | Teams profile | Opaque tenant-scoped operator profile; graph content cannot create provider authority. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `correlation.mode` | Application ID policy | Generate a new history, accept an external ID or require an existing authorized history. | `STRING` | false | GENERATE_NEW | GENERATE_NEW,ACCEPT_OR_CREATE,REQUIRE_EXISTING | false | Not declared | Not declared | Not declared |
+| `correlation.contributionSelector` | Contribution ID selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.kindSelector` | Contribution kind selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.referenceSelector` | Public reference selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.roundSelector` | Join round selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.secondarySelector` | Confirming ID selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.selector` | Application ID selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
 
 ## `teams.send` {#node-teams-send}
 
@@ -1781,6 +1942,13 @@ Canonical runtime rules: [core behavior reference](core-nodes.md).
 | `weekdays` | Weekdays | Comma-separated ISO weekdays; omitted means every day. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 128; max items 7; max item UTF-8 bytes 12 |
 | `mode` | Mode | ONCE emits the first match after activation; RECURRING continues. | `STRING` | true | ONCE | ONCE,RECURRING | false | Not declared | Not declared | max UTF-8 bytes 32; max items 1; max item UTF-8 bytes 32 |
 | `misfirePolicy` | Misfire policy | How occurrences missed while unavailable are handled. | `STRING` | false | LATEST_ONLY | SKIP,LATEST_ONLY | false | Not declared | Not declared | max UTF-8 bytes 32; max items 1; max item UTF-8 bytes 32 |
+| `correlation.mode` | Application ID policy | Generate a new history, accept an external ID or require an existing authorized history. | `STRING` | false | GENERATE_NEW | GENERATE_NEW,ACCEPT_OR_CREATE,REQUIRE_EXISTING | false | Not declared | Not declared | Not declared |
+| `correlation.contributionSelector` | Contribution ID selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.kindSelector` | Contribution kind selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.referenceSelector` | Public reference selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.roundSelector` | Join round selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.secondarySelector` | Confirming ID selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.selector` | Application ID selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
 
 ## `websocket.receive` {#node-websocket-receive}
 
@@ -1799,7 +1967,7 @@ Canonical runtime rules: [websocket bundle reference](bundles/websocket.md).
 | Declared allowed natures | SOURCE |
 | Application command allowlist | Not declared |
 | Runtime concurrency | default 64; ceiling 256 |
-| Outcomes | Not declared |
+| Outcomes | continue: An admitted event enters this SOURCE and follows its outgoing flow. |
 
 | Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---|---|---:|---|---|---:|---|---|---|
@@ -1807,6 +1975,13 @@ Canonical runtime rules: [websocket bundle reference](bundles/websocket.md).
 | `maxMessageBytes` | Maximum message bytes | May only tighten the operator profile ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `maxFragments` | Maximum fragments | May only tighten the operator profile ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `timeoutMs` | Handshake deadline (ms) | May only tighten the operator profile ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `correlation.mode` | Application ID policy | Generate a new history, accept an external ID or require an existing authorized history. | `STRING` | false | GENERATE_NEW | GENERATE_NEW,ACCEPT_OR_CREATE,REQUIRE_EXISTING | false | Not declared | Not declared | Not declared |
+| `correlation.contributionSelector` | Contribution ID selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.kindSelector` | Contribution kind selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.referenceSelector` | Public reference selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.roundSelector` | Join round selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.secondarySelector` | Confirming ID selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
+| `correlation.selector` | Application ID selector | Explicit RFC 6901 JSON Pointer over the exposed event payload. No expression evaluation or fallback. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 1024; max items 1; max item UTF-8 bytes 1024 |
 
 ## `websocket.send` {#node-websocket-send}
 

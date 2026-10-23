@@ -44,6 +44,20 @@ final class ConfiguratorCoreContractCompatibilityTest {
                     () -> negativeEnvironmentLabel(fixtures, "bundle.service-grant", vector));
         }
 
+        Map<String, String> history = environment(fixtures, "core.history");
+        var historyConfig = (ai.ravenroot.server.persistence.ExecutionStoreConfiguration.SingleHost)
+                ai.ravenroot.server.persistence.ExecutionStoreConfiguration.fromEnvironment(history);
+        var policy = historyConfig.storeConfig().businessHistories();
+        assertEquals(100, policy.maxPageSize()); assertEquals(1024, policy.maxPendingEntriesPerScope());
+        assertEquals(256, policy.selection().maxIdCharacters()); assertEquals(4194304, policy.response().maxEncodedBytes());
+        assertThrows(RuntimeException.class, () -> ai.ravenroot.server.persistence.ExecutionStoreConfiguration.fromEnvironment(invalidEnvironment(fixtures, "core.history")));
+        assertEquals(39, negativeEnvironmentCount(fixtures, "core.history"));
+        for (int index = 0; index < negativeEnvironmentCount(fixtures, "core.history"); index++) {
+            int vector = index;
+            assertThrows(RuntimeException.class, () -> ai.ravenroot.server.persistence.ExecutionStoreConfiguration.fromEnvironment(
+                    negativeEnvironment(fixtures, "core.history", vector)), () -> negativeEnvironmentLabel(fixtures, "core.history", vector));
+        }
+
         Map<String, String> http = environment(fixtures, "core.http");
         assertNotNull(OutboundHttpPolicy.fromCommaSeparated(http.get("RAVENROOT_HTTP_ALLOWED_HOSTS"),
                 http.get("RAVENROOT_HTTP_ALLOWED_PORTS"), Long.parseLong(http.get("RAVENROOT_HTTP_MAX_RESPONSE_BYTES")),

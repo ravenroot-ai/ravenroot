@@ -81,6 +81,49 @@ reason after terminal custody input is retired. History APIs expose this scalar 
 business summaries expose their nullable `closureSignal`. The ordinary and proof-protected embed
 history routes use the same projections and authorization boundaries.
 
+## Configure a cross-traversal join
+
+These are platform GraphML properties on the receiving node, separate from ordinary
+`joinPolicy` branch/iteration fan-in. In the editor, author them through the node's additional
+properties; the runnable [six-partition GraphML](../examples/correlation/lakehouse-six-partitions.graphml)
+shows the exact key declarations and a PASSTHROUGH receiving node.
+
+| Property | Contract |
+|---|---|
+| `correlatedJoin.mode` | `NONE` (default), `FIXED_COUNT`, `FIXED_MANIFEST`, or `DYNAMIC_MANIFEST`. |
+| `correlatedJoin.expectedCount` | Literal expected distinct contribution count for `FIXED_COUNT`; cannot coexist with its selector. |
+| `correlatedJoin.expectedCountSelector` | Explicit JSON Pointer to a nonnegative integer in the payload delivered to the join; requires trusted producer entries. |
+| `correlatedJoin.expectedIds` | JSON array of distinct bounded contribution IDs for `FIXED_MANIFEST`, for example `["part-1","part-2","part-3","part-4","part-5","part-6"]`. |
+| `correlatedJoin.manifestSelector` | Required dynamic-mode pointer to the complete expected-ID array in the delivered producer payload. |
+| `correlatedJoin.sealSelector` | Required dynamic-mode pointer to an actual JSON boolean declaring the expectation complete. |
+| `correlatedJoin.trustedProducerEntries` | JSON array naming pinned START, SOURCE or proven explicit derivation entry node IDs allowed to announce counts/manifests/seals. An ordinary worker or payload field cannot grant this authority. |
+
+Configure contribution and round selectors at the actual entry. The join uses the established typed
+context, even after payload transforms. Its selectors for producer announcements read the payload
+**at the join**, so deliberately preserve or transform that declared shape along the producer path.
+A producer signal may omit a contribution ID. An ordinary result must have one. Incompatible mode
+properties, invalid IDs/counts, over-limit input or untrusted control-only signals fail explicitly.
+
+For example, a `DYNAMIC_MANIFEST` node can use `manifestSelector=/expected`, `sealSelector=/sealed`
+and `trustedProducerEntries=["producer"]`. A SOURCE named `producer` may deliver
+`{"expected":["part-1","part-2"],"sealed":false}`, then later the same set with `sealed=true`.
+Results may arrive before the manifest, within finite contribution and byte limits. All results
+without a seal remain waiting. Later announcements may expand an unsealed expectation but cannot
+reduce it; a sealed incompatible expectation refuses. An event entering at another SOURCE cannot
+grant itself producer status by copying these payload fields.
+
+The durable join key includes exact scope, application ID, receiving node and explicit round.
+Duplicate matching contributions count once; conflicting same-ID content refuses. A retry remains
+in its original round. Supply a new explicit round for a later business cycle; late old-round input
+cannot fill its slots. Completeness commits READY and a deterministic independent continuation
+outbox together. Original contribution process/traversal/visit/attempt IDs remain causal evidence.
+
+The operator's `joinDeadline` and retained-input limits are finite. An incomplete expired collection
+becomes `EXPIRED` with missing members visible and no Gold continuation. Cancellation, held
+admission and retired source generations cannot dispatch a continuation into a different lifecycle.
+Use history views `joins` and `join-members` to inspect expected, received and missing members,
+phase, round and deadline without loading captured payloads. Activity capture can remain disabled.
+
 ## Runtime and storage verification
 
 The runtime tests execute an ordinary transform followed by an explicit derive operation, a
@@ -97,7 +140,7 @@ does not grant that authority. Payload fields and event attributes cannot grant 
 
 ## Propagate context through an external service
 
-The `http-request`, `amqp.publish.v1`, and `mail.send.v1` catalog types expose five optional
+The `http-request`, `amqp.publish`, and `mail.send` catalog types expose five optional
 outgoing properties. Configure literal dedicated headers, for example:
 
 | Property | Example target | Established value |

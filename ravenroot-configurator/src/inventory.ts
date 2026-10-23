@@ -31,6 +31,7 @@ export const NODE_COVERAGE: readonly NodeCoverage[] = [
   authorOnly("bigint-op"),
   covered("boundary-guard", "core", ["core.publication-policies"]),
   authorOnly("cel-decision"), authorOnly("cel-transform"), authorOnly("crontab"), authorOnly("delay"),
+  covered("correlation-close", "core", ["core.history"]), covered("correlation-derive", "core", ["core.history"]),
   covered("discord.interactions", "Discord", ["discord.config"]),
   covered("discord.send", "Discord", ["discord.config"]),
   covered("filesystem.read", "Filesystem", ["filesystem.profile"]),

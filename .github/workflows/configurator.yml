@@ -43,6 +43,9 @@ on:
       - ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runner/RunnerJson.java
       - ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java
       - ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/ProgramRuntimeConfiguration.java
+      - ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/persistence/BusinessHistoryConfiguration.java
+      - ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/correlation/BusinessHistoryPolicy.java
+      - ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/correlation/CorrelationLimits.java
       - ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RunnerPlaneConfiguration.java
       - ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/PublicationPolicyConfiguration.java
       - ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/humantaskinteraction/HumanTaskInteractionConfiguration.java

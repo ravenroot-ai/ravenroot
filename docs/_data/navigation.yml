@@ -114,6 +114,10 @@
 
 - title: Architecture and security
   items:
+    - title: Deployment and business identity glossary
+      url: /reference/execution-identity.html
+    - title: Business history acceptance and release qualification
+      url: /qa/business-history-acceptance.html
     - title: Architecture overview
       url: /architecture/
     - title: UI internationalization

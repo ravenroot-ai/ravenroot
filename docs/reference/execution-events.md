@@ -74,6 +74,28 @@ the failure classification on the event.
 
 ## Event delivery
 
+### SOURCE boundaries and business context
+
+`SOURCE_BOUNDARY` records a graph edge reaching an enabled SOURCE and stopping that branch. It
+retains the actual node/visit/attempt identity; it does not mean a listener failed or emitted another
+event. Only an accepted event whose actual entry is that SOURCE emits its admitted input through
+`continue`. Read the traversal entry and boundary event together when a source node appears in
+several histories. SOURCE readiness is deployment lifecycle state, separate from path activity.
+
+`EDGE_TRAVERSED` identifies the actual stable edge ID, including loop edges. Node/edge summary counts
+are scoped to the selected actual traversal; they do not establish a flattened chain across parallel
+branches or external processing. A correlated join arrival completes at its receiving node with
+`correlated-waiting` or `correlated-ready`. The eventual join continuation has a separate
+process/traversal identity with original contributions retained as causal evidence.
+
+Execution SSE variants add nullable `applicationCorrelationId`, `contributionId`, `contributionKind`,
+`roundId` and `publicReference` scalars from established runtime context. Old uncorrelated events
+leave them null. These fields do not replace request, process, traversal, invocation, attempt or
+protocol waiter IDs, and are not extracted heuristically from payloads. Durable event projection
+reads the retained relationship; live dispatch preserves the same immutable context. Event streams
+and history queries retain their existing tenant/source authorization. Captured input/output content
+remains a separate policy-governed read, not an event metadata copy.
+
 `GET /v1/events` is an authenticated SSE stream. Without a selector, it serves the durable journal when available and otherwise the process-local ring. `include=diagnostics` selects the ring for the whole connection. The source does not change within a connection.
 
 `GET /v1/events/recent` remains a separate legacy polling projection. It returns events after a cursor in ascending order; a limit above the server cap is refused rather than clamped. Its `source=DURABLE` or `source=RING` describes the selected source. Polling rows do not use the versioned stream envelope, and durable polling rows contain fewer fields than durable SSE data.

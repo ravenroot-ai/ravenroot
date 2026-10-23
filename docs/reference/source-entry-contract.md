@@ -17,6 +17,12 @@ single initial START traversal.
 
 ## Source inventory
 
+The [compiled descriptor inventory](source-descriptor-contracts.tsv) is generated and checked by
+`PublishedNodeContractTest` from the complete first-party catalog. It requires exactly the 15 SOURCE
+behaviors below, trusted catalog/package ownership, SOURCE nature, shared bounded correlation
+controls and the canonical literal `continue` emission. This descriptor proof is separate from the
+dispatch, protocol and custody evidence below.
+
 The following are the built-in and bundled source implementations. Each target below is the exact
 node that owns the active source context. A transport acknowledgement and an application correlation
 identifier remain separate identities.
@@ -85,3 +91,34 @@ store reopen, new deployment IDs, offline mail and independent shared consumers.
 
 Explicit business close barriers and computed context derivation are described in
 [Business context operations](business-correlation-operations.md).
+
+### Protocol and lifecycle evidence
+
+| Actual SOURCE | Connector test and exercised contract |
+|---|---|
+| `timer`, `crontab` | `CoreScheduledSourceDeploymentTest`, `ScheduledSourceLifecycleTest`: lifecycle-owned occurrences, durable checkpoint order and source activation. |
+| `amqp.consume` | `AmqpConsumeContractTest`, `AmqpStartupFailureDeploymentTest`: receipt/acknowledgement, reconnect/generation, source health, startup rollback and bounded protocol harness; `AmqpMixedDeploymentExampleTest` and `AmqpCorrelationHeaderProtocolTest` additionally execute real RabbitMQ. |
+| `kafka.consume` | `KafkaConsumeContractTest`: manual contiguous durable offset advancement, assignment/readiness, protocol-owned delivery ordering and bounded consumer harness. This is not a live Kafka cluster test. |
+| `mail.imap.consume` | `MailImapConsumeContractTest`, `MailImapConsumeGreenMailTest`, `MailTextCorrelationRecipeTest`: real IMAPS plus bounded projection, custody and checkpoint contracts; the installed container gate additionally verifies classloader/package ownership and store reopen. |
+| `websocket.receive` | `WebSocketReceiveSourceTest`: bounded volatile admission, session generation, backpressure revocation and explicit non-replayable behavior. It does not claim durable input custody. |
+| `openapi.receive` | `OpenApiReceiveSourceTest`: managed route/schema/receipt contract; `LakehouseExampleBrowserTest` additionally executes actual authenticated managed HTTP through runtime/store and Chromium. |
+| `openapi.request-reply` | `OpenApiRequestReplySourceTest`: bounded projected request/reply, independent waiter identity, timeout/cancel and source generation. A live response is not a durable receipt. |
+| `discord.interactions` | `DiscordInteractionsSourceTest`: signed callback verification, immediate protocol response versus durable command custody, and token stripping. |
+| `github-events-source` | `GithubEventsSourceTest`: verified relay/delivery and durable acceptance contract. |
+| `slack.events`, `slack.commands` | `SlackIngressSourceTest`: verification, event/command projection, receipt and callback response contracts for both sources. |
+| `teams.outgoing-webhook` | `TeamsOutgoingWebhookSourceTest`: verified activity, bounded projection and durable webhook acceptance. |
+| `matrix.sync` | `MatrixSyncSourceTest`: sync event admission and checkpoint/cursor ordering. |
+| `mattermost.outgoing-webhook` | `MattermostOutgoingWebhookSourceTest`: verified post projection and durable acceptance contract. |
+
+These tests exercise the shipped source implementations with bounded transport/protocol fixtures;
+the table identifies additional live broker/server cases explicitly. Common dispatch ownership,
+source boundaries, retired contexts, target validation and source-local liveness use
+`SourceLocalTraversalTest`, `SourceAuthorityLifecycleTest`,
+`DefaultGraphDeploymentSourceAuthorityIntegrationTest` and `DisconnectedSourceCommandTest`.
+Durable adapter contracts independently verify custody and metadata scope on SQLite and PostgreSQL,
+including the child-JVM recovery cases described above.
+
+Normal runtime/example gates use Pekko and engine-independent harnesses. Akka remains a separate
+optional licensed adapter with mirrored engine/source lifecycle contracts. A graph cannot enable it.
+Its `akka-actor-typed_2.13:2.10.20` dependency must be available under the operator's licensed build
+setup before that separate profile can be qualified.

@@ -4,6 +4,7 @@ import ai.ravenroot.api.catalog.NodePropertyDescriptor;
 import ai.ravenroot.api.catalog.NodePropertyGroupDescriptor;
 import ai.ravenroot.api.catalog.NodePropertyType;
 import ai.ravenroot.api.catalog.NodeRuntimeConcurrency;
+import ai.ravenroot.api.catalog.NodeRuntimeNature;
 import ai.ravenroot.api.catalog.NodeTypeDescriptor;
 import ai.ravenroot.api.node.NodeBehavior;
 import ai.ravenroot.api.node.NodeConfiguration;
@@ -69,7 +70,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** Runtime-backed publication gate for the public 63-node catalog and its admission-ready examples. */
+/** Runtime-backed publication gate for the complete supported catalog and its admission-ready examples. */
 final class PublishedNodeContractTest {
     private static final String UPDATE_PROPERTY = "ravenroot.docs.update";
     private static final Path REPOSITORY = repositoryRoot();
@@ -80,11 +81,41 @@ final class PublishedNodeContractTest {
     @Test
     void publishedDescriptorSnapshotMatchesRuntimeCatalog() throws Exception {
         List<NodeTypeDescriptor> descriptors = descriptors();
-        assertEquals(63, descriptors.size(), "the documented baseline must classify every supported node");
+        assertEquals(65, descriptors.size(), "the documented baseline must classify every supported node");
         String actual = snapshot(descriptors);
         update(SNAPSHOT, actual);
         assertEquals(Files.readString(SNAPSHOT), actual,
                 "descriptor contract drifted; review it, then regenerate with -D" + UPDATE_PROPERTY + "=true");
+    }
+
+    @Test
+    void everyActualSourceHasItsCanonicalEmissionAndTrustedCatalogOwner() throws Exception {
+        var registry = registry();
+        var sources = registry.descriptors().stream().filter(descriptor -> descriptor.defaultNature() == NodeRuntimeNature.SOURCE)
+                .sorted(Comparator.comparing(NodeTypeDescriptor::behavior)).toList();
+        assertEquals(Set.of("timer", "crontab", "amqp.consume", "kafka.consume", "mail.imap.consume", "websocket.receive",
+                "openapi.receive", "openapi.request-reply", "discord.interactions", "github-events-source", "slack.events",
+                "slack.commands", "teams.outgoing-webhook", "matrix.sync", "mattermost.outgoing-webhook"),
+                sources.stream().map(NodeTypeDescriptor::behavior).collect(java.util.stream.Collectors.toSet()));
+        var result = new StringBuilder("behavior\torigin\tbundleId\tlifecycleOwner\tdefaultNature\tallowedNatures\temissionOutcome\n");
+        for (var source : sources) {
+            assertTrue(source.allowedNatures().contains(NodeRuntimeNature.SOURCE));
+            assertTrue(source.outcomes().stream().anyMatch(outcome -> !outcome.parameterized() && outcome.name().equals("continue")),
+                    source.behavior() + " must expose the runtime-owned SOURCE emission outcome");
+            assertTrue(source.properties().stream().anyMatch(property -> property.name().equals("correlation.mode")));
+            assertTrue(source.properties().stream().anyMatch(property -> property.name().equals("correlation.selector")));
+            var owner = registry.catalogSources().get(source.behavior());
+            assertTrue(owner != null, "source catalog provenance is runtime-owned");
+            String lifecycleOwner = source.behavior().equals("timer") || source.behavior().equals("crontab")
+                    ? "ai.ravenroot.core.runtime.builtin.ScheduledSourceNodeFactory"
+                    : registry.sourceCapableBehavior(source.behavior()).orElseThrow().getClass().getName();
+            result.append(source.behavior()).append('\t').append(owner.origin()).append('\t').append(owner.bundleId()).append('\t')
+                    .append(lifecycleOwner).append('\t').append(source.defaultNature()).append('\t')
+                    .append(sorted(source.allowedNatures())).append("\tcontinue\n");
+        }
+        Path target = REPOSITORY.resolve("docs/reference/source-descriptor-contracts.tsv");
+        update(target, result.toString());
+        assertEquals(Files.readString(target), result.toString(), "SOURCE inventory drifted; regenerate deliberately from compiled descriptors");
     }
 
     @Test

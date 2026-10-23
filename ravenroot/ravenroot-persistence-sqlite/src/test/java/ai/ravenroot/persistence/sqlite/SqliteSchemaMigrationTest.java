@@ -109,6 +109,7 @@ class SqliteSchemaMigrationTest {
              PreparedStatement removeMarker = connection.prepareStatement(
                      "DELETE FROM store_schema_history WHERE version = ?");
              Statement statement = connection.createStatement()) {
+            LegacyHistorySchema.removeEmptyHistoryStep(connection);
             removeMarker.setInt(1, flowVersion);
             assertEquals(1, removeMarker.executeUpdate());
             statement.execute("PRAGMA user_version = " + (flowVersion - 1));

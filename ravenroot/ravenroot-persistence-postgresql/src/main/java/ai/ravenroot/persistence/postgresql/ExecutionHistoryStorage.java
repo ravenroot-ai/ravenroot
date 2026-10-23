@@ -29,7 +29,7 @@ final class ExecutionHistoryStorage {
             int limit, int maximum) throws SQLException {
         requireLimit(limit, maximum); String filter = "uncorrelated-traversals:" + limit;
         var after = cursor.map(value -> BusinessCursor.decode(scope, filter, value, 2));
-        UUID process = after.map(value -> UUID.fromString(value.getFirst())).orElse(null);
+        UUID process = after.map(value -> StoredUuid.cursor(value.getFirst())).orElse(null);
         long position = after.map(value -> Long.parseLong(value.get(1))).orElse(-1L);
         if (position < -1) throw new IllegalArgumentException("invalid traversal cursor");
         var items = new ArrayList<TraversalSummary>(); String lastProcess = null; long lastPosition = -1;
@@ -46,8 +46,8 @@ final class ExecutionHistoryStorage {
             statement.setInt(at, limit + 1);
             try (var rows = statement.executeQuery()) {
                 while (rows.next()) {
-                    UUID owner = uuid(rows, "process_instance_id");
-                    items.add(new TraversalSummary(owner, uuid(rows, "traversal_id"), rows.getString("ingress_node_id"),
+                    UUID owner = StoredUuid.required(rows, "traversal", "process_instance_id", scope.tenantId());
+                    items.add(new TraversalSummary(owner, StoredUuid.required(rows, "traversal", "traversal_id", scope.tenantId()), rows.getString("ingress_node_id"),
                             TraversalStatus.valueOf(rows.getString("status")), rows.getString("termination_reason") == null ? null :
                             ExecutionTerminationReason.valueOf(rows.getString("termination_reason")), rows.getLong("visits"), null, null));
                     if (items.size() <= limit) { lastProcess = owner.toString(); lastPosition = rows.getLong("position"); }
@@ -70,7 +70,7 @@ final class ExecutionHistoryStorage {
             int at = bindKey(statement, 1, key); statement.setLong(at++, after); statement.setInt(at, limit + 1);
             try (var rows = statement.executeQuery()) {
                 while (rows.next()) {
-                    UUID traversal = uuid(rows, "traversal_id");
+                    UUID traversal = StoredUuid.required(rows, "traversal", "traversal_id", key);
                     items.add(traversal(db, key, traversal, rows.getString("ingress_node_id"), rows.getString("status"),
                             rows.getString("termination_reason"), rows.getLong("visits")));
                     if (items.size() <= limit) last = rows.getLong("position");
@@ -89,7 +89,7 @@ final class ExecutionHistoryStorage {
             int at = bindKey(statement, 1, key);
             for (var id : ids) bindUuid(statement, at++, id);
             try (var rows = statement.executeQuery()) {
-                while (rows.next()) bindings.put(uuid(rows, "invocation_id"), rows.getString("node_id"));
+                while (rows.next()) bindings.put(StoredUuid.required(rows, "invocation", "invocation_id", key), rows.getString("node_id"));
             }
         }
         return Map.copyOf(bindings);
@@ -181,7 +181,7 @@ final class ExecutionHistoryStorage {
             statement.setLong(at++, after); statement.setInt(at, limit + 1);
             try (var rows = statement.executeQuery()) {
                 while (rows.next()) {
-                    UUID invocation = uuid(rows, "invocation_id");
+                    UUID invocation = StoredUuid.required(rows, "invocation", "invocation_id", key);
                     var status = NodeInvocationStatus.valueOf(rows.getString("status"));
                     // Only selected page members get timing lookups. The extra row proves a next page.
                     var first = items.size() < limit ? attemptId(db, key, invocation, false) : Optional.<UUID>empty();
@@ -209,7 +209,7 @@ final class ExecutionHistoryStorage {
             int at = bindKey(statement, 1, key); bindUuid(statement, at++, invocation); statement.setLong(at++, after); statement.setInt(at, limit + 1);
             try (var rows = statement.executeQuery()) {
                 while (rows.next()) {
-                    UUID attempt = uuid(rows, "attempt_id"); String completion = rows.getString("completion");
+                    UUID attempt = StoredUuid.required(rows, "attempt", "attempt_id", key); String completion = rows.getString("completion");
                     var started = items.size() < limit ? timing(db, key, invocation, attempt, false) : Optional.<Observation>empty();
                     var settled = items.size() < limit ? timing(db, key, invocation, attempt, true) : Optional.<Observation>empty();
                     items.add(new NodeAttemptSummary(attempt, rows.getInt("ordinal"), NodeAttemptStatus.valueOf(rows.getString("status")),
@@ -224,7 +224,7 @@ final class ExecutionHistoryStorage {
     static HistoryPage<VisitParent> parents(Connection db, ExecutionKey key, UUID traversal, UUID invocation,
             Optional<String> cursor, int limit, int maximum) throws SQLException {
         requireLimit(limit, maximum); String query = "parents:" + invocation + ':' + limit;
-        UUID after = cursor.map(value -> UUID.fromString(ExecutionHistoryCursor.decode(key, traversal, query, value))).orElse(null);
+        UUID after = cursor.map(value -> StoredUuid.cursor(ExecutionHistoryCursor.decode(key, traversal, query, value))).orElse(null);
         if (!visitExists(db, key, traversal, invocation)) return HistoryPage.missing();
         var items = new ArrayList<VisitParent>(); String last = "";
         try (var statement = db.prepareStatement("SELECT p.parent_invocation_id, i.traversal_id, i.node_id FROM invocation_parent p "
@@ -234,8 +234,8 @@ final class ExecutionHistoryStorage {
             int at = bindKey(statement, 1, key); bindUuid(statement, at++, invocation);
             if (after != null) bindUuid(statement, at++, after); statement.setInt(at, limit + 1);
             try (var rows = statement.executeQuery()) { while (rows.next()) {
-                UUID parent = uuid(rows, "parent_invocation_id");
-                items.add(new VisitParent(key.processInstanceId(), uuid(rows, "traversal_id"), parent, rows.getString("node_id")));
+                UUID parent = StoredUuid.required(rows, "invocation_parent", "parent_invocation_id", key);
+                items.add(new VisitParent(key.processInstanceId(), StoredUuid.required(rows, "traversal", "traversal_id", key), parent, rows.getString("node_id")));
                 if (items.size() <= limit) last = parent.toString();
             }}
         }
@@ -260,7 +260,7 @@ final class ExecutionHistoryStorage {
         try (var statement = db.prepareStatement("SELECT attempt_id FROM attempt WHERE " + PROCESS + " AND invocation_id = ? ORDER BY ordinal "
                 + (last ? "DESC" : "ASC") + " LIMIT 1")) {
             int at = bindKey(statement, 1, key); bindUuid(statement, at, invocation);
-            try (var rows = statement.executeQuery()) { return rows.next() ? Optional.of(uuid(rows, "attempt_id")) : Optional.empty(); }
+            try (var rows = statement.executeQuery()) { return rows.next() ? Optional.of(StoredUuid.required(rows, "attempt", "attempt_id", key)) : Optional.empty(); }
         }
     }
     private static boolean visitExists(Connection db, ExecutionKey key, UUID traversal, UUID invocation) throws SQLException {
@@ -292,5 +292,4 @@ final class ExecutionHistoryStorage {
         statement.setString(at++, key.tenantId()); bindUuid(statement, at++, key.processInstanceId()); return at;
     }
     private static void bindUuid(PreparedStatement statement, int at, UUID value) throws SQLException { statement.setObject(at, value); }
-    private static UUID uuid(ResultSet rows, String name) throws SQLException { return UUID.fromString(rows.getString(name)); }
 }

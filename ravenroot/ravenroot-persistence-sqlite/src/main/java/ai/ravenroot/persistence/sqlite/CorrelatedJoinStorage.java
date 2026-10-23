@@ -188,10 +188,10 @@ final class CorrelatedJoinStorage {
             try (var rows = statement.executeQuery()) { while (rows.next()) {
                 boolean received = rows.getInt("received_member") != 0;
                 items.add(new JoinMemberSummary(rows.getString("member_id"), rows.getInt("expected_member") != 0, received, rows.getString("kind"),
-                        received ? UUID.fromString(rows.getString("process_id")) : null,
-                        received ? UUID.fromString(rows.getString("traversal_id")) : null,
-                        received ? UUID.fromString(rows.getString("invocation_id")) : null,
-                        received ? UUID.fromString(rows.getString("attempt_id")) : null,
+                        received ? StoredUuid.required(rows.getString("process_id"), "correlated_join_member", "process_id", key.scope().tenantId()) : null,
+                        received ? StoredUuid.required(rows.getString("traversal_id"), "correlated_join_member", "traversal_id", key.scope().tenantId()) : null,
+                        received ? StoredUuid.required(rows.getString("invocation_id"), "correlated_join_member", "invocation_id", key.scope().tenantId()) : null,
+                        received ? StoredUuid.required(rows.getString("attempt_id"), "correlated_join_member", "attempt_id", key.scope().tenantId()) : null,
                         received ? Instant.ofEpochSecond(rows.getLong("accepted_epoch_second"), rows.getInt("accepted_nano")) : null));
             } }
         }

@@ -102,15 +102,15 @@ final class DeploymentEntryStorage {
         if (limit < 1 || limit > policy.maxPageSize()) throw new BusinessHistoryException(INVALID_REQUEST);
         String query = "deployment-entries:" + limit;
         String after = cursor.map(value -> BusinessCursor.decode(scope, query, value, 1).getFirst()).orElse("");
-        if (!after.isEmpty()) UUID.fromString(after);
+        if (!after.isEmpty()) StoredUuid.cursor(after);
         var items = new ArrayList<DeploymentEntrySummary>();
         try (var statement = db.prepareStatement("SELECT process_id, traversal_id, entry_node_id, application_id, cause, input_bytes, "
                 + "accepted_seconds, accepted_nano, expires_seconds, expires_nano, entry_started, entry_completed "
                 + "FROM deployment_entry_intent WHERE " + SCOPE + " AND process_id > ? ORDER BY process_id LIMIT ?")) {
             int at = bindScope(statement, 1, scope); statement.setString(at++, after); statement.setInt(at, limit + 1);
             try (var rows = statement.executeQuery()) {
-                while (rows.next()) items.add(new DeploymentEntrySummary(scope, UUID.fromString(rows.getString("process_id")),
-                        UUID.fromString(rows.getString("traversal_id")), rows.getString("entry_node_id"), rows.getString("application_id"),
+                while (rows.next()) items.add(new DeploymentEntrySummary(scope, StoredUuid.required(rows.getString("process_id"), "deployment_entry_intent", "process_id", scope.tenantId()),
+                        StoredUuid.required(rows.getString("traversal_id"), "deployment_entry_intent", "traversal_id", scope.tenantId()), rows.getString("entry_node_id"), rows.getString("application_id"),
                         CorrelatedTraversal.Cause.valueOf(rows.getString("cause")), rows.getLong("input_bytes"),
                         Instant.ofEpochSecond(rows.getLong("accepted_seconds"), rows.getInt("accepted_nano")),
                         Instant.ofEpochSecond(rows.getLong("expires_seconds"), rows.getInt("expires_nano")),

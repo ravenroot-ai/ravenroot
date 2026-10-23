@@ -309,8 +309,8 @@ final class BusinessHistoryStorage {
                 Instant.ofEpochMilli(rows.getLong("created_ms")), Instant.ofEpochMilli(rows.getLong("updated_ms")),
                 Instant.ofEpochMilli(rows.getLong("expires_ms")), rows.getString("requested_closure") == null ? null
                         : new BusinessClosureSignal(scope, rows.getString("application_id"), BusinessHistory.Lifecycle.valueOf(rows.getString("requested_closure")),
-                                rows.getString("closure_reason"), UUID.fromString(rows.getString("closure_process_id")), UUID.fromString(rows.getString("closure_traversal_id")),
-                                UUID.fromString(rows.getString("closure_invocation_id")), UUID.fromString(rows.getString("closure_attempt_id")),
+                                rows.getString("closure_reason"), StoredUuid.required(rows.getString("closure_process_id"), "business_history", "closure_process_id", scope.tenantId()), StoredUuid.required(rows.getString("closure_traversal_id"), "business_history", "closure_traversal_id", scope.tenantId()),
+                                StoredUuid.required(rows.getString("closure_invocation_id"), "business_history", "closure_invocation_id", scope.tenantId()), StoredUuid.required(rows.getString("closure_attempt_id"), "business_history", "closure_attempt_id", scope.tenantId()),
                                 Instant.ofEpochMilli(rows.getLong("closure_requested_ms"))));
     }
     private static CorrelatedTraversal readTraversal(ResultSet rows) throws SQLException {
@@ -319,12 +319,12 @@ final class BusinessHistoryStorage {
         return new CorrelatedTraversal(new BusinessScope(rows.getString("tenant_id"), rows.getString("deployment_id"), rows.getString("graph_version")),
                 new ApplicationCorrelationContext(rows.getString("application_id"), Optional.ofNullable(rows.getString("contribution_id")),
                         Optional.ofNullable(rows.getString("contribution_kind")), rows.getString("round_id"), Optional.ofNullable(rows.getString("public_reference"))),
-                UUID.fromString(rows.getString("process_id")), UUID.fromString(rows.getString("traversal_id")), rows.getString("entry_node_id"),
+                StoredUuid.required(rows.getString("process_id"), "correlated_traversal", "process_id", rows.getString("tenant_id")), StoredUuid.required(rows.getString("traversal_id"), "correlated_traversal", "traversal_id", rows.getString("tenant_id")), rows.getString("entry_node_id"),
                 CorrelatedTraversal.Cause.valueOf(rows.getString("cause")), TraversalStatus.valueOf(rows.getString("status")),
                 reason == null ? null : ExecutionTerminationReason.valueOf(reason), Instant.ofEpochMilli(rows.getLong("started_ms")),
                 Instant.ofEpochMilli(rows.getLong("updated_ms")), ended, rows.getString("derived_process_id") == null ? null
-                        : new CorrelationDerivation(UUID.fromString(rows.getString("derived_process_id")), UUID.fromString(rows.getString("derived_traversal_id")),
-                                UUID.fromString(rows.getString("derived_invocation_id")), UUID.fromString(rows.getString("derived_attempt_id")), rows.getString("derivation_reason")));
+                        : new CorrelationDerivation(StoredUuid.required(rows.getString("derived_process_id"), "correlated_traversal", "derived_process_id", rows.getString("tenant_id")), StoredUuid.required(rows.getString("derived_traversal_id"), "correlated_traversal", "derived_traversal_id", rows.getString("tenant_id")),
+                                StoredUuid.required(rows.getString("derived_invocation_id"), "correlated_traversal", "derived_invocation_id", rows.getString("tenant_id")), StoredUuid.required(rows.getString("derived_attempt_id"), "correlated_traversal", "derived_attempt_id", rows.getString("tenant_id")), rows.getString("derivation_reason")));
     }
     private static int bindScope(PreparedStatement statement, int at, BusinessScope scope) throws SQLException {
         statement.setString(at++, scope.tenantId()); statement.setString(at++, scope.deploymentId());

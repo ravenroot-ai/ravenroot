@@ -32,8 +32,18 @@ public record CorrelationLimits(int maxIdCharacters, int maxSelectorCharacters, 
  */
     public String requireId(Object value, String field) {
         if (!(value instanceof String text) || text.isBlank() || text.length() > maxIdCharacters
-                || text.codePoints().anyMatch(Character::isISOControl))
+                || text.codePoints().anyMatch(Character::isISOControl) || !wellFormed(text))
             throw new IllegalArgumentException("invalid " + field + ": expected bounded nonblank text without controls");
         return text;
+    }
+
+    private static boolean wellFormed(String value) {
+        for (int index = 0; index < value.length(); index++) {
+            char unit = value.charAt(index);
+            if (Character.isHighSurrogate(unit)) {
+                if (++index >= value.length() || !Character.isLowSurrogate(value.charAt(index))) return false;
+            } else if (Character.isLowSurrogate(unit)) return false;
+        }
+        return true;
     }
 }

@@ -5673,7 +5673,7 @@ def deployment_carrier_evidence_errors(setting: str, contract: dict[str, object]
 PERSISTENCE_POLICY_AUTHORITY_ID = "ravenroot-persistence-policy-v1"
 HISTORY_POLICY_AUTHORITY_ID = "ravenroot-business-history-policy-v1"
 HISTORY_POLICY_SOURCE_LOCKS = {'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/correlation/BusinessHistoryPolicy.java': '12a8db0efaca7d441cc599656110db9aaeaa892a081afeb16b9eb68a0038a1b9',
- 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/correlation/CorrelationLimits.java': '178a53f8d8ed973657051e90443b7dd1eb74645ce57c1ea55ab6819d4a00ac3f',
+ 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/correlation/CorrelationLimits.java': 'ba91eba4ba08fd00607fd05ad1ab7e93a189bdbc6baf75076a7ee29962d673f4',
  'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/persistence/BusinessHistoryConfiguration.java': 'de5caa2a572d31a6bd2af100f08a0b5e8e083e6031060ec911bf4cade7b80d04',
  'ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/persistence/InMemoryExecutionStorePolicy.java': '60d7d3d81e89d0f427407db92427608b1c70a340d44fa01b68a6dad640d201d5',
  'ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteStoreConfig.java': '08df36cb5d53a6d3a870c1d96c0d02cec88a1fa63496d19bfb18c02f6181d7d8',
@@ -8520,7 +8520,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'file',
   '',
   '',
-  'e8f17019f1b4c451bca40d3c3f46814b9aad2cd2162f97c688042248ccf54a77',
+  '4ed95abd22c5a4d4380f19bb5c14b580b05503d827bca65830a2f5131e3dd563',
   1),
  ('scripts/tests/test_program_authoring_platform_configuration.sh',
   'file',

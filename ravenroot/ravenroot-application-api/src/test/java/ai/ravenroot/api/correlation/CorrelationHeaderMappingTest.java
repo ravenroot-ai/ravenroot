@@ -40,8 +40,10 @@ class CorrelationHeaderMappingTest {
         var context = new ApplicationCorrelationContext("operation", Optional.empty(), Optional.empty(), "0", Optional.empty());
         assertEquals(Map.of("X-Operation", "operation"), mapping.merge(Map.of(), context));
         assertThrows(IllegalArgumentException.class, () -> mapping.merge(Map.of("X-Part", "old-unverified-part"), context));
-        var unicode = new ApplicationCorrelationContext("opération", Optional.empty(), Optional.empty(), "0", Optional.empty());
-        assertThrows(IllegalArgumentException.class, () -> mapping.merge(Map.of(), unicode));
+        for (String value : List.of("opération", " operation", "operation ")) {
+            var unrepresentable = new ApplicationCorrelationContext(value, Optional.empty(), Optional.empty(), "0", Optional.empty());
+            assertThrows(IllegalArgumentException.class, () -> mapping.merge(Map.of(), unrepresentable));
+        }
     }
     @Test void mappedPayloadStillRequiresAnExplicitHeadersObject() {
         var mapping = CorrelationHeaderMapping.read(Map.of(CorrelationHeaderMapping.APPLICATION, "X-Operation"), List.of());

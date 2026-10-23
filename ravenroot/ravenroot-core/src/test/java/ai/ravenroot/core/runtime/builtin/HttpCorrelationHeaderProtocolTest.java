@@ -57,6 +57,24 @@ class HttpCorrelationHeaderProtocolTest {
             assertEquals(0, fixture.requests.get()); assertEquals(0, fixture.credentials.get());
         }
     }
+    @Test void mappedIdentityCannotBeSilentlyTrimmedByTheActualHttpProtocol() throws Exception {
+        try (var fixture = new Fixture()) {
+            var handler = fixture.factory(ALLOW).create(fixture.node(Map.of("credentialRef", "fixture-token")));
+            for (String value : List.of(" business-42", "business-42 ")) {
+                var context = new ApplicationCorrelationContext(value, CONTEXT.contributionId(), CONTEXT.contributionKind(),
+                        CONTEXT.roundId(), CONTEXT.publicReference());
+                assertInstanceOf(IllegalArgumentException.class, assertThrows(CompletionException.class,
+                        () -> handler.handle(message(context)).toCompletableFuture().join()).getCause());
+            }
+            assertEquals(0, fixture.requests.get()); assertEquals(0, fixture.credentials.get());
+            var spaced = new ApplicationCorrelationContext("business operation", Optional.of("part two"),
+                    Optional.empty(), "round three", Optional.empty());
+            assertEquals("continue", handler.handle(message(spaced)).toCompletableFuture().get(5, TimeUnit.SECONDS).outcome());
+            assertEquals("business operation", fixture.headers.get().get("x-business-operation"));
+            assertEquals("part two", fixture.headers.get().get("x-business-part"));
+            assertEquals("round three", fixture.headers.get().get("x-business-round"));
+        }
+    }
     private static NodeMessage message(ApplicationCorrelationContext context) {
         UUID id = UUID.randomUUID();
         return new NodeMessage(new SecurityContext("transport-request", "tenant", "operator", PrincipalType.USER, "fixture"), id, id, id, id, Set.of(), "http",

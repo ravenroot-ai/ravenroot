@@ -4675,7 +4675,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             document = {"entries": list(entries.values()), "retiredEntries": [],
                         "migrationHistory": []}
             self.assertIn(
-                "| Retained published contract descriptions | 463 |",
+                "| Retained published contract descriptions | 475 |",
                 audit.render_report(document),
             )
             deferred = copy.deepcopy(document)
@@ -4683,7 +4683,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                              if entry["classification"] == "published-contract-description")
             published.update(status="deferred", followUp="#225")
             self.assertIn(
-                "| Retained published contract descriptions | 462 |",
+                "| Retained published contract descriptions | 474 |",
                 audit.render_report(deferred),
             )
         self.assertIn(

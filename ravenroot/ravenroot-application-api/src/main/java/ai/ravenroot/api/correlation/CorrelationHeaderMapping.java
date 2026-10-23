@@ -57,6 +57,7 @@ public final class CorrelationHeaderMapping {
 
     /** Copies effective headers and refuses ambiguous or conflicting targets before external I/O.
      * Optional absent fields emit no header; an existing target with no established value refuses.
+     * Portable values contain printable ASCII without leading or trailing whitespace.
      * @param original effective authored headers, after connector default/payload precedence
      * @param context immutable established context, required when a mapping is configured
      * @return copied headers for the connector's normal authority, count and size validation
@@ -81,7 +82,9 @@ public final class CorrelationHeaderMapping {
             };
             String prior = names.get(target.getValue().toLowerCase(Locale.ROOT));
             if (value == null) { if (prior != null) throw refused("CONFLICTING_HEADER"); continue; }
-            if (value.codePoints().anyMatch(character -> character < 32 || character > 126)) throw refused("UNREPRESENTABLE_VALUE");
+            if (value.charAt(0) == ' ' || value.charAt(value.length() - 1) == ' '
+                    || value.codePoints().anyMatch(character -> character < 32 || character > 126))
+                throw refused("UNREPRESENTABLE_VALUE");
             if (prior != null && !value.equals(original.get(prior))) throw refused("CONFLICTING_HEADER");
             if (prior == null) result.put(target.getValue(), value);
         }

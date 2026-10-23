@@ -163,7 +163,8 @@ headers leave HTTP request IDs, credentials and saga headers, AMQP `messageId`, 
 `replyTo`, and generated SMTP `Message-ID` in their existing identity domains. In particular, mail's
 payload `correlationId` does not automatically become an SMTP header.
 
-Mapped values must contain printable ASCII characters. A valid Unicode business identity that
+Mapped values must contain printable ASCII characters without leading or trailing spaces, which
+header protocols can remove. Interior spaces remain exact. A valid Unicode business identity that
 cannot be represented in this portable header contract fails explicitly; the runtime does not
 rewrite an opaque identity. Existing native header length, count and envelope limits still apply.
 AMQP and mail operator profiles must independently authorize every target header. Mapping never

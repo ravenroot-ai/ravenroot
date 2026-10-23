@@ -67,4 +67,14 @@ class CorrelationSelectorTest {
         assertThrows(CorrelationSelector.Invalid.class, () -> accept.extract(input(Map.of("id", Map.of("secret", "value"))),
                 () -> generated));
     }
+
+    @Test void opaqueIdentityMustHaveAnExactUtf8Representation() {
+        for (String malformed : List.of("\uD800", "\uDC00", "prefix\uD800suffix")) {
+            assertThrows(IllegalArgumentException.class, () -> LIMITS.requireId(malformed, "id"));
+            assertThrows(IllegalArgumentException.class, () -> new ApplicationCorrelationContext("business",
+                    Optional.empty(), Optional.empty(), "round", Optional.of(malformed)));
+        }
+        String exact = "  操作-😀  ";
+        assertEquals(exact, LIMITS.requireId(exact, "id"));
+    }
 }

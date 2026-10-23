@@ -252,6 +252,25 @@ describe('versioned execution stream normalization', () => {
     });
   });
 
+  it.each([versionedRingEvent, versionedDurableEvent])('keeps explicit correlation projection availability distinct from legacy absence', event => {
+    const notProjected = event({ applicationCorrelationAvailability: 'NOT_PROJECTED', applicationCorrelationId: null,
+      contributionId: null, contributionKind: null, roundId: null, publicReference: null });
+    expect(normalizeRuntimeEvent(notProjected)).toMatchObject(notProjected);
+    expect(normalizeRuntimeEvent(event())).not.toHaveProperty('applicationCorrelationAvailability');
+    expect(normalizeRuntimeEvent(event({ applicationCorrelationAvailability: 'NOT_RECORDED' })))
+      .toHaveProperty('applicationCorrelationAvailability', 'NOT_RECORDED');
+    expect(normalizeRuntimeEvent(event({ applicationCorrelationAvailability: 'AVAILABLE',
+      applicationCorrelationId: 'original', roundId: 'round', publicReference: 'same.csv' })))
+      .toMatchObject({ applicationCorrelationId: 'original', publicReference: 'same.csv' });
+    for (const fields of [
+      { applicationCorrelationAvailability: 'UNKNOWN' },
+      { applicationCorrelationAvailability: 'NOT_PROJECTED', applicationCorrelationId: 'invented' },
+      { applicationCorrelationAvailability: 'NOT_RECORDED', roundId: 'invented' },
+      { applicationCorrelationAvailability: 'AVAILABLE', applicationCorrelationId: 'missing-round' },
+      { applicationCorrelationAvailability: 'AVAILABLE', applicationCorrelationId: 'x'.repeat(4097), roundId: 'round' },
+    ]) expect(() => normalizeRuntimeEvent(event(fields))).toThrow();
+  });
+
   it.each(['schemaVersion', 'source', 'id', 'eventType', 'occurredAt', 'processInstanceId', 'traversalId'])
   ('does not treat a partial declared version as legacy when %s is absent', field => {
     const event = versionedDurableEvent();

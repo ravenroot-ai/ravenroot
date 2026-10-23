@@ -439,11 +439,12 @@ public final class OpenApiSpecGenerator {
 
     private static String businessEventProperties() {
         return """
-                "applicationCorrelationId":{"type":"string","maxLength":4096,"nullable":true,"description":"Retained business identity, independent of transport request and process/traversal identities. Null for legacy uncorrelated records."},
+                "applicationCorrelationId":{"type":"string","maxLength":4096,"nullable":true,"description":"Retained business identity, independent of transport request and process/traversal identities. Null when absent or explicitly not projected; full retained identity remains available through scoped history."},
                 "contributionId":{"type":"string","maxLength":4096,"nullable":true},
                 "contributionKind":{"type":"string","maxLength":4096,"nullable":true},
                 "roundId":{"type":"string","maxLength":4096,"nullable":true},
                 "publicReference":{"type":"string","maxLength":4096,"nullable":true},
+                "applicationCorrelationAvailability":{"type":"string","enum":["AVAILABLE","NOT_RECORDED","NOT_PROJECTED"],"description":"AVAILABLE carries the complete context. NOT_RECORDED means this event supplies no retained typed context. NOT_PROJECTED preserves complete frame bounds with null context projection fields; retained runtime/history identity is unchanged. Older producers may omit this additive field."},
                 "outcome":{"type":"string","maxLength":128,"nullable":true,"description":"Safe retained durable outcome classifier; absent or null when not recorded."},
                 """.strip();
     }

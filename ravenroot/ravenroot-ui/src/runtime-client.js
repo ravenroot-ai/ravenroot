@@ -1856,6 +1856,18 @@ function validateVersionedRuntimeEvent(value) {
         && value[field] !== null
         && (typeof value[field] !== 'string' || value[field].length === 0)) invalid();
   }
+  if (Object.hasOwn(value, 'applicationCorrelationAvailability')) {
+    const availability = value.applicationCorrelationAvailability;
+    if (!['AVAILABLE', 'NOT_RECORDED', 'NOT_PROJECTED'].includes(availability)) invalid();
+    for (const field of ['applicationCorrelationId', 'contributionId', 'contributionKind', 'roundId', 'publicReference']) {
+      const identity = value[field];
+      if (availability !== 'AVAILABLE') {
+        if (identity != null) invalid();
+      } else if (identity == null) {
+        if (field === 'applicationCorrelationId' || field === 'roundId') invalid();
+      } else if (typeof identity !== 'string' || !identity.trim() || identity.length > 4096) invalid();
+    }
+  }
   const nativeCursor = value.source === 'RING' ? value.sequence : value.journalOffset;
   // JSON.parse rounds unsafe native numbers. This checks their representable value only; the
   // bounded decimal id remains the exact identity. Adjacent unsafe integers cannot be distinguished

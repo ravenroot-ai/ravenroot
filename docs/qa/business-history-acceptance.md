@@ -55,7 +55,7 @@ first-Run, native/embedded history and executed lakehouse browser gates.
 | D01 | LakehouseExampleBrowserTest executes managed HTTP, Pekko, SQLite and explicit external processor fixture with concurrent filenames, missing/complete results and actual browser capture. | [source entry contract](../reference/source-entry-contract.md) |
 | D02 | Public mixed, text-mail and six-partition GraphML; actual RabbitMQ/SMTP, IMAPS and managed HTTP tests execute their declared behavior; lakehouse screenshots show the delivered UI. | [source entry contract](../reference/source-entry-contract.md) |
 | R01 | SQLite41/PostgreSQL21 additive schema and adapter contracts; populated old40/20 upgrade/reopen/downgrade-refusal tests also restore real pre-upgrade SQLite/pg_dump backups. | [configuration](../reference/configuration.md) |
-| R02 | Compiled SDK/strict DocLint, generated OpenAPI/catalog/source inventory, event/config references and configurator Java fixtures are explicit contract gates. | [api cli](../reference/api-cli.md) |
+| R02 | Compiled SDK/strict DocLint, generated OpenAPI/catalog/source inventory, event/config references and configurator Java fixtures are explicit contract gates. ExecutionEventWireJsonTest and StableEdgeIdWireContractTest cover complete-frame bounds without truncating retained context or stable edges. | [api cli](../reference/api-cli.md) |
 | R03 | The final candidate requires the repository full workflow on its exact SHA and independent review; feature tests do not substitute for release/merge gates. | [execution identity](../reference/execution-identity.md) |
 
 ## Executed examples and measurement boundaries

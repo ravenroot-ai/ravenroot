@@ -89,8 +89,16 @@ branches or external processing. A correlated join arrival completes at its rece
 process/traversal identity with original contributions retained as causal evidence.
 
 Execution SSE variants add nullable `applicationCorrelationId`, `contributionId`, `contributionKind`,
-`roundId` and `publicReference` scalars from established runtime context. Old uncorrelated events
-leave them null. These fields do not replace request, process, traversal, invocation, attempt or
+`roundId` and `publicReference` scalars from established runtime context. The additive
+`applicationCorrelationAvailability` is `AVAILABLE` when the complete context is projected,
+`NOT_RECORDED` when this event supplies no retained typed context, or `NOT_PROJECTED` when including it would reach the
+65,536-byte complete SSE frame ceiling. The last two states leave all five projection fields null;
+they are distinct from each other. Older producers may omit the availability field. No identity
+string is shortened: full immutable context remains in authorized scoped history when recorded.
+If the existing event fields alone cannot fit the complete frame, projection refuses before writing
+an oversized event; execution state and retained identity are unchanged. A disconnected stream still
+requires reconciliation and is not evidence of completion.
+Stable edge, process and traversal identities remain intact. These fields do not replace request, process, traversal, invocation, attempt or
 protocol waiter IDs, and are not extracted heuristically from payloads. Durable event projection
 reads the retained relationship; live dispatch preserves the same immutable context. Event streams
 and history queries retain their existing tenant/source authorization. Captured input/output content
@@ -167,7 +175,7 @@ When durable replay or recent-event polling declares that a cursor predates reta
 
 Durable replay survives a restart within retained history. RING eviction and restart can lose observations; the process-local stream cannot prove complete history across a restart. A closed connection or a clean end of a captured file is not evidence that an execution finished. The journal also has narrower event coverage and no live author diagnostics; do not fill gaps by interleaving ring and journal cursor domains.
 
-Raw `detail`, tenant attributes, correlation strings and journal payloads are not published in this envelope. Live message/output fields are already bounded and targeted-redacted at their producing boundary. They remain author diagnostics, never assistant/provider context. The stable-edge limit remains 8192 UTF-8 bytes, auxiliary traversal strings share the 12287-byte escaped budget, and the complete traversal SSE frame remains below 65536 bytes.
+Raw `detail`, tenant attributes, transport correlation strings and journal payloads are not published in this envelope. The explicitly named application-context scalars follow the availability contract above. Live message/output fields are already bounded and targeted-redacted at their producing boundary. They remain author diagnostics, never assistant/provider context. The stable-edge limit remains 8192 UTF-8 bytes, existing auxiliary traversal strings share the 12287-byte escaped budget, and complete-frame accounting keeps the traversal SSE frame below 65536 bytes when projecting application context.
 
 The optional [authenticated interaction WebSocket](interactions-websocket.md) reuses this durable
 journal projection and adds bounded acknowledgement flow control plus durable Human Task commands.

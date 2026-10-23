@@ -6,6 +6,7 @@ import ai.ravenroot.api.application.PublicExecutionDescription;
 import ai.ravenroot.api.application.RuntimeActivityData;
 import ai.ravenroot.api.application.StableEdgeId;
 import ai.ravenroot.api.payload.PayloadJson;
+import java.nio.charset.StandardCharsets;
 
 /** Versioned JSON projections carried by {@code event: execution} SSE frames. */
 public final class ExecutionEventWireJson {
@@ -22,6 +23,10 @@ public final class ExecutionEventWireJson {
      */
     public static String live(ExecutionEvent event) {
         String legacy = legacyLive(event);
+        return liveEnvelope(event, legacy);
+    }
+
+    private static String liveEnvelope(ExecutionEvent event, String legacy) {
         return "{\"schemaVersion\":" + SCHEMA_VERSION
                 + ",\"source\":\"" + RING_SOURCE + "\""
                 + ",\"id\":\"" + event.sequence() + "\""
@@ -34,6 +39,14 @@ public final class ExecutionEventWireJson {
      * offset; {@code eventId} is the existing persisted deduplication identity, not a new cursor.
      */
     public static String durable(DurableExecutionEvent event) {
+        String projected = durable(event, correlationFields(event.applicationCorrelation()));
+        if (fitsFrame(event.journalOffset(), projected)) return projected;
+        String omitted = durable(event, unavailableCorrelation());
+        requireFrame(event.journalOffset(), omitted);
+        return omitted;
+    }
+
+    private static String durable(DurableExecutionEvent event, String correlation) {
         String description = PublicExecutionDescription.forEventType(event.eventType());
         return "{\"schemaVersion\":" + SCHEMA_VERSION
                 + ",\"source\":\"" + DURABLE_SOURCE + "\""
@@ -54,7 +67,7 @@ public final class ExecutionEventWireJson {
                 + ",\"edgeId\":" + (event.edgeId() == null ? "null"
                         : "\"" + escape(StableEdgeId.requireValid(event.edgeId())) + "\"")
                 + ",\"handlerId\":" + nullableUuid(event.handlerId())
-                + correlationFields(event.applicationCorrelation())
+                + correlation
                 + ",\"outcome\":" + nullableEscaped(event.outcome())
                 + "}";
     }
@@ -68,6 +81,14 @@ public final class ExecutionEventWireJson {
      * still does.</p>
      */
     static String legacyLive(ExecutionEvent event) {
+        String projected = legacyLive(event, correlationFields(event.applicationCorrelation()));
+        if (fitsFrame(event.sequence(), liveEnvelope(event, projected))) return projected;
+        String omitted = legacyLive(event, unavailableCorrelation());
+        requireFrame(event.sequence(), liveEnvelope(event, omitted));
+        return omitted;
+    }
+
+    private static String legacyLive(ExecutionEvent event, String correlation) {
         String description = PublicExecutionDescription.forType(event.type(), event.publicReason());
         RuntimeActivityData.TextProjection message = event.authorMessage();
         return "{\"sequence\":" + event.sequence()
@@ -88,7 +109,7 @@ public final class ExecutionEventWireJson {
                 // origin. Keeping both here preserves durable re-entry identity across the live SSE
                 // and the ring recent-event endpoint, which share this projection.
                 + ",\"workloadId\":" + nullableEscaped(event.workloadId())
-                + correlationFields(event.applicationCorrelation())
+                + correlation
                 + ",\"invocationId\":" + nullableUuid(event.invocationId())
                 + ",\"attemptId\":" + nullableUuid(event.attemptId())
                 + ",\"type\":\"" + event.type() + "\""
@@ -113,11 +134,32 @@ public final class ExecutionEventWireJson {
     }
 
     static String correlationFields(ai.ravenroot.api.correlation.ApplicationCorrelationContext context) {
+        return correlationFields(context, context == null ? "NOT_RECORDED" : "AVAILABLE");
+    }
+
+    private static String unavailableCorrelation() {
+        return correlationFields(null, "NOT_PROJECTED");
+    }
+
+    private static String correlationFields(ai.ravenroot.api.correlation.ApplicationCorrelationContext context,
+                                            String availability) {
         return ",\"applicationCorrelationId\":" + nullableEscaped(context == null ? null : context.applicationCorrelationId())
                 + ",\"contributionId\":" + nullableEscaped(context == null ? null : context.contributionId().orElse(null))
                 + ",\"contributionKind\":" + nullableEscaped(context == null ? null : context.contributionKind().orElse(null))
                 + ",\"roundId\":" + nullableEscaped(context == null ? null : context.roundId())
-                + ",\"publicReference\":" + nullableEscaped(context == null ? null : context.publicReference().orElse(null));
+                + ",\"publicReference\":" + nullableEscaped(context == null ? null : context.publicReference().orElse(null))
+                + ",\"applicationCorrelationAvailability\":\"" + availability + "\"";
+    }
+
+    /** Exact complete framing budget; omission never changes the retained context or any identity. */
+    private static boolean fitsFrame(long cursor, String json) {
+        int framing = ("id: " + cursor + "\nevent: execution\ndata: \n\n").getBytes(StandardCharsets.UTF_8).length;
+        return (long) framing + json.getBytes(StandardCharsets.UTF_8).length < StableEdgeId.SSE_FRAME_MAX_BYTES;
+    }
+
+    private static void requireFrame(long cursor, String json) {
+        if (!fitsFrame(cursor, json))
+            throw new IllegalArgumentException("execution event fields exceed bounded wire projection");
     }
 
     /** Escapes one JSON string value without admitting a general-purpose object serializer. */

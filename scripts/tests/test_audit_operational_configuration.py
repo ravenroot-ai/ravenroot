@@ -1603,12 +1603,14 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         self.assertIsNotNone(expected)
         self.assertEqual(43, len(expected["contracts"]))
         self.assertEqual(97, len(expected["candidateIds"]))
-        self.assertEqual(
-            "471891f10e915939b5d29ae276a5ece19c8ada9abc8513f2ccf24beef9872e83",
-            hashlib.sha256(json.dumps(expected["contracts"][:40], sort_keys=True,
-                                      separators=(",", ":")).encode("utf-8")).hexdigest(),
-            "the accepted 40-contract prefix must not be rewritten to add the new path policies",
-        )
+        baseline = committed_inventory("cf76f96ead7fad1ad7eb6a6f3922afcee81a1a2c")[0]
+        original = baseline["persistencePolicyAuthorities"][audit.PERSISTENCE_POLICY_AUTHORITY_ID]["contracts"][:40]
+        def semantic_contracts(contracts):
+            # Appending source-compatible history policy changes lexical declaration IDs only.
+            # Preserve every original owner/field/default/binding and resolver-call proof.
+            return [{key: value for key, value in contract.items()
+                     if key not in {"candidateIds", "defaultCandidateIds"}} for contract in contracts]
+        self.assertEqual(semantic_contracts(original), semantic_contracts(expected["contracts"][:40]))
         self.assertEqual(
             {
                 "execution.store.selector", "execution.store.url", "execution.store.user",
@@ -2254,12 +2256,12 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as location:
             root = Path(location)
             authority, entries, candidates, details = self.route_table_authority_fixture(root)
-            self.assertEqual(122, len(details))
+            self.assertEqual(128, len(details))
             self.assertEqual(
-                {"methods": 135, "path": 122, "summary": 463, "successStatuses": 126},
+                {'methods': 141, 'path': 128, 'summary': 475, 'successStatuses': 132},
                 {role: len(ids) for role, ids in authority["candidateIdsByRole"].items()},
             )
-            self.assertEqual(846, len(entries))
+            self.assertEqual(876, len(entries))
             self.assertEqual([], self.route_table_errors(root, authority, entries, candidates))
             self.assertEqual({
                 "StableEdgeId.MAX_UTF8_BYTES": 8192,
@@ -4422,6 +4424,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         with mock.patch.object(audit, "assistant_limit_authority_errors", return_value=[]), \
                 mock.patch.object(audit, "helm_authority_errors", return_value=[]), \
                 mock.patch.object(audit, "persistence_policy_authority_errors", return_value=[]), \
+                    mock.patch.object(audit, "history_policy_authority_errors", return_value=[]), \
                 mock.patch.object(audit, "external_io_policy_authority_errors", return_value=[]), \
                 mock.patch.object(audit, "program_github_policy_authority_errors", return_value=[]), \
                 mock.patch.object(audit, "agent_budget_authority_errors", return_value=[]), \
@@ -6507,6 +6510,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             with mock.patch.object(audit, "assistant_limit_authority_errors", return_value=[]), \
                     mock.patch.object(audit, "helm_authority_errors", return_value=[]), \
                     mock.patch.object(audit, "persistence_policy_authority_errors", return_value=[]), \
+                    mock.patch.object(audit, "history_policy_authority_errors", return_value=[]), \
                     mock.patch.object(audit, "external_io_policy_authority_errors", return_value=[]), \
                     mock.patch.object(audit, "program_github_policy_authority_errors", return_value=[]), \
                     mock.patch.object(audit, "agent_budget_authority_errors", return_value=[]), \

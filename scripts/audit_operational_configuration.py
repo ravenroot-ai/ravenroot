@@ -2876,11 +2876,6 @@ def helm_authority_from_source(root: Path, candidates: tuple[Candidate, ...]) ->
 def helm_authority_errors(root: Path, authorities: object,
                           entries: dict[str, dict[str, object]],
                           candidates: tuple[Candidate, ...]) -> list[str]:
-    if (root / next(iter(HISTORY_POLICY_SOURCE_LOCKS))).is_file():
-        history_authority = history_policy_authority_from_source(root, current)
-        if history_authority is None:
-            return None, ["cannot derive the reviewed business history policy authority"]
-        refreshed["businessHistoryAuthorities"] = {HISTORY_POLICY_AUTHORITY_ID: history_authority}
     chart_present = helm_chart_present(root, candidates)
     expected = helm_authority_from_source(root, candidates)
     helm_entries = [entry for entry in entries.values() if entry.get("helmAuthority") is not None]
@@ -4045,6 +4040,11 @@ def apply_reconciliation(root: Path, document: dict[str, object], candidates: tu
     refreshed["routeTableAuthorities"] = {
         ROUTE_TABLE_AUTHORITY_ID: current_route_table_authority(root),
     }
+    if (root / next(iter(HISTORY_POLICY_SOURCE_LOCKS))).is_file():
+        history_authority = history_policy_authority_from_source(root, current)
+        if history_authority is None:
+            return None, ["cannot derive the reviewed business history policy authority"]
+        refreshed["businessHistoryAuthorities"] = {HISTORY_POLICY_AUTHORITY_ID: history_authority}
     chart_present = helm_chart_present(root, candidates)
     if chart_present:
         helm_authority = helm_authority_from_source(root, candidates)
@@ -14649,22 +14649,22 @@ STABLE_EDGE_TEST_PATH = Path(
 STABLE_EDGE_WIRE_TEST_PATH = Path(
     "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/StableEdgeIdWireContractTest.java")
 ROUTE_BOUND_CANDIDATES = {
-    "oc-79f74da23d4a94c27444": ("StableEdgeId.MAX_UTF8_BYTES",),
-    "oc-e76c63ce9b899f426c40":
+    "oc-676293b14c737100ccc5": ("StableEdgeId.MAX_UTF8_BYTES",),
+    "oc-46a4e51668fc4c6a8bf8":
         ("EdgeTraversalWireBudget.MAX_AUXILIARY_ESCAPED_VALUE_BYTES",),
-    "oc-185de3db1cf1278d2ceb": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
-    "oc-609f930fe8603b3d96e9": (
+    "oc-1540a808b0c4908e078a": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
+    "oc-6f29fb115e26588d174d": (
         "StableEdgeId.MAX_UTF8_BYTES",
         "EdgeTraversalWireBudget.MAX_AUXILIARY_ESCAPED_VALUE_BYTES",
     ),
-    "oc-826452c756f4b6f3cb91": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
+    "oc-2ff8cccab5b4a020b7f6": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
 }
 ROUTE_BOUND_PATHS = {
-    "oc-79f74da23d4a94c27444": "/v1/events",
-    "oc-e76c63ce9b899f426c40": "/v1/events",
-    "oc-185de3db1cf1278d2ceb": "/v1/events",
-    "oc-609f930fe8603b3d96e9": "/v1/events/recent",
-    "oc-826452c756f4b6f3cb91": "/v1/events/recent",
+    "oc-676293b14c737100ccc5": "/v1/events",
+    "oc-46a4e51668fc4c6a8bf8": "/v1/events",
+    "oc-1540a808b0c4908e078a": "/v1/events",
+    "oc-6f29fb115e26588d174d": "/v1/events/recent",
+    "oc-2ff8cccab5b4a020b7f6": "/v1/events/recent",
 }
 
 
@@ -14923,23 +14923,23 @@ GRAPH_AUTHORING_FILE_PROOFS = {
 # unrelated candidates retain their existing semantic authorities rather than being claimed by
 # graph authoring as a whole file.
 GRAPH_AUTHORING_SUPPORT_FILE_PROOFS = {
-    Path("ravenroot/ravenroot-ui/src/workspace.js"): "8a9b087bb2577e8cf1b1c7431e20497fd39e520e0e7c6357474752c18275ba22",
-    Path("ravenroot/ravenroot-ui/src/workspace-persistence.js"): "43a184684a79f7ba7016cd78bccf37dd75dba4887fd9306e0913e535e27f195f",
+    Path("ravenroot/ravenroot-ui/src/workspace.js"): "05fb16e6a6cb4faa30c74488a1b602e72a9e1e16098c7cb9e70758613da7873f",
+    Path("ravenroot/ravenroot-ui/src/workspace-persistence.js"): "6ecdca7d012248d46f3452ce41c4a347671f340e106399c7dadbb7e6ace7f921",
     Path("ravenroot/ravenroot-ui/src/document-close-plan.js"): "a795d45f1fd7bcebe3d0a63806700f9f326bc1b6644851ff8c36a43a38ca1872",
     Path("ravenroot/ravenroot-ui/test/workspace.test.js"): "a96f59730294ed6954ebc324c23d871585de2a772049a7cad2120307413d9cc6",
     Path("ravenroot/ravenroot-ui/test/workspace-persistence.test.js"): "c1a8f3264720c5ba57f1a03cc0fa324d1c3e0011e9c2d58fb2293b489b4f773b",
     Path("ravenroot/ravenroot-ui/test/document-close-plan.test.js"): "bf00fb125e359ca7bfc0cfbdf6a32f1226310b3a63746412565090dfff516403",
     Path("ravenroot/ravenroot-ui/src/credential-request.js"): "240501ee73c4068eabbd52540de39d4813b59f7a7c6d2a44bed297c33eb91c90",
     Path("ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/RavenrootApplication.java"):
-        "adf1b3bcee37848577c343c78f8e1ae3fe4c4efe3fe9ab62aaef92ca5b0a0333",
+        "a87aeaa05cf8e33faf71eabb1c411062dc1adf0156df96dcf34e4d95a1598ab7",
     Path("ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/AuthorizedRavenrootApplication.java"):
-        "753cf2cb56afd581e1ed341ca518cd88ed103aa3c764f835a6902a0839ab1f06",
+        "6a0d8a1c4ebd7b42130a53b4042f9b58ee2c5254e5fa90c19f1b94ca0f865f55",
     Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/WireErrorCodes.java"):
         "71b0aa2cdfdbbd0964c1e4a4aae9c29e6736ad1be2ee9f4d27f868b61d5e7299",
 }
 GRAPH_AUTHORING_TEST_PROOFS = {
     Path("ravenroot/ravenroot-ui/test/repository-picker.test.js"): 'da9806558b3759c4adaa407c763b776b0bf6cb62cb0c72de6e8efb98ff10f606',
-    Path("ravenroot/ravenroot-ui/e2e/managed-repository.spec.js"): 'a8404e632535cd0efcd03f633f90bfbea2847bcfa90fadcc920212edb68529fb',
+    Path("ravenroot/ravenroot-ui/e2e/managed-repository.spec.js"): '79106fe3a8e7baaecd26db8cca6bcb6091e1a962dd1a4b7b3e2f155f15a980d4',
     Path("ravenroot/ravenroot-ui/e2e/activity-localization.spec.js"): '330eee9236cb1498466010ef2515c592885cdb68d72a080d9413f1948b9c010a',
     Path("ravenroot/ravenroot-ui/e2e/startup-import.spec.js"): '4117b49e63dbb83c325650f1788f21ccb6bbcc80f86b7cbea71956475756eeb0',
     Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/AuthoringPublicationIndexTest.java"): "64bd2a9f1cd7a82af8442fa2be71a7e84833582ba6aee133dbe8ed395d475afd",
@@ -15083,7 +15083,7 @@ GRAPH_AUTHORING_UI_METHOD_PROOFS = {
 GRAPH_AUTHORING_UI_SUPPORT_SPAN_PROOFS = {
     "paneIsDirty": "ceb8181d2effb12561ea1b26434ab5feb729eeddafbc4240ac942c65f80d9601",
     "updateHistoryUi": "59437d046a615c053834b4b9d36f30fafba3312f00dd1c382cd410061f5011d6",
-    "completeReplaceActiveDocument": "5f048a87c67189014d16a0cee8d9af2ce0ddf81f95cc709a992e4841c18a9ca5",
+    "completeReplaceActiveDocument": "c3ba35734683c8cd2fb6c22144b2cb577e1c0fd5ffec4625841f2ab1349d7724",
     "bootApplication": '9a21d4cd04d3f43b387e7f0b97581629e29710b4b68dd7c9c3f422be1432e16d',
     "syncGraphModeLabel": 'a205d6a872ef979883261fb8c43ff376231456941c05321787ac53ef789faef9',
 }
@@ -15091,7 +15091,7 @@ GRAPH_AUTHORING_UI_SPAN_PROOFS = {
     (GRAPH_AUTHORING_UI_PATH, "documentModeLabel"):
         "413ae14ef232086fb9a1c0ec233892efc5829de3ebe6e9416a378468fcefbc5d",
     (Path("ravenroot/ravenroot-ui/src/workspace.js"), "createDocumentRecord"):
-        "4f9fc9eb0d1d9cf209ab76bd5f57e92aea38f53eeb52c5505fbc32c70c38b0ef",
+        "967a03ec2a26379e7b6ff859cfdee5ba637d2f4ee37831233705a1009a37449d",
     (Path("ravenroot/ravenroot-ui/src/workspace-persistence.js"), "persistedAuthoring"):
         "5d5f16d7c42fdc0cb3663ae69b43bc1d8a022a169f5781503ffdeecf34ec1e80",
     (GRAPH_AUTHORING_GRAPH_DOCUMENT_PATH, "createEmptyWorkflowDocument"):
@@ -16590,9 +16590,9 @@ def route_table_authority_errors(root: Path, authorities: object,
         return ["RouteTable.ALL is not the supported direct RouteDescriptor table"]
     partitions, details, source_candidates = parsed
     errors: list[str] = []
-    expected_counts = {"methods": 135, "path": 122, "summary": 463, "successStatuses": 126}
-    if len(details) != 122 or {role: len(ids) for role, ids in partitions.items()} != expected_counts:
-        errors.append("RouteTable authority no longer has the reviewed 122/846 positional shape")
+    expected_counts = {"methods": 141, "path": 128, "summary": 475, "successStatuses": 132}
+    if len(details) != 128 or {role: len(ids) for role, ids in partitions.items()} != expected_counts:
+        errors.append("RouteTable authority no longer has the reviewed 128/876 positional shape")
     recorded = authority["candidateIdsByRole"]
     if not isinstance(recorded, dict) or set(recorded) != set(expected_counts) \
             or any(recorded.get(role) != partitions[role] for role in expected_counts):

@@ -52,6 +52,12 @@ public enum GraphAdmissionReason {
     RUNTIME_CONCURRENCY_INVALID,
     /** The graph exceeds a bounded admission limit. */
     GRAPH_LIMIT_EXCEEDED,
+    /** A saga declaration is incomplete or inconsistent. */
+    SAGA_CONTRACT_INVALID,
+    /** The behavior has no trusted implementation of the declared participant protocol. */
+    SAGA_PARTICIPANT_UNSUPPORTED,
+    /** A saga requires a durable store with saga support. */
+    SAGA_DURABILITY_REQUIRED,
     /** A source node lacks the trusted inbound-source capability. */
     SOURCE_CAPABILITY_MISMATCH,
     /** The requested source purpose has no effective source node. */

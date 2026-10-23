@@ -27,6 +27,7 @@ import java.util.function.IntConsumer;
 /** One serial poll owner controls every channel operation and generation transition. */
 final class AmqpConsumerSource implements InboundSource {
     enum State { STOPPED, STARTING, READY, BACKING_OFF, RECONNECTING, STOPPING, FAILED }
+    private static final System.Logger LOGGER = System.getLogger("ai.ravenroot.amqp.delivery.rejected");
     private static final AmqpConsumerLeaseRegistry RESOURCE_LEASES = new AmqpConsumerLeaseRegistry();
     private static final AmqpSubscriptionLeaseRegistry SUBSCRIPTION_LEASES = new AmqpSubscriptionLeaseRegistry();
 
@@ -220,8 +221,8 @@ final class AmqpConsumerSource implements InboundSource {
             if (event instanceof AmqpConsumerProtocol.Disconnected disconnected)
                 throw new AmqpConsumerProtocol.Failure(false, disconnected.safeReason());
             if (event instanceof AmqpConsumerProtocol.Rejected rejected) {
-                context.reportDegraded(rejected.safeReason());
-                nackIfCurrent(sessionGeneration, rejected.deliveryTag(), false);
+                if (nackIfCurrent(sessionGeneration, rejected.deliveryTag(), false))
+                    reportRejectedDelivery(rejected.safeReason());
                 continue;
             }
             if (!(event instanceof AmqpConsumerProtocol.Delivery delivery)) continue;
@@ -235,8 +236,8 @@ final class AmqpConsumerSource implements InboundSource {
         AmqpDeliveryEvent.Projected projected;
         try { projected = AmqpDeliveryEvent.project(delivery, policy, settings.destination, 1); }
         catch (AmqpDeliveryEvent.Invalid invalid) {
-            context.reportDegraded(invalid.safeReason());
-            nackIfCurrent(sessionGeneration, delivery.deliveryTag(), false);
+            if (nackIfCurrent(sessionGeneration, delivery.deliveryTag(), false))
+                reportRejectedDelivery(invalid.safeReason());
             return;
         }
         int attempt = attempts.merge(projected.idempotentKey(), 1, Integer::sum);
@@ -279,10 +280,21 @@ final class AmqpConsumerSource implements InboundSource {
     private void healthy(InboundSourceContext context) {
         lifecycle.lock();
         try {
-            if (!stopRequested && state != State.READY) { state = State.READY; context.reportHealthy(); }
+            if (!stopRequested) {
+                // A durable acceptance and broker ack prove recovery even if our local state
+                // already says READY. Never leave the deployment's health latched to an old report.
+                state = State.READY;
+                context.reportHealthy();
+            }
         } finally {
             lifecycle.unlock();
         }
+    }
+
+    private static void reportRejectedDelivery(String safeReason) {
+        // A settled invalid delivery does not reduce the listener's ability to consume.
+        // Reasons are fixed protocol/projection codes; never log message content or identity.
+        LOGGER.log(System.Logger.Level.WARNING, "ravenroot_amqp_delivery_rejected reason={0}", safeReason);
     }
 
     private void degrade(InboundSourceContext context, String reason, State target) {

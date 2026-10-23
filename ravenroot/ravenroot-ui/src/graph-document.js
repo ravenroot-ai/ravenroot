@@ -1,3 +1,4 @@
+import { migrateLegacySagaDefaults } from './saga-authoring.js';
 import { productError } from './product-error.js';
 import { assertStableEdgeId, stableEdgeIdFinding } from './stable-edge-id.js';
 import { VISUAL_GROUPS_PROPERTY, readVisualGroups } from './visual-groups.js';
@@ -1052,7 +1053,8 @@ export function serializeGraphML(graph) {
     .forEach(edge => edge.remove());
   directChildren('node').filter(node => !nodeIds.has(node.getAttribute('id'))).forEach(node => node.remove());
 
-  for (const node of graph.nodes || []) {
+  for (const originalNode of graph.nodes || []) {
+    const node = migrateLegacySagaDefaults(originalNode);
     let element = findById('node', node.id);
     if (!element) {
       element = doc.createElementNS(namespace, 'node');

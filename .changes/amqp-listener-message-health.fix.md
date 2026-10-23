@@ -1,0 +1,1 @@
+Keep AMQP listeners ready and listening when individual deliveries are rejected for missing stable identity, invalid metadata or oversized content. Report these rejections separately from listener health, and restore healthy status after durable acceptance and broker acknowledgement. Actual broker and durable-ingress failures continue to report degraded health.

@@ -557,6 +557,13 @@ jobs:
             ravenroot/ravenroot-server/target/embed-browser-evidence/
             ravenroot/ravenroot-extensions/ravenroot-openapi-server/target/lakehouse-example/
           if-no-files-found: warn
+      - name: Run the saga authoring real-server browser regression
+        working-directory: ravenroot
+        run: >-
+          mvn -B --no-transfer-progress -pl ravenroot-server -am
+          -Dtest=SagaAuthoringBrowserTest
+          -Dravenroot.sagaAuthoring.browserTest=true
+          -Dsurefire.failIfNoSpecifiedTests=false test
       # Archive unconditionally: this evidence is the only record of a real restart, and a failure
       # here is exactly when it is needed. The UUID keeps repeated harness invocations separate.
       - name: Archive Human Task confirmation browser evidence
@@ -567,6 +574,8 @@ jobs:
           path: |
             ravenroot/ravenroot-server/target/human-task-confirmation-browser/*/playwright-results/**
             ravenroot/ravenroot-server/target/human-task-confirmation-browser/*/playwright-driver.log
+            ravenroot/ravenroot-server/target/saga-authoring-*/browser.log
+            ravenroot/ravenroot-server/target/saga-authoring-*/playwright/**
           if-no-files-found: ignore
           retention-days: 7
 

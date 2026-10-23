@@ -1,6 +1,7 @@
 import { createDeploymentHistoryMonitor } from './embed-viewer-entry.js';
 import { mountCorrelationPreview } from './correlation-authoring.js';
 import { runOriginDeployment, persistedDeploymentRun } from './deployment-run.js';
+import { sagaParticipant, sagaScopes, readSagaCatalogProperties } from './saga-authoring.js';
 import { chooseRepositoryDocument, managedRepositoryLaunch } from './repository-picker.js';
 import { uiMessage, uiComputed, isUiMessage, renderUiMessage, uiErrorMessage, uiMessageOf } from './ui-message.js';
 import { productError } from './product-error.js';
@@ -6787,7 +6788,7 @@ function readNodeEditorPatch(form, model) {
   const custom = readPropertyEditor(form);
   const additionalGroups = readAdditionalPropertyGroupEditor(
     form, catalogDescriptor(behavior));
-  const catalog = readCatalogPropertyEditor(form);
+  const catalog = readSagaCatalogProperties(form, () => readCatalogPropertyEditor(form));
   const kind = String(values.get('kind'));
   // Conditional catalog fields retain their draft and serialized value by default. AMQP destination
   // modes are narrower: their runtime schemas reject inactive destination fields, so remove only
@@ -7317,7 +7318,8 @@ function renderNodeForm(model, creating) {
       <div id="node-join-section">${joinFieldHtml(graphData, model)}</div>
       <div id="node-correlation-section">${catalogPropertyFieldsHtml(startMapping, model.properties || {}, catalogFieldOwner)}</div>
       <div id="catalog-properties">${catalogPropertyFieldsHtml(
-        catalogEditorDescriptor, model.properties || {}, catalogFieldOwner)}</div>
+        sagaOrdinaryDescriptor(catalogEditorDescriptor), model.properties || {}, catalogFieldOwner)}</div>
+      <div id="node-saga-section">${sagaFieldsHtml(catalogEditorDescriptor, model, catalogFieldOwner)}</div>
       <div id="program-workspace">${programWorkspaceContentHtml(descriptor, model)}</div>
       <div id="additional-property-groups">${additionalPropertyGroupsHtml(additionalGroups.groups)}</div>
       <section id="node-correlation-preview"></section>
@@ -7332,8 +7334,11 @@ function renderNodeForm(model, creating) {
   form._localeRender = () => renderNodeForm(model, creating);
   const renderCorrelationCatalogControls = (selected, values) => {
     const kind = form.elements.kind.value;
+    const effective = programCatalogEditorDescriptor(nodeEditorCatalogDescriptor(selected, kind));
     document.getElementById('catalog-properties').innerHTML = catalogPropertyFieldsHtml(
-      programCatalogEditorDescriptor(nodeEditorCatalogDescriptor(selected, kind)), values, catalogFieldOwner);
+      sagaOrdinaryDescriptor(effective), values, catalogFieldOwner);
+    document.getElementById('node-saga-section').innerHTML = sagaFieldsHtml(effective, { properties: values }, catalogFieldOwner);
+    bindSagaFields(form);
     document.getElementById('node-correlation-section').innerHTML = catalogPropertyFieldsHtml(startCorrelationDescriptor(kind), values, catalogFieldOwner);
     correlationPreview.reconcile();
   };
@@ -7378,6 +7383,7 @@ function renderNodeForm(model, creating) {
   bindNatureField();
   bindMaxConcurrencyField();
   bindJoinField();
+  bindSagaFields(form);
   // Any catalog property can be the sibling a condition names, so this listens on the
   // container rather than on specific properties the descriptor happens to declare as
   // condition-drivers today — nothing here is specific to "mode" or to any one behavior. Delegated
@@ -7385,7 +7391,7 @@ function renderNodeForm(model, creating) {
   // handler, which would otherwise have to re-bind itself on every change.
   document.getElementById('catalog-properties')?.addEventListener('change', event => {
     if (!catalogEditorDescriptor || !event.target.closest('[data-catalog-property]')) return;
-    refreshConditionalCatalogProperties(catalogEditorDescriptor, catalogFieldOwner);
+    refreshConditionalCatalogProperties(sagaOrdinaryDescriptor(catalogEditorDescriptor), catalogFieldOwner);
   });
   document.getElementById('catalog-properties')?.addEventListener('input', event => {
     const field = event.target.closest('[data-catalog-property]');
@@ -7548,7 +7554,8 @@ function catalogPropertyFieldsHtml(descriptor, values, owner) {
   // the referenced sibling, never a stale or differently-defaulted one. Computed once, up front,
   // because a condition can name any other property in this same list, not only ones earlier in it.
   const resolvedValues = Object.fromEntries(
-    descriptor.properties.map(property => [property.name, values[property.name] ?? property.defaultValue ?? '']));
+    descriptor.properties.map(property => [property.name, values[property.name]
+      ?? (property.name.startsWith('saga.') ? '' : property.defaultValue) ?? '']));
   // Publisher inherits a Producer queue only as an in-session draft. The queue stays mounted and
   // retained, but cannot suppress the Publisher exchange/routing controls while its own row is
   // hidden. Other descriptors keep the established rule that conditions see retained hidden values.
@@ -7828,7 +7835,7 @@ function catalogPropertyFieldsHtml(descriptor, values, owner) {
       const recognized = !present || stringValue === '' || stringValue === 'true' || stringValue === 'false';
       const unrecognizedOption = recognized ? ''
         : `<option value="${escapeAttribute(value)}" selected>${escapeHtml(uiText("workspace.template.app.current.value.not.recognized"))} ${escapeHtml(value)}</option>`;
-      control = `<select data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="BOOLEAN"${accessibility}>${unrecognizedOption}<option value="false" ${recognized && stringValue !== 'true' ? 'selected' : ''}>${escapeHtml(uiText("workspace.template.app.false"))}</option><option value="true" ${stringValue === 'true' ? 'selected' : ''}>${escapeHtml(uiText("workspace.template.app.true"))}</option></select>`;
+      control = `<select data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="BOOLEAN"${accessibility}>${property.name.startsWith('saga.') ? `<option value="" ${stringValue === '' ? 'selected' : ''}>${escapeHtml(uiText("workspace.template.app.not.declared"))}</option>` : ''}${unrecognizedOption}<option value="false" ${recognized && stringValue !== 'true' && (!property.name.startsWith('saga.') || stringValue !== '') ? 'selected' : ''}>${escapeHtml(uiText("workspace.template.app.false"))}</option><option value="true" ${stringValue === 'true' ? 'selected' : ''}>${escapeHtml(uiText("workspace.template.app.true"))}</option></select>`;
     } else {
       const inputType = property.type === 'INTEGER' || property.type === 'DECIMAL' ? 'number' : 'text';
       const step = property.type === 'DECIMAL' ? ' step="any"' : '';
@@ -10499,10 +10506,10 @@ function showAddCatalogNodeForm(behavior, { skipDraftGuard = false } = {}) {
   model.behavior = descriptor.behavior;
   model.nodeType = resolveDescriptorNodeType(descriptor);
   model.properties = Object.fromEntries((descriptor.properties || [])
-    .filter(catalogPropertyHasDeclaredDefault)
+    .filter(property => !property.name.startsWith('saga.') && catalogPropertyHasDeclaredDefault(property))
     .map(property => [property.name, property.defaultValue]));
   model.propertyTypes = Object.fromEntries((descriptor.properties || [])
-    .filter(catalogPropertyHasDeclaredDefault)
+    .filter(property => !property.name.startsWith('saga.') && catalogPropertyHasDeclaredDefault(property))
     .map(property => [property.name, catalogTypeToGraphMl(property.type)]));
   document.getElementById('info-title').textContent = uiText("workspace.app.add", { displayName: descriptor.displayName });
   renderNodeForm(model, true);
@@ -12809,6 +12816,9 @@ async function focusRuntimeFinding(owner, finding) {
 }
 
 const REFUSAL_REMEDIATION = Object.freeze({
+  SAGA_CONTRACT_INVALID: 'workspace.saga.invalid',
+  SAGA_PARTICIPANT_UNSUPPORTED: 'workspace.saga.unsupported',
+  SAGA_DURABILITY_REQUIRED: 'workspace.saga.durability',
   INVALID_STRUCTURE: 'workspace.refusal.invalidStructure',
   REQUIRED_PROPERTY_MISSING: 'workspace.refusal.requiredProperty',
   PROPERTY_TYPE_INVALID: 'workspace.refusal.propertyType',
@@ -17512,3 +17522,72 @@ function bootApplication() {
 // slow or missing optional catalog can settle after the window load event, so initialize directly
 // when that event has already passed instead of leaving the workspace empty.
 scheduleApplicationBoot({ document, window, boot: bootApplication });
+
+
+document.getElementById('btn-saga-scopes')?.addEventListener('click', () => {
+  runAfterInspectorDraft(() => showSagaScopes());
+});
+
+function sagaOrdinaryDescriptor(descriptor) {
+  return descriptor && { ...descriptor, properties: (descriptor.properties || [])
+    .filter(property => !property.name.startsWith('saga.')) };
+}
+
+function sagaFieldsHtml(descriptor, model, owner) {
+  if (!sagaParticipant(descriptor)) return '';
+  const values = model.properties || {};
+  const enabled = Object.keys(values).some(name => name.startsWith('saga.'));
+  const sagaDescriptor = { ...descriptor, properties: (descriptor.properties || [])
+    .filter(property => property.name.startsWith('saga.')).map(property => ({ ...property, defaultValue: '' })) };
+  return `<section class="saga-authoring"><div class="editor-section-title">${escapeHtml(uiText('workspace.saga.title'))}</div>
+    <label><input type="checkbox" data-saga-enabled ${enabled ? 'checked' : ''}>${escapeHtml(uiText('workspace.saga.optIn'))}</label>
+    <p>${escapeHtml(uiText('workspace.saga.help'))}</p>
+    <div data-saga-fields ${enabled ? '' : 'hidden'}>${catalogPropertyFieldsHtml(sagaDescriptor, values, owner)}</div></section>`;
+}
+
+function bindSagaFields(form) {
+  const enabled = form.querySelector('[data-saga-enabled]');
+  const fields = form.querySelector('[data-saga-fields]');
+  if (!enabled || !fields) return;
+  const update = () => {
+    fields.hidden = !enabled.checked;
+    fields.querySelectorAll('[data-catalog-property]').forEach(field => { field.disabled = !enabled.checked; });
+  };
+  enabled.addEventListener('change', update);
+  update();
+}
+
+function showSagaScopes() {
+  if (!graphData || graphData.format !== 'graphml') return false;
+  retireInspectorDraft();
+  revealInspector();
+  document.getElementById('info-title').textContent = uiText('workspace.saga.scopes');
+  const scopes = sagaScopes(graphData);
+  const eligible = graphData.nodes.filter(node => node.kind === 'BEHAVIOR' && sagaParticipant(catalogDescriptor(node.behavior)));
+  document.getElementById('info-body').innerHTML = `<p>${escapeHtml(uiText('workspace.saga.scopeHelp'))}</p>
+    <ul>${[...scopes].map(([scope, nodes]) => `<li>${escapeHtml(scope)}: ${nodes.map(node => escapeHtml(node.name || node.id)).join(', ')}</li>`).join('')}</ul>
+    <form id="saga-scope-editor" class="editor-form">
+      <label>${escapeHtml(uiText('workspace.saga.scopeName'))}<input name="scope" required list="saga-scope-names"></label>
+      <datalist id="saga-scope-names">${[...scopes.keys()].map(scope => `<option value="${escapeAttribute(scope)}"></option>`).join('')}</datalist>
+      <label>${escapeHtml(uiText('workspace.saga.selectNode'))}<select name="node" required><option value=""></option>${eligible.map(node => `<option value="${escapeAttribute(node.id)}">${escapeHtml(node.name || node.id)}</option>`).join('')}</select></label>
+      <button class="btn" type="submit" ${modifyEnabled ? '' : 'disabled'}>${escapeHtml(uiText('workspace.saga.configure'))}</button>
+      <p>${escapeHtml(uiText('workspace.saga.emptyScope'))}</p>
+    </form>`;
+  document.getElementById('saga-scope-editor').addEventListener('submit', event => {
+    event.preventDefault();
+    if (!modifyEnabled || !canModifyGraph(graphData, layoutMode)) return;
+    const values = new FormData(event.currentTarget);
+    const node = graphData.nodeMap[String(values.get('node'))];
+    if (!node || !sagaParticipant(catalogDescriptor(node.behavior))) return;
+    renderNodeForm(node, false);
+    const form = document.getElementById('node-editor');
+    const enabled = form.querySelector('[data-saga-enabled]');
+    enabled.checked = true;
+    const scope = form.querySelector('[data-catalog-property="saga.scope"]');
+    scope.value = String(values.get('scope')).trim();
+    enabled.dispatchEvent(new Event('change', { bubbles: true }));
+    scope.dispatchEvent(new Event('input', { bubbles: true }));
+    form.querySelector('[data-catalog-property="saga.step"]')?.focus();
+  });
+  return true;
+}

@@ -32,7 +32,7 @@ identifier remain separate identities.
 | `openapi.receive` | `OpenApiReceiveSource` | Durable receipt for the accepted HTTP event. |
 | `openapi.request-reply` | `OpenApiRequestReplySource` | Bounded projected request/reply at the owning source; the HTTP caller waits for its response. |
 | `discord.interactions` | `DiscordInteractionsSourceBehavior` | Verified callback; durable command receipt before accepting its transport handoff. |
-| `github.events` | `GithubEventsSourceBehavior` | Verified delivery; durable receipt before accepting the webhook. |
+| `github-events-source` | `GithubEventsSourceBehavior` | Verified delivery; durable receipt before accepting the webhook. |
 | `slack.events` | `SlackIngressSourceBehavior` | Verified event; durable receipt before accepting the callback. |
 | `slack.commands` | `SlackIngressSourceBehavior` | Verified command; durable receipt before accepting the callback. |
 | `teams.outgoing-webhook` | `TeamsOutgoingWebhookSourceBehavior` | Verified activity; durable receipt before accepting the webhook. |
@@ -64,6 +64,10 @@ each transport's verification, acknowledgement, cursor and backpressure rules.
 SOURCE into core HTTP effects with the embedded no-manifest composition. That explicit composition
 binds the trusted policy snapshot captured at runner startup. Manifest-backed hosted runners still
 require the exact resolved execution policy; missing authority is not replaced by startup defaults.
+
+`AmqpMixedDeploymentExampleTest` executes the [mixed graph](../examples/correlation/mixed.md) against
+actual RabbitMQ, HTTP, SMTP, Pekko and SQLite. It checks four listeners alongside a bounded START
+cycle, sibling email completion, exact source entries and source-to-source boundaries.
 
 Explicit business close barriers and computed context derivation are described in
 [Business context operations](business-correlation-operations.md).

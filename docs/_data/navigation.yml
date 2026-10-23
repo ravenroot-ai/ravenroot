@@ -41,6 +41,8 @@
       url: /examples/lakehouse/
     - title: Execute six correlated file results
       url: /examples/correlation/lakehouse.html
+    - title: Startup work and four AMQP sources
+      url: /examples/correlation/mixed.html
     - title: Credentials, providers, and artifacts
       url: /user-guide/integrations-artifacts.html
     - title: Embedded viewing and accessibility

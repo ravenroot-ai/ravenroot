@@ -229693,7 +229693,7 @@
     {
       "id": "oc-e7fb82389f2bd093585f",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/ExecutionEventWireJson.java",
-      "line": 12,
+      "line": 13,
       "symbol": "ExecutionEventWireJson",
       "kind": "fixed-declaration",
       "role": "SCHEMA_VERSION",
@@ -229708,7 +229708,7 @@
     {
       "id": "oc-9e8ffb7a45a681e9d46e",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/ExecutionEventWireJson.java",
-      "line": 13,
+      "line": 14,
       "symbol": "ExecutionEventWireJson",
       "kind": "fixed-declaration",
       "role": "RING_SOURCE",
@@ -229723,7 +229723,7 @@
     {
       "id": "oc-64593c9888b04f197115",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/ExecutionEventWireJson.java",
-      "line": 14,
+      "line": 15,
       "symbol": "ExecutionEventWireJson",
       "kind": "fixed-declaration",
       "role": "DURABLE_SOURCE",
@@ -229734,6 +229734,36 @@
       "status": "retained",
       "classification": "protocol-or-format-invariant",
       "rationale": "This value is a fixed parser, wire, event, selector, DOM, command, build-property, or configuration-vocabulary token consumed across a defined source boundary."
+    },
+    {
+      "id": "oc-c12cff91403e67e5e600",
+      "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/ExecutionEventWireJson.java",
+      "line": 156,
+      "symbol": "fitsFrame",
+      "kind": "operational-declaration",
+      "role": "framing",
+      "expression": "\"\\nevent: execution\\ndata: \\n\\n\"",
+      "expressionDigest": "97736e170d136212df02737600aed7a9640230af73d2eb187338f2b76a8a364c",
+      "evidenceDigest": "e86adcf2351c5dabb15985aa04112256f1ead99e1e6b3d9f9bf2aeff368059ce",
+      "surface": "java",
+      "status": "retained",
+      "classification": "protocol-or-format-invariant",
+      "rationale": "These exact SSE field names, separators and newlines measure the complete emitted UTF-8 frame against the existing published ceiling; they are wire grammar, not an operator default."
+    },
+    {
+      "id": "oc-ab5dbf307de5553f78a3",
+      "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/ExecutionEventWireJson.java",
+      "line": 156,
+      "symbol": "fitsFrame",
+      "kind": "operational-declaration",
+      "role": "framing",
+      "expression": "\"id: \"",
+      "expressionDigest": "02e0d6fb9b2af868954f435590778dae2232d2fc20df7f4a77078138867ae835",
+      "evidenceDigest": "e86adcf2351c5dabb15985aa04112256f1ead99e1e6b3d9f9bf2aeff368059ce",
+      "surface": "java",
+      "status": "retained",
+      "classification": "protocol-or-format-invariant",
+      "rationale": "These exact SSE field names, separators and newlines measure the complete emitted UTF-8 frame against the existing published ceiling; they are wire grammar, not an operator default."
     },
     {
       "id": "oc-14a49e319beb330d0661",
@@ -276390,7 +276420,7 @@
     {
       "id": "oc-59cc4d8b0189ed734773",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java",
-      "line": 624,
+      "line": 625,
       "symbol": "for",
       "kind": "fixed-declaration",
       "role": "SERVER_CODE_STATUSES",
@@ -276412,7 +276442,7 @@
     {
       "id": "oc-c2288065437ba94f35f6",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java",
-      "line": 625,
+      "line": 626,
       "symbol": "for",
       "kind": "fixed-declaration",
       "role": "SERVER_CODE_STATUSES",
@@ -276434,7 +276464,7 @@
     {
       "id": "oc-53e0706224e192f018ff",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java",
-      "line": 626,
+      "line": 627,
       "symbol": "for",
       "kind": "fixed-declaration",
       "role": "SERVER_CODE_STATUSES",
@@ -276456,7 +276486,7 @@
     {
       "id": "oc-aeab5d2d237fcbf520be",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java",
-      "line": 627,
+      "line": 628,
       "symbol": "for",
       "kind": "fixed-declaration",
       "role": "SERVER_CODE_STATUSES",
@@ -276478,7 +276508,7 @@
     {
       "id": "oc-133053da26e41daa292b",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java",
-      "line": 628,
+      "line": 629,
       "symbol": "for",
       "kind": "fixed-declaration",
       "role": "SERVER_CODE_STATUSES",
@@ -276500,7 +276530,7 @@
     {
       "id": "oc-d7420b266937f53688ae",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java",
-      "line": 629,
+      "line": 630,
       "symbol": "for",
       "kind": "fixed-declaration",
       "role": "SERVER_CODE_STATUSES",
@@ -276522,7 +276552,7 @@
     {
       "id": "oc-9c0810f8d1f8994d622b",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java",
-      "line": 630,
+      "line": 631,
       "symbol": "for",
       "kind": "fixed-declaration",
       "role": "SERVER_CODE_STATUSES",
@@ -276544,7 +276574,7 @@
     {
       "id": "oc-e65b8f00c4c57d38e3c1",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java",
-      "line": 631,
+      "line": 632,
       "symbol": "for",
       "kind": "fixed-declaration",
       "role": "SERVER_CODE_STATUSES",
@@ -276566,7 +276596,7 @@
     {
       "id": "oc-3fc3a2cb6067adf4c3f6",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java",
-      "line": 632,
+      "line": 633,
       "symbol": "for",
       "kind": "fixed-declaration",
       "role": "SERVER_CODE_STATUSES",
@@ -276588,7 +276618,7 @@
     {
       "id": "oc-17f856d5be62484f42a4",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java",
-      "line": 633,
+      "line": 634,
       "symbol": "for",
       "kind": "fixed-declaration",
       "role": "SERVER_CODE_STATUSES",
@@ -276610,7 +276640,7 @@
     {
       "id": "oc-8788718a18ed5a9526dd",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java",
-      "line": 634,
+      "line": 635,
       "symbol": "for",
       "kind": "fixed-declaration",
       "role": "SERVER_CODE_STATUSES",
@@ -276632,7 +276662,7 @@
     {
       "id": "oc-506b1e5ebddc543ddcfc",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java",
-      "line": 635,
+      "line": 636,
       "symbol": "for",
       "kind": "fixed-declaration",
       "role": "SERVER_CODE_STATUSES",
@@ -276654,7 +276684,7 @@
     {
       "id": "oc-9900599fe29cbb6b44f5",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java",
-      "line": 636,
+      "line": 637,
       "symbol": "for",
       "kind": "fixed-declaration",
       "role": "SERVER_CODE_STATUSES",
@@ -276676,7 +276706,7 @@
     {
       "id": "oc-06b46aaf7b14543e4252",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java",
-      "line": 637,
+      "line": 638,
       "symbol": "for",
       "kind": "fixed-declaration",
       "role": "SERVER_CODE_STATUSES",
@@ -276698,7 +276728,7 @@
     {
       "id": "oc-a596a723a1601a3d2b39",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java",
-      "line": 638,
+      "line": 639,
       "symbol": "for",
       "kind": "fixed-declaration",
       "role": "SERVER_CODE_STATUSES",
@@ -276713,7 +276743,7 @@
     {
       "id": "oc-da8f07de639a62e2f460",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java",
-      "line": 639,
+      "line": 640,
       "symbol": "for",
       "kind": "fixed-declaration",
       "role": "SERVER_CODE_STATUSES",
@@ -276728,7 +276758,7 @@
     {
       "id": "oc-e214feefbbf17e058e86",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java",
-      "line": 640,
+      "line": 641,
       "symbol": "for",
       "kind": "fixed-declaration",
       "role": "SERVER_CODE_STATUSES",
@@ -276743,7 +276773,7 @@
     {
       "id": "oc-9a3f13a11be91de6bef8",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java",
-      "line": 641,
+      "line": 642,
       "symbol": "for",
       "kind": "fixed-declaration",
       "role": "SERVER_CODE_STATUSES",
@@ -276758,7 +276788,7 @@
     {
       "id": "oc-955a052984fa6b79da6d",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java",
-      "line": 642,
+      "line": 643,
       "symbol": "for",
       "kind": "fixed-declaration",
       "role": "SERVER_CODE_STATUSES",
@@ -276773,7 +276803,7 @@
     {
       "id": "oc-81869d21debd1cce228f",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java",
-      "line": 643,
+      "line": 644,
       "symbol": "for",
       "kind": "fixed-declaration",
       "role": "SERVER_CODE_STATUSES",
@@ -276788,7 +276818,7 @@
     {
       "id": "oc-1ee17dff3c588852ae12",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java",
-      "line": 644,
+      "line": 645,
       "symbol": "for",
       "kind": "fixed-declaration",
       "role": "SERVER_CODE_STATUSES",
@@ -276803,7 +276833,7 @@
     {
       "id": "oc-66ad8e1fb9c63a44ab11",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java",
-      "line": 645,
+      "line": 646,
       "symbol": "for",
       "kind": "fixed-declaration",
       "role": "SERVER_CODE_STATUSES",
@@ -276818,7 +276848,7 @@
     {
       "id": "oc-f525f52d6e84d2fed4b4",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java",
-      "line": 646,
+      "line": 647,
       "symbol": "for",
       "kind": "fixed-declaration",
       "role": "SERVER_CODE_STATUSES",
@@ -276833,7 +276863,7 @@
     {
       "id": "oc-1ae989ca8881e5f59be1",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java",
-      "line": 647,
+      "line": 648,
       "symbol": "for",
       "kind": "fixed-declaration",
       "role": "SERVER_CODE_STATUSES",
@@ -276848,7 +276878,7 @@
     {
       "id": "oc-794f96dd6af2e7c359bf",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java",
-      "line": 648,
+      "line": 649,
       "symbol": "for",
       "kind": "fixed-declaration",
       "role": "SERVER_CODE_STATUSES",
@@ -276863,7 +276893,7 @@
     {
       "id": "oc-04f54e7f519e414a7615",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java",
-      "line": 649,
+      "line": 650,
       "symbol": "for",
       "kind": "fixed-declaration",
       "role": "SERVER_CODE_STATUSES",
@@ -276878,7 +276908,7 @@
     {
       "id": "oc-ee9b1001fa417f60c460",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java",
-      "line": 650,
+      "line": 651,
       "symbol": "for",
       "kind": "fixed-declaration",
       "role": "SERVER_CODE_STATUSES",
@@ -276893,7 +276923,7 @@
     {
       "id": "oc-9f42ad4b78b71a4d39eb",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java",
-      "line": 651,
+      "line": 652,
       "symbol": "for",
       "kind": "fixed-declaration",
       "role": "SERVER_CODE_STATUSES",
@@ -276908,7 +276938,7 @@
     {
       "id": "oc-f66c699f49d83ade78be",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java",
-      "line": 652,
+      "line": 653,
       "symbol": "for",
       "kind": "fixed-declaration",
       "role": "SERVER_CODE_STATUSES",
@@ -276923,7 +276953,7 @@
     {
       "id": "oc-14be35e31deb8c1541cf",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java",
-      "line": 653,
+      "line": 654,
       "symbol": "for",
       "kind": "fixed-declaration",
       "role": "SERVER_CODE_STATUSES",
@@ -276938,7 +276968,7 @@
     {
       "id": "oc-cdc16e627739c55d7378",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java",
-      "line": 654,
+      "line": 655,
       "symbol": "for",
       "kind": "fixed-declaration",
       "role": "SERVER_CODE_STATUSES",
@@ -356199,7 +356229,7 @@
     {
       "id": "oc-e8efe132e31f801c2188",
       "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-      "line": 1911,
+      "line": 1923,
       "symbol": "memoryTokenProvider",
       "kind": "fixed-declaration",
       "role": "replace",
@@ -356217,7 +356247,7 @@
     {
       "id": "oc-23bfd55193c0b9e169a2",
       "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-      "line": 1931,
+      "line": 1943,
       "symbol": "for",
       "kind": "fixed-declaration",
       "role": "colon",
@@ -356235,7 +356265,7 @@
     {
       "id": "oc-124e5c744a5e8a973d9f",
       "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-      "line": 1932,
+      "line": 1944,
       "symbol": "for",
       "kind": "fixed-declaration",
       "role": "field",
@@ -356253,7 +356283,7 @@
     {
       "id": "oc-9c982dd517bfa677b659",
       "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-      "line": 1932,
+      "line": 1944,
       "symbol": "for",
       "kind": "fixed-declaration",
       "role": "field",
@@ -356271,7 +356301,7 @@
     {
       "id": "oc-3773ecb91b62e9fd7b05",
       "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-      "line": 1947,
+      "line": 1959,
       "symbol": "normalizeBaseUrl",
       "kind": "fixed-declaration",
       "role": "parsed",
@@ -685146,6 +685176,7 @@
     "e85ff41c46dca8c997cea856c9628a32dbe5daab18fac6240c9b211795f111f0": "packages = document.get(\"packages\")",
     "e86673020925f2c3c2bb2a324fdc3f1838e5152db19d4fbc6bb33ad16677c6e5": "control = command(kubectl + [\"get\", \"service/native-ravenroot-agent-native-network-control\", \"-o\", \"jsonpath={.spec.clusterIP}\"]).decode()",
     "e868151d30bcb827565feee2c118f2c9c4e7f5c8607de167b8186288938fea20": "- name: RAVENROOT_HUMAN_TASK_RESPONSE_MAX_DEPTH",
+    "e86adcf2351c5dabb15985aa04112256f1ead99e1e6b3d9f9bf2aeff368059ce": "} private static boolean fitsFrame(long cursor, String json) { int framing = (\"id: \" + cursor + \"\\nevent: execution\\ndata: \\n\\n\").getBytes(StandardCharsets.UTF_8).length;",
     "e879d06dfce4f4bd544700157015f711176553c34b33360de475f2dbbb75c059": "group(\"RAVENROOT_SYSTEM_ONE_PROFILE_TYPO\")",
     "e87be823278fbbea052643d877d56916b8ffb8bba9540199a098818dee998aaa": "raise RegistryError(\"Central bundle contains an invalid release signature\")",
     "e87bf98b61b064c87c6f82a8a128ecb1b79f091e9e549869298444c75f7e9f49": "const id = options.id || uniqueElementId('edge', graph.edges);",
@@ -1344156,6 +1344187,35 @@
           }
         }
       ]
+    },
+    {
+      "id": "issue-590-bounded-wire-source-alignment-v1",
+      "issue": "#590",
+      "sourceRevision": "ae18a62b9e00f7e0308242dbae6926275351931c",
+      "targetRevision": "e1a96e8f71ec19fe7f2ab2490ebd77fec7773a42",
+      "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+      "sourceInventoryDigest": "c5160846720a57f1d361e049dd0be063ed9d2fe33ed9078e381bbdbb54fdc4b5",
+      "targetCandidateDigest": "a1e52c276c4446d2ee868a2dd8db9c6aa922cd2a74f0343fe9fa7b6ce0df4aca",
+      "mappings": [],
+      "retirements": [],
+      "additions": [
+        {
+          "id": "oc-c12cff91403e67e5e600",
+          "metadata": {
+            "status": "retained",
+            "classification": "protocol-or-format-invariant",
+            "rationale": "These exact SSE field names, separators and newlines measure the complete emitted UTF-8 frame against the existing published ceiling; they are wire grammar, not an operator default."
+          }
+        },
+        {
+          "id": "oc-ab5dbf307de5553f78a3",
+          "metadata": {
+            "status": "retained",
+            "classification": "protocol-or-format-invariant",
+            "rationale": "These exact SSE field names, separators and newlines measure the complete emitted UTF-8 frame against the existing published ceiling; they are wire grammar, not an operator default."
+          }
+        }
+      ]
     }
   ],
   "semanticReviewHistory": [
@@ -1420602,7 +1420662,7 @@
         },
         {
           "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-          "digest": "f825c0f4c3580cd1112d5ab315b9208a38937d0bce9d2e4b8a240865f262cac6"
+          "digest": "8f258b1bae29c9d1bae07b4c8749af30697c6bd9c9e36d0ecc1a0976fb33f936"
         },
         {
           "path": "scripts/check_release_configuration.py",
@@ -1427826,7 +1427886,7 @@
         },
         {
           "path": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/correlation/CorrelationLimits.java",
-          "digest": "178a53f8d8ed973657051e90443b7dd1eb74645ce57c1ea55ab6819d4a00ac3f"
+          "digest": "ba91eba4ba08fd00607fd05ad1ab7e93a189bdbc6baf75076a7ee29962d673f4"
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/persistence/BusinessHistoryConfiguration.java",

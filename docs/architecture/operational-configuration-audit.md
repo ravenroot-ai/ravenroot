@@ -36,18 +36,18 @@ semantic review and focused source inventories remain required for those boundar
 
 | Measure | Count |
 |---|---:|
-| Atomic operational candidates discovered | 32970 |
+| Atomic operational candidates discovered | 32972 |
 | Source-proven Helm operator fields | 39 |
 | Helm operator fields represented by lexical inventory rows | 31 |
 | Source-proven Helm fields outside lexical candidate patterns | 8 |
-| Reviewed | 32970 |
+| Reviewed | 32972 |
 | Pending review | 0 |
 | Confirmed hard-coded candidates awaiting remediation | 0 |
 | Unique confirmed operator-configurable parameters | 374 |
 | Unique parameters converted to centralized configuration | 16 |
 | Duplicate authorities removed | 27 |
 | Retained security ceilings or defaults | 2521 |
-| Retained protocol or format invariants | 14118 |
+| Retained protocol or format invariants | 14120 |
 | Retained published contract descriptions | 628 |
 | Retained presentation text | 3066 |
 | Retained derived values | 1228 |
@@ -62,10 +62,10 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 192.
+Checked source reconciliations: 193.
 
 The following tables are exhaustive projections of the same active inventory; each includes
-zero-count or unclassified rows as needed and sums to 32970 candidates.
+zero-count or unclassified rows as needed and sums to 32972 candidates.
 
 ### Status counts
 
@@ -77,7 +77,7 @@ zero-count or unclassified rows as needed and sums to 32970 candidates.
 | deferred | 0 |
 | duplicate-removed | 0 |
 | pending-review | 0 |
-| retained | 31013 |
+| retained | 31015 |
 
 ### Classification counts
 
@@ -86,7 +86,7 @@ zero-count or unclassified rows as needed and sums to 32970 candidates.
 | derived | 1228 |
 | operator-configurable | 1957 |
 | presentation-text | 3066 |
-| protocol-or-format-invariant | 14118 |
+| protocol-or-format-invariant | 14120 |
 | published-contract-description | 628 |
 | security-ceiling-or-default | 2521 |
 | test-fixture | 9452 |
@@ -98,7 +98,7 @@ zero-count or unclassified rows as needed and sums to 32970 candidates.
 |---|---:|
 | deployment | 3215 |
 | deployment-example | 20 |
-| java | 8573 |
+| java | 8575 |
 | script | 2892 |
 | test-fixture | 9452 |
 | ui | 8818 |
@@ -118,7 +118,7 @@ assigned to an issue retroactively.
 | #319 | 334 |
 | #320 | 1466 |
 | #321 | 8105 |
-| Retained; no remediation required | 22793 |
+| Retained; no remediation required | 22795 |
 
 ## Latest reconciliation
 
@@ -127,12 +127,12 @@ identity and retirement has its own approved record in the machine-readable inve
 
 | Partition | Count |
 |---|---:|
-| Source inventory candidates | 32226 |
-| Unchanged identities | 27019 |
-| Approved identity migrations | 5168 |
-| Approved retirements | 39 |
-| Semantically classified additions | 783 |
-| Current candidates | 32970 |
+| Source inventory candidates | 32970 |
+| Unchanged identities | 32970 |
+| Approved identity migrations | 0 |
+| Approved retirements | 0 |
+| Semantically classified additions | 2 |
+| Current candidates | 32972 |
 
 ## Final semantic review
 
@@ -10647,9 +10647,11 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-0fc2c5203dbdbf8e48fd` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/DeploymentObservationCursorStore.java:14` `DeploymentObservationCursorStore` | java | retained | security-ceiling-or-default | This fixed bound limits deployment observation retention, parsing, retry, or reconnect work. |
 | `oc-401414a15decc5bc6559` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/DeploymentObservationCursorStore.java:30` `DeploymentObservationCursorStore` | java | retained | security-ceiling-or-default | This fixed bound limits deployment observation retention, parsing, retry, or reconnect work. |
 | `oc-86b7ff6decd42a5b0d4f` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/DeploymentObservationCursorStore.java:37` `issue` | java | retained | security-ceiling-or-default | This fixed bound limits deployment observation retention, parsing, retry, or reconnect work. |
-| `oc-e7fb82389f2bd093585f` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/ExecutionEventWireJson.java:12` `ExecutionEventWireJson` | java | retained | protocol-or-format-invariant | This value is a fixed parser, wire, event, selector, DOM, command, build-property, or configuration-vocabulary token consumed across a defined source boundary. |
-| `oc-9e8ffb7a45a681e9d46e` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/ExecutionEventWireJson.java:13` `ExecutionEventWireJson` | java | retained | protocol-or-format-invariant | This value is a fixed parser, wire, event, selector, DOM, command, build-property, or configuration-vocabulary token consumed across a defined source boundary. |
-| `oc-64593c9888b04f197115` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/ExecutionEventWireJson.java:14` `ExecutionEventWireJson` | java | retained | protocol-or-format-invariant | This value is a fixed parser, wire, event, selector, DOM, command, build-property, or configuration-vocabulary token consumed across a defined source boundary. |
+| `oc-e7fb82389f2bd093585f` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/ExecutionEventWireJson.java:13` `ExecutionEventWireJson` | java | retained | protocol-or-format-invariant | This value is a fixed parser, wire, event, selector, DOM, command, build-property, or configuration-vocabulary token consumed across a defined source boundary. |
+| `oc-9e8ffb7a45a681e9d46e` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/ExecutionEventWireJson.java:14` `ExecutionEventWireJson` | java | retained | protocol-or-format-invariant | This value is a fixed parser, wire, event, selector, DOM, command, build-property, or configuration-vocabulary token consumed across a defined source boundary. |
+| `oc-64593c9888b04f197115` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/ExecutionEventWireJson.java:15` `ExecutionEventWireJson` | java | retained | protocol-or-format-invariant | This value is a fixed parser, wire, event, selector, DOM, command, build-property, or configuration-vocabulary token consumed across a defined source boundary. |
+| `oc-ab5dbf307de5553f78a3` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/ExecutionEventWireJson.java:156` `fitsFrame` | java | retained | protocol-or-format-invariant | These exact SSE field names, separators and newlines measure the complete emitted UTF-8 frame against the existing published ceiling; they are wire grammar, not an operator default. |
+| `oc-c12cff91403e67e5e600` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/ExecutionEventWireJson.java:156` `fitsFrame` | java | retained | protocol-or-format-invariant | These exact SSE field names, separators and newlines measure the complete emitted UTF-8 frame against the existing published ceiling; they are wire grammar, not an operator default. |
 | `oc-14a49e319beb330d0661` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/HumanTaskConfiguration.java:34` `fromSystem` | java | already-centralized | operator-configurable | defaultResponseBytes is the typed new task response default authority resolved from the paired JVM property/environment binding and typed default. |
 | `oc-23d020ae4d91dcdd52da` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/HumanTaskConfiguration.java:35` `fromSystem` | java | already-centralized | operator-configurable | defaultResponseBytes is the typed new task response default authority resolved from the paired JVM property/environment binding and typed default. |
 | `oc-2a0c52b781bc813d060c` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/HumanTaskConfiguration.java:37` `fromSystem` | java | already-centralized | operator-configurable | maxResponseBytes is the typed new task response admission authority resolved from the paired JVM property/environment binding and typed default. |
@@ -12363,37 +12365,37 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-68ad6d922f328fec2cb1` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:44` `main` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-4707dfc3e5ab3cf80142` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:45` `main` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-0a913a1f036a8734d6f4` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:46` `main` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-59cc4d8b0189ed734773` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:624` `for` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-c2288065437ba94f35f6` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:625` `for` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-53e0706224e192f018ff` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:626` `for` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-aeab5d2d237fcbf520be` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:627` `for` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-133053da26e41daa292b` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:628` `for` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-d7420b266937f53688ae` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:629` `for` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-9c0810f8d1f8994d622b` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:630` `for` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-e65b8f00c4c57d38e3c1` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:631` `for` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-3fc3a2cb6067adf4c3f6` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:632` `for` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-17f856d5be62484f42a4` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:633` `for` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-8788718a18ed5a9526dd` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:634` `for` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-506b1e5ebddc543ddcfc` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:635` `for` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-9900599fe29cbb6b44f5` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:636` `for` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-06b46aaf7b14543e4252` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:637` `for` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-a596a723a1601a3d2b39` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:638` `for` | java | retained | security-ceiling-or-default | The reviewed exact-integer, size, or count ceiling fails closed across graph authoring publication boundaries. |
-| `oc-da8f07de639a62e2f460` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:639` `for` | java | retained | security-ceiling-or-default | The reviewed exact-integer, size, or count ceiling fails closed across graph authoring publication boundaries. |
-| `oc-e214feefbbf17e058e86` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:640` `for` | java | retained | security-ceiling-or-default | The reviewed exact-integer, size, or count ceiling fails closed across graph authoring publication boundaries. |
-| `oc-9a3f13a11be91de6bef8` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:641` `for` | java | retained | security-ceiling-or-default | The reviewed exact-integer, size, or count ceiling fails closed across graph authoring publication boundaries. |
-| `oc-955a052984fa6b79da6d` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:642` `for` | java | retained | security-ceiling-or-default | The reviewed exact-integer, size, or count ceiling fails closed across graph authoring publication boundaries. |
-| `oc-81869d21debd1cce228f` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:643` `for` | java | retained | security-ceiling-or-default | The reviewed exact-integer, size, or count ceiling fails closed across graph authoring publication boundaries. |
-| `oc-1ee17dff3c588852ae12` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:644` `for` | java | retained | security-ceiling-or-default | The reviewed exact-integer, size, or count ceiling fails closed across graph authoring publication boundaries. |
-| `oc-66ad8e1fb9c63a44ab11` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:645` `for` | java | retained | security-ceiling-or-default | The reviewed exact-integer, size, or count ceiling fails closed across graph authoring publication boundaries. |
-| `oc-f525f52d6e84d2fed4b4` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:646` `for` | java | retained | security-ceiling-or-default | The reviewed exact-integer, size, or count ceiling fails closed across graph authoring publication boundaries. |
-| `oc-1ae989ca8881e5f59be1` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:647` `for` | java | retained | security-ceiling-or-default | The reviewed exact-integer, size, or count ceiling fails closed across graph authoring publication boundaries. |
-| `oc-794f96dd6af2e7c359bf` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:648` `for` | java | retained | security-ceiling-or-default | The reviewed exact-integer, size, or count ceiling fails closed across graph authoring publication boundaries. |
-| `oc-04f54e7f519e414a7615` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:649` `for` | java | retained | security-ceiling-or-default | The reviewed exact-integer, size, or count ceiling fails closed across graph authoring publication boundaries. |
-| `oc-ee9b1001fa417f60c460` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:650` `for` | java | retained | security-ceiling-or-default | The reviewed exact-integer, size, or count ceiling fails closed across graph authoring publication boundaries. |
-| `oc-9f42ad4b78b71a4d39eb` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:651` `for` | java | retained | security-ceiling-or-default | The reviewed exact-integer, size, or count ceiling fails closed across graph authoring publication boundaries. |
-| `oc-f66c699f49d83ade78be` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:652` `for` | java | retained | security-ceiling-or-default | The reviewed exact-integer, size, or count ceiling fails closed across graph authoring publication boundaries. |
-| `oc-14be35e31deb8c1541cf` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:653` `for` | java | retained | security-ceiling-or-default | The reviewed exact-integer, size, or count ceiling fails closed across graph authoring publication boundaries. |
-| `oc-cdc16e627739c55d7378` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:654` `for` | java | retained | security-ceiling-or-default | The reviewed exact-integer, size, or count ceiling fails closed across graph authoring publication boundaries. |
+| `oc-59cc4d8b0189ed734773` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:625` `for` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-c2288065437ba94f35f6` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:626` `for` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-53e0706224e192f018ff` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:627` `for` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-aeab5d2d237fcbf520be` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:628` `for` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-133053da26e41daa292b` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:629` `for` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-d7420b266937f53688ae` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:630` `for` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-9c0810f8d1f8994d622b` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:631` `for` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-e65b8f00c4c57d38e3c1` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:632` `for` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-3fc3a2cb6067adf4c3f6` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:633` `for` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-17f856d5be62484f42a4` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:634` `for` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-8788718a18ed5a9526dd` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:635` `for` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-506b1e5ebddc543ddcfc` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:636` `for` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-9900599fe29cbb6b44f5` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:637` `for` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-06b46aaf7b14543e4252` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:638` `for` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-a596a723a1601a3d2b39` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:639` `for` | java | retained | security-ceiling-or-default | The reviewed exact-integer, size, or count ceiling fails closed across graph authoring publication boundaries. |
+| `oc-da8f07de639a62e2f460` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:640` `for` | java | retained | security-ceiling-or-default | The reviewed exact-integer, size, or count ceiling fails closed across graph authoring publication boundaries. |
+| `oc-e214feefbbf17e058e86` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:641` `for` | java | retained | security-ceiling-or-default | The reviewed exact-integer, size, or count ceiling fails closed across graph authoring publication boundaries. |
+| `oc-9a3f13a11be91de6bef8` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:642` `for` | java | retained | security-ceiling-or-default | The reviewed exact-integer, size, or count ceiling fails closed across graph authoring publication boundaries. |
+| `oc-955a052984fa6b79da6d` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:643` `for` | java | retained | security-ceiling-or-default | The reviewed exact-integer, size, or count ceiling fails closed across graph authoring publication boundaries. |
+| `oc-81869d21debd1cce228f` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:644` `for` | java | retained | security-ceiling-or-default | The reviewed exact-integer, size, or count ceiling fails closed across graph authoring publication boundaries. |
+| `oc-1ee17dff3c588852ae12` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:645` `for` | java | retained | security-ceiling-or-default | The reviewed exact-integer, size, or count ceiling fails closed across graph authoring publication boundaries. |
+| `oc-66ad8e1fb9c63a44ab11` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:646` `for` | java | retained | security-ceiling-or-default | The reviewed exact-integer, size, or count ceiling fails closed across graph authoring publication boundaries. |
+| `oc-f525f52d6e84d2fed4b4` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:647` `for` | java | retained | security-ceiling-or-default | The reviewed exact-integer, size, or count ceiling fails closed across graph authoring publication boundaries. |
+| `oc-1ae989ca8881e5f59be1` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:648` `for` | java | retained | security-ceiling-or-default | The reviewed exact-integer, size, or count ceiling fails closed across graph authoring publication boundaries. |
+| `oc-794f96dd6af2e7c359bf` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:649` `for` | java | retained | security-ceiling-or-default | The reviewed exact-integer, size, or count ceiling fails closed across graph authoring publication boundaries. |
+| `oc-04f54e7f519e414a7615` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:650` `for` | java | retained | security-ceiling-or-default | The reviewed exact-integer, size, or count ceiling fails closed across graph authoring publication boundaries. |
+| `oc-ee9b1001fa417f60c460` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:651` `for` | java | retained | security-ceiling-or-default | The reviewed exact-integer, size, or count ceiling fails closed across graph authoring publication boundaries. |
+| `oc-9f42ad4b78b71a4d39eb` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:652` `for` | java | retained | security-ceiling-or-default | The reviewed exact-integer, size, or count ceiling fails closed across graph authoring publication boundaries. |
+| `oc-f66c699f49d83ade78be` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:653` `for` | java | retained | security-ceiling-or-default | The reviewed exact-integer, size, or count ceiling fails closed across graph authoring publication boundaries. |
+| `oc-14be35e31deb8c1541cf` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:654` `for` | java | retained | security-ceiling-or-default | The reviewed exact-integer, size, or count ceiling fails closed across graph authoring publication boundaries. |
+| `oc-cdc16e627739c55d7378` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java:655` `for` | java | retained | security-ceiling-or-default | The reviewed exact-integer, size, or count ceiling fails closed across graph authoring publication boundaries. |
 | `oc-6409a26c8cfd5e91dbf9` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/RouteTable.java:83` `RouteTable` | java | retained | protocol-or-format-invariant | Reviewed runner protocol v1 route constructor position: methods; exact closed RouteTable authority and generated OpenAPI agreement enforce this atom. Reviewed issue #414 atom: "GET". |
 | `oc-70e9e8077853b79be4fb` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/RouteTable.java:83` `RouteTable` | java | retained | protocol-or-format-invariant | Reviewed runner protocol v1 route constructor position: path; exact closed RouteTable authority and generated OpenAPI agreement enforce this atom. Reviewed issue #414 atom: "/v1/runner-plane/health". |
 | `oc-5018892dbd2d1f670fa8` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/RouteTable.java:84` `RouteTable` | java | retained | published-contract-description | Reviewed runner protocol v1 route constructor position: summary; exact closed RouteTable authority and generated OpenAPI agreement enforce this atom. Reviewed issue #414 atom: "Tenant-scoped cursor page of durable active-job health and pageMetrics gauges. Idle runner health is unknown, never inferred from registration.". |
@@ -16742,11 +16744,11 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-bd7392b4008764a318b4` | `ravenroot/ravenroot-ui/src/runtime-client.js:1830` `validateVersionedRuntimeEvent` | ui | retained | protocol-or-format-invariant | This value is a fixed parser, wire, event, selector, DOM, command, build-property, or configuration-vocabulary token consumed across a defined source boundary. |
 | `oc-fbafeb41c9c276643441` | `ravenroot/ravenroot-ui/src/runtime-client.js:1831` `validateVersionedRuntimeEvent` | ui | retained | protocol-or-format-invariant | This value is a fixed parser, wire, event, selector, DOM, command, build-property, or configuration-vocabulary token consumed across a defined source boundary. |
 | `oc-212c49a0c3c23fa75297` | `ravenroot/ravenroot-ui/src/runtime-client.js:1841` `if` | ui | retained | protocol-or-format-invariant | This value is a fixed parser, wire, event, selector, DOM, command, build-property, or configuration-vocabulary token consumed across a defined source boundary. |
-| `oc-e8efe132e31f801c2188` | `ravenroot/ravenroot-ui/src/runtime-client.js:1911` `memoryTokenProvider` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-23bfd55193c0b9e169a2` | `ravenroot/ravenroot-ui/src/runtime-client.js:1931` `for` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
-| `oc-124e5c744a5e8a973d9f` | `ravenroot/ravenroot-ui/src/runtime-client.js:1932` `for` | ui | retained | derived | These remaining browser numerics initialize local state, sequence, index, or calculation values after explicit limits are separated. |
-| `oc-9c982dd517bfa677b659` | `ravenroot/ravenroot-ui/src/runtime-client.js:1932` `for` | ui | retained | derived | These remaining browser numerics initialize local state, sequence, index, or calculation values after explicit limits are separated. |
-| `oc-3773ecb91b62e9fd7b05` | `ravenroot/ravenroot-ui/src/runtime-client.js:1947` `normalizeBaseUrl` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-e8efe132e31f801c2188` | `ravenroot/ravenroot-ui/src/runtime-client.js:1923` `memoryTokenProvider` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-23bfd55193c0b9e169a2` | `ravenroot/ravenroot-ui/src/runtime-client.js:1943` `for` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
+| `oc-124e5c744a5e8a973d9f` | `ravenroot/ravenroot-ui/src/runtime-client.js:1944` `for` | ui | retained | derived | These remaining browser numerics initialize local state, sequence, index, or calculation values after explicit limits are separated. |
+| `oc-9c982dd517bfa677b659` | `ravenroot/ravenroot-ui/src/runtime-client.js:1944` `for` | ui | retained | derived | These remaining browser numerics initialize local state, sequence, index, or calculation values after explicit limits are separated. |
+| `oc-3773ecb91b62e9fd7b05` | `ravenroot/ravenroot-ui/src/runtime-client.js:1959` `normalizeBaseUrl` | ui | retained | protocol-or-format-invariant | These strings and structured atoms are exact DOM, route, event, storage, parser, selector, or document identities. |
 | `oc-17d4413c50e35d8eeb60` | `ravenroot/ravenroot-ui/src/saga-authoring.js:6` `sagaParticipant` | ui | retained | protocol-or-format-invariant | Issue #593 source review of ravenroot/ravenroot-ui/src/saga-authoring.js:6 #sagaParticipant (supported): 'jdbc-receipt-v1' is exact behavior/participant/adapter, saga property-prefix, or DOM-selector vocabulary used to keep UI participation aligned with the server contract. |
 | `oc-66bb389e7723ed21f62b` | `ravenroot/ravenroot-ui/src/saga-authoring.js:6` `sagaParticipant` | ui | retained | protocol-or-format-invariant | Issue #593 source review of ravenroot/ravenroot-ui/src/saga-authoring.js:6 #sagaParticipant (supported): 'jdbc.insert' is exact behavior/participant/adapter, saga property-prefix, or DOM-selector vocabulary used to keep UI participation aligned with the server contract. |
 | `oc-a7b35839c941b99de89d` | `ravenroot/ravenroot-ui/src/saga-authoring.js:6` `sagaParticipant` | ui | retained | protocol-or-format-invariant | Issue #593 source review of ravenroot/ravenroot-ui/src/saga-authoring.js:6 #sagaParticipant (supported): 'ravenroot.jdbc-receipt.v1' is exact behavior/participant/adapter, saga property-prefix, or DOM-selector vocabulary used to keep UI participation aligned with the server contract. |

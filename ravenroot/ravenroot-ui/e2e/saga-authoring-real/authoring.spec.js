@@ -128,6 +128,25 @@ test('mixed sagas survive import/export and forged or incomplete declarations ha
 
 
 test('Log before a real source remains ordinary for Test and deployment-bound Run', async ({ page }) => {
+  // Hold only the application's consumption of the actual server Stop response. The real HTTP
+  // request, authorization, effect, headers and response bytes remain unchanged. This makes the
+  // headers-before-settlement window deterministic without any sleep or retry-as-acceptance.
+  await page.addInitScript(() => {
+    const fetch = globalThis.fetch.bind(globalThis);
+    const held = { waiting: false, release: null }; globalThis.__sagaStopBody = held;
+    globalThis.fetch = async (input, options) => {
+      const response = await fetch(input, options);
+      if (options?.method === 'POST' && /\/v1\/deployments\/[^/]+\/stop$/.test(new URL(String(input), location.href).pathname)) {
+        const text = response.text.bind(response);
+        response.text = async () => {
+          held.waiting = true;
+          await new Promise(resolve => { held.release = resolve; });
+          return text();
+        };
+      }
+      return response;
+    };
+  });
   await connect(page);
   const xml = graph().replace('<node id="end">', '<node id="source"><data key="kind">BEHAVIOR</data><data key="behavior">test.saga.source</data></node><node id="end">')
     .replace('<edge source="log" target="transform"/>', '<edge source="log" target="source"/><edge source="source" target="transform"/>');
@@ -164,7 +183,17 @@ test('Log before a real source remains ordinary for Test and deployment-bound Ru
   const stopResponse = await stopped; expect(stopResponse.status()).toBe(200);
   expect((await stopResponse.request().allHeaders())['x-ravenroot-deployment-incarnation']).toBe(binding.incarnationId);
   expect((await stopResponse.request().allHeaders())['x-ravenroot-graph-version']).toBe(binding.graphVersion);
-  await expect.poll(() => page.evaluate(id => window.ravenroot.workspace.find(id), origin)).toBeNull();
+  await expect.poll(() => page.evaluate(() => globalThis.__sagaStopBody.waiting)).toBe(true);
+  // Returning a rich Document makes Playwright serialize the viewer, graph, controllers and DOM
+  // while Stop is still reading its body. Observe membership as a primitive in both states.
+  const originIsOpen = () => page.evaluate(id => Boolean(window.ravenroot.workspace.find(id)), origin);
+  await expect.poll(originIsOpen).toBe(true);
+  expect(await page.evaluate(id => window.ravenroot.workspace.find(id).deploymentRunStopPending, origin)).toBe(true);
+  expect(await page.evaluate(() => window.ravenroot.workspace.activeId)).toBe(other);
+  expect(mutations.filter(path => path.endsWith('/initial-start'))).toHaveLength(1);
+  await page.evaluate(() => globalThis.__sagaStopBody.release());
+  await stopResponse.finished();
+  await expect.poll(originIsOpen).toBe(false);
   expect(await page.evaluate(() => window.ravenroot.workspace.activeId)).toBe(other);
   const status = await page.request.get(new URL(`/v1/deployments/${binding.deploymentId}`, process.env.RAVENROOT_SAGA_ORIGIN).href);
   expect(status.status()).toBe(200); expect((await status.json()).state).toBe('STOPPED');

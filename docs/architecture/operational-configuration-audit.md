@@ -36,11 +36,11 @@ semantic review and focused source inventories remain required for those boundar
 
 | Measure | Count |
 |---|---:|
-| Atomic operational candidates discovered | 33153 |
+| Atomic operational candidates discovered | 33155 |
 | Source-proven Helm operator fields | 39 |
 | Helm operator fields represented by lexical inventory rows | 31 |
 | Source-proven Helm fields outside lexical candidate patterns | 8 |
-| Reviewed | 33153 |
+| Reviewed | 33155 |
 | Pending review | 0 |
 | Confirmed hard-coded candidates awaiting remediation | 0 |
 | Unique confirmed operator-configurable parameters | 374 |
@@ -49,9 +49,9 @@ semantic review and focused source inventories remain required for those boundar
 | Retained security ceilings or defaults | 2527 |
 | Retained protocol or format invariants | 14179 |
 | Retained published contract descriptions | 633 |
-| Retained presentation text | 3103 |
+| Retained presentation text | 3104 |
 | Retained derived values | 1234 |
-| Test fixtures | 9520 |
+| Test fixtures | 9521 |
 | Intentionally deferred | 0 |
 
 Retired source candidates preserved in inventory history: 2999.
@@ -62,10 +62,10 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 200.
+Checked source reconciliations: 201.
 
 The following tables are exhaustive projections of the same active inventory; each includes
-zero-count or unclassified rows as needed and sums to 33153 candidates.
+zero-count or unclassified rows as needed and sums to 33155 candidates.
 
 ### Status counts
 
@@ -77,7 +77,7 @@ zero-count or unclassified rows as needed and sums to 33153 candidates.
 | deferred | 0 |
 | duplicate-removed | 0 |
 | pending-review | 0 |
-| retained | 31196 |
+| retained | 31198 |
 
 ### Classification counts
 
@@ -85,11 +85,11 @@ zero-count or unclassified rows as needed and sums to 33153 candidates.
 |---|---:|
 | derived | 1234 |
 | operator-configurable | 1957 |
-| presentation-text | 3103 |
+| presentation-text | 3104 |
 | protocol-or-format-invariant | 14179 |
 | published-contract-description | 633 |
 | security-ceiling-or-default | 2527 |
-| test-fixture | 9520 |
+| test-fixture | 9521 |
 | unclassified | 0 |
 
 ### Surface counts
@@ -98,9 +98,9 @@ zero-count or unclassified rows as needed and sums to 33153 candidates.
 |---|---:|
 | deployment | 3215 |
 | deployment-example | 20 |
-| java | 8586 |
+| java | 8587 |
 | script | 2946 |
-| test-fixture | 9520 |
+| test-fixture | 9521 |
 | ui | 8866 |
 
 ### Owning remediation counts
@@ -118,7 +118,7 @@ assigned to an issue retroactively.
 | #319 | 334 |
 | #320 | 1466 |
 | #321 | 8103 |
-| Retained; no remediation required | 22978 |
+| Retained; no remediation required | 22980 |
 
 ## Latest reconciliation
 
@@ -131,8 +131,8 @@ identity and retirement has its own approved record in the machine-readable inve
 | Unchanged identities | 33153 |
 | Approved identity migrations | 0 |
 | Approved retirements | 0 |
-| Semantically classified additions | 0 |
-| Current candidates | 33153 |
+| Semantically classified additions | 2 |
+| Current candidates | 33155 |
 
 ## Final semantic review
 
@@ -4898,6 +4898,7 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-7222f008e5b38f7f2e82` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/correlation/CorrelatedJoinCodec.java:12` `CorrelatedJoinCodec` | java | retained | security-ceiling-or-default | This versioned durable envelope has a fixed encoding/tree safety ceiling independent of configurable retention quotas; it prevents unbounded decoding and is covered by persistence round-trip/recovery contracts. |
 | `oc-ac3595426960a5d7667c` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/correlation/CorrelatedJoinCodec.java:12` `CorrelatedJoinCodec` | java | retained | security-ceiling-or-default | This versioned durable envelope has a fixed encoding/tree safety ceiling independent of configurable retention quotas; it prevents unbounded decoding and is covered by persistence round-trip/recovery contracts. |
 | `oc-b31f2efc387e5624f222` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/correlation/CorrelatedJoinCodec.java:12` `CorrelatedJoinCodec` | java | retained | security-ceiling-or-default | This versioned durable envelope has a fixed encoding/tree safety ceiling independent of configurable retention quotas; it prevents unbounded decoding and is covered by persistence round-trip/recovery contracts. |
+| `oc-cb8fe2e3d8327e5f5699` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/correlation/CorrelatedJoinCodec.java:99` `reserve` | java | retained | presentation-text | The fixed exception message reports the already-declared 64 MiB encoding refusal without payload or identity values. It is diagnostic text, not an operator setting; BoundedOutput.reserve enforces the existing MAX_ENCODED_BYTES ceiling. |
 | `oc-876e448d660c92b1d4f4` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/correlation/CorrelationHeaderMapping.java:9` `CorrelationHeaderMapping` | java | retained | protocol-or-format-invariant | This atom names an authored correlation mapping property, its editor label, or a reserved transport identity header; configured output names remain validated under connector and external-I/O authority. |
 | `oc-58297f3be82bcb65b69a` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/correlation/CorrelationHeaderMapping.java:11` `CorrelationHeaderMapping` | java | retained | protocol-or-format-invariant | This atom names an authored correlation mapping property, its editor label, or a reserved transport identity header; configured output names remain validated under connector and external-I/O authority. |
 | `oc-a4f54593426cf9f4a2aa` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/correlation/CorrelationHeaderMapping.java:13` `CorrelationHeaderMapping` | java | retained | protocol-or-format-invariant | This atom names an authored correlation mapping property, its editor label, or a reserved transport identity header; configured output names remain validated under connector and external-I/O authority. |

@@ -96427,6 +96427,21 @@
       "rationale": "This versioned durable envelope has a fixed encoding/tree safety ceiling independent of configurable retention quotas; it prevents unbounded decoding and is covered by persistence round-trip/recovery contracts."
     },
     {
+      "id": "oc-cb8fe2e3d8327e5f5699",
+      "path": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/correlation/CorrelatedJoinCodec.java",
+      "line": 99,
+      "symbol": "reserve",
+      "kind": "fixed-declaration",
+      "role": "literal",
+      "expression": "\"join encoding exceeds limit\"",
+      "expressionDigest": "e74fbb517b3db07d602274c0ebcebfaa0b942ff83b22a9462765a16d04aa4378",
+      "evidenceDigest": "1adf68c2f004fa539e2d9a98bb8a1f9f8d21f8fc0b1ed26c883c522d0ad98797",
+      "surface": "java",
+      "status": "retained",
+      "classification": "presentation-text",
+      "rationale": "The fixed exception message reports the already-declared 64 MiB encoding refusal without payload or identity values. It is diagnostic text, not an operator setting; BoundedOutput.reserve enforces the existing MAX_ENCODED_BYTES ceiling."
+    },
+    {
       "id": "oc-876e448d660c92b1d4f4",
       "path": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/correlation/CorrelationHeaderMapping.java",
       "line": 9,
@@ -211542,7 +211557,7 @@
     {
       "id": "oc-cd19f941a0c135470b98",
       "path": "ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/CorrelatedJoinContract.java",
-      "line": 41,
+      "line": 44,
       "symbol": "try",
       "kind": "operational-declaration",
       "role": "page",
@@ -211557,7 +211572,7 @@
     {
       "id": "oc-85ab147e699cd9279be0",
       "path": "ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/CorrelatedJoinContract.java",
-      "line": 41,
+      "line": 44,
       "symbol": "try",
       "kind": "operational-declaration",
       "role": "page",
@@ -211572,7 +211587,7 @@
     {
       "id": "oc-d7db0447cfcbca2586cc",
       "path": "ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/CorrelatedJoinContract.java",
-      "line": 59,
+      "line": 62,
       "symbol": "newVirtualThreadPerTaskExecutor",
       "kind": "operational-declaration",
       "role": "retry",
@@ -211587,7 +211602,7 @@
     {
       "id": "oc-5d4a4938f3bb4617a462",
       "path": "ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/CorrelatedJoinContract.java",
-      "line": 75,
+      "line": 78,
       "symbol": "catch",
       "kind": "inline-operational-call",
       "role": "timeunit-get",
@@ -211602,7 +211617,7 @@
     {
       "id": "oc-bd0f5c362cce60d8bfd8",
       "path": "ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/CorrelatedJoinContract.java",
-      "line": 160,
+      "line": 163,
       "symbol": "try",
       "kind": "operational-declaration",
       "role": "pages",
@@ -211617,7 +211632,7 @@
     {
       "id": "oc-48aa53d9249b236aebb9",
       "path": "ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/CorrelatedJoinContract.java",
-      "line": 162,
+      "line": 165,
       "symbol": "try",
       "kind": "operational-declaration",
       "role": "page",
@@ -211632,7 +211647,7 @@
     {
       "id": "oc-4b2555944d59f5b33b08",
       "path": "ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/CorrelatedJoinContract.java",
-      "line": 246,
+      "line": 249,
       "symbol": "try",
       "kind": "operational-declaration",
       "role": "page",
@@ -211645,9 +211660,24 @@
       "rationale": "This atom is an executable persistence/catalog fixture, outside production runtime policy."
     },
     {
+      "id": "oc-13fbf46b915306547d31",
+      "path": "ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/CorrelatedJoinContract.java",
+      "line": 268,
+      "symbol": "try",
+      "kind": "operational-declaration",
+      "role": "oversized",
+      "expression": "60",
+      "expressionDigest": "39fa9ec190eee7b6f4dff1100d6343e10918d044c75eac8f9e9a2596173f80c9",
+      "evidenceDigest": "527a82415e6a2f17cbc9d6e0b16cc183a8bc13156bfd78f9e522d64b6b295f26",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "This 60-second fixed-clock checkpoint deadline belongs only to the oversized-manifest rollback conformance test. It is not a production wait or retention default; the regression reaches the actual 64 MiB codec ceiling and checks atomic rejection across all storage adapters."
+    },
+    {
       "id": "oc-9d1ec7214e141843dc71",
       "path": "ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/CorrelatedJoinContract.java",
-      "line": 266,
+      "line": 308,
       "symbol": "contributions",
       "kind": "inline-operational-call",
       "role": "timeunit-get",
@@ -679751,6 +679781,7 @@
     "1ad7c342a275de77bf9a722f44094f278a8c60dd0698f41b1201b1f845f84819": "public static final int DEFAULT_MAX_TOOL_ITERATIONS = 8;",
     "1ad92b75f2d4039cda076abca6bcee0af6264bd72705c498715d80c258d672f6": "target.write_bytes(b\"class Marker {\\n // \" + bytes([0x07]) + b\"\\n}\\n\")",
     "1adc95cf2ba8ce80ac648f7fd61d3ecf87d01d5576b311b1b74ace10966a00d8": "str(ROOT / \"docs/security/release-signing-key.asc\"),",
+    "1adf68c2f004fa539e2d9a98bb8a1f9f8d21f8fc0b1ed26c883c522d0ad98797": "} private static final class BoundedOutput extends ByteArrayOutputStream { private void reserve(int length) { if (length > MAX_ENCODED_BYTES - count) throw new IllegalArgumentException(\"join encoding exceeds limit\");",
     "1ae3ce53272f466d2062c7ebd4ddb4fff86e95726dc18683624cb65c479ca794": "public IngressRequestProjectionPolicy { packageId = token(packageId, \"packageId\");",
     "1aea79e14da3a820a98edfb3076dff8c1d5ff84a43b609afbf087eba6e65ae0c": "\"\"\"Return one validated replacement without changing a release surface yet.\"\"\"",
     "1aecb5d7199a7b9afbda47e601a96896c9e13b0a0c3fce9a4521b43d13987d80": "final class TeamsBehaviorDescriptors { static final String SEND = \"teams.send\";",
@@ -682277,6 +682308,7 @@
     "52799a41a8d8ffcf45b0f59a5b1488a283a3bf5ad933cc67a241b78ba1f86749": "with tempfile.TemporaryDirectory(prefix=\"ravenroot-kubernetes-\") as temporary:",
     "5279c5ed86ebe75ab945d00c4fd4c7dc8d9d0bea08db4891f2594cc612d77d43": "private static final String TENANT = \"acme\";",
     "527a1bd75e65a5d44709e591aa7d03ae14fd50aace625c5c673572bb548b896a": "public static final int HARD_MAX_ATTENTION_PAGE_SIZE = 100;",
+    "527a82415e6a2f17cbc9d6e0b16cc183a8bc13156bfd78f9e522d64b6b295f26": "var oversized = CorrelatedJoinRecord.open(key, ids, null, false, JoinCause.of(event), NOW, NOW.plusSeconds(60));",
     "527ab11551037664a782a0d6607b831ed84abc7e064b7a8796cd95f2dc900d60": "f\" maxOutputTokens {shift_assignment} 1;\", 1)",
     "5281096735af647b4d9ad137451f189d64d2013561fd6cf181b411b4dd074a18": "self.assertTrue(any(\"burst validation no longer delegates\" in error for error in errors), errors)",
     "52866eff88862f5bee4639eb3375c844e8977e4e2992b6063c8748585596244b": "HARNESS_DIR=\"$PROJECT_DIR/ravenroot-dev-harness\"",
@@ -1374080,6 +1374112,35 @@
       "mappings": [],
       "retirements": [],
       "additions": []
+    },
+    {
+      "id": "issue-590-attempt6-codec-bound-reconciliation-v1",
+      "issue": "#590",
+      "sourceRevision": "89aee8f64ba3ee8fdfae3a68f953201849646fe0",
+      "targetRevision": "8b7265384d6ca47abfd5299f735b2ea1bce8a48d",
+      "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+      "sourceInventoryDigest": "1034170bc9e97d8762f2c6298c18e934426a402d7cedc8b3d8f525ea50394e79",
+      "targetCandidateDigest": "c77f5529bd6bacdd78ca8a508e4756771ff961efe192a209d8f5274e30ac4cc8",
+      "mappings": [],
+      "retirements": [],
+      "additions": [
+        {
+          "id": "oc-cb8fe2e3d8327e5f5699",
+          "metadata": {
+            "status": "retained",
+            "classification": "presentation-text",
+            "rationale": "The fixed exception message reports the already-declared 64 MiB encoding refusal without payload or identity values. It is diagnostic text, not an operator setting; BoundedOutput.reserve enforces the existing MAX_ENCODED_BYTES ceiling."
+          }
+        },
+        {
+          "id": "oc-13fbf46b915306547d31",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "This 60-second fixed-clock checkpoint deadline belongs only to the oversized-manifest rollback conformance test. It is not a production wait or retention default; the regression reaches the actual 64 MiB codec ceiling and checks atomic rejection across all storage adapters."
+          }
+        }
+      ]
     }
   ],
   "semanticReviewHistory": [

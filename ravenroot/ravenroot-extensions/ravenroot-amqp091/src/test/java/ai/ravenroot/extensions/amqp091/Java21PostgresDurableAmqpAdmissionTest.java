@@ -194,8 +194,10 @@ class Java21PostgresDurableAmqpAdmissionTest {
                 var delivery = AmqpConsumerTestSupport.delivery(1L, "one-carrier-message", false);
                 String key = AmqpDeliveryEvent.project(delivery, AmqpConsumerTestSupport.policy(), 1)
                         .idempotentKey();
+                String destination = deploymentId.value() + "/source/" + java.util.Base64.getUrlEncoder()
+                        .withoutPadding().encodeToString("listener".getBytes(StandardCharsets.UTF_8)) + "/listener";
                 UUID processId = UUID.nameUUIDFromBytes((IDENTITY.tenantId() + '\0'
-                        + deploymentId.value() + "/listener" + '\0' + key)
+                        + destination + '\0' + key)
                         .getBytes(StandardCharsets.UTF_8));
                 ExecutionKey expectedAmqpExecution = new ExecutionKey(IDENTITY.tenantId(), processId);
                 var owner = new VerifyingOwner(expectedAmqpExecution, running, definitions, manifests,
@@ -238,7 +240,7 @@ class Java21PostgresDurableAmqpAdmissionTest {
                     var stableReceipt = new CompletableFuture<IngressReceipt>();
                     Thread.ofVirtual().name("stable-one-carrier").start(() -> {
                         try {
-                            stableReceipt.complete(stable.offerDurably(IDENTITY, IngressTarget.start(),
+                            stableReceipt.complete(stable.offerDurably(IDENTITY, IngressTarget.node("capture"),
                                     "stable payload", "stream-1", "stable-key-1"));
                         } catch (Throwable failure) {
                             stableReceipt.completeExceptionally(failure);

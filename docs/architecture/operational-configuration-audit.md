@@ -36,11 +36,11 @@ semantic review and focused source inventories remain required for those boundar
 
 | Measure | Count |
 |---|---:|
-| Atomic operational candidates discovered | 33155 |
+| Atomic operational candidates discovered | 33318 |
 | Source-proven Helm operator fields | 39 |
 | Helm operator fields represented by lexical inventory rows | 31 |
 | Source-proven Helm fields outside lexical candidate patterns | 8 |
-| Reviewed | 33155 |
+| Reviewed | 33318 |
 | Pending review | 0 |
 | Confirmed hard-coded candidates awaiting remediation | 0 |
 | Unique confirmed operator-configurable parameters | 374 |
@@ -51,10 +51,10 @@ semantic review and focused source inventories remain required for those boundar
 | Retained published contract descriptions | 633 |
 | Retained presentation text | 3104 |
 | Retained derived values | 1234 |
-| Test fixtures | 9521 |
+| Test fixtures | 9684 |
 | Intentionally deferred | 0 |
 
-Retired source candidates preserved in inventory history: 2999.
+Retired source candidates preserved in inventory history: 3009.
 
 Approved normalized-identity reappearances: 23. Active candidates and
 retired historical payloads remain counted separately; an approval records identity reuse only.
@@ -62,10 +62,10 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 204.
+Checked source reconciliations: 205.
 
 The following tables are exhaustive projections of the same active inventory; each includes
-zero-count or unclassified rows as needed and sums to 33155 candidates.
+zero-count or unclassified rows as needed and sums to 33318 candidates.
 
 ### Status counts
 
@@ -77,7 +77,7 @@ zero-count or unclassified rows as needed and sums to 33155 candidates.
 | deferred | 0 |
 | duplicate-removed | 0 |
 | pending-review | 0 |
-| retained | 31198 |
+| retained | 31361 |
 
 ### Classification counts
 
@@ -89,7 +89,7 @@ zero-count or unclassified rows as needed and sums to 33155 candidates.
 | protocol-or-format-invariant | 14179 |
 | published-contract-description | 633 |
 | security-ceiling-or-default | 2527 |
-| test-fixture | 9521 |
+| test-fixture | 9684 |
 | unclassified | 0 |
 
 ### Surface counts
@@ -100,7 +100,7 @@ zero-count or unclassified rows as needed and sums to 33155 candidates.
 | deployment-example | 20 |
 | java | 8587 |
 | script | 2946 |
-| test-fixture | 9521 |
+| test-fixture | 9684 |
 | ui | 8866 |
 
 ### Owning remediation counts
@@ -118,7 +118,7 @@ assigned to an issue retroactively.
 | #319 | 334 |
 | #320 | 1466 |
 | #321 | 8103 |
-| Retained; no remediation required | 22980 |
+| Retained; no remediation required | 23143 |
 
 ## Latest reconciliation
 
@@ -128,11 +128,11 @@ identity and retirement has its own approved record in the machine-readable inve
 | Partition | Count |
 |---|---:|
 | Source inventory candidates | 33155 |
-| Unchanged identities | 33155 |
+| Unchanged identities | 33145 |
 | Approved identity migrations | 0 |
-| Approved retirements | 0 |
-| Semantically classified additions | 0 |
-| Current candidates | 33155 |
+| Approved retirements | 10 |
+| Semantically classified additions | 173 |
+| Current candidates | 33318 |
 
 ## Final semantic review
 
@@ -6140,7 +6140,7 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-65422ff825a8c643b0c1` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/recovery/PinnedGraphRecoveryAuthority.java:65` `PinnedGraphRecoveryAuthority` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-e5f617a16195edd197f7` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/recovery/PinnedGraphRecoveryAuthority.java:75` `PinnedGraphRecoveryAuthority` | java | retained | security-ceiling-or-default | These numeric bounds limit admitted payload, memory, concurrency, queue, or collection work at the enforcing component boundary. |
 | `oc-29fcbcb58b1656065ec6` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/recovery/PinnedGraphRecoveryAuthority.java:107` `PinnedGraphRecoveryAuthority` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-b036b5367c9cfeab639e` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runner/KubernetesApi.java:131` `bounded` | java | retained | security-ceiling-or-default | Reviewed issue #446 atom 1 at ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runner/KubernetesApi.java#bounded: bounded read uses one overflow sentinel byte, or checks empty input; oversized data fails closed. |
+| `oc-b036b5367c9cfeab639e` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runner/KubernetesApi.java:173` `bounded` | java | retained | security-ceiling-or-default | Reviewed issue #446 atom 1 at ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runner/KubernetesApi.java#bounded: bounded read uses one overflow sentinel byte, or checks empty input; oversized data fails closed. |
 | `oc-c2add1d51cab8d183eea` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runner/KubernetesPodRunner.java:68` `KubernetesPodRunner` | java | retained | protocol-or-format-invariant | Reviewed issue #446 atom "kubernetes-manager.lock" at ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runner/KubernetesPodRunner.java#KubernetesPodRunner: exact Kubernetes status/field, manager-owned receipt filename, usage zero identity, or generated attestation envelope key; no user authority inferred. |
 | `oc-08ee011743d439df2d1d` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runner/KubernetesPodRunner.java:94` `if` | java | retained | security-ceiling-or-default | Reviewed issue #446 atom 1 at ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runner/KubernetesPodRunner.java#if: bounded internal polling/quiescence granularity or minimal preflight budget, always constrained by configured lifecycle and policy ceilings; not a fleet capacity default. |
 | `oc-1cef069551e8058c366b` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runner/KubernetesPodRunner.java:94` `if` | java | retained | security-ceiling-or-default | Reviewed issue #446 atom 1 at ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runner/KubernetesPodRunner.java#if: bounded internal polling/quiescence granularity or minimal preflight budget, always constrained by configured lifecycle and policy ceilings; not a fleet capacity default. |

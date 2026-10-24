@@ -161,7 +161,10 @@ class AuthoredCorrelationRuntimeTest {
 
     @Test void committedHandoffWithLostResponseReopensIntoOneOriginalChildWithoutProducerRetry() throws Exception {
         Path database = directory.resolve("derived-response-loss.db"); var sources = new ConcurrentHashMap<String, InboundSourceContext>();
-        var input = Map.of("operation", "original", "partition", "mail-1"); var child = new CompletableFuture<NodeMessage>();
+        var input = Map.of("operation", "original", "partition", "mail-1"); var childEffects = new AtomicInteger();
+        var child = new CompletableFuture<NodeMessage>() {
+            @Override public boolean complete(NodeMessage message) { childEffects.incrementAndGet(); return super.complete(message); }
+        };
         var committed = new CompletableFuture<DeploymentEntryIntent>();
         try (var engine = new SameThreadExecutionEngine(); var store = new SqliteExecutionStore(database, Clock.systemUTC())) {
             var lost = proxy(store, (method, args) -> {
@@ -184,11 +187,49 @@ class AuthoredCorrelationRuntimeTest {
         }
         var intent = committed.get();
         try (var engine = new SameThreadExecutionEngine(); var store = new SqliteExecutionStore(database, Clock.systemUTC())) {
-            var deployment = derivedDeployment(engine, store, sources, child, Clock.systemUTC());
+            var originalKey = new ExecutionKey(OWNER.tenantId(), intent.derivedFrom().processInstanceId());
+            var recoveryClaimed = new CountDownLatch(1);
+            var releaseRecovery = new CompletableFuture<Void>();
+            var cleanupTask = new CompletableFuture<Thread>();
+            var originalLease = new AtomicReference<LeaseHandle>();
+            var observed = proxy(store, (method, args) -> {
+                var result = invoke(store, method, args);
+                if (method.getName().equals("claim") && args[0].equals(originalKey))
+                    return ((CompletionStage<?>) result).thenCompose(lease -> {
+                        assertTrue(originalLease.compareAndSet(null, (LeaseHandle) lease));
+                        recoveryClaimed.countDown();
+                        return releaseRecovery.thenApply(ignored -> lease);
+                    });
+                if (method.getName().equals("release") && ((LeaseHandle) args[0]).key().equals(originalKey)) {
+                    var lease = (LeaseHandle) args[0];
+                    assertEquals(originalLease.get().workerId(), lease.workerId());
+                    assertEquals(originalLease.get().fencingToken(), lease.fencingToken());
+                    cleanupTask.complete(Thread.currentThread());
+                }
+                return result;
+            });
+            var deployment = derivedDeployment(engine, observed, sources, child, Clock.systemUTC());
             deployment.start(OWNER).toCompletableFuture().get(5, TimeUnit.SECONDS);
+            try {
+                assertTrue(recoveryClaimed.await(5, TimeUnit.SECONDS));
+                var retained = store.deploymentEntry(originalKey).toCompletableFuture().get().orElseThrow();
+                assertEquals(intent.derivedFrom().traversalId(), retained.traversalId());
+                assertEquals(input, ai.ravenroot.api.payload.PayloadJson.read(retained.input().bytes(), ai.ravenroot.api.payload.PayloadLimits.DEFAULTS).toJava());
+                var owned = sources.get("source").ingress().offerDurably(OWNER, IngressTarget.node("source"), input, "source", "one-original-event");
+                assertEquals(new IngressReceipt.Ambiguous("one-original-event", "the same durable traversal is already admitted"), owned);
+                assertFalse(owned.acknowledgeable());
+                assertEquals(retained, store.deploymentEntry(originalKey).toCompletableFuture().get().orElseThrow());
+            } finally { releaseRecovery.complete(null); }
+            // With this same-thread engine, teardown finishes on its per-task virtual worker.
+            // A child handler or lease-release signal alone precedes admission cleanup; joining
+            // that exact lease's worker is test synchronization, not a production receipt contract.
+            var cleanup = cleanupTask.get(15, TimeUnit.SECONDS);
+            assertTrue(cleanup.isVirtual());
+            assertTrue(cleanup.join(Duration.ofSeconds(5)));
             var delivered = child.get(15, TimeUnit.SECONDS);
             assertEquals(intent.processInstanceId(), delivered.processInstanceId()); assertEquals(intent.traversalId(), delivered.traversalId());
             assertEquals(intent.context(), delivered.applicationCorrelation()); assertEquals("structured", delivered.attributes().get("mail"));
+            assertEquals(Map.of("computed", "ingestion-42"), delivered.payload());
             var original = store.correlatedTraversal(OWNER.tenantId(), intent.derivedFrom().processInstanceId(), intent.derivedFrom().traversalId()).toCompletableFuture().get().orElseThrow();
             assertEquals("original", original.context().applicationCorrelationId());
             var originalVisit = store.load(new ExecutionKey(OWNER.tenantId(), intent.derivedFrom().processInstanceId())).toCompletableFuture().get().state()
@@ -197,6 +238,7 @@ class AuthoredCorrelationRuntimeTest {
             assertEquals(intent.derivedFrom().attemptId(), originalVisit.attempts().getFirst().attemptId());
             assertInstanceOf(IngressReceipt.Duplicate.class, sources.get("source").ingress().offerDurably(OWNER, IngressTarget.node("source"), input, "source", "one-original-event"));
             assertEquals(1, store.correlatedTraversals(intent.scope(), intent.context().applicationCorrelationId(), Optional.empty(), 10).toCompletableFuture().get().items().size());
+            assertEquals(1, childEffects.get());
             deployment.stop().toCompletableFuture().get(5, TimeUnit.SECONDS);
         }
     }

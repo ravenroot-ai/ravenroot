@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { measureHistoryResponses } from '../history-response-measurements.mjs';
 test.use({ hasTouch: true });
 const ORIGIN = process.env.RAVENROOT_DEPLOYMENT_PERSISTENCE_ORIGIN;
 const CAP = Number(process.env.RAVENROOT_HISTORY_PAGE_CAP);
@@ -50,15 +51,9 @@ test('native monitor reads bounded real persistent histories, visits and retry a
   test.setTimeout(60_000); page.setDefaultTimeout(10_000);
   if (!ORIGIN || !OUTPUT || ![1, 10].includes(CAP)) throw new Error('requires real history server harness');
   page.on('dialog', dialog => dialog.accept());
-  const failures = [], pages = [], pending = [];
+  const failures = [], measurements = measureHistoryResponses(page), pages = measurements.pages;
+  try {
   page.on('pageerror', error => failures.push(error.message));
-  page.on('response', response => {
-    const url = new URL(response.url()); if (!url.pathname.endsWith('/history')) return;
-    pending.push((async () => { const body = await response.body(), data = JSON.parse(body);
-      pages.push({ view: url.searchParams.get('view'), requestLimit: Number(url.searchParams.get('limit')), bytes: body.length,
-        applicationCorrelationId: url.searchParams.get('applicationCorrelationId'), publicReference: url.searchParams.get('publicReference'), cursor: url.searchParams.get('cursor'),
-        rows: data.items?.length, status: response.status(), duration: response.request().timing().responseEnd }); })());
-  });
   await page.goto(ORIGIN); await expect(page.locator('#runtime-connection')).toHaveClass(/connected/, { timeout: 30_000 });
   await page.evaluate(theme => window.ravenroot.setApplicationTheme(theme), CAP === 1 ? 'dark' : 'light');
   await page.locator('#menu-run').click(); await page.getByRole('menuitem', { name: 'Deployments…' }).click();
@@ -140,7 +135,9 @@ test('native monitor reads bounded real persistent histories, visits and retry a
 
   const dom = await monitor.evaluate(node => ({ elements: node.querySelectorAll('*').length, rows: node.querySelectorAll('.history-page li').length,
     previews: node.querySelectorAll('.history-preview').length, scrollWidth: node.scrollWidth, width: node.clientWidth }));
-  await Promise.all(pending);
+  // Measure this bounded first-traversal interaction only. Later repeated-preview and draft
+  // checks remain functional assertions; retiring those readers must not leak body tasks here.
+  await measurements.stop();
   const exactSearch = pages.filter(page => page.view === 'histories' && page.applicationCorrelationId);
   expect(exactSearch).toHaveLength(1); expect(exactSearch[0]).toMatchObject({ applicationCorrelationId: 'operation-1999', publicReference: 'same-file.csv', cursor: null, rows: 1 });
   // Two new explicit reads exercise exact search and clear. The prior navigation/inspection
@@ -184,5 +181,5 @@ test('native monitor reads bounded real persistent histories, visits and retry a
     expect(await page.evaluate(() => window.ravenroot.activeDocument().deploymentRun.graphVersion)).toBe(original.graphVersion); expect(mutations).toEqual([]);
     await page.setViewportSize({ width: 390, height: 844 }); await page.screenshot({ path: join(OUTPUT, 'history-draft-divergence.png'), fullPage: true });
   }
-
+  } finally { await measurements.stop(); }
 });

@@ -1,4 +1,7 @@
 import { expect, test } from '@playwright/test';
+import { keepAuthenticationInMemory } from './memory-only-auth.mjs';
+import { PID, deferred, deploymentService } from './deployment-run-fixture.mjs';
+test.beforeEach(async ({ page }) => keepAuthenticationInMemory(page));
 
 const SOURCE_CATALOG = JSON.stringify([{
   behavior: 'external.consume', displayName: 'External consumer', category: 'Sources',
@@ -36,35 +39,11 @@ async function makeActiveDirty(page, name) {
 }
 
 async function stubSourceRuntime(page, { failStop = false, delayStop = false } = {}) {
-  let releaseStop;
-  const stopGate = new Promise(resolve => { releaseStop = resolve; });
-  const calls = { sourceDeletes: 0, deployments: 0, releaseStop };
-  await page.route('**/v1/node-types', route => route.fulfill({
-    status: 200, contentType: 'application/json', body: SOURCE_CATALOG,
-  }));
-  await page.route('**/v1/events**', route => route.fulfill({ status: 204, body: '' }));
-  await page.route('**/v1/source-sessions**', async route => {
-    const request = route.request();
-    const sessionId = new URL(request.url()).searchParams.get('id')
-      || decodeURIComponent(new URL(request.url()).pathname.split('/').at(-1));
-    if (request.method() === 'DELETE') calls.sourceDeletes += 1;
-    if (request.method() === 'DELETE' && delayStop) await stopGate;
-    if (request.method() === 'DELETE' && failStop) {
-      return route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"unavailable"}' });
-    }
-    const state = request.method() === 'POST' ? 'STARTING'
-      : request.method() === 'DELETE' ? 'STOPPED' : 'LISTENING';
-    return route.fulfill({
-      status: request.method() === 'POST' ? 202 : 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ sessionId, state, sourceCount: 1, scope: 'LOCAL_PROCESS', diagnostic: null }),
-    });
-  });
-  await page.route('**/v1/deployments**', route => {
-    calls.deployments += 1;
-    return route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"must not be called"}' });
-  });
-  return calls;
+  const gate = deferred();
+  const backend = await deploymentService(page, { failStop, stopGate: delayStop ? gate : null });
+  return { backend, releaseStop: gate.resolve,
+    get stops() { return backend.calls.filter(call => call.action === 'stop').length; },
+    get undeploys() { return backend.calls.filter(call => call.method === 'DELETE').length; } };
 }
 
 async function openAndRunSource(page, name) {
@@ -73,7 +52,7 @@ async function openAndRunSource(page, name) {
   });
   page.once('dialog', dialog => dialog.accept());
   await page.locator('#btn-run').click();
-  await expect(page.locator('#source-session-status')).toContainText('Listening');
+  await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().deploymentRun?.processInstanceId)).toBe(PID);
 }
 
 test.describe('Close All Documents', () => {
@@ -185,8 +164,8 @@ test.describe('Close All Documents', () => {
     await expect.poll(() => page.evaluate(() => window.ravenroot.workspace.documents.map(document_ => document_.id)))
       .toEqual([later]);
     expect(captured).not.toContain(later);
-    expect(calls.sourceDeletes).toBe(0);
-    expect(calls.deployments).toBe(0);
+    expect(calls.stops).toBe(0);
+    expect(calls.undeploys).toBe(0);
     await expect(page.locator('#document-switcher')).toBeFocused();
   });
 
@@ -199,13 +178,13 @@ test.describe('Close All Documents', () => {
 
     await closeAllFromView(page);
     await page.locator('[data-close-all-action="discard"]').click();
-    await expect(page.locator('#close-all-documents-title')).toHaveText('Close documents with active local sessions?');
+    await expect(page.locator('#close-all-documents-title')).toHaveText('Close documents with server runtimes?');
     await page.locator('[data-close-all-action="cancel"]').click();
 
     expect(await page.evaluate(() => window.ravenroot.workspace.documents.map(document_ => document_.id))).toEqual(before);
     expect(await page.evaluate(() => window.ravenroot.workspace.active.history.isDirty())).toBe(true);
-    expect(calls.sourceDeletes).toBe(0);
-    expect(calls.deployments).toBe(0);
+    expect(calls.stops).toBe(0);
+    expect(calls.undeploys).toBe(0);
   });
 
   test('Stop and Close All reaches authoritative stopped state before closing and never undeploys', async ({ page }) => {
@@ -216,9 +195,9 @@ test.describe('Close All Documents', () => {
     await closeAllFromView(page);
     await page.locator('[data-close-all-action="stop"]').click();
 
-    await expect.poll(() => calls.sourceDeletes).toBe(1);
+    await expect.poll(() => calls.stops).toBe(1);
     await expect.poll(() => page.evaluate(() => window.ravenroot.workspace.size)).toBe(0);
-    expect(calls.deployments).toBe(0);
+    expect(calls.undeploys).toBe(0);
   });
 
   test('Stop and Close requires authoritative success; failure keeps every target open and never undeploys', async ({ page }) => {
@@ -231,8 +210,8 @@ test.describe('Close All Documents', () => {
     await page.locator('[data-close-all-action="stop"]').click();
     await expect(page.locator('#close-all-documents-status')).toContainText('did not reach the stopped state');
     expect(await page.evaluate(() => window.ravenroot.workspace.documents.map(document_ => document_.id))).toEqual(before);
-    expect(calls.sourceDeletes).toBe(1);
-    expect(calls.deployments).toBe(0);
+    expect(calls.stops).toBe(1);
+    expect(calls.undeploys).toBe(0);
   });
 
   test('Escape during a pending stop cancels document closure without undoing the truthful stop result', async ({ page }) => {
@@ -243,13 +222,31 @@ test.describe('Close All Documents', () => {
 
     await closeAllFromView(page);
     await page.locator('[data-close-all-action="stop"]').click();
-    await expect.poll(() => calls.sourceDeletes).toBe(1);
+    await expect.poll(() => calls.stops).toBe(1);
     await page.locator('#close-all-documents-dialog').press('Escape');
     calls.releaseStop();
 
     await expect(page.locator('#close-all-documents-dialog')).toBeHidden();
     await page.waitForTimeout(100);
     expect(await page.evaluate(() => window.ravenroot.workspace.documents.map(document_ => document_.id))).toEqual(before);
-    expect(calls.deployments).toBe(0);
+    expect(calls.undeploys).toBe(0);
   });
+  test('stops exactly two captured bindings and leaves a later focused document open', async ({ page }) => {
+    const calls = await stubSourceRuntime(page, { delayStop: true }); await page.goto('/');
+    await openAndRunSource(page, 'first.graphml');
+    await page.locator('#btn-new').click(); await openAndRunSource(page, 'second.graphml');
+    const targets = await page.evaluate(() => window.ravenroot.workspace.documents.map(owner => ({ id: owner.id, deploymentId: owner.deploymentRun?.deploymentId || null })));
+    await closeAllFromView(page); await expect(page.locator('#close-all-documents-list li')).toHaveCount(2);
+    const later = await page.evaluate(() => window.ravenroot.openDocument({ name: 'later.graphml' }));
+    await page.locator('[data-close-all-action="stop"]').click();
+    await expect.poll(() => calls.stops).toBe(1);
+    expect(await page.evaluate(() => window.ravenroot.workspace.size)).toBe(targets.length + 1);
+    calls.releaseStop();
+    await expect.poll(() => page.evaluate(() => window.ravenroot.workspace.documents.map(owner => owner.id))).toEqual([later]);
+    expect(calls.backend.calls.filter(call => call.action === 'stop').map(call => call.id).sort())
+      .toEqual(targets.map(target => target.deploymentId).filter(Boolean).sort());
+    expect(calls.undeploys).toBe(0);
+    expect(calls.backend.calls.filter(call => call.action === 'initial-start')).toHaveLength(2);
+  });
+
 });

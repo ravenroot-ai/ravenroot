@@ -189,6 +189,18 @@ const nativeCardSnapshot = (page, renderer) => page.evaluate(selectedRenderer =>
   };
 }, renderer);
 
+async function openNativeElasticFixture(page) {
+  // #590 deployment Monitoring is the bounded history dialog. Keep this legacy renderer contract
+  // on an independent, read-only synthetic graph fixture with the identical authored topology.
+  // This is test data, not a product conversion or an assertion that safe deployment views can fork.
+  await page.evaluate(() => {
+    const graph = structuredClone(window.ravenroot.activeDocument().graph);
+    graph.format = 'graphml'; delete graph.viewerBinding;
+    window.ravenroot.openDocument({ name: 'elastic-renderer-contract.graphml', graph, mode: 'test' });
+  });
+  await page.locator('#btn-monitoring').click();
+}
+
 const nativeElasticSnapshot = page => page.evaluate(source => {
   const owner = window.ravenroot.activeDocument();
   const renderer = owner.renderer;
@@ -324,7 +336,7 @@ for (const theme of ['dark', 'light']) {
       // uses the native default Design presentation instead of forcing this legacy standard style.
       if (renderer === 'cyto') await page.evaluate(() => window.ravenroot.setVisualStyle('standard'));
       if (renderer === 'n8n') await page.evaluate(() => window.ravenroot.setVisualStyle('n8n'));
-      if (renderer === 'elastic') await page.locator('#btn-monitoring').click();
+      if (renderer === 'elastic') await openNativeElasticFixture(page);
       if (renderer === 'elastic') {
         await expect(page.locator('.doc-pane--active .doc-elastic-host.active')).toBeVisible();
       }
@@ -360,7 +372,7 @@ for (const theme of ['dark', 'light']) {
       await page.evaluate(selected => window.ravenroot.setApplicationTheme(selected), theme);
       for (const [mode, renderer] of [['design', 'cyto'], ['monitoring', 'elastic']]) {
         if (renderer === 'elastic') {
-          await page.locator('#btn-monitoring').click();
+          await openNativeElasticFixture(page);
           await expect(page.locator('.doc-pane--active .doc-elastic-host.active')).toBeVisible();
         }
         const native = renderer === 'elastic'

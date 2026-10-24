@@ -2,11 +2,8 @@ import { keepAuthenticationInMemory } from './memory-only-auth.mjs';
 import { expect, test } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 
-// The Deployments window owns registration and control of local deployments. Routing that behavior
-// through the Run button would change Run's meaning; Run keeps its existing meaning end to end,
-// and THIS window is where "also registered and controlled as a
-// local deployment" for a source-less graph actually lives -- decoupled from any open document,
-// exactly like a deployment registered through the CLI would be.
+// The Deployments window controls explicit tenant registrations independently of open documents.
+// First Run binds an originating document to its own registration; Test remains one-shot.
 //
 // Two things can only be checked here, in a real browser against the real page: that the window is
 // REACHABLE through the menu as a modal, and that a full register → start → stop → restart → undeploy
@@ -460,7 +457,7 @@ test.describe('the deployments window', () => {
     expect(listCallCount()).toBe(countAtClose);
   });
 
-  test('Run and Test are unaffected by this window -- neither touches /v1/deployments', async ({ page }) => {
+  test('one-shot Test is unaffected by this window and never touches /v1/deployments', async ({ page }) => {
     const service = withDeploymentService(page);
     await page.route('**/v1/node-types', route => route.fulfill({
       status: 200, contentType: 'application/json', body: '[]',
@@ -480,9 +477,9 @@ test.describe('the deployments window', () => {
     await expect(page.locator('#btn-run')).toBeEnabled();
 
     page.once('dialog', dialog => dialog.accept());
-    await page.locator('#btn-run').click();
+    await page.locator('#btn-play').click();
     await expect.poll(() => executionCalls.filter(call => call.method === 'POST').length).toBe(1);
-    expect(executionCalls.find(call => call.method === 'POST').url).toContain('mode=run');
+    expect(new URL(executionCalls.find(call => call.method === 'POST').url).searchParams.get('mode')).toBeNull();
     expect(service.calls).toHaveLength(0);
   });
 });

@@ -169,3 +169,36 @@ before changing a running environment:
 
 These guides describe separate authority, persistence, and failure boundaries. A successful visual
 action does not imply that a different tenant, deployment, runner, or recovery topology is ready.
+
+## Closing a bound document
+
+First **Run** associates the originating document with one exact deployment, including a graph
+without SOURCE nodes. **Test** remains a separate one-shot execution. Closing a bound document offers
+**Stop and Close**, **Close and keep running**, and **Cancel**. Keep Running detaches this browser's
+observation only; it sends no Stop, Undeploy, or initial START. Closing never removes a registration.
+Close All captures the document incarnations and bindings present when invoked; documents opened
+later remain open. Cancelling while an explicit Stop is pending cancels closure, while the server's
+actual stop result remains authoritative.
+
+Stop and Close reads the binding's current tenant, immutable graph, and runtime or durable
+registration identity. The server checks that identity at mutation time. Process-local Stop captures
+the exact runtime incarnation. Durable Stop additionally uses the current generation, an idempotency
+key, and an explicit operator reason. A replaced registration, different graph, denied authority,
+unavailable response, or a state other than authoritative STOPPED keeps the document open. An
+ordinary operator Stop from the deployment console retains its existing lifecycle contract.
+
+For HTTP clients, `POST /v1/deployments/{id}/stop` accepts the optional paired headers
+`X-Ravenroot-Deployment-Incarnation` and `X-Ravenroot-Graph-Version`. Durable bound Stop also requires
+`X-Ravenroot-Registration-Identity`, plus the existing generation, idempotency and reason headers.
+Changed bindings return 409 before mutation. The ordinary Java SDK exposes the equivalent
+`stopLocalDeployment(tenantId, deploymentId, incarnationId, graphVersion)` overload for process-local
+bindings; durable hosts use the lifecycle coordinator's registration and generation fences. CLI
+operator Stop retains its explicit alias and current-generation contract; it does not claim to stop
+an earlier browser document incarnation.
+
+
+The authenticated deployment status includes optional `runtimeIncarnationId`, the exact hosted runtime identity available before activation. Compatibility status producers may omit it. The editor captures that identity, the tenant, graph version, and durable registration identity before issuing Start or Stop. Conditional Start uses the same three binding headers as conditional Stop. A replacement under the same name is refused before opening a listener. The ordinary operator lifecycle endpoints and SDK overloads continue to support explicitly unconditional control of the current named deployment.
+
+Stop requested during a pending Run waits for the captured registration or activation to resolve. It prevents an initial START request that has not yet been issued, then stops the exact runtime. Closing the originating document after requesting Stop does not cancel that cleanup; changing authentication or tenant authority does. A successful Stop closes admission, so a delayed initial START request is refused. A later explicit Run can activate the same deployment again and reconcile its permanent initial marker: an already admitted initial traversal keeps its original process and traversal IDs.
+
+The native history monitor shows current Human Task attention separately from visit history. **Review tasks in graph** returns to the originating graph and selects a node with actionable tasks. Task decisions retain their existing confirmation, exact-generation, and current-authorization checks. Unknown or unavailable attention is displayed explicitly.

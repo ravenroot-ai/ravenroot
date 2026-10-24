@@ -759,6 +759,7 @@ describe('process-local deployment client', () => {
 
     const result = await client.stopDeployment('deployment-1', {
       expectedGeneration: 7, idempotencyKey: 'intent-7', reason: 'maintenance',
+      binding: { incarnationId: 'runtime-1', graphVersion: 'a'.repeat(64), registrationIdentity: 'registry-1' },
     });
 
     expect(result).toEqual({ outcome: accepted, status: stopped });
@@ -766,8 +767,21 @@ describe('process-local deployment client', () => {
       'Idempotency-Key': 'intent-7',
       'X-Ravenroot-Expected-Generation': '7',
       'X-Ravenroot-Reason': 'maintenance',
+      'X-Ravenroot-Deployment-Incarnation': 'runtime-1', 'X-Ravenroot-Graph-Version': 'a'.repeat(64),
+      'X-Ravenroot-Registration-Identity': 'registry-1',
     }));
     expect(fetchImpl.mock.calls[1][0]).toBe('/v1/deployments/deployment-1');
+  });
+
+  it('refuses malformed conditional Stop bindings and binding on other commands before I/O', async () => {
+    const fetchImpl = vi.fn(), client = new RavenrootRuntimeClient('', { fetchImpl });
+    const valid = { incarnationId: 'runtime-1', graphVersion: 'a'.repeat(64), registrationIdentity: null };
+    for (const binding of [{ ...valid, incarnationId: '' }, { ...valid, graphVersion: 'wrong' },
+      { ...valid, registrationIdentity: 'x'.repeat(257) }, { ...valid, incarnationId: 'bad\nheader' }]) {
+      await expect(client.stopDeployment('deployment-1', { binding })).rejects.toThrow(/binding/);
+    }
+    await expect(client.restartDeployment('deployment-1', { binding: valid })).rejects.toThrow(/binding/);
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it('retries an ambiguous durable delivery once with identical intent metadata', async () => {

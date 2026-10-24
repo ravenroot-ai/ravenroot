@@ -395,6 +395,9 @@ export function validateLocalDeploymentStatus(value, expectedDeploymentId = '') 
       || typeof value.deploymentId !== 'string' || !value.deploymentId
       || typeof value.tenantId !== 'string' || !value.tenantId
       || !LOCAL_DEPLOYMENT_STATES.has(value.state)
+      || (value.runtimeIncarnationId != null && (typeof value.runtimeIncarnationId !== 'string'
+        || !value.runtimeIncarnationId || value.runtimeIncarnationId.length > 256
+        || /[\u0000-\u001f\u007f-\u009f]/.test(value.runtimeIncarnationId)))
       || !Number.isSafeInteger(value.sourceCount) || value.sourceCount < 0
       || value.scope !== 'LOCAL_PROCESS'
       || (value.deploymentGeneration !== null && value.deploymentGeneration !== undefined
@@ -946,17 +949,30 @@ export class RavenrootRuntimeClient {
   }
 
   async #deploymentCommand(deploymentId, action,
-    { expectedGeneration, idempotencyKey, reason, disposition } = {}) {
+    { expectedGeneration, idempotencyKey, reason, disposition, binding } = {}) {
     const id = String(deploymentId || '');
     if (!id) throw runtimeClientValidationError(`Deployment ${action} requires an id`);
     const path = action === 'undeploy' ? `/v1/deployments/${encodeURIComponent(id)}`
       : `/v1/deployments/${encodeURIComponent(id)}/${action}`;
     const method = action === 'undeploy' ? 'DELETE' : 'POST';
+    let bindingHeaders = {};
+    if (binding !== undefined) {
+      const safe = value => typeof value === 'string' && value.length > 0 && value.length <= 256
+        && !/[\u0000-\u001f\u007f-\u009f]/.test(value);
+      if (!['start', 'stop'].includes(action) || !safe(binding?.incarnationId)
+          || !/^[a-f0-9]{64}$/.test(binding?.graphVersion)
+          || binding.registrationIdentity !== null && !safe(binding.registrationIdentity))
+        throw runtimeClientValidationError('Invalid identity-fenced deployment lifecycle binding');
+      bindingHeaders = { 'X-Ravenroot-Deployment-Incarnation': binding.incarnationId,
+        'X-Ravenroot-Graph-Version': binding.graphVersion,
+        ...(binding.registrationIdentity ? { 'X-Ravenroot-Registration-Identity': binding.registrationIdentity } : {}) };
+    }
+
 
     // Absence means a compatibility deployment. Presence switches the entire command onto the
     // durable contract; unsafe int64 values are refused rather than rounded into another fence.
     if (expectedGeneration === undefined || expectedGeneration === null) {
-      const result = await this.#json(path, { method, headers: { Accept: 'application/json' } });
+      const result = await this.#json(path, { method, headers: { Accept: 'application/json', ...bindingHeaders } });
       return validateLocalDeploymentStatus(result, id);
     }
     if (!safeGeneration(expectedGeneration)) {
@@ -975,7 +991,7 @@ export class RavenrootRuntimeClient {
       throw runtimeClientValidationError('Secure deployment idempotency key generation is unavailable');
     }
     const headers = {
-      Accept: 'application/json',
+      Accept: 'application/json', ...bindingHeaders,
       'Idempotency-Key': key,
       'X-Ravenroot-Expected-Generation': String(expectedGeneration),
       ...((['pause', 'cancel', 'stop', 'undeploy'].includes(action))

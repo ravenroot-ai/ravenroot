@@ -1,5 +1,6 @@
 import { keepAuthenticationInMemory } from './memory-only-auth.mjs';
 import { createServer } from 'node:http';
+import { createHash } from 'node:crypto';
 import { mkdir } from 'node:fs/promises';
 
 import { expect, test } from '@playwright/test';
@@ -63,6 +64,8 @@ let requests;
 let capabilityResponse;
 let catalogResponse;
 let executionContext;
+let deployments, contextDeployments;
+const PID = '10000000-0000-0000-0000-000000000001', TID = '20000000-0000-0000-0000-000000000002';
 
 function task(id, generation, status = 'WAITING') {
   return { taskId: id, generation, status, graphVersion: 'graph-v1', deploymentId: null,
@@ -84,26 +87,63 @@ function startService() {
   service = createServer(async (request, response) => {
     if (respondWithSuccessfulGraphInspection(request, response, { origin: UI_ORIGIN })) return;
     const headers = { 'Access-Control-Allow-Origin': UI_ORIGIN, Vary: 'Origin',
-      'Access-Control-Allow-Headers': 'authorization,content-type',
+      'Access-Control-Allow-Headers': 'authorization,content-type,x-ravenroot-deployment-incarnation,x-ravenroot-graph-version,x-ravenroot-registration-identity',
       'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' };
     if (request.method === 'OPTIONS') { response.writeHead(204, headers).end(); return; }
     const url = new URL(request.url, SERVICE_ORIGIN);
     requests.push(url.pathname + url.search);
     if (url.pathname === '/v1/configuration') return json(response, 200, {
-      schemaVersion: 1, graphDocumentMaxBytes: 10 * 1024 * 1024, humanTasks: capabilityResponse }, headers);
+      schemaVersion: 1, graphDocumentMaxBytes: 10 * 1024 * 1024, workspace: { tenantId: 'tenant' }, humanTasks: capabilityResponse }, headers);
     if (url.pathname === '/v1/node-types') return json(response, 200, catalogResponse, headers);
     if (url.pathname === '/v1/events') { response.writeHead(204, headers).end(); return; }
     if (url.pathname === '/v1/executions') return json(response, 200, { executionId: 'traversal-v1',
       ...executionContext, executionPolicy: 'durable' }, headers);
+    if (url.pathname === '/v1/deployments' && request.method === 'POST') {
+      const chunks = []; for await (const chunk of request) chunks.push(chunk);
+      const graph = Buffer.concat(chunks), id = url.searchParams.get('id');
+      const status = { deploymentId: id, tenantId: 'tenant', state: 'REGISTERED', sourceCount: 0,
+        graphVersion: createHash('sha256').update(graph).digest('hex'), runtimeIncarnationId: `runtime-${id}`,
+        scope: 'LOCAL_PROCESS', diagnostic: null, continuity: 'PROCESS_LOCAL', deploymentRevision: null,
+        desiredState: null, observedState: null, recoveryFailure: null, context: executionContext.graphVersion };
+      deployments.set(id, status); contextDeployments.set(executionContext.graphVersion, status);
+      return json(response, 200, status, headers);
+    }
+    const deploymentMatch = url.pathname.match(/^\/v1\/deployments\/([^/]+)(?:\/(.*))?$/);
+    if (deploymentMatch) {
+      const status = deployments.get(decodeURIComponent(deploymentMatch[1])), action = deploymentMatch[2];
+      if (!status) return json(response, 404, { error: 'not found' }, headers);
+      if (action === 'start') {
+        if (request.headers['x-ravenroot-deployment-incarnation'] !== status.runtimeIncarnationId
+            || request.headers['x-ravenroot-graph-version'] !== status.graphVersion)
+          return json(response, 409, { error: 'binding changed' }, headers);
+        status.state = 'READY';
+      }
+      if (action === 'view') return json(response, 200, { viewerSourceVersion: '1',
+        source: { kind: 'deployment', deploymentId: status.deploymentId, graphVersion: status.graphVersion,
+          incarnationId: status.runtimeIncarnationId }, lifecycle: status.state,
+        projection: { viewerContractVersion: '1.0', nodes: [], edges: [] } }, headers);
+      if (action === 'initial-start') {
+        const chunks = []; for await (const chunk of request) chunks.push(chunk);
+        const input = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+        const duplicate = status.initial; status.initial = true;
+        return json(response, duplicate ? 200 : 202, { outcome: duplicate ? 'DUPLICATE' : 'ACCEPTED',
+          requestId: input.requestId, processInstanceId: PID, traversalId: TID }, headers);
+      }
+      return json(response, 200, status, headers);
+    }
+    if (url.pathname === `/v1/executions/${TID}`) return json(response, 200,
+      { executionId: TID, traversalId: TID, processInstanceId: PID, status: 'COMPLETED', payload: null }, headers);
     if (url.pathname === '/v1/human-tasks/attention') {
       const requestedGraph = url.searchParams.get('graphVersion');
+      const deploymentId = url.searchParams.get('deploymentId');
+      const contextB = deployments.get(deploymentId)?.context === 'graph-b';
       if (attentionMode === 'network'
-          || (attentionMode === 'offline-graph-b' && requestedGraph === 'graph-b')) {
+          || (attentionMode === 'offline-graph-b' && contextB)) {
         request.socket.destroy(); return;
       }
-      let live = attentionMode === 'empty-graph-b' && requestedGraph === 'graph-b' ? []
+      let live = attentionMode === 'empty-graph-b' && contextB ? []
         : tasks.filter(entry => ['WAITING', 'ESCALATED'].includes(entry.status)).map(entry => ({ ...entry,
-          graphVersion: requestedGraph || entry.graphVersion,
+          graphVersion: requestedGraph || entry.graphVersion, deploymentId: deploymentId || entry.deploymentId,
           processInstanceId: url.searchParams.get('processInstanceId') || entry.processInstanceId }));
       const nodeId = url.searchParams.get('nodeId');
       if (nodeId) live = live.filter(entry => entry.nodeId === nodeId);
@@ -180,8 +220,11 @@ async function addHumanTaskNode(page) {
 async function runAndSelect(page, graphVersion = executionContext.graphVersion) {
   page.once('dialog', dialog => dialog.accept());
   await page.locator('#btn-run').click();
+  await expect.poll(() => page.evaluate(() => Boolean(window.ravenroot.activeDocument().deploymentRun?.traversalId))).toBe(true);
+  const deployed = contextDeployments.get(graphVersion);
+  expect(deployed).toBeDefined();
   await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().execution.graphVersion))
-    .toBe(graphVersion);
+    .toBe(deployed.graphVersion);
   await page.evaluate(() => {
     window.ravenroot.activeDocument().cy.getElementById('human-confirmation').emit('tap');
   });
@@ -299,7 +342,7 @@ test.beforeEach(async () => {
   tasks = [task('task-1', 1, 'ESCALATED'), task('task-2', 2)];
   decisionMode = 'normal';
   attentionMode = 'normal';
-  requests = [];
+  requests = []; deployments = new Map(); contextDeployments = new Map();
   capabilityResponse = { ...CAPABILITY };
   catalogResponse = [HUMAN_TASK];
   executionContext = { processInstanceId: 'process-v1', graphVersion: 'graph-v1' };
@@ -423,23 +466,18 @@ test('attention survives Design and Monitoring renderer changes with a pulsing n
   }).toBe(true);
 
   await page.locator('#btn-monitoring').click();
-  await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().renderer.kind)).toBe('elastic');
-  await expect.poll(() => page.evaluate(() => {
-    const renderer = window.ravenroot.activeDocument().renderer;
-    const circle = renderer.nodeSelection.filter(item => item.id === 'human-confirmation').node();
-    const label = renderer.nodeLabelSelection.filter(item => item.id === 'human-confirmation').text();
-    return { label, attention: circle?.classList.contains('human-task-attention'),
-      escalated: circle?.classList.contains('is-escalated') };
-  })).toEqual({ label: 'Human task\n⚑ 2 · ▲ 1', attention: true, escalated: true });
-  await expect(page.locator('.human-task-status')).toBeInViewport();
-  await expect(page.locator('.human-task-status')).toContainText('2 actionable tasks');
+  await expect(page.locator('.doc-history-dialog')).toBeVisible();
+  await expect(page.locator('.doc-history-attention')).toContainText('2 actionable tasks · 1 escalated');
+  await expect(page.locator('.doc-history-review-tasks')).toBeInViewport();
   if (process.env.RR_VISUAL_EVIDENCE_DIR) {
     await mkdir(process.env.RR_VISUAL_EVIDENCE_DIR, { recursive: true });
     await page.screenshot({ path: `${process.env.RR_VISUAL_EVIDENCE_DIR}/human-task-attention-monitoring.png`,
       fullPage: true });
   }
 
-  await page.locator('#btn-design').click();
+  await page.locator('.doc-history-review-tasks').click();
+  await expect(page.locator('.doc-history-dialog')).not.toBeVisible();
+  await expect(page.locator('[data-human-task-id="task-1"]')).toBeVisible();
   await expect(page.locator('.doc-pane--active')).not.toHaveAttribute('aria-busy', 'true');
   await expect.poll(() => page.evaluate(() => ({ renderer: window.ravenroot.activeDocument().renderer.kind,
     label: window.ravenroot.activeDocument().cy.getElementById('human-confirmation').renderedStyle('label'),
@@ -472,7 +510,7 @@ test('a failed switch to a document sharing the node id clears the previous halo
   attentionMode = 'offline-graph-b';
   await page.locator('#document-switcher').click();
   await page.locator(`[data-document-activate="${documentB}"]`).click();
-  await expect.poll(() => requests.filter(value => value.includes('graphVersion=graph-b')).length)
+  await expect.poll(() => requests.filter(value => value.includes('deploymentId=' + contextDeployments.get('graph-b').deploymentId)).length)
     .toBeGreaterThan(0);
   await expect.poll(() => page.evaluate(() => {
     const node = window.ravenroot.activeDocument().cy.getElementById('human-confirmation');
@@ -726,3 +764,24 @@ test('keyboard focus, screen-reader structure and reduced motion remain usable',
 
 // Exercise the established feature with deliberately memory-only browser authentication.
 test.beforeEach(async ({ page }) => keepAuthenticationInMemory(page));
+
+test('one-shot Test retains the Elastic attention carrier across renderer changes', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await connectAndCreate(page);
+  await page.locator('#btn-play').click();
+  await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().execution.graphVersion)).toBe('graph-v1');
+  await page.evaluate(() => { window.ravenroot.activeDocument().cy.getElementById('human-confirmation').emit('tap'); });
+  await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().cy.getElementById('human-confirmation').hasClass('human-task-pulse'))).toBe(true);
+  await page.locator('#btn-monitoring').click();
+  await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().renderer.kind)).toBe('elastic');
+  await expect.poll(() => page.evaluate(() => {
+    const renderer = window.ravenroot.activeDocument().renderer;
+    const circle = renderer.nodeSelection.filter(item => item.id === 'human-confirmation').node();
+    return { label: renderer.nodeLabelSelection.filter(item => item.id === 'human-confirmation').text(),
+      attention: circle?.classList.contains('human-task-attention'), escalated: circle?.classList.contains('is-escalated') };
+  })).toEqual({ label: 'Human task\n⚑ 2 · ▲ 1', attention: true, escalated: true });
+  await expect(page.locator('.human-task-status')).toBeInViewport();
+  await expect(page.locator('.human-task-status')).toContainText('2 actionable tasks');
+  await page.locator('#btn-design').click();
+  await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().cy.getElementById('human-confirmation').renderedStyle('label'))).toBe('Human task\n⚑ 2 · ▲ 1');
+});

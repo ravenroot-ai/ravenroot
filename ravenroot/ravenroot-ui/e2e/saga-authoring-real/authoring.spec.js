@@ -127,7 +127,7 @@ test('mixed sagas survive import/export and forged or incomplete declarations ha
 });
 
 
-test('Log before a real source remains ordinary for Test and source-session Run', async ({ page }) => {
+test('Log before a real source remains ordinary for Test and deployment-bound Run', async ({ page }) => {
   await connect(page);
   const xml = graph().replace('<node id="end">', '<node id="source"><data key="kind">BEHAVIOR</data><data key="behavior">test.saga.source</data></node><node id="end">')
     .replace('<edge source="log" target="transform"/>', '<edge source="log" target="source"/><edge source="source" target="transform"/>');
@@ -143,10 +143,29 @@ test('Log before a real source remains ordinary for Test and source-session Run'
   expect((await start).status()).toBe(202);
   expect(mutations.filter(path => path.endsWith('/initial-start'))).toHaveLength(1);
   expect(mutations).not.toContain('/v1/source-sessions');
-  await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().deploymentRun?.phase)).toBe('READY');
+  await expect.poll(() => page.evaluate(() => { const run = window.ravenroot.activeDocument().deploymentRun; return run?.phase === 'READY' && Boolean(run.processInstanceId && run.traversalId); })).toBe(true);
   const binding = await page.evaluate(() => window.ravenroot.activeDocument().deploymentRun);
   expect(binding.processInstanceId).toBeTruthy(); expect(binding.traversalId).toBeTruthy();
   expect((await inspect(page)).xml).not.toContain('<data key="scope">');
+  const admitted = await page.request.get(`/v1/executions/${binding.traversalId}`);
+  expect(admitted.status()).toBe(200);
+  expect(await admitted.json()).toMatchObject({ processInstanceId: binding.processInstanceId, traversalId: binding.traversalId });
+  const origin = await page.evaluate(() => window.ravenroot.activeDocument().id);
+  await page.evaluate(id => window.ravenroot.requestCloseDocument(id), origin);
+  await expect(page.locator('#active-deployment-dialog')).toBeVisible();
+  const other = await page.evaluate(() => window.ravenroot.openDocument({ name: 'later.graphml' }));
+  const stopped = page.waitForResponse(response => response.request().method() === 'POST'
+    && new URL(response.url()).pathname === `/v1/deployments/${binding.deploymentId}/stop`);
+  await page.locator('[data-active-deployment-action="stop-and-close"]').click();
+  const stopResponse = await stopped; expect(stopResponse.status()).toBe(200);
+  expect((await stopResponse.request().allHeaders())['x-ravenroot-deployment-incarnation']).toBe(binding.incarnationId);
+  expect((await stopResponse.request().allHeaders())['x-ravenroot-graph-version']).toBe(binding.graphVersion);
+  await expect.poll(() => page.evaluate(id => window.ravenroot.workspace.find(id), origin)).toBeNull();
+  expect(await page.evaluate(() => window.ravenroot.workspace.activeId)).toBe(other);
+  const status = await page.request.get(`/v1/deployments/${binding.deploymentId}`);
+  expect(status.status()).toBe(200); expect((await status.json()).state).toBe('STOPPED');
+  expect(mutations.filter(path => path.endsWith('/initial-start'))).toHaveLength(1);
+
 });
 
 test('catalog and kind transitions preserve correlation controls and explicit saga opt-in independently', async ({ page }) => {

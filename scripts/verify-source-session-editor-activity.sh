@@ -13,8 +13,9 @@
 #      that built editor and hosts a REAL inbound source admitting one message every 700 ms.
 #   3. That test drives a REAL Chromium through `playwright.source-session-activity.config.js`: open
 #      the graph, press Run, and watch for over twenty seconds of admitted traffic. It asserts the
-#      nodes are painted, that monitoring accumulated across many traversals rather than resetting on
-#      each one, and that the `log` node's output reached the activity panel.
+#      original pinned topology shows one selected actual traversal, that twenty distinct SOURCE
+#      traversals remain attributed through focus/draft changes, and that log output reaches the
+#      activity panel. The mutable draft is never painted with deployment traffic.
 #
 # The window is deliberately long. A seven-second sample can fall entirely between admissions and
 # show nothing at all, which reads as a broken stream and sends the reader after a transport fault
@@ -44,5 +45,5 @@ mvn -B -f "$REACTOR_DIR/pom.xml" \
   -Dsurefire.failIfNoSpecifiedTests=false \
   test
 
-echo "PASSED: a listening source graph painted its nodes, accumulated monitoring across many"
-echo "traversals, and showed the log node's output in the editor's activity panel."
+echo "PASSED: real SOURCE traffic retained origin ownership and exact pinned traversal history,"
+echo "preserved draft isolation, showed log output, and stopped the captured deployment."

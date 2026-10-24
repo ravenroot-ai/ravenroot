@@ -147,9 +147,13 @@ test('Log before a real source remains ordinary for Test and deployment-bound Ru
   const binding = await page.evaluate(() => window.ravenroot.activeDocument().deploymentRun);
   expect(binding.processInstanceId).toBeTruthy(); expect(binding.traversalId).toBeTruthy();
   expect((await inspect(page)).xml).not.toContain('<data key="scope">');
-  const admitted = await page.request.get(`/v1/executions/${binding.traversalId}`);
-  expect(admitted.status()).toBe(200);
-  expect(await admitted.json()).toMatchObject({ processInstanceId: binding.processInstanceId, traversalId: binding.traversalId });
+  // Hosted admissions settle in the durable process inventory, not the one-shot result cache.
+  await expect.poll(async () => {
+    const admitted = await page.request.get(new URL(`/v1/executions/${binding.processInstanceId}/traversals`, process.env.RAVENROOT_SAGA_ORIGIN).href);
+    if (admitted.status() === 404) return null;
+    expect(admitted.status()).toBe(200);
+    return (await admitted.json()).traversals.find(row => row.traversalId === binding.traversalId)?.status;
+  }).toBe('COMPLETED');
   const origin = await page.evaluate(() => window.ravenroot.activeDocument().id);
   await page.evaluate(id => window.ravenroot.requestCloseDocument(id), origin);
   await expect(page.locator('#active-deployment-dialog')).toBeVisible();
@@ -162,7 +166,7 @@ test('Log before a real source remains ordinary for Test and deployment-bound Ru
   expect((await stopResponse.request().allHeaders())['x-ravenroot-graph-version']).toBe(binding.graphVersion);
   await expect.poll(() => page.evaluate(id => window.ravenroot.workspace.find(id), origin)).toBeNull();
   expect(await page.evaluate(() => window.ravenroot.workspace.activeId)).toBe(other);
-  const status = await page.request.get(`/v1/deployments/${binding.deploymentId}`);
+  const status = await page.request.get(new URL(`/v1/deployments/${binding.deploymentId}`, process.env.RAVENROOT_SAGA_ORIGIN).href);
   expect(status.status()).toBe(200); expect((await status.json()).state).toBe('STOPPED');
   expect(mutations.filter(path => path.endsWith('/initial-start'))).toHaveLength(1);
 

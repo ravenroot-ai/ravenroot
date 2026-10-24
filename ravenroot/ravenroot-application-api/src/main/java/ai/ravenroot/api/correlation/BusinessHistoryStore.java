@@ -60,6 +60,11 @@ public interface BusinessHistoryStore {
     default CompletionStage<Void> settleCorrelatedTraversal(String tenantId, UUID processId, UUID traversalId,
             TraversalStatus status, ExecutionTerminationReason reason) { return unsupported(); }
     /** Explicit compare-and-set closure; OPEN cannot be restored by this method or a late arrival.
+     * Successful closure requires no running, failed or cancelled traversals, complete retained
+     * history, and every known join's continuation durably dispatched. A pending collection,
+     * READY release intent or unsuccessful terminal join refuses with
+     * {@link BusinessHistoryException.Reason#REVISION_CONFLICT} without changing history or joins.
+     * Explicit FAILED and CANCELLED closure may cancel pending joins while retaining their facts.
  * @param scope tenant, logical deployment and exact immutable graph version
  * @param applicationId exact application correlation identity within the authenticated history scope
  * @param expectedRevision exact retained history revision required for the closure to commit

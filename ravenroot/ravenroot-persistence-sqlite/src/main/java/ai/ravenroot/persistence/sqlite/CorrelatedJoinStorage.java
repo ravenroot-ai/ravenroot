@@ -87,10 +87,10 @@ final class CorrelatedJoinStorage {
         writeMetadata(db, desired);
         if (desired.phase() == CorrelatedJoinRecord.Phase.FAILED
                 || desired.phase() == CorrelatedJoinRecord.Phase.EXPIRED) {
-            try (var close = db.prepareStatement("UPDATE business_history SET lifecycle = ?, incomplete = ?, revision = revision + 1, "
+            try (var close = db.prepareStatement("UPDATE business_history SET lifecycle = ?, incomplete = CASE WHEN incomplete = 1 THEN 1 ELSE ? END, revision = revision + 1, "
                     + "updated_ms = ? WHERE " + SCOPE + " AND application_id = ? AND lifecycle = 'OPEN'")) {
                 close.setString(1, desired.phase() == CorrelatedJoinRecord.Phase.CANCELLED ? "CANCELLED" : "FAILED");
-                close.setInt(2, desired.phase() == CorrelatedJoinRecord.Phase.EXPIRED ? 1 : 0);
+                close.setInt(2, desired.phase() == CorrelatedJoinRecord.Phase.EXPIRED || !desired.satisfied() ? 1 : 0);
                 close.setLong(3, now.toEpochMilli()); int at = bindScope(close, 4, key.scope()); close.setString(at, key.applicationCorrelationId());
                 close.executeUpdate();
             }

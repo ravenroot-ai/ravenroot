@@ -96,6 +96,33 @@ public abstract class BusinessClosureContract {
         }
     }
 
+    @Test void unsuccessfulTerminalJoinsCannotTurnAnAuthoredSuccessRequestIntoCompletion() throws Exception {
+        try (var store = createStore(id())) {
+            for (boolean full : List.of(false, true)) {
+                for (var phase : List.of(CorrelatedJoinRecord.Phase.CANCELLED, CorrelatedJoinRecord.Phase.FAILED, CorrelatedJoinRecord.Phase.EXPIRED)) {
+                    String app = "terminal-" + phase + "-" + full;
+                    var work = work(store, app, "part-1"); var key = new CorrelatedJoinKey(SCOPE, app, "join", "0");
+                    var join = CorrelatedJoinRecord.open(key, full ? Set.of("part-1") : Set.of("part-1", "part-2"), null, true,
+                            cause(work), NOW, NOW.plusSeconds(100));
+                    await(store.compareAndSetCorrelatedJoin(join));
+                    join = await(store.compareAndSetCorrelatedJoin(join.contribute(contribution(work, "part-1"), Set.of(), null, false, NOW, store.businessHistoryPolicy())));
+                    var requested = completeVisit(store, work, signal(work, BusinessHistory.Lifecycle.COMPLETED));
+                    var terminalJoin = await(store.compareAndSetCorrelatedJoin(join.terminate(phase, NOW)));
+                    var members = await(store.correlatedJoinMembers(key, JoinMemberFilter.ALL, Optional.empty(), 10));
+                    terminal(store, work, requested.revision(), TraversalStatus.COMPLETED);
+                    var result = await(store.businessHistory(SCOPE, app)).orElseThrow();
+                    assertEquals(BusinessHistory.Lifecycle.FAILED, result.lifecycle());
+                    assertEquals(BusinessHistory.Lifecycle.COMPLETED, result.closureSignal().requested());
+                    assertEquals(phase == CorrelatedJoinRecord.Phase.EXPIRED || !full, result.incompleteHistory());
+                    assertEquals(terminalJoin, await(store.correlatedJoin(key)).orElseThrow());
+                    assertEquals(members, await(store.correlatedJoinMembers(key, JoinMemberFilter.ALL, Optional.empty(), 10)));
+                    assertEquals(full ? 0 : 1, await(store.correlatedJoinMembers(key, JoinMemberFilter.MISSING, Optional.empty(), 10)).items().size());
+                    assertEquals(1, result.completedTraversals());
+                }
+            }
+        }
+    }
+
     @Test void closureAuthorityAndConflictingRetriesRollBackWithTheVisit() throws Exception {
         try (var store = createStore(id())) {
             var work = work(store, "authority", "part"); var signal = signal(work, BusinessHistory.Lifecycle.COMPLETED);

@@ -245,14 +245,23 @@ final class BusinessHistoryStorage {
     static void finishRequestedClosure(Connection db, BusinessScope scope, String id, Instant now) throws SQLException {
         var group = history(db, scope, id).orElse(null);
         if (group == null || group.lifecycle() != BusinessHistory.Lifecycle.OPEN || group.closureSignal() == null || group.runningTraversals() != 0) return;
-        boolean missing;
-        try (var count = db.prepareStatement("SELECT SUM(CASE WHEN phase = 'READY' THEN 1 ELSE 0 END), SUM(CASE WHEN phase = 'OPEN' THEN 1 ELSE 0 END) "
-                + "FROM correlated_business_join WHERE " + SCOPE + " AND application_id = ?")) {
+        boolean missing, unsuccessful;
+        try (var count = db.prepareStatement("SELECT SUM(CASE WHEN phase = 'READY' THEN 1 ELSE 0 END), "
+                + "SUM(CASE WHEN phase = 'OPEN' OR phase = 'EXPIRED' OR sealed = 0 OR snapshot IS NULL "
+                + "OR (expectation = 'COUNT' AND expected_count <> received_count) OR EXISTS "
+                + "(SELECT 1 FROM correlated_join_member m WHERE m.tenant_id = j.tenant_id AND m.deployment_id = j.deployment_id "
+                + "AND m.graph_version = j.graph_version AND m.application_id = j.application_id AND m.node_id = j.node_id "
+                + "AND m.round_id = j.round_id AND m.expected_member = 1 AND m.received_member = 0) THEN 1 ELSE 0 END), "
+                + "SUM(CASE WHEN phase IN ('FAILED','CANCELLED','EXPIRED') THEN 1 ELSE 0 END) "
+                + "FROM correlated_business_join j WHERE " + SCOPE + " AND application_id = ?")) {
             int at = bindScope(count, 1, scope); count.setString(at, id);
-            try (var rows = count.executeQuery()) { rows.next(); if (rows.getLong(1) != 0) return; missing = rows.getLong(2) != 0; }
+            try (var rows = count.executeQuery()) {
+                rows.next(); if (rows.getLong(1) != 0) return;
+                missing = rows.getLong(2) != 0; unsuccessful = rows.getLong(3) != 0;
+            }
         }
         var requested = group.closureSignal().requested();
-        var outcome = requested == BusinessHistory.Lifecycle.COMPLETED && (missing || group.failedTraversals() > 0 || group.cancelledTraversals() > 0)
+        var outcome = requested == BusinessHistory.Lifecycle.COMPLETED && (missing || unsuccessful || group.failedTraversals() > 0 || group.cancelledTraversals() > 0)
                 ? BusinessHistory.Lifecycle.FAILED : requested;
         try (var update = db.prepareStatement("UPDATE business_history SET lifecycle = ?, incomplete = ?, revision = revision + 1, updated_ms = ? "
                 + "WHERE " + SCOPE + " AND application_id = ? AND lifecycle = 'OPEN' AND running_count = 0")) {
@@ -273,9 +282,22 @@ final class BusinessHistoryStorage {
         if (closure == null || closure == BusinessHistory.Lifecycle.OPEN || closure == BusinessHistory.Lifecycle.EXPIRED)
             throw new BusinessHistoryException(INVALID_REQUEST);
         expire(db, scope, now);
+        // Join writes take this same history lock before changing collection/outbox state. In
+        // PostgreSQL READ COMMITTED the later statement must obtain a fresh snapshot AFTER any
+        // competing writer commits; a subquery in the lock-taking UPDATE alone is insufficient.
+        if (closure == BusinessHistory.Lifecycle.COMPLETED) {
+            try (var lock = db.prepareStatement("UPDATE business_history SET revision = revision WHERE " + SCOPE
+                    + " AND application_id = ? AND revision = ? AND lifecycle = 'OPEN' AND requested_closure IS NULL")) {
+                int at = bindScope(lock, 1, scope); lock.setString(at++, id); lock.setLong(at, revision);
+                if (lock.executeUpdate() != 1) throw new BusinessHistoryException(REVISION_CONFLICT);
+            }
+        }
         try (var update = db.prepareStatement("UPDATE business_history SET lifecycle = ?, revision = revision + 1, updated_ms = ? "
                 + "WHERE " + SCOPE + " AND application_id = ? AND revision = ? AND lifecycle = 'OPEN' AND requested_closure IS NULL "
-                + (closure == BusinessHistory.Lifecycle.COMPLETED ? "AND running_count = 0 AND failed_count = 0 AND cancelled_count = 0" : ""))) {
+                + (closure == BusinessHistory.Lifecycle.COMPLETED ? "AND running_count = 0 AND failed_count = 0 AND cancelled_count = 0 AND incomplete = 0 "
+                    + "AND NOT EXISTS (SELECT 1 FROM correlated_business_join j WHERE j.tenant_id = business_history.tenant_id "
+                    + "AND j.deployment_id = business_history.deployment_id AND j.graph_version = business_history.graph_version "
+                    + "AND j.application_id = business_history.application_id AND j.phase <> 'DISPATCHED')" : ""))) {
             update.setString(1, closure.name()); update.setLong(2, now.toEpochMilli()); int at = bindScope(update, 3, scope);
             update.setString(at++, id); update.setLong(at, revision);
             if (update.executeUpdate() == 0) throw new BusinessHistoryException(REVISION_CONFLICT);

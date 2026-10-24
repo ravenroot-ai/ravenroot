@@ -159,9 +159,12 @@ final class InMemoryBusinessHistories {
         if (current == null || current.lifecycle() != BusinessHistory.Lifecycle.OPEN || current.closureSignal() == null || current.runningTraversals() != 0) return;
         var pending = joins.values().stream().filter(join -> join.key().scope().equals(scope) && join.key().applicationCorrelationId().equals(id)).toList();
         if (pending.stream().anyMatch(join -> join.phase() == CorrelatedJoinRecord.Phase.READY)) return;
-        boolean missing = pending.stream().anyMatch(join -> join.phase() == CorrelatedJoinRecord.Phase.OPEN);
+        boolean missing = pending.stream().anyMatch(join -> join.phase() == CorrelatedJoinRecord.Phase.OPEN
+                || join.phase() == CorrelatedJoinRecord.Phase.EXPIRED || !join.satisfied());
+        boolean unsuccessful = pending.stream().anyMatch(join -> join.phase() == CorrelatedJoinRecord.Phase.FAILED
+                || join.phase() == CorrelatedJoinRecord.Phase.CANCELLED || join.phase() == CorrelatedJoinRecord.Phase.EXPIRED);
         var requested = current.closureSignal().requested();
-        var outcome = requested == BusinessHistory.Lifecycle.COMPLETED && (missing || current.failedTraversals() > 0 || current.cancelledTraversals() > 0)
+        var outcome = requested == BusinessHistory.Lifecycle.COMPLETED && (missing || unsuccessful || current.failedTraversals() > 0 || current.cancelledTraversals() > 0)
                 ? BusinessHistory.Lifecycle.FAILED : requested;
         histories.put(key, new BusinessHistory(current.scope(), current.applicationCorrelationId(), current.publicReference(), outcome,
                 current.revision() + 1, current.runningTraversals(), current.completedTraversals(), current.failedTraversals(), current.cancelledTraversals(),
@@ -176,7 +179,12 @@ final class InMemoryBusinessHistories {
         var key = new Key(scope, id); var group = history(scope, id).orElseThrow(() -> new BusinessHistoryException(UNKNOWN_HISTORY));
         if (group.lifecycle() != BusinessHistory.Lifecycle.OPEN || group.closureSignal() != null || group.revision() != revision
                 || (closure == BusinessHistory.Lifecycle.COMPLETED && (group.runningTraversals() > 0
-                || group.failedTraversals() > 0 || group.cancelledTraversals() > 0))) throw new BusinessHistoryException(REVISION_CONFLICT);
+                || group.failedTraversals() > 0 || group.cancelledTraversals() > 0 || group.incompleteHistory()
+                || joins.values().stream().anyMatch(join -> join.key().scope().equals(scope)
+                        && join.key().applicationCorrelationId().equals(id) && join.phase() != CorrelatedJoinRecord.Phase.DISPATCHED)
+                || expiredJoins.values().stream().anyMatch(join -> join.key().scope().equals(scope)
+                        && join.key().applicationCorrelationId().equals(id) && join.phase() != CorrelatedJoinRecord.Phase.DISPATCHED))))
+            throw new BusinessHistoryException(REVISION_CONFLICT);
         var closed = new BusinessHistory(scope, id, group.publicReference(), closure, revision + 1,
                 group.runningTraversals(), group.completedTraversals(), group.failedTraversals(), group.cancelledTraversals(),
                 group.incompleteHistory(), group.createdAt(), Instant.ofEpochMilli(clock.instant().toEpochMilli()), group.expiresAt(), group.closureSignal());
@@ -231,7 +239,8 @@ final class InMemoryBusinessHistories {
                         ? BusinessHistory.Lifecycle.CANCELLED : BusinessHistory.Lifecycle.FAILED;
                 histories.put(groupKey, new BusinessHistory(current.scope(), current.applicationCorrelationId(), current.publicReference(),
                         lifecycle, current.revision() + 1, current.runningTraversals(), current.completedTraversals(),
-                        current.failedTraversals(), current.cancelledTraversals(), desired.phase() == CorrelatedJoinRecord.Phase.EXPIRED,
+                        current.failedTraversals(), current.cancelledTraversals(), current.incompleteHistory()
+                                || desired.phase() == CorrelatedJoinRecord.Phase.EXPIRED || !desired.satisfied(),
                         current.createdAt(), now, current.expiresAt(), current.closureSignal()));
             }
             cancelPending(key.scope(), key.applicationCorrelationId(), now);

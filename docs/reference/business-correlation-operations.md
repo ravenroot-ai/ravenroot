@@ -41,13 +41,26 @@ cannot grant this exception: the scope, node, round, process, and traversal must
 The history stays open while admitted work runs or a READY continuation awaits acknowledgement.
 A quiet history with such a pending continuation reports `CLOSING`. It settles only after those
 obligations settle. A requested successful close becomes `FAILED` when an original traversal failed
-or was cancelled, or when an open join still lacks contributions. Missing members, received members,
-and the requested disposition remain available for inspection; missing collection also marks the
-history incomplete. Zero running traversals alone never establishes business success.
+or was cancelled, when an open join still lacks contributions, or when a known join failed,
+expired or was cancelled before its continuation was dispatched. A fully collected join that
+failed or was cancelled before release is unsuccessful without inventing missing members. Known missing or unsealed
+collection and expired data mark the history incomplete. Missing members, received members,
+and the requested disposition remain available for inspection. Zero running traversals alone never
+establishes business success.
 
 The bounded signal retains its authored reason and original process, traversal, visit, attempt, and
 store time. It contains no event payload copy. Closing an old uncorrelated traversal fails explicitly;
 it does not invent a business identity for that record.
+
+Trusted persistence hosts can also use `BusinessHistoryStore.closeBusinessHistory` with an exact
+history revision. This immediate CAS operation has no force-success option: `COMPLETED` refuses
+with `REVISION_CONFLICT` while any traversal is running, failed or cancelled, history is incomplete,
+or a known join has not reached `DISPATCHED`. That includes missing collection, READY release
+intent and failed, expired or cancelled joins. Refusal preserves the history revision, original
+context, member facts and release intent. After a continuation is durably accepted, acknowledged
+and successfully settled, a fresh exact revision may complete the history. Joins in other tenants,
+deployments, graph versions or business histories do not affect this decision. Explicit `FAILED`
+or `CANCELLED` closure still cancels pending work and refuses later external arrivals.
 
 ## Derive a context from transformed input
 

@@ -91,6 +91,53 @@ class AuthoredCorrelationRuntimeTest {
         }
     }
 
+    @Test void authoredSuccessfulCloseCannotEraseAnAlreadyCancelledCollection() throws Exception {
+        try (var engine = new SameThreadExecutionEngine(); var store = new SqliteExecutionStore(directory.resolve("cancelled-close.db"), Clock.systemUTC())) {
+            var sources = new ConcurrentHashMap<String, InboundSourceContext>();
+            var monitor = new ExecutionMonitor(); var terminals = new LinkedBlockingQueue<ExecutionEvent>();
+            monitor.subscribe(event -> { if (event.type().isTraversalTerminal()) terminals.add(event); });
+            var originalClose = new AtomicReference<BusinessClosureSignal>();
+            var settled = new CompletableFuture<StoredProcessInstance>();
+            var observed = proxy(store, (method, args) -> {
+                if (method.getName().equals("apply")) {
+                    var batch = (ExecutionBatch) args[0];
+                    batch.businessClosureSignals().stream().filter(signal -> signal.applicationCorrelationId().equals("cancelled-collection"))
+                            .findFirst().ifPresent(signal -> assertTrue(originalClose.compareAndSet(null, signal)));
+                    var result = invoke(store, method, args); var signal = originalClose.get();
+                    if (signal != null && batch.key().equals(new ExecutionKey(signal.scope().tenantId(), signal.processInstanceId()))
+                            && batch.transitions().stream().anyMatch(transition -> transition instanceof ExecutionTransition.TraversalTransitioned terminal
+                                    && terminal.traversalId().equals(signal.traversalId()) && terminal.next().terminal())) {
+                        ((CompletionStage<?>) result).whenComplete((value, failure) -> {
+                            if (failure != null) settled.completeExceptionally(failure);
+                            else settled.complete((StoredProcessInstance) value);
+                        });
+                    }
+                    return result;
+                }
+                return invoke(store, method, args);
+            });
+            var deployment = SourceLocalTraversalTest.deployment(engine, observed, sources, new CopyOnWriteArrayList<>(), monitor, GRAPH,
+                    Clock.systemUTC(), registry -> authored(registry).register("gate", message -> CompletableFuture.completedFuture(NodeResult.continueWith(message.payload()))));
+            deployment.start(OWNER).toCompletableFuture().get(5, TimeUnit.SECONDS);
+            try {
+                committed(sources, "source", Map.of("operation", "cancelled-collection", "partition", "part-1"), "one");
+                assertNotNull(terminals.poll(5, TimeUnit.SECONDS));
+                var scope = scope(monitor); var key = new CorrelatedJoinKey(scope, "cancelled-collection", "join", "0");
+                var cancelled = store.correlatedJoin(key).toCompletableFuture().get().orElseThrow().terminate(CorrelatedJoinRecord.Phase.CANCELLED, Instant.now());
+                store.compareAndSetCorrelatedJoin(cancelled).toCompletableFuture().get();
+                cancelled = store.correlatedJoin(key).toCompletableFuture().get().orElseThrow();
+                committed(sources, "closeSource", Map.of("operation", "cancelled-collection"), "close");
+                settled.get(5, TimeUnit.SECONDS);
+                assertNotNull(originalClose.get());
+                var history = store.businessHistory(scope, "cancelled-collection").toCompletableFuture().get().orElseThrow();
+                assertEquals(BusinessHistory.Lifecycle.FAILED, history.lifecycle());
+                assertEquals(BusinessHistory.Lifecycle.COMPLETED, history.closureSignal().requested());
+                assertTrue(history.incompleteHistory());
+                assertEquals(cancelled, store.correlatedJoin(key).toCompletableFuture().get().orElseThrow());
+            } finally { deployment.stop().toCompletableFuture().get(5, TimeUnit.SECONDS); }
+        }
+    }
+
     @Test void ordinaryTransformKeepsOriginalContextAndExplicitDeriveCreatesAuditedIndependentTraversal() throws Exception {
         String graph = derivedGraph();
         try (var engine = new SameThreadExecutionEngine(); var store = new SqliteExecutionStore(directory.resolve("derive.db"), Clock.systemUTC())) {

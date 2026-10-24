@@ -1374032,6 +1374032,18 @@
       "mappings": [],
       "retirements": [],
       "additions": []
+    },
+    {
+      "id": "issue-590-attempt3-server-custody-audit-reconciliation-v1",
+      "issue": "#590",
+      "sourceRevision": "66de9d0cc6e53fdefdd9bca9a928f3527920bd06",
+      "targetRevision": "a5cf796ef049714f8cfa0d7f5910e03ed9442fd6",
+      "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+      "sourceInventoryDigest": "b7d809ddb956b2368d163b56aa6599442cd9fd1bc043e61e986ad8a85def2b17",
+      "targetCandidateDigest": "828efe423df954a2f72830d265652e42c93a0d33042b83292d9943d9a965652d",
+      "mappings": [],
+      "retirements": [],
+      "additions": []
     }
   ],
   "semanticReviewHistory": [

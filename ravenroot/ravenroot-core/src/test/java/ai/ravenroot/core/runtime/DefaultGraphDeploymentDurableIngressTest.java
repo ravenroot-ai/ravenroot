@@ -271,11 +271,20 @@ class DefaultGraphDeploymentDurableIngressTest {
                         try { return method.invoke(store, args); }
                         catch (java.lang.reflect.InvocationTargetException wrapped) { throw wrapped.getCause(); }
                     });
-            var first = deployment(deploymentId, engine, interrupted, countCompletions().monitor());
+            var initialScan = new CountDownLatch(1);
+            var first = deployment(deploymentId, engine, gateRecoveryScan(interrupted, initialScan,
+                    CompletableFuture.completedFuture(null)), countCompletions().monitor());
             first.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
+            // The manual scheduler will not run another sweep. Finish the actual empty startup
+            // query before creating the fault, so orderly cleanup cannot cancel recovered work.
+            assertTrue(initialScan.await(10, TimeUnit.SECONDS));
             assertThrows(RuntimeException.class, () -> first.ingress().offerDurably(IDENTITY,
                     IngressTarget.node("start"), "payload", sourceId, key));
+            var beforeStop = assertUnstartedCustody(store);
+            assertEquals(ai.ravenroot.api.application.ProcessInstanceStatus.ACCEPTED, beforeStop.state().status());
             first.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            assertEquals(beforeStop, store.load(beforeStop.key()).toCompletableFuture().get(10, TimeUnit.SECONDS),
+                    "fixture cleanup must not settle the work whose crash recovery is being tested");
         }
         try (var engine = new JoinTestEngine(); var store = new SqliteExecutionStore(file, systemClock())) {
             byte[] changedGraph = ManualSourceFixture.graph(GRAPH).replace("id=\"wiring\"", "id=\"replacement\"")
@@ -292,15 +301,27 @@ class DefaultGraphDeploymentDurableIngressTest {
             changed.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
 
             var completions = countCompletions();
-            var restarted = deployment(deploymentId, engine, store, completions.monitor());
-            restarted.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
-            var receipt = restarted.ingress().offerDurably(IDENTITY, IngressTarget.node("start"),
-                    "payload", sourceId, key);
-            assertInstanceOf(IngressReceipt.Duplicate.class, receipt);
-            assertTrue(completions.latch().await(10, TimeUnit.SECONDS),
-                    "the saved but unstarted execution must dispatch after redelivery");
-            assertEquals(1, completions.count().get());
-            restarted.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            var original = assertUnstartedCustody(store);
+            var scanRead = new CountDownLatch(1);
+            var releaseScan = new CompletableFuture<Void>();
+            var restarted = deployment(deploymentId, engine, gateRecoveryScan(store, scanRead, releaseScan), completions.monitor());
+            try {
+                restarted.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
+                assertTrue(scanRead.await(10, TimeUnit.SECONDS));
+                var receipt = restarted.ingress().offerDurably(IDENTITY, IngressTarget.node("start"),
+                        "payload", sourceId, key);
+                assertInstanceOf(IngressReceipt.Duplicate.class, receipt);
+                assertTrue(completions.latch().await(10, TimeUnit.SECONDS),
+                        "the saved but unstarted execution must dispatch after redelivery");
+                assertEquals(1, completions.count().get());
+                var settled = store.load(original.key()).toCompletableFuture().get(10, TimeUnit.SECONDS);
+                assertEquals(original.graphVersionPin(), settled.graphVersionPin());
+                assertEquals(original.state().traversals().keySet(), settled.state().traversals().keySet());
+                assertEquals(ai.ravenroot.api.application.ProcessInstanceStatus.COMPLETED, settled.state().status());
+            } finally {
+                releaseScan.complete(null);
+                restarted.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            }
         }
     }
 
@@ -321,21 +342,42 @@ class DefaultGraphDeploymentDurableIngressTest {
                         try { return method.invoke(store, args); }
                         catch (java.lang.reflect.InvocationTargetException wrapped) { throw wrapped.getCause(); }
                     });
-            var first = deployment(deploymentId, engine, interrupted, countCompletions().monitor());
+            var initialScan = new CountDownLatch(1);
+            var first = deployment(deploymentId, engine, gateRecoveryScan(interrupted, initialScan,
+                    CompletableFuture.completedFuture(null)), countCompletions().monitor());
             first.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
+            // The manual scheduler will not run another sweep. Finish the actual empty startup
+            // query before creating the fault, so orderly cleanup cannot cancel recovered work.
+            assertTrue(initialScan.await(10, TimeUnit.SECONDS));
             assertThrows(RuntimeException.class, () -> first.ingress().offerDurably(IDENTITY,
                     IngressTarget.node("start"), "payload", sourceId, key));
+            var beforeStop = assertUnstartedCustody(store);
+            assertEquals(ai.ravenroot.api.application.ProcessInstanceStatus.RUNNING, beforeStop.state().status());
             first.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            assertEquals(beforeStop, store.load(beforeStop.key()).toCompletableFuture().get(10, TimeUnit.SECONDS),
+                    "fixture cleanup must not settle the work whose crash recovery is being tested");
         }
         try (var engine = new JoinTestEngine(); var store = new SqliteExecutionStore(file, systemClock())) {
             var completions = countCompletions();
-            var restarted = deployment(deploymentId, engine, store, completions.monitor());
-            restarted.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
-            assertInstanceOf(IngressReceipt.Duplicate.class, restarted.ingress().offerDurably(
-                    IDENTITY, IngressTarget.node("start"), "payload", sourceId, key));
-            assertTrue(completions.latch().await(10, TimeUnit.SECONDS));
-            assertEquals(1, completions.count().get());
-            restarted.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            var original = assertUnstartedCustody(store);
+            var scanRead = new CountDownLatch(1);
+            var releaseScan = new CompletableFuture<Void>();
+            var restarted = deployment(deploymentId, engine, gateRecoveryScan(store, scanRead, releaseScan), completions.monitor());
+            try {
+                restarted.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
+                assertTrue(scanRead.await(10, TimeUnit.SECONDS));
+                assertInstanceOf(IngressReceipt.Duplicate.class, restarted.ingress().offerDurably(
+                        IDENTITY, IngressTarget.node("start"), "payload", sourceId, key));
+                assertTrue(completions.latch().await(10, TimeUnit.SECONDS));
+                assertEquals(1, completions.count().get());
+                var settled = store.load(original.key()).toCompletableFuture().get(10, TimeUnit.SECONDS);
+                assertEquals(original.graphVersionPin(), settled.graphVersionPin());
+                assertEquals(original.state().traversals().keySet(), settled.state().traversals().keySet());
+                assertEquals(ai.ravenroot.api.application.ProcessInstanceStatus.COMPLETED, settled.state().status());
+            } finally {
+                releaseScan.complete(null);
+                restarted.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            }
         }
     }
 
@@ -596,6 +638,42 @@ class DefaultGraphDeploymentDurableIngressTest {
     }
 
     // -------------------------------------------------------------------------------------- fixtures
+
+    /** Holds the actual startup query result, without filtering it or replacing store behavior. */
+    private static ExecutionStore gateRecoveryScan(ExecutionStore store, CountDownLatch read,
+                                                    CompletableFuture<Void> release) {
+        return (ExecutionStore) java.lang.reflect.Proxy.newProxyInstance(ExecutionStore.class.getClassLoader(),
+                new Class<?>[]{ExecutionStore.class}, (proxy, method, args) -> {
+                    Object result;
+                    try { result = method.invoke(store, args); }
+                    catch (java.lang.reflect.InvocationTargetException wrapped) { throw wrapped.getCause(); }
+                    if (method.getName().equals("pendingDeploymentEntries")) {
+                        return ((java.util.concurrent.CompletionStage<?>) result).thenCompose(page -> {
+                            read.countDown();
+                            return release.thenApply(ignored -> page);
+                        });
+                    }
+                    return result;
+                });
+    }
+
+    private static ai.ravenroot.api.persistence.StoredProcessInstance assertUnstartedCustody(ExecutionStore store) throws Exception {
+        var processes = store.listProcessInstances(IDENTITY.tenantId(),
+                ai.ravenroot.api.persistence.ProcessInventoryQuery.everything(10)).toCompletableFuture().get(10, TimeUnit.SECONDS);
+        assertEquals(1, processes.items().size());
+        var key = processes.items().getFirst().key();
+        var stored = store.load(key).toCompletableFuture().get(10, TimeUnit.SECONDS);
+        assertFalse(stored.state().status().terminal());
+        assertEquals(1, stored.state().traversals().size());
+        var traversal = stored.state().traversals().values().iterator().next();
+        assertEquals("start", traversal.ingressNodeId());
+        assertTrue(traversal.invocations().isEmpty());
+        var custody = store.deploymentEntry(key).toCompletableFuture().get(10, TimeUnit.SECONDS).orElseThrow();
+        assertEquals(traversal.traversalId(), custody.traversalId());
+        assertEquals(IDENTITY, custody.identity());
+        assertTrue(store.leases(IDENTITY.tenantId()).toCompletableFuture().get(10, TimeUnit.SECONDS).isEmpty());
+        return stored;
+    }
 
     private static DefaultGraphDeployment deployment(ai.ravenroot.api.execution.ExecutionEngine engine,
             ExecutionStore store, ExecutionMonitor monitor) {

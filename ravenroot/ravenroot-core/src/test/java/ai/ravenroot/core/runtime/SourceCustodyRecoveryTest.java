@@ -134,6 +134,84 @@ class SourceCustodyRecoveryTest {
     @Test void originalSourceCompletionSurvivesRealProcessDeathBeforeOutgoingDispatch() throws Exception { recoverAfterKill("source-complete"); }
     @Test void reservedSourceFanOutSurvivesRealProcessDeathBeforeFirstRealDelivery() throws Exception { recoverAfterKill("source-edge"); }
 
+    @Test void redeliveryCannotStealStartupRecoveryDispatch() throws Exception { recoveryAndRedelivery(false); }
+    @Test void cancellationStillOwnsRecoveryAfterConcurrentRedelivery() throws Exception { recoveryAndRedelivery(true); }
+
+    private void recoveryAndRedelivery(boolean cancel) throws Exception {
+        Path database = directory.resolve("recovery-redelivery.db"), effectsFile = directory.resolve("recovery-redelivery.effects");
+        killAtBoundary(database, "receipt", effectsFile);
+        assertFalse(Files.exists(effectsFile));
+        var queued = new LinkedBlockingQueue<Runnable>();
+        var observed = new CopyOnWriteArrayList<Object>();
+        var recoveryClaimed = new CountDownLatch(1);
+        var releaseRecoveryClaim = new CompletableFuture<Void>();
+        var claims = new java.util.concurrent.atomic.AtomicInteger();
+        try (var engine = new SameThreadExecutionEngine();
+             var store = new SqliteExecutionStore(database, Clock.offset(Clock.systemUTC(), Duration.ofMinutes(2)))) {
+            var row = store.pendingDeploymentEntries(scope(), Optional.empty(), 10).toCompletableFuture().get().items().getFirst();
+            var key = new ExecutionKey(row.scope().tenantId(), row.processInstanceId());
+            var original = store.deploymentEntry(key).toCompletableFuture().get().orElseThrow();
+            var interrupted = (ExecutionStore) Proxy.newProxyInstance(ExecutionStore.class.getClassLoader(), new Class<?>[]{ExecutionStore.class},
+                    (proxy, method, values) -> {
+                        Object value;
+                        try { value = method.invoke(store, values); }
+                        catch (InvocationTargetException failed) { throw failed.getCause(); }
+                        if (method.getName().equals("claim") && claims.incrementAndGet() == 1) {
+                            return ((CompletionStage<?>) value).thenCompose(lease -> {
+                                recoveryClaimed.countDown();
+                                return releaseRecoveryClaim.thenApply(ignored -> lease);
+                            });
+                        }
+                        return value;
+                    });
+            var monitor = new ExecutionMonitor(); var completed = terminal(monitor);
+            var deployment = deployment(engine, interrupted, monitor, queued::add, observed::add);
+            try {
+                deployment.start(TestIdentities.TENANT_A).toCompletableFuture().get(5, TimeUnit.SECONDS);
+                assertTrue(recoveryClaimed.await(5, TimeUnit.SECONDS), "startup recovery owns the original traversal before redelivery");
+                var receipt = deployment.ingress().offerDurably(TestIdentities.TENANT_A, IngressTarget.node("source"),
+                        Map.of("operation", "original-operation", "body", "original-input"), "source", "one-original-event");
+                assertEquals(1, claims.get(), "redelivery cannot acquire another recorder for recovery's admitted traversal");
+                assertInstanceOf(IngressReceipt.Ambiguous.class, receipt);
+                assertFalse(receipt.acknowledgeable(), "the in-progress recovery is reconciled before producer acknowledgement");
+                assertTrue(observed.isEmpty());
+                assertEquals(original, store.deploymentEntry(key).toCompletableFuture().get().orElseThrow());
+                // A conflicting delivery also cannot erase recovery's ownership through refusal cleanup.
+                assertFalse(deployment.ingress().offerDurably(TestIdentities.TENANT_A, IngressTarget.node("source"),
+                        Map.of("operation", "original-operation", "body", "conflicting-input"), "source", "one-original-event").acknowledgeable());
+                assertEquals(1, claims.get());
+                releaseRecoveryClaim.complete(null);
+                var dispatch = queued.poll(5, TimeUnit.SECONDS);
+                assertNotNull(dispatch);
+                if (cancel) {
+                    deployment.closeAdmission(100).toCompletableFuture().get();
+                    deployment.barrier(100).toCompletableFuture().get();
+                }
+                dispatch.run();
+                assertTrue(completed.await(10, TimeUnit.SECONDS), () -> monitor.eventsAfter(0).toString());
+                var traversal = store.load(key).toCompletableFuture().get().state().traversals().get(original.traversalId());
+                if (cancel) {
+                    assertTrue(observed.isEmpty());
+                    assertEquals(TraversalStatus.FAILED, traversal.status());
+                    assertEquals(ExecutionTerminationReason.CANCELLED, traversal.terminationReason());
+                    deployment.openAdmission(101).toCompletableFuture().get();
+                } else {
+                    assertEquals(List.of(Map.of("operation", "original-operation", "body", "original-input")), observed);
+                    assertEquals(TraversalStatus.COMPLETED, traversal.status());
+                    assertEquals(1, traversal.invocations().values().stream().filter(visit -> visit.nodeId().equals("source")).count());
+                    assertEquals(1, traversal.invocations().values().stream().filter(visit -> visit.nodeId().equals("worker")).count());
+                }
+                assertTrue(store.deploymentEntry(key).toCompletableFuture().get().isEmpty());
+                assertInstanceOf(IngressReceipt.Duplicate.class, deployment.ingress().offerDurably(TestIdentities.TENANT_A,
+                        IngressTarget.node("source"), Map.of("operation", "original-operation"), "source", "one-original-event"));
+                assertEquals(cancel ? 0 : 1, observed.size());
+            } finally {
+                releaseRecoveryClaim.complete(null);
+                deployment.stop().toCompletableFuture().get(5, TimeUnit.SECONDS);
+            }
+        }
+    }
+
     @Test void restartingAtTheConsumedStepLimitCannotGrantAnotherExecutionBudget() throws Exception {
         Path database = directory.resolve("steps.db"), effects = directory.resolve("steps.effects");
         killAtBoundary(database, "source-edge-at-limit", effects); assertFalse(Files.exists(effects));

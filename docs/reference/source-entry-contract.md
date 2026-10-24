@@ -66,7 +66,10 @@ boundaries, the same-source cycle with one admission slot, and correlation refus
 application command validation. `SourceCustodyRecoveryTest` kills a separate JVM after a returned committed
 receipt and at source start, source completion and outgoing dispatch boundaries. It also covers partial
 fan-out, an original ambiguous real effect, retained execution budgets, cancellation, drain, expiry,
-and mutation of caller-owned input after the receipt.
+and mutation of caller-owned input after the receipt. A concurrent redelivery cannot take a
+startup recovery's traversal reservation or lease: it receives a non-acknowledgeable ambiguous
+receipt until reconciliation is possible. Recovery keeps the original input and identities, and
+cancellation still prevents pending effects. Once settled, the same delivery reconciles as a duplicate.
 
 `DeploymentEntryContract` runs against SQLite, PostgreSQL and the memory reference adapter. It checks
 atomic input/business admission, immutable duplicate input and target, explicit missing legacy input,

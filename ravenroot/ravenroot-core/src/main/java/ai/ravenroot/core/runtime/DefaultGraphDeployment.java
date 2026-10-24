@@ -3609,6 +3609,17 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
                     if (!admitting || activeRunner == null || permits == null) {
                         return new ai.ravenroot.api.deployment.IngressReceipt.Refused("not ready");
                     }
+                    // Startup custody recovery owns the same deterministic traversal as a
+                    // redelivery. Do not overwrite its admission or let this call's cleanup
+                    // remove its dispatch marker and close a concurrently acquired recorder.
+                    if (admitted.containsKey(traversalId)) {
+                        // Initial recovery uses offerDurably itself, so activeDurableEvents
+                        // excludes an unresolved admission; an existing initial owner here has
+                        // already returned its committed receipt. Preserve START reconciliation.
+                        if (entryNodeId == null) return new ai.ravenroot.api.deployment.IngressReceipt.Duplicate(idempotentKey);
+                        return new ai.ravenroot.api.deployment.IngressReceipt.Ambiguous(idempotentKey,
+                                "the same durable traversal is already admitted");
+                    }
                     if (!permits.tryAcquire()) {
                         return new ai.ravenroot.api.deployment.IngressReceipt.Refused("buffer full");
                     }

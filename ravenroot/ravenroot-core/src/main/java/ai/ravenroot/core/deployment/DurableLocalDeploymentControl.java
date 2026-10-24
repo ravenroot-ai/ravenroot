@@ -180,6 +180,45 @@ public final class DurableLocalDeploymentControl implements AutoCloseable {
         return Optional.of(outcome);
     }
 
+    /**
+     * Submits to the exact immutable registration and active graph observed by a document, while
+     * retaining the lifecycle coordinator's durable generation, lease and compare-and-set fences.
+     * @param tenantId owning tenant
+     * @param localId logical deployment name
+     * @param registrationIdentity immutable registry identity
+     * @param runtimeIncarnationId exact runtime captured before the command
+     * @param graphVersion observed active graph digest
+     * @param command explicit lifecycle command
+     * @param expectedGeneration authoritative generation observed by the caller
+     * @return normal lifecycle outcome, or empty when the alias is absent
+     */
+    public Optional<DeploymentCommandOutcome> submitBound(String tenantId, String localId,
+            String registrationIdentity, String runtimeIncarnationId, String graphVersion, LifecycleCommand command,
+            long expectedGeneration) {
+        Objects.requireNonNull(registrationIdentity); Objects.requireNonNull(graphVersion);
+        if (!(command instanceof LifecycleCommand.Stop) && !(command instanceof LifecycleCommand.Start))
+            throw new IllegalArgumentException("bound command must be Start or Stop");
+        DeploymentId id = resolveAlias(tenantId, localId);
+        if (id == null) return Optional.empty();
+        if (!id.value().equals(registrationIdentity)) throw new IllegalStateException("deployment registration changed");
+        return coordinator.withHostedRegistration(tenantId, id, () -> {
+            var runtime = application.localDeployment(tenantId, localId).orElseThrow(() -> new IllegalStateException("deployment runtime is absent"));
+            if (!runtime.runtimeIncarnationId().filter(runtimeIncarnationId::equals).isPresent())
+                throw new IllegalStateException("deployment runtime changed");
+            var record = await(registry.get(tenantId, id)).orElseThrow();
+            if (record.tombstone() != null) throw new IllegalStateException("deployment was removed");
+            Long active = record.observed().activeVersion();
+            long selected = command instanceof LifecycleCommand.Start start ? start.version() : active != null ? active : record.desired().desiredVersion() != null
+                    ? record.desired().desiredVersion() : record.latestVersion();
+            var version = await(registry.version(tenantId, id, selected,
+                    application.maximumLocalDeploymentGraphBytes())).orElseThrow();
+            if (!version.canonicalDigest().equals(graphVersion)) throw new IllegalStateException("deployment graph changed");
+            // The alias is never re-resolved. A new activation changes generation, so a concurrent
+            // authority cannot switch the active graph past this check and still accept the command.
+            return Optional.of(coordinator.submit(tenantId, id, command, GenerationExpectation.exactly(expectedGeneration)));
+        });
+    }
+
     private DeploymentId resolveAlias(String tenantId, String localId) {
         Alias alias = new Alias(tenantId, localId);
         DeploymentId known = aliases.get(alias);

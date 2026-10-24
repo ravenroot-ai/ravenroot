@@ -156,6 +156,14 @@ class RouteTableSpecServerAgreementTest {
         assertTrue(deploymentStop.contains("\"name\": \"X-Ravenroot-Expected-Generation\""),
                 deploymentStop);
         assertTrue(deploymentStop.contains("\"name\": \"X-Ravenroot-Reason\""), deploymentStop);
+        for (String header : List.of("X-Ravenroot-Deployment-Incarnation", "X-Ravenroot-Graph-Version",
+                "X-Ravenroot-Registration-Identity")) assertTrue(deploymentStop.contains(header), deploymentStop);
+        assertTrue(deploymentStop.contains("409"), deploymentStop);
+        String boundStart = pathEntry(generatedNow, "/v1/deployments/{id}/start");
+        for (String header : List.of("X-Ravenroot-Deployment-Incarnation", "X-Ravenroot-Graph-Version",
+                "X-Ravenroot-Registration-Identity")) assertTrue(boundStart.contains(header), boundStart);
+        assertTrue(boundStart.contains("409"), boundStart);
+        assertTrue(generatedNow.contains("\"runtimeIncarnationId\""), generatedNow);
         assertTrue(deploymentStop.contains("#/components/schemas/DeploymentCommandResponse"), deploymentStop);
         String deploymentRestart = pathEntry(generatedNow, "/v1/deployments/{id}/restart");
         assertFalse(deploymentRestart.contains("X-Ravenroot-Reason"),

@@ -4496,6 +4496,16 @@ public final class RavenrootServer implements AutoCloseable {
                 durableDeploymentCommand(exchange, httpContext, deploymentId, segments[2]);
                 return;
             }
+            if (("stop".equals(segments[2]) || "start".equals(segments[2])) && deploymentLifecycleBinding(exchange)) {
+                if (exchange.getRequestHeaders().containsKey("X-Ravenroot-Registration-Identity"))
+                    throw new IllegalStateException("durable lifecycle authority is unavailable");
+                String incarnation = requiredHeader(exchange, "X-Ravenroot-Deployment-Incarnation");
+                String version = requiredHeader(exchange, "X-Ravenroot-Graph-Version");
+                awaitDeploymentCommand(exchange, httpContext, "start".equals(segments[2])
+                        ? authorizedApplication.startLocalDeployment(context, deploymentId, incarnation, version)
+                        : authorizedApplication.stopLocalDeployment(context, deploymentId, incarnation, version));
+                return;
+            }
             java.util.concurrent.CompletionStage<java.util.Optional<
                     ai.ravenroot.api.application.LocalDeploymentStatus>> command =
                     switch (segments[2]) {
@@ -4580,14 +4590,36 @@ public final class RavenrootServer implements AutoCloseable {
             fail(exchange, httpContext, ErrorCode.UNKNOWN_RESOURCE);
             return;
         }
-        var outcome = durableDeploymentControl.submit(context.tenantId(),
-                deploymentId, command,
-                ai.ravenroot.api.deployment.registry.GenerationExpectation.exactly(generation));
+        var expectation = ai.ravenroot.api.deployment.registry.GenerationExpectation.exactly(generation);
+        var outcome = ("stop".equals(action) || "start".equals(action)) && deploymentLifecycleBinding(exchange)
+                ? durableDeploymentControl.submitBound(context.tenantId(), deploymentId,
+                        requiredHeader(exchange, "X-Ravenroot-Registration-Identity"),
+                        requiredHeader(exchange, "X-Ravenroot-Deployment-Incarnation"),
+                        requiredHeader(exchange, "X-Ravenroot-Graph-Version"), command, generation)
+                : durableDeploymentControl.submit(context.tenantId(), deploymentId, command, expectation);
         if (outcome.isEmpty()) {
             fail(exchange, httpContext, ErrorCode.UNKNOWN_RESOURCE);
             return;
         }
         json(exchange, 200, deploymentOutcomeObject(outcome.orElseThrow()));
+    }
+
+    private static boolean deploymentLifecycleBinding(HttpExchange exchange) {
+        var headers = exchange.getRequestHeaders();
+        var names = java.util.List.of("X-Ravenroot-Deployment-Incarnation", "X-Ravenroot-Graph-Version",
+                "X-Ravenroot-Registration-Identity");
+        if (names.stream().noneMatch(headers::containsKey)) return false;
+        for (String name : names) {
+            var values = headers.get(name);
+            if (values != null && (values.size() != 1 || values.getFirst().isBlank()
+                    || values.getFirst().length() > 256
+                    || values.getFirst().codePoints().anyMatch(Character::isISOControl)))
+                throw new IllegalArgumentException("invalid deployment lifecycle binding");
+        }
+        requiredHeader(exchange, "X-Ravenroot-Deployment-Incarnation");
+        if (!requiredHeader(exchange, "X-Ravenroot-Graph-Version").matches("[a-f0-9]{64}"))
+            throw new IllegalArgumentException("invalid deployment lifecycle graph version");
+        return true;
     }
 
     private static String requiredHeader(HttpExchange exchange, String name) {
@@ -4978,6 +5010,7 @@ public final class RavenrootServer implements AutoCloseable {
                 + "\",\"tenantId\":\"" + escape(tenantId)
                 + "\",\"state\":\"" + status.state().name()
                 + "\",\"sourceCount\":" + status.sourceCount()
+                + ",\"runtimeIncarnationId\":" + status.runtimeIncarnationId().map(value -> "\"" + escape(value) + "\"").orElse("null")
                 + ",\"graphVersion\":" + graphVersion
                 + ",\"scope\":\"" + ai.ravenroot.api.application.LocalDeploymentStatus.SCOPE
                 + "\",\"diagnostic\":" + diagnostic

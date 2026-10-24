@@ -3780,6 +3780,51 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
     }
 
     @Override
+    public CompletionStage<java.util.Optional<LocalDeploymentStatus>> startLocalDeployment(
+            SecurityContext security, String deploymentId, String incarnationId, String graphVersion) {
+        java.util.Objects.requireNonNull(incarnationId, "incarnationId");
+        java.util.Objects.requireNonNull(graphVersion, "graphVersion");
+        var key = new LocalDeploymentKey(requireTenant(security.tenantId()), requireLocalDeploymentId(deploymentId));
+        // Capture and validate the actual object under registration's lock. Never resolve the alias
+        // again after checking: a concurrent removal/re-registration cannot redirect this start.
+        synchronized (localDeploymentLock) {
+            LocalDeploymentRecord record = localDeployments.get(key);
+            if (record == null) return java.util.concurrent.CompletableFuture.completedFuture(java.util.Optional.empty());
+            var deployment = record.deployment();
+            if (deployments.get(record.engineId()) != deployment
+                    || !deployment.incarnationId().equals(incarnationId)
+                    || !deployment.graphVersion().equals(graphVersion))
+                throw new IllegalStateException("deployment start binding changed");
+            synchronized (deploymentAdmissionLock) {
+                requireAdmissionSlot(deployment.id(), deployment);
+                return deployment.start(security).handle((ignored, failure) ->
+                        java.util.Optional.of(localDeploymentStatus(deploymentId, record)));
+            }
+        }
+    }
+
+    @Override
+    public CompletionStage<java.util.Optional<LocalDeploymentStatus>> stopLocalDeployment(
+            String tenantId, String deploymentId, String incarnationId, String graphVersion) {
+        java.util.Objects.requireNonNull(incarnationId, "incarnationId");
+        java.util.Objects.requireNonNull(graphVersion, "graphVersion");
+        var key = new LocalDeploymentKey(requireTenant(tenantId), requireLocalDeploymentId(deploymentId));
+        // Capture and validate the actual object under registration's lock. Never resolve the alias
+        // again after checking: a concurrent removal/re-registration cannot redirect this stop.
+        synchronized (localDeploymentLock) {
+            LocalDeploymentRecord record = localDeployments.get(key);
+            if (record == null) return java.util.concurrent.CompletableFuture.completedFuture(java.util.Optional.empty());
+            var deployment = record.deployment();
+            if (deployments.get(record.engineId()) != deployment
+                    || !deployment.incarnationId().equals(incarnationId)
+                    || !deployment.graphVersion().equals(graphVersion))
+                throw new IllegalStateException("deployment stop binding changed");
+            return deployment.stop().handle((ignored, failure) ->
+                    java.util.Optional.of(localDeploymentStatus(deploymentId, record)));
+        }
+    }
+
+    @Override
     public CompletionStage<java.util.Optional<LocalDeploymentStatus>> restartLocalDeployment(
             SecurityContext security, String deploymentId) {
         java.util.Objects.requireNonNull(security, "security");
@@ -3908,8 +3953,8 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
 
     private LocalDeploymentStatus localDeploymentStatus(String deploymentId, LocalDeploymentRecord record) {
         GraphDeployment deployment = deployments.get(record.engineId());
-        if (deployment == null) {
-            var stopped = LocalDeploymentStatus.withGraph(deploymentId, LocalDeploymentState.STOPPED, record.sourceCount(), record.graphHash());
+        if (deployment == null || deployment != record.deployment()) {
+            var stopped = LocalDeploymentStatus.withGraph(deploymentId, LocalDeploymentState.STOPPED, record.sourceCount(), record.graphHash()).withRuntimeIncarnationId(record.deployment().incarnationId());
             return record.durableRegistration() ? stopped.withRegistrationIdentity(record.lifecycleId().value()) : stopped;
         }
         // The diagnostics are fixed strings chosen here, not the engine's own DeploymentStatus.cause().
@@ -3937,6 +3982,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
             case STOPPED -> LocalDeploymentStatus.withGraph(
                     deploymentId, LocalDeploymentState.STOPPED, record.sourceCount(), record.graphHash());
         };
+        result = result.withRuntimeIncarnationId(record.deployment().incarnationId());
         return record.durableRegistration() ? result.withRegistrationIdentity(record.lifecycleId().value()) : result;
     }
 

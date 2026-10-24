@@ -665,6 +665,20 @@ public final class AuthorizedRavenrootApplication {
         return delegate.sourceSession(context.tenantId(), sessionId);
     }
 
+    /** Starts an exact observed runtime under ordinary deployment control authorization.
+     * @param context authenticated caller and tenant
+     * @param deploymentId logical deployment name
+     * @param incarnationId observed runtime incarnation
+     * @param graphVersion immutable graph digest
+     * @return readiness of the captured runtime, or empty when absent
+     */
+    public CompletionStage<java.util.Optional<LocalDeploymentStatus>> startLocalDeployment(
+            RequestContext context, String deploymentId, String incarnationId, String graphVersion) {
+        require(context, AuthorizationAction.EXECUTION_CONTROL,
+                ProtectedResource.owned("deployment", requireText(deploymentId, "deployment id"), context.tenantId()));
+        return delegate.startLocalDeployment(SecurityContext.of(context), deploymentId, incarnationId, graphVersion);
+    }
+
     /**
  * Stops only the caller tenant's named session and never the shared execution engine.
 * @param context authenticated request context authorizing the operation
@@ -1164,6 +1178,21 @@ public final class AuthorizedRavenrootApplication {
         require(context, AuthorizationAction.EXECUTION_CONTROL,
                 ProtectedResource.owned("deployment", requireText(deploymentId, "deployment id"), context.tenantId()));
         return delegate.stopLocalDeployment(context.tenantId(), deploymentId);
+    }
+
+    /**
+     * Stops an exact observed runtime under the same control authorization as ordinary Stop.
+     * @param context authenticated caller and tenant
+     * @param deploymentId logical deployment name
+     * @param incarnationId observed runtime incarnation
+     * @param graphVersion immutable graph digest
+     * @return authoritative stopped status, or empty when absent
+     */
+    public CompletionStage<java.util.Optional<LocalDeploymentStatus>> stopLocalDeployment(
+            RequestContext context, String deploymentId, String incarnationId, String graphVersion) {
+        require(context, AuthorizationAction.EXECUTION_CONTROL,
+                ProtectedResource.owned("deployment", requireText(deploymentId, "deployment id"), context.tenantId()));
+        return delegate.stopLocalDeployment(context.tenantId(), deploymentId, incarnationId, graphVersion);
     }
 
     /**

@@ -529,20 +529,25 @@ public final class RouteTable {
                             + "Subject to this pod's active-deployment cap, which counts deployments a "
                             + "graceful shutdown would owe time to and so is checked here rather than at "
                             + "registration; exceeding it is a 429. Durable targets require Idempotency-Key and "
-                            + "X-Ravenroot-Expected-Generation and return DeploymentCommandOutcome.",
+                            + "X-Ravenroot-Expected-Generation and return DeploymentCommandOutcome. Document-bound Start "
+                            + "supplies exact runtime incarnation and graph version headers, plus durable registration "
+                            + "identity when applicable; changed bindings are refused before activation.",
                     true, false, 200,
                     concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_RESOURCE.code(),
                             ErrorCode.INVALID_REQUEST.code(), ErrorCode.REQUEST_INTERRUPTED.code(),
-                            ErrorCode.REQUEST_LIMIT_EXCEEDED.code()), NEVER, false),
+                            ErrorCode.REQUEST_LIMIT_EXCEEDED.code(), ErrorCode.CONFLICT.code()), NEVER, false),
             new RouteDescriptor(Set.of("POST"), "/v1/deployments/{id}/stop",
                     "Stops one process-local deployment and leaves it registered and re-startable. Closes "
                             + "admission and inbound sources first, then releases only that deployment's own "
                             + "domain -- never a sibling deployment and never the shared ActorSystem. "
                             + "Idempotent: stopping a stopped deployment answers STOPPED. Durable targets also "
-                            + "require Idempotency-Key, X-Ravenroot-Expected-Generation and X-Ravenroot-Reason.",
+                            + "require Idempotency-Key, X-Ravenroot-Expected-Generation and X-Ravenroot-Reason. "
+                            + "Document-bound Stop additionally supplies X-Ravenroot-Deployment-Incarnation and "
+                            + "X-Ravenroot-Graph-Version, plus X-Ravenroot-Registration-Identity for durable targets; "
+                            + "the server refuses changed identities before mutation.",
                     true, false, 200,
                     concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_RESOURCE.code(),
-                            ErrorCode.INVALID_REQUEST.code(), ErrorCode.REQUEST_INTERRUPTED.code()), NEVER, false),
+                            ErrorCode.INVALID_REQUEST.code(), ErrorCode.CONFLICT.code(), ErrorCode.REQUEST_INTERRUPTED.code()), NEVER, false),
             new RouteDescriptor(Set.of("POST"), "/v1/deployments/{id}/restart",
                     "A completed stop followed by a start, never the two overlapping, so no source "
                             + "subscription is duplicated across the restart. Durable targets require "

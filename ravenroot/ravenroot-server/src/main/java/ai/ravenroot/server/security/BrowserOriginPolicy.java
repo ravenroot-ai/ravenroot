@@ -17,7 +17,10 @@ import java.util.Set;
  */
 public final class BrowserOriginPolicy {
     private static final Set<String> REQUEST_HEADERS =
-            Set.of("authorization", "content-type", "last-event-id", "x-ravenroot-provider-signature");
+            Set.of("authorization", "content-type", "last-event-id", "x-ravenroot-provider-signature",
+                    "idempotency-key", "x-ravenroot-expected-generation", "x-ravenroot-reason",
+                    "x-ravenroot-deployment-incarnation", "x-ravenroot-graph-version",
+                    "x-ravenroot-registration-identity");
     private final Set<String> allowedOrigins;
 
     public BrowserOriginPolicy(Set<String> allowedOrigins) {

@@ -35,11 +35,13 @@ import java.util.Optional;
  * @param diagnostic fixed, bounded, operator-safe explanation, present only for degraded or failed
  *                   deployments
  * @param failure structured startup failure, present only for failed startup when available
+ * @param runtimeIncarnationId exact current runtime identity, available before activation; absent for compatibility producers
  * @param registrationIdentity immutable opaque durable-registry identity, absent for process-local registrations
  */
 public record LocalDeploymentStatus(String deploymentId, LocalDeploymentState state, int sourceCount,
                                     Optional<String> graphVersion, Optional<String> diagnostic,
-                                    Optional<ai.ravenroot.api.deployment.StartupFailure> failure, Optional<String> registrationIdentity) {
+                                    Optional<ai.ravenroot.api.deployment.StartupFailure> failure, Optional<String> registrationIdentity,
+                                    Optional<String> runtimeIncarnationId) {
     /** Honest ownership label returned on the wire; intentionally makes no multi-replica claim. */
     public static final String SCOPE = "LOCAL_PROCESS";
     /** Defense in depth for implementations other than the reference implementation. */
@@ -63,6 +65,8 @@ public record LocalDeploymentStatus(String deploymentId, LocalDeploymentState st
         failure = failure == null ? Optional.empty() : failure;
         registrationIdentity = registrationIdentity == null ? Optional.empty() : registrationIdentity
                 .map(value -> ai.ravenroot.api.persistence.HandlerRegistration.requireBoundedKey(value, "registrationIdentity"));
+        runtimeIncarnationId = runtimeIncarnationId == null ? Optional.empty() : runtimeIncarnationId
+                .map(value -> ai.ravenroot.api.persistence.HandlerRegistration.requireBoundedKey(value, "runtimeIncarnationId"));
         if (diagnostic.isPresent() && state != LocalDeploymentState.DEGRADED
                 && state != LocalDeploymentState.FAILED) {
             throw new IllegalArgumentException("only degraded and failed deployments carry diagnostics");
@@ -70,6 +74,30 @@ public record LocalDeploymentStatus(String deploymentId, LocalDeploymentState st
         if (failure.isPresent() && state != LocalDeploymentState.FAILED) {
             throw new IllegalArgumentException("only failed deployments carry startup failures");
         }
+    }
+
+    /** Compatibility constructor without a runtime identity projection.
+     * @param deploymentId tenant-local name
+     * @param state lifecycle state
+     * @param sourceCount effective source count
+     * @param graphVersion immutable graph digest
+     * @param diagnostic bounded safe explanation
+     * @param failure structured startup failure
+     * @param registrationIdentity immutable durable registration identity
+     */
+    public LocalDeploymentStatus(String deploymentId, LocalDeploymentState state, int sourceCount,
+            Optional<String> graphVersion, Optional<String> diagnostic,
+            Optional<ai.ravenroot.api.deployment.StartupFailure> failure, Optional<String> registrationIdentity) {
+        this(deploymentId, state, sourceCount, graphVersion, diagnostic, failure, registrationIdentity, Optional.empty());
+    }
+
+    /** Projects the captured runtime identity before asynchronous lifecycle commands.
+     * @param identity exact current runtime incarnation
+     * @return this observation with its runtime identity
+     */
+    public LocalDeploymentStatus withRuntimeIncarnationId(String identity) {
+        return new LocalDeploymentStatus(deploymentId, state, sourceCount, graphVersion, diagnostic,
+                failure, registrationIdentity, Optional.of(identity));
     }
 
     /** Creates a status without a durable registration identity.
@@ -91,7 +119,7 @@ public record LocalDeploymentStatus(String deploymentId, LocalDeploymentState st
      * @return this observation with its durable registration identity
      */
     public LocalDeploymentStatus withRegistrationIdentity(String identity) {
-        return new LocalDeploymentStatus(deploymentId, state, sourceCount, graphVersion, diagnostic, failure, Optional.of(identity));
+        return new LocalDeploymentStatus(deploymentId, state, sourceCount, graphVersion, diagnostic, failure, Optional.of(identity), runtimeIncarnationId);
     }
 
     /**

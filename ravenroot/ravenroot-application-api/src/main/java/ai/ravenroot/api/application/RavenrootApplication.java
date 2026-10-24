@@ -690,6 +690,19 @@ public interface RavenrootApplication extends AutoCloseable {
         return java.util.concurrent.CompletableFuture.completedFuture(java.util.Optional.empty());
     }
 
+    /** Starts only an exact observed runtime; unsupported implementations fail closed.
+     * @param security authenticated serving identity
+     * @param deploymentId logical deployment name
+     * @param incarnationId observed runtime incarnation
+     * @param graphVersion immutable graph digest
+     * @return readiness of the captured runtime, or empty when absent
+     */
+    default CompletionStage<java.util.Optional<LocalDeploymentStatus>> startLocalDeployment(
+            SecurityContext security, String deploymentId, String incarnationId, String graphVersion) {
+        return java.util.concurrent.CompletableFuture.failedFuture(
+                new UnsupportedOperationException("identity-fenced deployment start is unavailable"));
+    }
+
     /**
  * Stops one of this tenant's deployments and <b>leaves it registered</b>.
  *
@@ -706,6 +719,21 @@ public interface RavenrootApplication extends AutoCloseable {
     default CompletionStage<java.util.Optional<LocalDeploymentStatus>> stopLocalDeployment(
             String tenantId, String deploymentId) {
         return java.util.concurrent.CompletableFuture.completedFuture(java.util.Optional.empty());
+    }
+
+    /**
+     * Stops only the exact process-local deployment observed by a document. Implementations that
+     * cannot fence this identity refuse rather than falling back to an alias-only stop.
+     * @param tenantId owning tenant
+     * @param deploymentId logical deployment name
+     * @param incarnationId observed runtime incarnation
+     * @param graphVersion observed immutable graph digest
+     * @return authoritative status of the captured deployment, or empty when absent
+     */
+    default CompletionStage<java.util.Optional<LocalDeploymentStatus>> stopLocalDeployment(
+            String tenantId, String deploymentId, String incarnationId, String graphVersion) {
+        return java.util.concurrent.CompletableFuture.failedFuture(
+                new UnsupportedOperationException("identity-fenced deployment stop is unavailable"));
     }
 
     /**

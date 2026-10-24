@@ -1374141,6 +1374141,18 @@
           }
         }
       ]
+    },
+    {
+      "id": "issue-590-authored-recovery-receipt-synchronization-v1",
+      "issue": "#590",
+      "sourceRevision": "5d6287b1c9303e72a65a6705a828895722150be3",
+      "targetRevision": "21b6bb3ed537986ef9eecc83fade24a28a937138",
+      "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+      "sourceInventoryDigest": "b6e55dda385515a8f711dcbaabbf8e061ad19f3aa619b774ed8a8e55ace878c3",
+      "targetCandidateDigest": "c77f5529bd6bacdd78ca8a508e4756771ff961efe192a209d8f5274e30ac4cc8",
+      "mappings": [],
+      "retirements": [],
+      "additions": []
     }
   ],
   "semanticReviewHistory": [

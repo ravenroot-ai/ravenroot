@@ -36,25 +36,25 @@ semantic review and focused source inventories remain required for those boundar
 
 | Measure | Count |
 |---|---:|
-| Atomic operational candidates discovered | 33318 |
+| Atomic operational candidates discovered | 33334 |
 | Source-proven Helm operator fields | 39 |
 | Helm operator fields represented by lexical inventory rows | 31 |
 | Source-proven Helm fields outside lexical candidate patterns | 8 |
-| Reviewed | 33318 |
+| Reviewed | 33334 |
 | Pending review | 0 |
 | Confirmed hard-coded candidates awaiting remediation | 0 |
 | Unique confirmed operator-configurable parameters | 374 |
 | Unique parameters converted to centralized configuration | 16 |
 | Duplicate authorities removed | 27 |
 | Retained security ceilings or defaults | 2527 |
-| Retained protocol or format invariants | 14179 |
+| Retained protocol or format invariants | 14191 |
 | Retained published contract descriptions | 633 |
 | Retained presentation text | 3104 |
 | Retained derived values | 1234 |
-| Test fixtures | 9684 |
+| Test fixtures | 9688 |
 | Intentionally deferred | 0 |
 
-Retired source candidates preserved in inventory history: 3009.
+Retired source candidates preserved in inventory history: 3013.
 
 Approved normalized-identity reappearances: 23. Active candidates and
 retired historical payloads remain counted separately; an approval records identity reuse only.
@@ -62,10 +62,10 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 205.
+Checked source reconciliations: 206.
 
 The following tables are exhaustive projections of the same active inventory; each includes
-zero-count or unclassified rows as needed and sums to 33318 candidates.
+zero-count or unclassified rows as needed and sums to 33334 candidates.
 
 ### Status counts
 
@@ -77,7 +77,7 @@ zero-count or unclassified rows as needed and sums to 33318 candidates.
 | deferred | 0 |
 | duplicate-removed | 0 |
 | pending-review | 0 |
-| retained | 31361 |
+| retained | 31377 |
 
 ### Classification counts
 
@@ -86,10 +86,10 @@ zero-count or unclassified rows as needed and sums to 33318 candidates.
 | derived | 1234 |
 | operator-configurable | 1957 |
 | presentation-text | 3104 |
-| protocol-or-format-invariant | 14179 |
+| protocol-or-format-invariant | 14191 |
 | published-contract-description | 633 |
 | security-ceiling-or-default | 2527 |
-| test-fixture | 9684 |
+| test-fixture | 9688 |
 | unclassified | 0 |
 
 ### Surface counts
@@ -98,9 +98,9 @@ zero-count or unclassified rows as needed and sums to 33318 candidates.
 |---|---:|
 | deployment | 3215 |
 | deployment-example | 20 |
-| java | 8587 |
+| java | 8599 |
 | script | 2946 |
-| test-fixture | 9684 |
+| test-fixture | 9688 |
 | ui | 8866 |
 
 ### Owning remediation counts
@@ -118,7 +118,7 @@ assigned to an issue retroactively.
 | #319 | 334 |
 | #320 | 1466 |
 | #321 | 8103 |
-| Retained; no remediation required | 23143 |
+| Retained; no remediation required | 23159 |
 
 ## Latest reconciliation
 
@@ -127,12 +127,12 @@ identity and retirement has its own approved record in the machine-readable inve
 
 | Partition | Count |
 |---|---:|
-| Source inventory candidates | 33155 |
-| Unchanged identities | 33145 |
-| Approved identity migrations | 0 |
-| Approved retirements | 10 |
-| Semantically classified additions | 173 |
-| Current candidates | 33318 |
+| Source inventory candidates | 33318 |
+| Unchanged identities | 33310 |
+| Approved identity migrations | 4 |
+| Approved retirements | 4 |
+| Semantically classified additions | 20 |
+| Current candidates | 33334 |
 
 ## Final semantic review
 
@@ -6069,7 +6069,7 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-a65a8215f788ce02be0e` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/persistence/InMemoryBusinessHistories.java:100` `traversals` | java | retained | derived | This atom is an exact persisted event name or arithmetic/counter initial value used in bounded paging, expiry or truthful metadata projection; actual resource ceilings come from the typed store policy. |
 | `oc-fdd5af916047d60fb8b7` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/persistence/InMemoryBusinessHistories.java:100` `traversals` | java | retained | derived | This atom is an exact persisted event name or arithmetic/counter initial value used in bounded paging, expiry or truthful metadata projection; actual resource ceilings come from the typed store policy. |
 | `oc-d1dea4fce8c4e1bb2bfc` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/persistence/InMemoryBusinessHistories.java:101` `traversals` | java | retained | derived | This atom is an exact persisted event name or arithmetic/counter initial value used in bounded paging, expiry or truthful metadata projection; actual resource ceilings come from the typed store policy. |
-| `oc-4bcea034809d2221c5cb` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/persistence/InMemoryBusinessHistories.java:269` `if` | java | retained | derived | This atom is an exact persisted event name or arithmetic/counter initial value used in bounded paging, expiry or truthful metadata projection; actual resource ceilings come from the typed store policy. |
+| `oc-4bcea034809d2221c5cb` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/persistence/InMemoryBusinessHistories.java:278` `if` | java | retained | derived | This atom is an exact persisted event name or arithmetic/counter initial value used in bounded paging, expiry or truthful metadata projection; actual resource ceilings come from the typed store policy. |
 | `oc-620bb2941afaaa186272` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/persistence/InMemoryDeploymentEntries.java:51` `if` | java | retained | derived | This atom is an exact persisted event name or arithmetic/counter initial value used in bounded paging, expiry or truthful metadata projection; actual resource ceilings come from the typed store policy. |
 | `oc-3ba39e0eaf98555cfa22` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/persistence/InMemoryExecutionStore.java:171` `InMemoryExecutionStore` | java | retained | derived | This zero/one literal is local state, counter, page, or aggregate arithmetic and does not define an operator control. |
 | `oc-dbf5f4c1b683cf0e5b4d` | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/persistence/InMemoryExecutionStore.java:171` `InMemoryExecutionStore` | java | retained | derived | This zero/one literal is local state, counter, page, or aggregate arithmetic and does not define an operator control. |
@@ -10106,10 +10106,16 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-49fbdcabe06678a12b8e` | `ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/BusinessHistoryStorage.java:205` `if` | java | retained | protocol-or-format-invariant | Exact prepared SQL scope/column vocabulary enforces tenant/deployment/version or process/traversal identity; numeric atoms are result-column positions and settled/expiry counters, not admission limits. |
 | `oc-2d3b5b65d8aa9a8ce527` | `ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/BusinessHistoryStorage.java:206` `if` | java | retained | protocol-or-format-invariant | Exact prepared SQL scope/column vocabulary enforces tenant/deployment/version or process/traversal identity; numeric atoms are result-column positions and settled/expiry counters, not admission limits. |
 | `oc-578f846b49450263799f` | `ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/BusinessHistoryStorage.java:206` `if` | java | retained | protocol-or-format-invariant | Exact prepared SQL scope/column vocabulary enforces tenant/deployment/version or process/traversal identity; numeric atoms are result-column positions and settled/expiry counters, not admission limits. |
-| `oc-220dd2ddcdaee2c53574` | `ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/BusinessHistoryStorage.java:249` `finishRequestedClosure` | java | retained | protocol-or-format-invariant | Exact prepared SQL scope/column vocabulary enforces tenant/deployment/version or process/traversal identity; numeric atoms are result-column positions and settled/expiry counters, not admission limits. |
-| `oc-8ebae48df9fcf82a1f9a` | `ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/BusinessHistoryStorage.java:250` `finishRequestedClosure` | java | retained | protocol-or-format-invariant | Exact prepared SQL scope/column vocabulary enforces tenant/deployment/version or process/traversal identity; numeric atoms are result-column positions and settled/expiry counters, not admission limits. |
-| `oc-eb179520a7dc864bfbe3` | `ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/BusinessHistoryStorage.java:250` `finishRequestedClosure` | java | retained | protocol-or-format-invariant | Exact prepared SQL scope/column vocabulary enforces tenant/deployment/version or process/traversal identity; numeric atoms are result-column positions and settled/expiry counters, not admission limits. |
-| `oc-e3d55aa6f0181838bdff` | `ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/BusinessHistoryStorage.java:251` `finishRequestedClosure` | java | retained | derived | Exact prepared SQL scope/column vocabulary enforces tenant/deployment/version or process/traversal identity; numeric atoms are result-column positions and settled/expiry counters, not admission limits. |
+| `oc-ae6f4eefa0c21e39a9a3` | `ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/BusinessHistoryStorage.java:249` `finishRequestedClosure` | java | retained | protocol-or-format-invariant | Reviewed prepared-SQL atom "SELECT SUM(CASE WHEN phase = 'READY' THEN 1 ELSE 0 END), " at ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/BusinessHistoryStorage.java#finishRequestedClosure: scalar join phase, actual missing member/count/seal/availability and terminal result vocabulary, with exact tenant/deployment/version/history/node/round parameter correlation. Result-column positions and CASE constants are protocol facts, never configurable admission limits; READY and original contribution data remain preserved. |
+| `oc-48f3fd775d8371501631` | `ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/BusinessHistoryStorage.java:250` `finishRequestedClosure` | java | retained | protocol-or-format-invariant | Reviewed prepared-SQL atom "SUM(CASE WHEN phase = 'OPEN' OR phase = 'EXPIRED' OR sealed = 0 OR snapshot IS NULL " at ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/BusinessHistoryStorage.java#finishRequestedClosure: scalar join phase, actual missing member/count/seal/availability and terminal result vocabulary, with exact tenant/deployment/version/history/node/round parameter correlation. Result-column positions and CASE constants are protocol facts, never configurable admission limits; READY and original contribution data remain preserved. |
+| `oc-d8e299dfff760d722f7e` | `ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/BusinessHistoryStorage.java:251` `finishRequestedClosure` | java | retained | protocol-or-format-invariant | Reviewed prepared-SQL atom "OR (expectation = 'COUNT' AND expected_count <> received_count) OR EXISTS " at ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/BusinessHistoryStorage.java#finishRequestedClosure: scalar join phase, actual missing member/count/seal/availability and terminal result vocabulary, with exact tenant/deployment/version/history/node/round parameter correlation. Result-column positions and CASE constants are protocol facts, never configurable admission limits; READY and original contribution data remain preserved. |
+| `oc-74e5b6680da19d9a4e69` | `ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/BusinessHistoryStorage.java:252` `finishRequestedClosure` | java | retained | protocol-or-format-invariant | Reviewed prepared-SQL atom "(SELECT 1 FROM correlated_join_member m WHERE m.tenant_id = j.tenant_id AND m.deployment_id = j.deployment_id " at ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/BusinessHistoryStorage.java#finishRequestedClosure: scalar join phase, actual missing member/count/seal/availability and terminal result vocabulary, with exact tenant/deployment/version/history/node/round parameter correlation. Result-column positions and CASE constants are protocol facts, never configurable admission limits; READY and original contribution data remain preserved. |
+| `oc-f7198de859a472b5ad7e` | `ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/BusinessHistoryStorage.java:253` `finishRequestedClosure` | java | retained | protocol-or-format-invariant | Reviewed prepared-SQL atom "AND m.graph_version = j.graph_version AND m.application_id = j.application_id AND m.node_id = j.node_id " at ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/BusinessHistoryStorage.java#finishRequestedClosure: scalar join phase, actual missing member/count/seal/availability and terminal result vocabulary, with exact tenant/deployment/version/history/node/round parameter correlation. Result-column positions and CASE constants are protocol facts, never configurable admission limits; READY and original contribution data remain preserved. |
+| `oc-6cad8ff87ad0d388799b` | `ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/BusinessHistoryStorage.java:254` `finishRequestedClosure` | java | retained | protocol-or-format-invariant | Reviewed prepared-SQL atom "AND m.round_id = j.round_id AND m.expected_member = 1 AND m.received_member = 0) THEN 1 ELSE 0 END), " at ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/BusinessHistoryStorage.java#finishRequestedClosure: scalar join phase, actual missing member/count/seal/availability and terminal result vocabulary, with exact tenant/deployment/version/history/node/round parameter correlation. Result-column positions and CASE constants are protocol facts, never configurable admission limits; READY and original contribution data remain preserved. |
+| `oc-7a549a81f82d8c8b5af1` | `ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/BusinessHistoryStorage.java:255` `finishRequestedClosure` | java | retained | protocol-or-format-invariant | Reviewed prepared-SQL atom "SUM(CASE WHEN phase IN ('FAILED','CANCELLED','EXPIRED') THEN 1 ELSE 0 END) " at ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/BusinessHistoryStorage.java#finishRequestedClosure: scalar join phase, actual missing member/count/seal/availability and terminal result vocabulary, with exact tenant/deployment/version/history/node/round parameter correlation. Result-column positions and CASE constants are protocol facts, never configurable admission limits; READY and original contribution data remain preserved. |
+| `oc-595f72b04685caf02d22` | `ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/BusinessHistoryStorage.java:256` `finishRequestedClosure` | java | retained | protocol-or-format-invariant | Reviewed prepared-SQL atom "FROM correlated_business_join j WHERE " at ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/BusinessHistoryStorage.java#finishRequestedClosure: scalar join phase, actual missing member/count/seal/availability and terminal result vocabulary, with exact tenant/deployment/version/history/node/round parameter correlation. Result-column positions and CASE constants are protocol facts, never configurable admission limits; READY and original contribution data remain preserved. |
+| `oc-8853c8392042f7da324e` | `ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/BusinessHistoryStorage.java:256` `finishRequestedClosure` | java | retained | protocol-or-format-invariant | Exact prepared SQL scope/column vocabulary enforces tenant/deployment/version or process/traversal identity; numeric atoms are result-column positions and settled/expiry counters, not admission limits. |
+| `oc-499c82df7dedfa09078d` | `ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/BusinessHistoryStorage.java:257` `finishRequestedClosure` | java | retained | derived | Exact prepared SQL scope/column vocabulary enforces tenant/deployment/version or process/traversal identity; numeric atoms are result-column positions and settled/expiry counters, not admission limits. |
 | `oc-7f072effa0436e4ef478` | `ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/CorrelatedJoinStorage.java:11` `CorrelatedJoinStorage` | java | retained | protocol-or-format-invariant | Exact prepared SQL scope/column vocabulary enforces tenant/deployment/version or process/traversal identity; numeric atoms are result-column positions and settled/expiry counters, not admission limits. |
 | `oc-6e6f64da0dedc6236035` | `ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/CorrelatedJoinStorage.java:12` `CorrelatedJoinStorage` | java | retained | protocol-or-format-invariant | Exact prepared SQL scope/column vocabulary enforces tenant/deployment/version or process/traversal identity; numeric atoms are result-column positions and settled/expiry counters, not admission limits. |
 | `oc-36203a1f6fce78570c65` | `ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/CorrelatedJoinStorage.java:45` `if` | java | retained | protocol-or-format-invariant | Exact prepared SQL scope/column vocabulary enforces tenant/deployment/version or process/traversal identity; numeric atoms are result-column positions and settled/expiry counters, not admission limits. |
@@ -10321,10 +10327,16 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-d21a60387405bec33762` | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/BusinessHistoryStorage.java:205` `if` | java | retained | protocol-or-format-invariant | Exact prepared SQL scope/column vocabulary enforces tenant/deployment/version or process/traversal identity; numeric atoms are result-column positions and settled/expiry counters, not admission limits. |
 | `oc-6ab292717c148913ffe5` | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/BusinessHistoryStorage.java:206` `if` | java | retained | protocol-or-format-invariant | Exact prepared SQL scope/column vocabulary enforces tenant/deployment/version or process/traversal identity; numeric atoms are result-column positions and settled/expiry counters, not admission limits. |
 | `oc-8cff80ed53fa54dbbc1c` | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/BusinessHistoryStorage.java:206` `if` | java | retained | protocol-or-format-invariant | Exact prepared SQL scope/column vocabulary enforces tenant/deployment/version or process/traversal identity; numeric atoms are result-column positions and settled/expiry counters, not admission limits. |
-| `oc-ecacb5349676ae2d899b` | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/BusinessHistoryStorage.java:249` `finishRequestedClosure` | java | retained | protocol-or-format-invariant | Exact prepared SQL scope/column vocabulary enforces tenant/deployment/version or process/traversal identity; numeric atoms are result-column positions and settled/expiry counters, not admission limits. |
-| `oc-127dabbd8a74e015a849` | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/BusinessHistoryStorage.java:250` `finishRequestedClosure` | java | retained | protocol-or-format-invariant | Exact prepared SQL scope/column vocabulary enforces tenant/deployment/version or process/traversal identity; numeric atoms are result-column positions and settled/expiry counters, not admission limits. |
-| `oc-75f7b978d2f46f431465` | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/BusinessHistoryStorage.java:250` `finishRequestedClosure` | java | retained | protocol-or-format-invariant | Exact prepared SQL scope/column vocabulary enforces tenant/deployment/version or process/traversal identity; numeric atoms are result-column positions and settled/expiry counters, not admission limits. |
-| `oc-1bb68e30ce9a59a4d6de` | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/BusinessHistoryStorage.java:251` `finishRequestedClosure` | java | retained | derived | Exact prepared SQL scope/column vocabulary enforces tenant/deployment/version or process/traversal identity; numeric atoms are result-column positions and settled/expiry counters, not admission limits. |
+| `oc-229ea1c2c243efdf72c0` | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/BusinessHistoryStorage.java:249` `finishRequestedClosure` | java | retained | protocol-or-format-invariant | Reviewed prepared-SQL atom "SELECT SUM(CASE WHEN phase = 'READY' THEN 1 ELSE 0 END), " at ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/BusinessHistoryStorage.java#finishRequestedClosure: scalar join phase, actual missing member/count/seal/availability and terminal result vocabulary, with exact tenant/deployment/version/history/node/round parameter correlation. Result-column positions and CASE constants are protocol facts, never configurable admission limits; READY and original contribution data remain preserved. |
+| `oc-8554eee64786a965967f` | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/BusinessHistoryStorage.java:250` `finishRequestedClosure` | java | retained | protocol-or-format-invariant | Reviewed prepared-SQL atom "SUM(CASE WHEN phase = 'OPEN' OR phase = 'EXPIRED' OR sealed = 0 OR snapshot IS NULL " at ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/BusinessHistoryStorage.java#finishRequestedClosure: scalar join phase, actual missing member/count/seal/availability and terminal result vocabulary, with exact tenant/deployment/version/history/node/round parameter correlation. Result-column positions and CASE constants are protocol facts, never configurable admission limits; READY and original contribution data remain preserved. |
+| `oc-bb17ee19fac46aa3e4d3` | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/BusinessHistoryStorage.java:251` `finishRequestedClosure` | java | retained | protocol-or-format-invariant | Reviewed prepared-SQL atom "OR (expectation = 'COUNT' AND expected_count <> received_count) OR EXISTS " at ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/BusinessHistoryStorage.java#finishRequestedClosure: scalar join phase, actual missing member/count/seal/availability and terminal result vocabulary, with exact tenant/deployment/version/history/node/round parameter correlation. Result-column positions and CASE constants are protocol facts, never configurable admission limits; READY and original contribution data remain preserved. |
+| `oc-1c949988c9c1d42416e2` | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/BusinessHistoryStorage.java:252` `finishRequestedClosure` | java | retained | protocol-or-format-invariant | Reviewed prepared-SQL atom "(SELECT 1 FROM correlated_join_member m WHERE m.tenant_id = j.tenant_id AND m.deployment_id = j.deployment_id " at ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/BusinessHistoryStorage.java#finishRequestedClosure: scalar join phase, actual missing member/count/seal/availability and terminal result vocabulary, with exact tenant/deployment/version/history/node/round parameter correlation. Result-column positions and CASE constants are protocol facts, never configurable admission limits; READY and original contribution data remain preserved. |
+| `oc-2563c8368853e18c73e3` | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/BusinessHistoryStorage.java:253` `finishRequestedClosure` | java | retained | protocol-or-format-invariant | Reviewed prepared-SQL atom "AND m.graph_version = j.graph_version AND m.application_id = j.application_id AND m.node_id = j.node_id " at ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/BusinessHistoryStorage.java#finishRequestedClosure: scalar join phase, actual missing member/count/seal/availability and terminal result vocabulary, with exact tenant/deployment/version/history/node/round parameter correlation. Result-column positions and CASE constants are protocol facts, never configurable admission limits; READY and original contribution data remain preserved. |
+| `oc-db9f54908d81ece4d228` | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/BusinessHistoryStorage.java:254` `finishRequestedClosure` | java | retained | protocol-or-format-invariant | Reviewed prepared-SQL atom "AND m.round_id = j.round_id AND m.expected_member = 1 AND m.received_member = 0) THEN 1 ELSE 0 END), " at ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/BusinessHistoryStorage.java#finishRequestedClosure: scalar join phase, actual missing member/count/seal/availability and terminal result vocabulary, with exact tenant/deployment/version/history/node/round parameter correlation. Result-column positions and CASE constants are protocol facts, never configurable admission limits; READY and original contribution data remain preserved. |
+| `oc-2249e5e61976a468f807` | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/BusinessHistoryStorage.java:255` `finishRequestedClosure` | java | retained | protocol-or-format-invariant | Reviewed prepared-SQL atom "SUM(CASE WHEN phase IN ('FAILED','CANCELLED','EXPIRED') THEN 1 ELSE 0 END) " at ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/BusinessHistoryStorage.java#finishRequestedClosure: scalar join phase, actual missing member/count/seal/availability and terminal result vocabulary, with exact tenant/deployment/version/history/node/round parameter correlation. Result-column positions and CASE constants are protocol facts, never configurable admission limits; READY and original contribution data remain preserved. |
+| `oc-0e50a8533418d29289c3` | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/BusinessHistoryStorage.java:256` `finishRequestedClosure` | java | retained | protocol-or-format-invariant | Exact prepared SQL scope/column vocabulary enforces tenant/deployment/version or process/traversal identity; numeric atoms are result-column positions and settled/expiry counters, not admission limits. |
+| `oc-bbc8bd8da90011a9c894` | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/BusinessHistoryStorage.java:256` `finishRequestedClosure` | java | retained | protocol-or-format-invariant | Reviewed prepared-SQL atom "FROM correlated_business_join j WHERE " at ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/BusinessHistoryStorage.java#finishRequestedClosure: scalar join phase, actual missing member/count/seal/availability and terminal result vocabulary, with exact tenant/deployment/version/history/node/round parameter correlation. Result-column positions and CASE constants are protocol facts, never configurable admission limits; READY and original contribution data remain preserved. |
+| `oc-f950670e2cff44289871` | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/BusinessHistoryStorage.java:257` `finishRequestedClosure` | java | retained | derived | Exact prepared SQL scope/column vocabulary enforces tenant/deployment/version or process/traversal identity; numeric atoms are result-column positions and settled/expiry counters, not admission limits. |
 | `oc-2dfd3609c9fb94a51c5e` | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/CorrelatedJoinStorage.java:11` `CorrelatedJoinStorage` | java | retained | protocol-or-format-invariant | Exact prepared SQL scope/column vocabulary enforces tenant/deployment/version or process/traversal identity; numeric atoms are result-column positions and settled/expiry counters, not admission limits. |
 | `oc-b1f82fe7df22eb1a3228` | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/CorrelatedJoinStorage.java:12` `CorrelatedJoinStorage` | java | retained | protocol-or-format-invariant | Exact prepared SQL scope/column vocabulary enforces tenant/deployment/version or process/traversal identity; numeric atoms are result-column positions and settled/expiry counters, not admission limits. |
 | `oc-0cbd5f4d7d8bc818d908` | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/CorrelatedJoinStorage.java:45` `if` | java | retained | protocol-or-format-invariant | Exact prepared SQL scope/column vocabulary enforces tenant/deployment/version or process/traversal identity; numeric atoms are result-column positions and settled/expiry counters, not admission limits. |

@@ -615589,7 +615589,7 @@
     {
       "id": "oc-ae6b1c053f19927418a4",
       "path": "scripts/verify-source-session-editor-activity.sh",
-      "line": 32,
+      "line": 33,
       "symbol": "module",
       "kind": "script-default",
       "role": "PROJECT_DIR",
@@ -615604,7 +615604,7 @@
     {
       "id": "oc-ba3a08eeb72722952565",
       "path": "scripts/verify-source-session-editor-activity.sh",
-      "line": 32,
+      "line": 33,
       "symbol": "module",
       "kind": "script-default",
       "role": "PROJECT_DIR",
@@ -615619,7 +615619,7 @@
     {
       "id": "oc-bfffb876819101290ba5",
       "path": "scripts/verify-source-session-editor-activity.sh",
-      "line": 32,
+      "line": 33,
       "symbol": "module",
       "kind": "script-default",
       "role": "PROJECT_DIR",
@@ -615634,7 +615634,7 @@
     {
       "id": "oc-8a1b83ec5903e75842f3",
       "path": "scripts/verify-source-session-editor-activity.sh",
-      "line": 32,
+      "line": 33,
       "symbol": "module",
       "kind": "script-default",
       "role": "PROJECT_DIR",
@@ -615649,7 +615649,7 @@
     {
       "id": "oc-3bcd013fe290822755d2",
       "path": "scripts/verify-source-session-editor-activity.sh",
-      "line": 33,
+      "line": 34,
       "symbol": "module",
       "kind": "script-default",
       "role": "REACTOR_DIR",
@@ -615664,7 +615664,7 @@
     {
       "id": "oc-bc65f5fbf35ad9f2ca8f",
       "path": "scripts/verify-source-session-editor-activity.sh",
-      "line": 34,
+      "line": 35,
       "symbol": "module",
       "kind": "script-default",
       "role": "UI_DIR",
@@ -615679,7 +615679,7 @@
     {
       "id": "oc-9a433e3878f7e3674591",
       "path": "scripts/verify-source-session-editor-activity.sh",
-      "line": 37,
+      "line": 38,
       "symbol": "module",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -615694,7 +615694,7 @@
     {
       "id": "oc-a2f761a7b49fda366195",
       "path": "scripts/verify-source-session-editor-activity.sh",
-      "line": 40,
+      "line": 41,
       "symbol": "module",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -1374040,6 +1374040,18 @@
       "targetRevision": "a5cf796ef049714f8cfa0d7f5910e03ed9442fd6",
       "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
       "sourceInventoryDigest": "b7d809ddb956b2368d163b56aa6599442cd9fd1bc043e61e986ad8a85def2b17",
+      "targetCandidateDigest": "828efe423df954a2f72830d265652e42c93a0d33042b83292d9943d9a965652d",
+      "mappings": [],
+      "retirements": [],
+      "additions": []
+    },
+    {
+      "id": "issue-590-attempt3-final-observation-reconciliation-v1",
+      "issue": "#590",
+      "sourceRevision": "0cf1b5a021f6ca1457c7e050a9a8acd4b51861d9",
+      "targetRevision": "0347241b30158a6e118771bd2df60cbe491b6c7d",
+      "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+      "sourceInventoryDigest": "9ef21fc6ae34f252bc65dde7371db87face1fbc4e9bab85bfe30e9b0d084e599",
       "targetCandidateDigest": "828efe423df954a2f72830d265652e42c93a0d33042b83292d9943d9a965652d",
       "mappings": [],
       "retirements": [],

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createDeploymentRunIntent, persistedDeploymentRun, runOriginDeployment } from '../src/deployment-run.js';
+import { createDeploymentRunIntent, persistedDeploymentRun, runOriginDeployment, observeOriginDeployment } from '../src/deployment-run.js';
 import { persistedDocument, workspaceSnapshot, validateWorkspaceSnapshot, workspaceScope } from '../src/workspace-persistence.js';
 const version = 'a'.repeat(64), process = '10000000-0000-0000-0000-000000000001', traversal = '20000000-0000-0000-0000-000000000002';
 const deferred = () => { let resolve; const promise = new Promise(yes => { resolve = yes; }); return { promise, resolve }; };
@@ -160,4 +160,45 @@ describe('origin document deployment Run', () => {
     expect(f.owner.deploymentRun.incarnationId).toBe('restored-runtime');
   });
 
+});
+
+
+describe('read-only origin deployment observation', () => {
+  function observationFixture(known = {}) {
+    const f = fixture();
+    f.owner.deploymentRun = { ...createDeploymentRunIntent(f.options), graphVersion: version, phase: 'RECONCILE', ...known };
+    f.owner.deploymentRunStatus = 'UNKNOWN';
+    const status = { deploymentId: f.owner.deploymentRun.deploymentId, tenantId: 'tenant', graphVersion: version,
+      runtimeIncarnationId: 'runtime-observed', state: 'REGISTERED', ...known };
+    f.client.deployment.mockResolvedValue(status);
+    return { ...f, status };
+  }
+  it('projects exact lost-registration status without adopting identity or causing lifecycle effects', async () => {
+    const f = observationFixture(), original = structuredClone(f.owner.deploymentRun);
+    await expect(observeOriginDeployment(f.owner, f.options)).resolves.toBe(true);
+    expect(f.owner.deploymentRunStatus).toBe('REGISTERED'); expect(f.owner.deploymentRun).toEqual(original);
+    expect(f.owner.deploymentRun.incarnationId).toBeNull(); expect(f.client.deployment).toHaveBeenCalledTimes(1);
+    expect(f.client.registerDeployment).not.toHaveBeenCalled(); expect(f.client.startDeployment).not.toHaveBeenCalled();
+    expect(f.client.initialStartDeployment).not.toHaveBeenCalled(); expect(f.options.persist).not.toHaveBeenCalled();
+    f.client.deploymentView.mockImplementation(async id => ({ source: { deploymentId: id, graphVersion: version, incarnationId: 'runtime-observed' } }));
+    await runOriginDeployment(f.owner, f.options);
+    expect(f.owner.deploymentRun.incarnationId).toBe('runtime-observed');
+    expect(f.client.startDeployment.mock.lastCall[1].binding.incarnationId).toBe('runtime-observed');
+    expect(f.client.initialStartDeployment.mock.lastCall[1]).toMatchObject({ incarnationId: 'runtime-observed', requestId: original.initialStartRequestId, input: { original: true } });
+    expect(f.client.registerDeployment).not.toHaveBeenCalled();
+  });
+  it.each(['deploymentId', 'tenantId', 'graphVersion', 'registrationIdentity', 'runtimeIncarnationId'])('refuses changed known %s without mutation', async field => {
+    const known = field === 'registrationIdentity' ? { registrationIdentity: 'original-registration' }
+      : field === 'runtimeIncarnationId' ? { incarnationId: 'runtime-original' } : {};
+    const f = observationFixture(known), original = structuredClone(f.owner.deploymentRun);
+    f.status[field] = 'foreign';
+    await expect(observeOriginDeployment(f.owner, f.options)).rejects.toThrow('OBSERVATION_BINDING_CHANGED');
+    expect(f.owner.deploymentRun).toEqual(original); expect(f.owner.deploymentRunStatus).toBe('UNKNOWN');
+    expect(f.client.startDeployment).not.toHaveBeenCalled(); expect(f.client.initialStartDeployment).not.toHaveBeenCalled();
+  });
+  it('accepts a matching captured process-local incarnation without replacing the saved binding', async () => {
+    const f = observationFixture({ incarnationId: 'runtime-observed' }), original = structuredClone(f.owner.deploymentRun);
+    await expect(observeOriginDeployment(f.owner, f.options)).resolves.toBe(true);
+    expect(f.owner.deploymentRun).toEqual(original); expect(f.owner.deploymentRunStatus).toBe('REGISTERED');
+  });
 });

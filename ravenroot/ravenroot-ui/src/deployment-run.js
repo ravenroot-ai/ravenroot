@@ -262,7 +262,7 @@ export async function observeOriginDeployment(owner, { client, isCurrent }) {
   if (!current() || status.deploymentId !== binding.deploymentId || status.tenantId !== binding.tenantId
       || status.graphVersion !== binding.graphVersion
       || binding.registrationIdentity && status.registrationIdentity !== binding.registrationIdentity
-      || !binding.registrationIdentity && status.runtimeIncarnationId !== binding.incarnationId)
+      || !binding.registrationIdentity && binding.incarnationId && status.runtimeIncarnationId !== binding.incarnationId)
     throw failure('OBSERVATION_BINDING_CHANGED');
   owner.deploymentRunStatus = status.state; return true;
 }

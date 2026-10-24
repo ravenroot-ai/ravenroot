@@ -1374020,6 +1374020,18 @@
           }
         }
       ]
+    },
+    {
+      "id": "issue-590-attempt3-source-local-admission-reconciliation-v1",
+      "issue": "#590",
+      "sourceRevision": "faae4aa691f9bd2e7162b8bf2259e4765deb1842",
+      "targetRevision": "5d8cd7a22603200d549ee334faf817edb7199fc2",
+      "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+      "sourceInventoryDigest": "c6ee6b07495bd25477c1810a183c681d5f9fb902df2249ced8a959b3c7c8ff8b",
+      "targetCandidateDigest": "828efe423df954a2f72830d265652e42c93a0d33042b83292d9943d9a965652d",
+      "mappings": [],
+      "retirements": [],
+      "additions": []
     }
   ],
   "semanticReviewHistory": [

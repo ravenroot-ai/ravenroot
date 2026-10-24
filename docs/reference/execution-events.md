@@ -182,3 +182,10 @@ journal projection and adds bounded acknowledgement flow control plus durable Hu
 It does not change the SSE representation or create server-side cursor state.
 
 For API paths see [HTTP API and CLI](api-cli.md). For diagnosis see [Events and persistence](../troubleshooting/events-persistence.md).
+
+The server audit line also carries the same five typed, bounded business-context scalars and
+`applicationCorrelationAvailability` (`AVAILABLE` or `NOT_RECORDED`). These explicit fields preserve
+correlation when optional activity capture is disabled. They do not serialize arbitrary payload,
+attributes, credentials or nested metadata; a public reference must be non-secret. The audit line
+retains its separate operator identity/detail fields, while browser presentation/redaction fields
+remain SSE-only.

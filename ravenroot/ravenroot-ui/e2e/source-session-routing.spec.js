@@ -177,6 +177,23 @@ async function openGraph(page, xml, name) {
   await expect(page.locator('#btn-run')).toBeEnabled();
 }
 
+// Listener READY precedes initial START admission. Use this only when a test needs the
+// accepted initial identities and the application's execution projection, not for lifecycle tests.
+async function expectInitialTraversalProjected(page, documentId) {
+  await expect.poll(() => page.evaluate(id => {
+    const owner = window.ravenroot.workspace.find(id), run = owner?.deploymentRun;
+    return { processInstanceId: run?.processInstanceId, traversalId: run?.traversalId,
+      projectedProcessInstanceId: owner?.execution.processInstanceId,
+      projectedTraversalId: owner?.execution.executionId,
+      pinMatches: owner?.execution.graphVersion === run?.graphVersion };
+  }, documentId)).toEqual({
+    processInstanceId: '10000000-0000-0000-0000-000000000001',
+    traversalId: '20000000-0000-0000-0000-000000000002',
+    projectedProcessInstanceId: '10000000-0000-0000-0000-000000000001',
+    projectedTraversalId: '20000000-0000-0000-0000-000000000002', pinMatches: true,
+  });
+}
+
 test('Run binds an effective SOURCE deployment with one initial START and Test stays passthrough', async ({ page }) => {
   const calls = await stubRuntime(page);
   await page.goto('/');
@@ -623,9 +640,13 @@ test('a listening deployment retains all actual traversal metadata without repai
   await page.goto('/');
   await openGraph(page, sourceGraph('external.consume'), 'listening.graphml');
 
+  const initialResponse = page.waitForResponse(response => response.request().method() === 'POST'
+    && new URL(response.url()).pathname.endsWith('/initial-start'));
   page.once('dialog', dialog => dialog.accept());
   await page.locator('#btn-run').click();
   await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Ready');
+  expect((await initialResponse).status()).toBe(202);
+  await expectInitialTraversalProjected(page, await page.evaluate(() => window.ravenroot.activeDocument().id));
 
   const painted = () => page.evaluate(() => {
     const document_ = window.ravenroot.activeDocument();
@@ -681,6 +702,29 @@ test('another deployment traffic is still dropped rather than painted on whichev
 test.beforeEach(async ({ page }) => keepAuthenticationInMemory(page));
 
 test('known continuation stays with its originating bound document through focus and draft changes', async ({ page }) => {
+  let releaseInitialBody;
+  const initialBody = new Promise(resolve => { releaseInitialBody = resolve; });
+  await page.exposeFunction('__holdInitialStartBody', () => initialBody);
+  await page.addInitScript(() => {
+    const fetch = globalThis.fetch.bind(globalThis);
+    globalThis.__initialStartBodyWaiting = false;
+    globalThis.fetch = async (input, options) => {
+      const response = await fetch(input, options);
+      if (options?.method === 'POST' && /\/v1\/deployments\/[^/]+\/initial-start$/.test(new URL(String(input), location.href).pathname)) {
+        const text = response.text.bind(response);
+        response.text = async () => {
+          globalThis.__initialStartBodyWaiting = true;
+          await globalThis.__holdInitialStartBody();
+          return text();
+        };
+      }
+      return response;
+    };
+  });
+  const initialRequests = [];
+  page.on('request', request => {
+    if (request.method() === 'POST' && new URL(request.url()).pathname.endsWith('/initial-start')) initialRequests.push(request);
+  });
   let release;
   const gate = new Promise(resolve => { release = resolve; });
   await stubRuntime(page, { eventResponder: async ({ route, startedSession }) => {
@@ -689,10 +733,41 @@ test('known continuation stays with its originating bound document through focus
   } });
   await page.goto('/');
   await openGraph(page, sourceGraph('external.consume'), 'original-source.graphml');
+  const originId = await page.evaluate(() => window.ravenroot.activeDocument().id);
+  const initialResponse = page.waitForResponse(response => response.request().method() === 'POST'
+    && new URL(response.url()).pathname.endsWith('/initial-start'));
   page.once('dialog', dialog => dialog.accept()); await page.locator('#btn-run').click();
   await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Ready');
+  const response = await initialResponse;
+  expect(response.status()).toBe(202);
+  const accepted = await response.json();
+  expect(accepted).toEqual({ outcome: 'ACCEPTED', requestId: response.request().postDataJSON().requestId,
+    processInstanceId: '10000000-0000-0000-0000-000000000001',
+    traversalId: '20000000-0000-0000-0000-000000000002' });
+  try {
+    await expect.poll(() => page.evaluate(() => globalThis.__initialStartBodyWaiting)).toBe(true);
+    // The actual accepted response exists, but the application has not consumed its body.
+    // READY alone must not become the immutable comparison baseline with null START identities.
+    expect(await page.evaluate(id => {
+      const run = window.ravenroot.workspace.find(id).deploymentRun;
+      return [run.processInstanceId, run.traversalId];
+    }, originId)).toEqual([null, null]);
+  } finally { releaseInitialBody(); }
+  await expectInitialTraversalProjected(page, originId);
   const original = await page.evaluate(() => ({ id: window.ravenroot.activeDocument().id,
     binding: { ...window.ravenroot.activeDocument().deploymentRun } }));
+  expect(original.id).toBe(originId);
+  expect(original.binding).toMatchObject({ tenantId: 'tenant-authenticated', incarnationId: 'runtime-original',
+    registrationIdentity: null, initialStartRequestId: accepted.requestId,
+    processInstanceId: accepted.processInstanceId, traversalId: accepted.traversalId });
+  expect(original.binding.graphVersion).toHaveLength(64);
+  expect(response.request().postDataJSON()).toEqual({
+    incarnationId: original.binding.incarnationId,
+    graphVersion: original.binding.graphVersion,
+    requestId: original.binding.initialStartRequestId,
+    input: JSON.parse(original.binding.inputJson),
+  });
+
   await page.locator('#btn-modify').click(); await page.locator('#btn-add-node').click();
   await page.locator('#node-editor input[name="id"]').fill('local-draft-only');
   await page.locator('#node-editor button[type="submit"]').click();
@@ -711,6 +786,7 @@ test('known continuation stays with its originating bound document through focus
       ownership: owner.sourceSession.processOwners.get('10000000-0000-4000-8000-000000000001') };
   }, original.id);
   expect(retained.binding).toEqual(original.binding);
+  expect(initialRequests).toHaveLength(1);
   expect(retained.localNode).toBe('local-draft-only'); expect(retained.state).toBe('idle');
   expect(retained.endState, 'a null-deployment continuation also stays off the mutable draft').toBe('idle');
   expect(retained.ownership).toMatchObject({ originTraversalId: '20000000-0000-4000-8000-000000000001',

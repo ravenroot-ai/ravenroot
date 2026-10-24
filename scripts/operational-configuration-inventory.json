@@ -1374165,6 +1374165,18 @@
       "mappings": [],
       "retirements": [],
       "additions": []
+    },
+    {
+      "id": "issue-590-inspector-validated-configuration-readiness-v1",
+      "issue": "#590",
+      "sourceRevision": "6b6474d124ae948982c8c8c41ca87e1f7f5b7c07",
+      "targetRevision": "76c480d8413605888858edf78043537e6738b31a",
+      "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+      "sourceInventoryDigest": "d855e0bc7b6508e7e287585e9674fc134e6b6cf95b8db9665bd6f954a392e466",
+      "targetCandidateDigest": "c77f5529bd6bacdd78ca8a508e4756771ff961efe192a209d8f5274e30ac4cc8",
+      "mappings": [],
+      "retirements": [],
+      "additions": []
     }
   ],
   "semanticReviewHistory": [

@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { keepAuthenticationInMemory } from './memory-only-auth.mjs';
-import { PID, deploymentService } from './deployment-run-fixture.mjs';
+import { PID, deferred, deploymentService } from './deployment-run-fixture.mjs';
 test.beforeEach(async ({ page }) => keepAuthenticationInMemory(page));
 
 // First Run binds the originating document to a server deployment, with or without SOURCEs.
@@ -82,7 +82,7 @@ test('"Close (keep running)" detaches observation only -- no Stop and no Undeplo
   await page.locator('[data-active-deployment-action="close"]').click();
 
   await expect(page.locator('#active-deployment-dialog')).toBeHidden();
-  await expect.poll(() => page.evaluate(documentId => window.ravenroot.workspace.find(documentId), id)).toBeNull();
+  await expect.poll(() => page.evaluate(documentId => Boolean(window.ravenroot.workspace.find(documentId)), id)).toBe(false);
   // Give any accidental async Stop/Undeploy a chance to fire before asserting its absence.
   await page.waitForTimeout(150);
   expect(stops(calls)).toHaveLength(0);
@@ -99,8 +99,8 @@ test('"Stop and Close" reaches authoritative STOPPED before the document actuall
   await page.locator('[data-active-deployment-action="stop-and-close"]').click();
 
   await expect.poll(() => stops(calls).length > 0, { timeout: 15_000 }).toBe(true);
-  await expect.poll(() => page.evaluate(documentId => window.ravenroot.workspace.find(documentId), id),
-    { timeout: 15_000 }).toBeNull();
+  await expect.poll(() => page.evaluate(documentId => Boolean(window.ravenroot.workspace.find(documentId)), id),
+    { timeout: 15_000 }).toBe(false);
   // Explicit Stop targets the saved deployment; it never removes the registration.
   expect(undeploys(calls)).toHaveLength(0);
   expect(calls.sourceCalls).toHaveLength(0);
@@ -150,7 +150,7 @@ test('closing a document after one-shot Test closes immediately without stopping
   const id = await requestCloseActiveDocument(page);
 
   await expect(page.locator('#active-deployment-dialog')).toBeHidden();
-  await expect.poll(() => page.evaluate(documentId => window.ravenroot.workspace.find(documentId), id)).toBeNull();
+  await expect.poll(() => page.evaluate(documentId => Boolean(window.ravenroot.workspace.find(documentId)), id)).toBe(false);
   expect(undeploys(calls)).toHaveLength(0);
   expect(calls.sourceCalls).toHaveLength(0);
 });
@@ -165,7 +165,7 @@ test('closing a document with no active session closes immediately, with no dial
   const id = await requestCloseActiveDocument(page);
 
   await expect(page.locator('#active-deployment-dialog')).toBeHidden();
-  await expect.poll(() => page.evaluate(documentId => window.ravenroot.workspace.find(documentId), id)).toBeNull();
+  await expect.poll(() => page.evaluate(documentId => Boolean(window.ravenroot.workspace.find(documentId)), id)).toBe(false);
   expect(undeploys(calls)).toHaveLength(0);
   expect(calls.sourceCalls).toHaveLength(0);
 });
@@ -176,25 +176,77 @@ test('non-SOURCE Run still owns a deployment binding and Keep Running preserves 
   const id = await requestCloseActiveDocument(page);
   await expect(page.locator('#active-deployment-dialog')).toBeVisible();
   await page.locator('[data-active-deployment-action="close"]').click();
-  await expect.poll(() => page.evaluate(id => window.ravenroot.workspace.find(id), id)).toBeNull();
+  await expect.poll(() => page.evaluate(id => Boolean(window.ravenroot.workspace.find(id)), id)).toBe(false);
   expect(calls.executionCalls.filter(call => call.method === 'POST')).toHaveLength(0);
   expect(stops(calls)).toHaveLength(0); expect(undeploys(calls)).toHaveLength(0);
   expect(calls.backend.held.size).toBe(1);
 });
 
 test('Stop and Close uses the captured origin even after focus moves to another document', async ({ page }) => {
+  const body = deferred();
+  await page.exposeFunction('__holdOriginStopBody', () => body.promise);
+  await page.addInitScript(() => {
+    const fetch = globalThis.fetch.bind(globalThis);
+    globalThis.__originStopBodyWaiting = false;
+    globalThis.fetch = async (input, options) => {
+      const response = await fetch(input, options);
+      if (options?.method === 'POST' && /\/v1\/deployments\/[^/]+\/stop$/.test(new URL(String(input), location.href).pathname)) {
+        const text = response.text.bind(response);
+        response.text = async () => {
+          globalThis.__originStopBodyWaiting = true;
+          await globalThis.__holdOriginStopBody();
+          return text();
+        };
+      }
+      return response;
+    };
+  });
   const calls = await stubRuntime(page); await page.goto('/');
   await openGraphAndRun(page, graph('external.consume'), 'origin.graphml');
+  const binding = await page.evaluate(() => {
+    const run = window.ravenroot.activeDocument().deploymentRun;
+    return { deploymentId: run.deploymentId, incarnationId: run.incarnationId, graphVersion: run.graphVersion };
+  });
+  expect(binding.incarnationId).toBe('runtime-1');
+  expect(binding.graphVersion).toHaveLength(64);
   const origin = await requestCloseActiveDocument(page);
   const other = await page.evaluate(() => window.ravenroot.openDocument({ name: 'other.graphml' }));
+  const stopped = page.waitForResponse(response => response.request().method() === 'POST'
+    && new URL(response.url()).pathname === `/v1/deployments/${binding.deploymentId}/stop`);
   await page.locator('[data-active-deployment-action="stop-and-close"]').click();
-  await expect.poll(() => stops(calls).length).toBe(1);
-  await expect.poll(() => page.evaluate(id => window.ravenroot.workspace.find(id), origin)).toBeNull();
+  const response = await stopped;
+  expect(response.status()).toBe(200);
+  const headers = await response.request().allHeaders();
+  expect(headers['x-ravenroot-deployment-incarnation']).toBe(binding.incarnationId);
+  expect(headers['x-ravenroot-graph-version']).toBe(binding.graphVersion);
+  await expect.poll(() => page.evaluate(() => globalThis.__originStopBodyWaiting)).toBe(true);
+  try {
+    expect(await page.evaluate(id => Boolean(window.ravenroot.workspace.find(id)), origin)).toBe(true);
+    expect(await page.evaluate(id => window.ravenroot.workspace.find(id).deploymentRunStopPending, origin)).toBe(true);
+    expect(await page.evaluate(() => window.ravenroot.workspace.activeId)).toBe(other);
+    expect(stops(calls)).toHaveLength(1);
+    // Begin the close observation while the real response body is still held. Returning a rich
+    // Document here serializes its graph/viewer/DOM and can prevent the pending Stop from settling.
+    // The console event only orders the test's release; it grants no runtime/lifecycle authority.
+    const entered = page.waitForEvent('console', message => message.text() === 'origin-close-observer-entered');
+    const observed = page.waitForResponse(read => read.request().method() === 'GET'
+      && new URL(read.url()).pathname === `/v1/deployments/${binding.deploymentId}`);
+    const closed = expect.poll(() => page.evaluate(id => {
+      console.debug('origin-close-observer-entered');
+      return Boolean(window.ravenroot.workspace.find(id));
+    }, origin)).toBe(false);
+    // Attach both tasks immediately: observer errors and response errors must fail the test.
+    await Promise.all([closed, (async () => {
+      await entered;
+      body.resolve();
+      expect((await (await observed).json()).state).toBe('STOPPED');
+    })()]);
+  } finally { body.resolve(); }
   expect(await page.evaluate(() => window.ravenroot.workspace.activeId)).toBe(other);
   expect(stops(calls)).toHaveLength(1); expect(undeploys(calls)).toHaveLength(0);
-  const stop = stops(calls)[0];
-  expect(stop.headers['x-ravenroot-deployment-incarnation']).toBe('runtime-1');
-  expect(stop.headers['x-ravenroot-graph-version']).toHaveLength(64);
+  expect(calls.backend.calls.filter(call => call.action === 'initial-start')).toHaveLength(1);
+  expect(calls.backend.calls.filter(call => call.action === 'start')).toHaveLength(1);
+  expect(calls.sourceCalls).toHaveLength(0);
 });
 
 for (const field of ['tenantId', 'graphVersion', 'registrationIdentity']) test(`changed ${field} keeps the origin open and sends no Stop`, async ({ page }) => {

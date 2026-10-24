@@ -130,7 +130,7 @@ public abstract class GraphDeploymentContract {
         }
     }
 
-    private static BehaviorRegistry sourceRegistry() {
+    static BehaviorRegistry sourceRegistry() {
         class Source implements NodeBehavior, InboundSourceCapable {
             @Override public NodeTypeDescriptor descriptor() {
                 return new NodeTypeDescriptor("tck-source", "TCK source", "Test", "Passive source", "actor", false,

@@ -130,18 +130,20 @@ public abstract class InboundSourceLifecycleContract {
                     <node id="error"><data key="node-kind">ERROR</data></node>
                     <node id="start"><data key="node-kind">START</data></node>
                 """);
-        String previous = "start";
+        // Each listener owns a SOURCE-local path. START is independent and never substitutes for
+        // repeated external arrivals; observation happens in an ordinary downstream worker.
         for (int i = 0; i < behaviors.length; i++) {
-            String nodeId = "source" + i;
-            xml.append("    <node id=\"").append(nodeId).append("\"><data key=\"node-kind\">BEHAVIOR</data>")
+            String source = "source" + i, worker = "worker" + i, end = "end";
+            xml.append("<node id=\"").append(source).append("\"><data key=\"node-kind\">BEHAVIOR</data>")
                     .append("<data key=\"node-behavior\">").append(behaviors[i]).append("</data></node>\n");
-            xml.append("    <edge id=\"e").append(i).append("\" source=\"").append(previous).append("\" target=\"")
-                    .append(nodeId).append("\"><data key=\"edge-outcome\">continue</data></edge>\n");
-            previous = nodeId;
+            xml.append("<node id=\"").append(worker).append("\"><data key=\"node-kind\">BEHAVIOR</data>")
+                    .append("<data key=\"node-behavior\">").append(behaviors[i]).append("-observer</data></node>\n");
+            xml.append("<edge id=\"source-worker").append(i).append("\" source=\"").append(source)
+                    .append("\" target=\"").append(worker).append("\"><data key=\"edge-outcome\">continue</data></edge>\n");
+            xml.append("<edge id=\"worker-end").append(i).append("\" source=\"").append(worker)
+                    .append("\" target=\"").append(end).append("\"><data key=\"edge-outcome\">continue</data></edge>\n");
         }
-        xml.append("    <node id=\"end\"><data key=\"node-kind\">END</data></node>\n");
-        xml.append("    <edge id=\"eend\" source=\"").append(previous).append("\" target=\"end\">")
-                .append("<data key=\"edge-outcome\">continue</data></edge>\n");
+        xml.append("<node id=\"end\"><data key=\"node-kind\">END</data></node>\n");
         xml.append("  </graph>\n</graphml>\n");
         return xml.toString();
     }
@@ -220,6 +222,10 @@ public abstract class InboundSourceLifecycleContract {
 
         @Override
         public NodeAction create(NodeConfiguration configuration) {
+            throw new AssertionError("SOURCE ordinary actions must never execute");
+        }
+
+        private NodeAction observe() {
             return message -> {
                 Object payload = message.payload();
                 receivedPayloads.add(payload);
@@ -259,7 +265,18 @@ public abstract class InboundSourceLifecycleContract {
 
         @Override
         public List<NodeBehavior> behaviors() {
-            return List.of(behavior);
+            NodeBehavior observer = new NodeBehavior() {
+                @Override public NodeTypeDescriptor descriptor() {
+                    String name = behavior.descriptor().behavior() + "-observer";
+                    return new NodeTypeDescriptor(name, name, "Custom", "source-tck observer", "actor", false,
+                            List.of(), java.util.Set.of());
+                }
+                @Override public NodeAction create(NodeConfiguration configuration) {
+                    return behavior instanceof RecordingBehavior recording ? recording.observe()
+                            : message -> CompletableFuture.completedFuture(NodeResult.continueWith(message.payload()));
+                }
+            };
+            return List.of(behavior, observer);
         }
     }
 
@@ -502,7 +519,7 @@ public abstract class InboundSourceLifecycleContract {
         assertSame(TCK_IDENTITY, firstContext.identity());
 
         var first = assertInstanceOf(RequestReplyAdmission.Accepted.class,
-                firstContext.requestReply().request(IngressTarget.start(), PayloadValue.of("first"),
+                firstContext.requestReply().request(IngressTarget.node("source0"), PayloadValue.of("first"),
                         Instant.now().plusSeconds(5)));
         var firstOutcome = first.exchange().completion().toCompletableFuture().get(10, TimeUnit.SECONDS);
         assertEquals(RequestReplyTerminalState.COMPLETED, firstOutcome.state());
@@ -513,14 +530,14 @@ public abstract class InboundSourceLifecycleContract {
         deployment.restart(replacementIdentity).toCompletableFuture().get(10, TimeUnit.SECONDS);
 
         var stale = assertInstanceOf(RequestReplyAdmission.Refused.class,
-                firstContext.requestReply().request(IngressTarget.start(), PayloadValue.of("stale"),
+                firstContext.requestReply().request(IngressTarget.node("source0"), PayloadValue.of("stale"),
                         Instant.now().plusSeconds(5)));
         assertEquals(RequestReplyRefusal.ADMISSION_CLOSED, stale.reason());
 
         InboundSourceContext replacementContext = issued.get(1).lastContext.get();
         assertSame(replacementIdentity, replacementContext.identity());
         var replacement = assertInstanceOf(RequestReplyAdmission.Accepted.class,
-                replacementContext.requestReply().request(IngressTarget.start(), PayloadValue.of("replacement"),
+                replacementContext.requestReply().request(IngressTarget.node("source0"), PayloadValue.of("replacement"),
                         Instant.now().plusSeconds(5)));
         var replacementOutcome = replacement.exchange().completion().toCompletableFuture()
                 .get(10, TimeUnit.SECONDS);
@@ -556,10 +573,12 @@ public abstract class InboundSourceLifecycleContract {
         assertNotSame(contextX.ingress(), contextY.ingress());
         assertEquals(DeploymentId.of("ingress-x-deployment"), contextX.deploymentId());
         assertEquals(DeploymentId.of("ingress-y-deployment"), contextY.deploymentId());
+        assertTrue(behaviorX.receivedPayloads.isEmpty(), "Deploy must not execute the source path");
+        assertTrue(behaviorY.receivedPayloads.isEmpty(), "Deploy must not execute the sibling source path");
         assertEquals(IngressDisposition.ACCEPTED,
-                contextX.ingress().offer(TCK_IDENTITY, IngressTarget.start(), "x-only"));
+                contextX.ingress().offer(TCK_IDENTITY, IngressTarget.node("source0"), "x-only"));
         assertEquals(IngressDisposition.ACCEPTED,
-                contextY.ingress().offer(TCK_IDENTITY, IngressTarget.start(), "y-only"));
+                contextY.ingress().offer(TCK_IDENTITY, IngressTarget.node("source0"), "y-only"));
         assertEquals("x-only", behaviorX.firstPayload.get(10, TimeUnit.SECONDS));
         assertEquals("y-only", behaviorY.firstPayload.get(10, TimeUnit.SECONDS));
         assertEquals(List.of("x-only"), behaviorX.receivedPayloads,
@@ -569,9 +588,9 @@ public abstract class InboundSourceLifecycleContract {
 
         deploymentX.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
         assertEquals(IngressDisposition.REJECTED_ADMISSION_CLOSED,
-                contextX.ingress().offer(TCK_IDENTITY, IngressTarget.start(), "retired-x"));
+                contextX.ingress().offer(TCK_IDENTITY, IngressTarget.node("source0"), "retired-x"));
         assertEquals(IngressDisposition.ACCEPTED,
-                contextY.ingress().offer(TCK_IDENTITY, IngressTarget.start(), "live-y"));
+                contextY.ingress().offer(TCK_IDENTITY, IngressTarget.node("source0"), "live-y"));
     }
 
     /** A behavior whose source always fails to start, to drive the rollback test. */

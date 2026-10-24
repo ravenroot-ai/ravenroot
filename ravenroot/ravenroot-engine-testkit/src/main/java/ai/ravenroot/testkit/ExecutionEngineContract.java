@@ -1842,8 +1842,8 @@ public abstract class ExecutionEngineContract {
     }
 
     /**
-     * One deployment's own graph: {@code start -> served -> end}, where {@code served} counts. A
-     * sibling that still runs a traversal to completion is evidence its domain, its actors and the
+     * One deployment's own graph: {@code source -> served -> end}, plus an independent START.
+     * {@code served} counts. A sibling that still runs a traversal to completion is evidence its domain, its actors and the
      * engine underneath all of them are alive -- which a status field alone would not be.
      */
     private static final String LIFECYCLE_ISOLATION_GRAPH = """
@@ -1855,12 +1855,13 @@ public abstract class ExecutionEngineContract {
               <graph id="lifecycle-isolation" edgedefault="directed">
                 <node id="error"><data key="node-kind">ERROR</data></node>
                 <node id="start"><data key="node-kind">START</data></node>
+                <node id="source"><data key="node-kind">BEHAVIOR</data><data key="node-behavior">tck-source</data></node>
                 <node id="served">
                   <data key="node-kind">BEHAVIOR</data>
                   <data key="node-behavior">served</data>
                 </node>
                 <node id="end"><data key="node-kind">END</data></node>
-                <edge id="e1" source="start" target="served"><data key="edge-outcome">continue</data></edge>
+                <edge id="e1" source="source" target="served"><data key="edge-outcome">continue</data></edge>
                 <edge id="e2" source="served" target="end"><data key="edge-outcome">continue</data></edge>
               </graph>
             </graphml>
@@ -1971,7 +1972,7 @@ public abstract class ExecutionEngineContract {
 
             int servedBefore = siblingServed.get();
             assertEquals(IngressDisposition.ACCEPTED,
-                    sibling.ingress().offer(TCK_IDENTITY, IngressTarget.start(), "ping"),
+                    sibling.ingress().offer(TCK_IDENTITY, IngressTarget.node("source"), "ping"),
                     lifecycle.command() + " must not close a sibling's ingress");
             long deadline = System.nanoTime() + Duration.ofSeconds(20).toNanos();
             while (siblingServed.get() <= servedBefore && System.nanoTime() - deadline < 0) {
@@ -1986,7 +1987,7 @@ public abstract class ExecutionEngineContract {
 
     private static DefaultGraphDeployment lifecycleDeployment(ExecutionEngine engine, String id,
                                                               AtomicInteger served) {
-        var behaviors = new BehaviorRegistry().register("served", message -> {
+        var behaviors = GraphDeploymentContract.sourceRegistry().register("served", message -> {
             served.incrementAndGet();
             return CompletableFuture.completedFuture(NodeResult.continueWith("served"));
         });

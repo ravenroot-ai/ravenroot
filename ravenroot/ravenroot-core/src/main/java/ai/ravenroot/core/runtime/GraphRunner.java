@@ -374,7 +374,8 @@ public final class GraphRunner implements AutoCloseable {
      * submission (an atomic removal from its own map guards the call), on that submission's own
      * single-traversal runner, which it hands to {@code close()} on the next line.</p>
      */
-    private final Set<UUID> cancelledTraversals = ConcurrentHashMap.newKeySet();
+    // Origin travels atomically with refusal: shutdown must not invent an operator cancellation.
+    private final ConcurrentHashMap<UUID, StopOrigin> cancelledTraversals = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<UUID, ActiveBudget> activeBudgets = new ConcurrentHashMap<>();
     /** Runtime state used by the saga boundary around actual node dispatch. */
     private final ConcurrentHashMap<UUID, ExecutionState> activeExecutionStates = new ConcurrentHashMap<>();
@@ -1336,7 +1337,17 @@ public final class GraphRunner implements AutoCloseable {
                         preparedRoot, rootHop);
         opening.add(root.toCompletableFuture());
         return allOrFirstFailure(opening)
-                .handle((ignored, error) -> error)
+                // A terminated join discards late arrivals and may absorb a late branch failure.
+                // Neither is evidence of traversal success after cancellation. Preserve the refusal
+                // here, before release() removes its marker; an existing failure or suspension wins.
+                .handle((ignored, error) -> {
+                    if (error != null) return error;
+                    StopOrigin origin = cancelledTraversals.get(traversalId);
+                    if (origin == null) return null;
+                    return origin == StopOrigin.OPERATOR
+                            ? new TraversalCancelledException(traversalId, null)
+                            : new IllegalStateException("Runner shutdown ended traversal before completion");
+                })
                 // Cleanup is sequenced *into* the returned stage rather than hung off a whenComplete.
                 // A caller that has seen this stage complete must be able to assert that the join
                 // records of this traversal are gone; with cleanup running concurrently that
@@ -2243,7 +2254,8 @@ public final class GraphRunner implements AutoCloseable {
      */
     private boolean cancelTraversal(UUID traversalId, GateRelease release) {
         java.util.Objects.requireNonNull(traversalId, "traversalId");
-        if (!cancelledTraversals.add(traversalId)) {
+        StopOrigin origin = release == GateRelease.ON_CALLER ? StopOrigin.SHUTDOWN : StopOrigin.OPERATOR;
+        if (cancelledTraversals.putIfAbsent(traversalId, origin) != null) {
             return false;
         }
         ExecutionState sagaState = activeExecutionStates.get(traversalId);
@@ -2327,7 +2339,7 @@ public final class GraphRunner implements AutoCloseable {
      */
     public boolean pauseTraversal(UUID traversalId) {
         java.util.Objects.requireNonNull(traversalId, "traversalId");
-        if (cancelledTraversals.contains(traversalId)) {
+        if (cancelledTraversals.containsKey(traversalId)) {
             return false;
         }
         TraversalControl control = controlFor(traversalId);
@@ -2659,6 +2671,8 @@ public final class GraphRunner implements AutoCloseable {
         java.util.Objects.requireNonNull(traversalId, "traversalId");
         return releasePauseGate(traversalId, GateRelease.OFF_CALLER, GateReleaseReason.RESUMED);
     }
+
+    private enum StopOrigin { OPERATOR, SHUTDOWN }
 
     /**
      * Where the hop a pause gate parked resumes.
@@ -3071,7 +3085,7 @@ public final class GraphRunner implements AutoCloseable {
                 identity.graphVersion(), identity.traversalId(), node.id());
         return traversalAdmission.acquire(admission, definition.maxConcurrency(), state.limits.maxLiveActorsPerTraversal(),
                 state.limits.maxQueuedAdmissionsPerNode()).thenCompose(lease -> {
-            if (cancelledTraversals.contains(identity.traversalId())) {
+            if (cancelledTraversals.containsKey(identity.traversalId())) {
                 lease.close(); hop.close(); return CompletableFuture.failedFuture(new TraversalCancelledException(state.traversalId, node.id()));
             }
             UUID completed = checkpoint.completedEventId() == null
@@ -3099,7 +3113,7 @@ public final class GraphRunner implements AutoCloseable {
             return CompletableFuture.failedFuture(new IllegalStateException(
                     "a derived boundary cannot begin inside a join"));
         }
-        if (cancelledTraversals.contains(identity.traversalId())) {
+        if (cancelledTraversals.containsKey(identity.traversalId())) {
             hop.close();
             return CompletableFuture.failedFuture(
                     new TraversalCancelledException(identity.traversalId(), node.id()));
@@ -3115,7 +3129,7 @@ public final class GraphRunner implements AutoCloseable {
         return traversalAdmission.acquire(admissionKey, definition.maxConcurrency(),
                         state.limits.maxLiveActorsPerTraversal(), state.limits.maxQueuedAdmissionsPerNode())
                 .thenCompose(lease -> {
-                    if (cancelledTraversals.contains(identity.traversalId())) {
+                    if (cancelledTraversals.containsKey(identity.traversalId())) {
                         lease.close();
                         hop.close();
                         return CompletableFuture.failedFuture(
@@ -3220,7 +3234,7 @@ public final class GraphRunner implements AutoCloseable {
         // aggregate: the traversal's record ends at the last node that actually ran, which is what a
         // reader reconstructing what happened needs it to say. A gate placed after the send instead
         // would be a gate on the node that already started.
-        if (cancelledTraversals.contains(identity.traversalId())) {
+        if (cancelledTraversals.containsKey(identity.traversalId())) {
             hop.close();
             return CompletableFuture.failedFuture(new TraversalCancelledException(identity.traversalId(), node.id()));
         }
@@ -3285,7 +3299,7 @@ public final class GraphRunner implements AutoCloseable {
                                                TraversalAdmissionRegistry.Lease admissionLease,
                                                ExecutionBudget.Hop hop) {
         // A queued admission may have been cancelled before its permit became available.
-        if (cancelledTraversals.contains(identity.traversalId())) {
+        if (cancelledTraversals.containsKey(identity.traversalId())) {
             admissionLease.close();
             hop.close();
             return CompletableFuture.failedFuture(
@@ -3298,7 +3312,7 @@ public final class GraphRunner implements AutoCloseable {
         // Cancellation can arrive while the durable NODE_STARTED write is unresolved. The write may
         // still commit, so it is not rolled back or relabelled as absent; once it returns, however,
         // the cancelled traversal must not deliver the node effect that the caller already refused.
-        if (cancelledTraversals.contains(identity.traversalId())) {
+        if (cancelledTraversals.containsKey(identity.traversalId())) {
             return CompletableFuture.failedFuture(
                     new TraversalCancelledException(identity.traversalId(), node.id()));
         }
@@ -3939,7 +3953,7 @@ public final class GraphRunner implements AutoCloseable {
         return awaitBackoff(identity.traversalId(), node.id(), outcome.retryDelay())
                 .thenCompose(released -> awaitPauseGate(identity.traversalId()))
                 .thenCompose(released -> {
-                    if (cancelledTraversals.contains(identity.traversalId())) {
+                    if (cancelledTraversals.containsKey(identity.traversalId())) {
                         return CompletableFuture.<Void>failedFuture(
                                 new TraversalCancelledException(identity.traversalId(), node.id()));
                     }
@@ -4027,7 +4041,7 @@ public final class GraphRunner implements AutoCloseable {
      * different thread pool.</p>
      */
     private CompletionStage<Void> awaitBackoff(UUID traversalId, String nodeId, Duration delay) {
-        if (cancelledTraversals.contains(traversalId)) {
+        if (cancelledTraversals.containsKey(traversalId)) {
             return CompletableFuture.failedFuture(new TraversalCancelledException(traversalId, nodeId));
         }
         if (delay == null || delay.isZero() || delay.isNegative()) {
@@ -4039,7 +4053,7 @@ public final class GraphRunner implements AutoCloseable {
         waits.add(registration);
         // Registered first, then re-checked: a cancellation that landed between the check at the top
         // of this method and the registration above would otherwise leave a wait nobody can end.
-        if (cancelledTraversals.contains(traversalId)) {
+        if (cancelledTraversals.containsKey(traversalId)) {
             waits.remove(registration);
             return CompletableFuture.failedFuture(new TraversalCancelledException(traversalId, nodeId));
         }
@@ -5247,13 +5261,12 @@ public final class GraphRunner implements AutoCloseable {
         // Set before the first traversal is touched. Everything below releases holds through paths
         // whose reason is ENDED, and none of those is a decision about the traversal; see the field.
         shuttingDown = true;
-        // Snapshotted BEFORE the loop below, and the order is load-bearing. That loop cancels every
-        // traversal this runner holds, so after it `cancelledTraversals` names all of them and can no
-        // longer answer "which of these did an operator ask to stop" -- the question the forced
-        // teardown has to answer if it is to record an operator's act as theirs without inventing one
-        // for a traversal a shutdown merely happened to catch. Read here, it names exactly the
-        // traversals somebody stopped before this shutdown began.
-        Set<UUID> operatorStopped = Set.copyOf(cancelledTraversals);
+        // Keep the pre-shutdown operator snapshot used by forced teardown. Filter by the
+        // first publisher's origin, so a repeated close cannot turn an earlier shutdown mark
+        // into an operator request while a late branch is still unresolved.
+        Set<UUID> operatorStopped = cancelledTraversals.entrySet().stream()
+                .filter(entry -> entry.getValue() == StopOrigin.OPERATOR)
+                .map(Map.Entry::getKey).collect(java.util.stream.Collectors.toUnmodifiableSet());
         coordinators.keySet().forEach(traversalId -> cancelTraversal(traversalId, GateRelease.ON_CALLER));
         // Refuse every queued admission before draining traversal continuations. Active leases are
         // released by their attempt handlers; queued hops fail immediately and cannot spawn actors.
@@ -5683,10 +5696,8 @@ public final class GraphRunner implements AutoCloseable {
             //
             // The node named is a join the traversal is actually parked at, which is the truthful
             // reading of "the first hop that did not run": the branch was waiting to pass through it.
-            // `cancelledTraversals` answers "did somebody ask to stop this" honestly here, unlike
-            // inside close(), which cancels every traversal it holds before tearing them down and so
-            // has to be handed the set as it stood beforehand.
-            coordinator.terminate(cancelledTraversals.contains(traversalId)
+            // Preserve the first stop's origin even if reconciliation races shutdown.
+            coordinator.terminate(cancelledTraversals.get(traversalId) == StopOrigin.OPERATOR
                     ? operatorStop(traversalId, coordinator)
                     : new TraversalUnreachableException(traversalId, parked));
             reconciled.add(traversalId);

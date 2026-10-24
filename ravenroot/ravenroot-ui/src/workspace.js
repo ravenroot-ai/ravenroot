@@ -26,11 +26,6 @@ export const DOCUMENT_MODES = Object.freeze({ DRAFT: 'draft', TEST: 'test', DEPL
 const SOURCE_PROCESS_OWNERSHIP_LIMIT = 256;
 // Opaque tokens preserve reference identity without retaining an old binding's graph/input bytes.
 const deploymentProcessBindingTokens = new WeakMap();
-function deploymentProcessBindingToken(binding) {
-  if (!binding) return null;
-  if (!deploymentProcessBindingTokens.has(binding)) deploymentProcessBindingTokens.set(binding, Object.freeze({}));
-  return deploymentProcessBindingTokens.get(binding);
-}
 const ACTIVE_SOURCE_SESSION_STATES = new Set([
   'STARTING', 'LISTENING', 'DEGRADED', 'STOPPING', 'UNKNOWN',
 ]);
@@ -469,6 +464,12 @@ function trustedStreamTenant(streamScope) {
   if (streamScope.tenantId === null) return null;
   return typeof streamScope.tenantId === 'string' && streamScope.tenantId.length > 0
     ? streamScope.tenantId : undefined;
+}
+
+function deploymentProcessBindingToken(binding) {
+  if (!binding) return null;
+  if (!deploymentProcessBindingTokens.has(binding)) deploymentProcessBindingTokens.set(binding, Object.freeze({}));
+  return deploymentProcessBindingTokens.get(binding);
 }
 
 function rememberSourceProcessOwner(document_, event, streamTenant) {

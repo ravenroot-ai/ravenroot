@@ -17,6 +17,15 @@ import ai.ravenroot.api.security.PrincipalType;
 import ai.ravenroot.api.security.SecurityContext;
 import ai.ravenroot.core.runtime.BehaviorEnvironment;
 import ai.ravenroot.core.runtime.BehaviorRegistry;
+import ai.ravenroot.core.runtime.NodePackages;
+import ai.ravenroot.api.catalog.*;
+import ai.ravenroot.api.node.*;
+import ai.ravenroot.api.deployment.InboundSource;
+import ai.ravenroot.api.deployment.InboundSourceContext;
+import java.util.List;
+import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import ai.ravenroot.core.runtime.DefaultGraphDeployment;
 import ai.ravenroot.core.runtime.ExecutionMonitor;
 import org.junit.jupiter.api.AfterEach;
@@ -76,13 +85,13 @@ public abstract class GraphDeploymentContract {
             <graphml xmlns="http://graphml.graphdrawing.org/xmlns">
               <key id="node-kind" for="node" attr.name="kind" attr.type="string"/>
               <key id="edge-outcome" for="edge" attr.name="outcome" attr.type="string"/>
+              <key id="behavior" for="node" attr.name="behavior" attr.type="string"/>
               <graph id="wiring" edgedefault="directed">
                 <node id="error"><data key="node-kind">ERROR</data></node>
                 <node id="start"><data key="node-kind">START</data></node>
+                <node id="source"><data key="node-kind">BEHAVIOR</data><data key="behavior">tck-source</data></node>
                 <node id="end"><data key="node-kind">END</data></node>
-                <edge id="start-end" source="start" target="end">
-                  <data key="edge-outcome">continue</data>
-                </edge>
+                <edge id="source-end" source="source" target="end"><data key="edge-outcome">continue</data></edge>
               </graph>
             </graphml>
             """;
@@ -121,8 +130,32 @@ public abstract class GraphDeploymentContract {
         }
     }
 
+    private static BehaviorRegistry sourceRegistry() {
+        class Source implements NodeBehavior, InboundSourceCapable {
+            @Override public NodeTypeDescriptor descriptor() {
+                return new NodeTypeDescriptor("tck-source", "TCK source", "Test", "Passive source", "actor", false,
+                        List.of(), Set.of(), NodeRuntimeNature.SOURCE, Set.of(NodeRuntimeNature.SOURCE));
+            }
+            @Override public NodeAction create(NodeConfiguration configuration) {
+                throw new AssertionError("SOURCE ordinary actions must never execute");
+            }
+            @Override public InboundSource createSource(NodeConfiguration configuration, InboundSourceContext context) {
+                return new InboundSource() {
+                    @Override public CompletionStage<Void> start(InboundSourceContext active) { return CompletableFuture.completedFuture(null); }
+                    @Override public CompletionStage<Void> stop() { return CompletableFuture.completedFuture(null); }
+                };
+            }
+        }
+        return NodePackages.register(BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults()), new NodePackage() {
+            @Override public String id() { return "test.deployment-tck-source"; }
+            @Override public String version() { return "1.0.0"; }
+            @Override public String sdkContract() { return NodeSdk.CONTRACT; }
+            @Override public List<NodeBehavior> behaviors() { return List.of(new Source()); }
+        });
+    }
+
     private DefaultGraphDeployment deployment(DeploymentId id, String graphMl) {
-        return new DefaultGraphDeployment(id, engine(), BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults()),
+        return new DefaultGraphDeployment(id, engine(), sourceRegistry(),
                 new ExecutionMonitor(), ExecutionIdentitySource.randomUuids(),
                 graphMl.getBytes(StandardCharsets.UTF_8), DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY);
     }
@@ -133,9 +166,9 @@ public abstract class GraphDeploymentContract {
 
         assertEquals(DeploymentState.COLD, deployment.status().state());
         assertEquals(IngressDisposition.REJECTED_NOT_READY,
-                deployment.ingress().offer(TCK_IDENTITY, IngressTarget.start(), "payload"));
+                deployment.ingress().offer(TCK_IDENTITY, IngressTarget.node("source"), "payload"));
         var refusal = assertInstanceOf(RequestReplyAdmission.Refused.class,
-                deployment.requestReply().request(IngressTarget.start(), PayloadValue.of("payload"),
+                deployment.requestReply().request(IngressTarget.node("source"), PayloadValue.of("payload"),
                         Instant.now().plusSeconds(5)));
         assertEquals(RequestReplyRefusal.NOT_READY, refusal.reason());
     }
@@ -153,10 +186,10 @@ public abstract class GraphDeploymentContract {
         assertEquals(DeploymentState.READY, status.state());
 
         assertEquals(IngressDisposition.ACCEPTED,
-                deployment.ingress().offer(TCK_IDENTITY, IngressTarget.start(), "payload"));
+                deployment.ingress().offer(TCK_IDENTITY, IngressTarget.node("source"), "payload"));
 
         var accepted = assertInstanceOf(RequestReplyAdmission.Accepted.class,
-                deployment.requestReply().request(IngressTarget.start(), PayloadValue.of("request-reply"),
+                deployment.requestReply().request(IngressTarget.node("source"), PayloadValue.of("request-reply"),
                         Instant.now().plusSeconds(5)));
         var exchange = accepted.exchange();
         var outcome = exchange.completion().toCompletableFuture().get(10, TimeUnit.SECONDS);
@@ -184,7 +217,7 @@ public abstract class GraphDeploymentContract {
         var seen = new AtomicReference<RequestReplyContext>();
         var deadline = Instant.now().plusSeconds(5);
         var accepted = assertInstanceOf(RequestReplyAdmission.Accepted.class,
-                deployment.requestReply().requestProjected(IngressTarget.start(), context -> {
+                deployment.requestReply().requestProjected(IngressTarget.node("source"), context -> {
                     seen.set(context);
                     return PayloadValue.of(context.traversalId().toString());
                 }, deadline));
@@ -202,7 +235,7 @@ public abstract class GraphDeploymentContract {
 
         var ran = new AtomicInteger();
         var refusal = assertInstanceOf(RequestReplyAdmission.Refused.class,
-                deployment.requestReply().requestProjected(IngressTarget.start(), context -> {
+                deployment.requestReply().requestProjected(IngressTarget.node("source"), context -> {
                     ran.incrementAndGet();
                     throw PayloadException.tooLarge(64, 16);
                 }, Instant.now().plusSeconds(5)));
@@ -211,7 +244,7 @@ public abstract class GraphDeploymentContract {
 
         // Capacity survives the refusal: the next ordinary request is still admitted and completes.
         var after = assertInstanceOf(RequestReplyAdmission.Accepted.class,
-                deployment.requestReply().request(IngressTarget.start(), PayloadValue.of("after"),
+                deployment.requestReply().request(IngressTarget.node("source"), PayloadValue.of("after"),
                         Instant.now().plusSeconds(5)));
         assertEquals("after", after.exchange().completion().toCompletableFuture()
                 .get(10, TimeUnit.SECONDS).payload());
@@ -240,7 +273,7 @@ public abstract class GraphDeploymentContract {
         // No partial residue via the contract surface: ingress must not be admitting on a deployment
         // that never actually reached readiness.
         assertEquals(IngressDisposition.REJECTED_NOT_READY,
-                deployment.ingress().offer(TCK_IDENTITY, IngressTarget.start(), "payload"));
+                deployment.ingress().offer(TCK_IDENTITY, IngressTarget.node("source"), "payload"));
 
         // A repeat start against the same unparseable document fails the same well-defined way rather
         // than hanging, corrupting state, or silently reporting something other than FAILED -- the
@@ -325,9 +358,9 @@ public abstract class GraphDeploymentContract {
         deployment.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
 
         assertEquals(IngressDisposition.REJECTED_ADMISSION_CLOSED,
-                deployment.ingress().offer(TCK_IDENTITY, IngressTarget.start(), "late"));
+                deployment.ingress().offer(TCK_IDENTITY, IngressTarget.node("source"), "late"));
         var refusal = assertInstanceOf(RequestReplyAdmission.Refused.class,
-                deployment.requestReply().request(IngressTarget.start(), PayloadValue.of("late"),
+                deployment.requestReply().request(IngressTarget.node("source"), PayloadValue.of("late"),
                         Instant.now().plusSeconds(5)));
         assertEquals(RequestReplyRefusal.ADMISSION_CLOSED, refusal.reason());
     }
@@ -337,13 +370,13 @@ public abstract class GraphDeploymentContract {
     final void restartReachesRealReadinessAgain() throws Exception {
         var deployment = deployment(DeploymentId.of("restart"), VALID_GRAPH);
         deployment.start(TCK_IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
-        deployment.ingress().offer(TCK_IDENTITY, IngressTarget.start(), "before-restart");
+        deployment.ingress().offer(TCK_IDENTITY, IngressTarget.node("source"), "before-restart");
 
         var status = deployment.restart(TCK_IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
 
         assertEquals(DeploymentState.READY, status.state());
         assertEquals(IngressDisposition.ACCEPTED,
-                deployment.ingress().offer(TCK_IDENTITY, IngressTarget.start(), "after-restart"));
+                deployment.ingress().offer(TCK_IDENTITY, IngressTarget.node("source"), "after-restart"));
     }
 
     private static Throwable rootCause(Throwable error) {

@@ -203937,7 +203937,7 @@
       "rationale": "Exact prepared SQL scope/column vocabulary enforces tenant/deployment/version or process/traversal identity; numeric atoms are result-column positions and settled/expiry counters, not admission limits."
     },
     {
-      "id": "oc-ae6f4eefa0c21e39a9a3",
+      "id": "oc-2447790f3b035171817e",
       "path": "ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/BusinessHistoryStorage.java",
       "line": 249,
       "symbol": "finishRequestedClosure",
@@ -203945,15 +203945,19 @@
       "role": "count",
       "expression": "\"SELECT SUM(CASE WHEN phase = 'READY' THEN 1 ELSE 0 END), \"",
       "expressionDigest": "e7a543fe969090018b3e57557277d0546af6dc06fc69a1ab037b2f7b89f0d17a",
-      "evidenceDigest": "706f5a458bf473fb6a9ef5d03db56adf5d8b74dda1bd3bf9c7d1a39d5a33af80",
+      "evidenceDigest": "3a23e88811677cd662be28875b2248d1d9435362d3d4742f857e7bf43f53bc3b",
       "surface": "java",
       "status": "retained",
       "classification": "protocol-or-format-invariant",
       "remediationOwner": "#590",
-      "rationale": "Reviewed prepared-SQL atom \"SELECT SUM(CASE WHEN phase = 'READY' THEN 1 ELSE 0 END), \" at ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/BusinessHistoryStorage.java#finishRequestedClosure: scalar join phase, actual missing member/count/seal/availability and terminal result vocabulary, with exact tenant/deployment/version/history/node/round parameter correlation. Result-column positions and CASE constants are protocol facts, never configurable admission limits; READY and original contribution data remain preserved."
+      "rationale": "Reviewed prepared-SQL atom \"SELECT SUM(CASE WHEN phase = 'READY' THEN 1 ELSE 0 END), \" at ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/BusinessHistoryStorage.java#finishRequestedClosure: scalar join phase, actual missing member/count/seal/availability and terminal result vocabulary, with exact tenant/deployment/version/history/node/round parameter correlation. Result-column positions and CASE constants are protocol facts, never configurable admission limits; READY and original contribution data remain preserved.",
+      "identityMigration": {
+        "history": "issue-590-unsatisfied-retained-manifest-completeness-v1",
+        "fromId": "oc-ae6f4eefa0c21e39a9a3"
+      }
     },
     {
-      "id": "oc-48f3fd775d8371501631",
+      "id": "oc-0074a660a8bc92abdb30",
       "path": "ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/BusinessHistoryStorage.java",
       "line": 250,
       "symbol": "finishRequestedClosure",
@@ -203961,31 +203965,35 @@
       "role": "count",
       "expression": "\"SUM(CASE WHEN phase = 'OPEN' OR phase = 'EXPIRED' OR sealed = 0 OR snapshot IS NULL \"",
       "expressionDigest": "12bdb741980d53676682d046cefc49e3115f343b8b232da4b62f1bf5c0929fef",
-      "evidenceDigest": "706f5a458bf473fb6a9ef5d03db56adf5d8b74dda1bd3bf9c7d1a39d5a33af80",
+      "evidenceDigest": "3a23e88811677cd662be28875b2248d1d9435362d3d4742f857e7bf43f53bc3b",
       "surface": "java",
       "status": "retained",
       "classification": "protocol-or-format-invariant",
       "remediationOwner": "#590",
-      "rationale": "Reviewed prepared-SQL atom \"SUM(CASE WHEN phase = 'OPEN' OR phase = 'EXPIRED' OR sealed = 0 OR snapshot IS NULL \" at ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/BusinessHistoryStorage.java#finishRequestedClosure: scalar join phase, actual missing member/count/seal/availability and terminal result vocabulary, with exact tenant/deployment/version/history/node/round parameter correlation. Result-column positions and CASE constants are protocol facts, never configurable admission limits; READY and original contribution data remain preserved."
+      "rationale": "Reviewed prepared-SQL atom \"SUM(CASE WHEN phase = 'OPEN' OR phase = 'EXPIRED' OR sealed = 0 OR snapshot IS NULL \" at ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/BusinessHistoryStorage.java#finishRequestedClosure: scalar join phase, actual missing member/count/seal/availability and terminal result vocabulary, with exact tenant/deployment/version/history/node/round parameter correlation. Result-column positions and CASE constants are protocol facts, never configurable admission limits; READY and original contribution data remain preserved.",
+      "identityMigration": {
+        "history": "issue-590-unsatisfied-retained-manifest-completeness-v1",
+        "fromId": "oc-48f3fd775d8371501631"
+      }
     },
     {
-      "id": "oc-d8e299dfff760d722f7e",
+      "id": "oc-dd467d11cfd3e50446c0",
       "path": "ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/BusinessHistoryStorage.java",
       "line": 251,
       "symbol": "finishRequestedClosure",
       "kind": "operational-declaration",
       "role": "count",
-      "expression": "\"OR (expectation = 'COUNT' AND expected_count <> received_count) OR EXISTS \"",
-      "expressionDigest": "fb0023e0f450cef3ac58d01c878ec97c6cbca868bce01b6059989c78e425cccb",
-      "evidenceDigest": "706f5a458bf473fb6a9ef5d03db56adf5d8b74dda1bd3bf9c7d1a39d5a33af80",
+      "expression": "\"OR expected_count <> received_count OR EXISTS \"",
+      "expressionDigest": "b3362f2d1cec98d78fba9c096d5f082dbdba2feca0c79061d0cae140e093b300",
+      "evidenceDigest": "3a23e88811677cd662be28875b2248d1d9435362d3d4742f857e7bf43f53bc3b",
       "surface": "java",
       "status": "retained",
       "classification": "protocol-or-format-invariant",
       "remediationOwner": "#590",
-      "rationale": "Reviewed prepared-SQL atom \"OR (expectation = 'COUNT' AND expected_count <> received_count) OR EXISTS \" at ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/BusinessHistoryStorage.java#finishRequestedClosure: scalar join phase, actual missing member/count/seal/availability and terminal result vocabulary, with exact tenant/deployment/version/history/node/round parameter correlation. Result-column positions and CASE constants are protocol facts, never configurable admission limits; READY and original contribution data remain preserved."
+      "rationale": "Exact prepared-SQL manifest/count satisfaction comparison at ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/BusinessHistoryStorage.java#finishRequestedClosure. Expected and received scalar counts must agree, alongside the existing expected-member anti-join, to project the public exact-set satisfaction rule. This protocol predicate preserves retained received/missing rows; it is neither a new configurable limit nor admission/closure authority."
     },
     {
-      "id": "oc-74e5b6680da19d9a4e69",
+      "id": "oc-9e5277a69fc963956573",
       "path": "ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/BusinessHistoryStorage.java",
       "line": 252,
       "symbol": "finishRequestedClosure",
@@ -203993,15 +204001,19 @@
       "role": "count",
       "expression": "\"(SELECT 1 FROM correlated_join_member m WHERE m.tenant_id = j.tenant_id AND m.deployment_id = j.deployment_id \"",
       "expressionDigest": "ba7a0eae08eacb03e695ab3952a6a803a4c977d28ae513438d0648ce6e4c3aed",
-      "evidenceDigest": "706f5a458bf473fb6a9ef5d03db56adf5d8b74dda1bd3bf9c7d1a39d5a33af80",
+      "evidenceDigest": "3a23e88811677cd662be28875b2248d1d9435362d3d4742f857e7bf43f53bc3b",
       "surface": "java",
       "status": "retained",
       "classification": "protocol-or-format-invariant",
       "remediationOwner": "#590",
-      "rationale": "Reviewed prepared-SQL atom \"(SELECT 1 FROM correlated_join_member m WHERE m.tenant_id = j.tenant_id AND m.deployment_id = j.deployment_id \" at ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/BusinessHistoryStorage.java#finishRequestedClosure: scalar join phase, actual missing member/count/seal/availability and terminal result vocabulary, with exact tenant/deployment/version/history/node/round parameter correlation. Result-column positions and CASE constants are protocol facts, never configurable admission limits; READY and original contribution data remain preserved."
+      "rationale": "Reviewed prepared-SQL atom \"(SELECT 1 FROM correlated_join_member m WHERE m.tenant_id = j.tenant_id AND m.deployment_id = j.deployment_id \" at ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/BusinessHistoryStorage.java#finishRequestedClosure: scalar join phase, actual missing member/count/seal/availability and terminal result vocabulary, with exact tenant/deployment/version/history/node/round parameter correlation. Result-column positions and CASE constants are protocol facts, never configurable admission limits; READY and original contribution data remain preserved.",
+      "identityMigration": {
+        "history": "issue-590-unsatisfied-retained-manifest-completeness-v1",
+        "fromId": "oc-74e5b6680da19d9a4e69"
+      }
     },
     {
-      "id": "oc-f7198de859a472b5ad7e",
+      "id": "oc-137851a9d6f8cb6a0183",
       "path": "ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/BusinessHistoryStorage.java",
       "line": 253,
       "symbol": "finishRequestedClosure",
@@ -204009,15 +204021,19 @@
       "role": "count",
       "expression": "\"AND m.graph_version = j.graph_version AND m.application_id = j.application_id AND m.node_id = j.node_id \"",
       "expressionDigest": "1883f549356d63758ad580fb5eadba6ec67d2099c8755b57b92559148e830159",
-      "evidenceDigest": "706f5a458bf473fb6a9ef5d03db56adf5d8b74dda1bd3bf9c7d1a39d5a33af80",
+      "evidenceDigest": "3a23e88811677cd662be28875b2248d1d9435362d3d4742f857e7bf43f53bc3b",
       "surface": "java",
       "status": "retained",
       "classification": "protocol-or-format-invariant",
       "remediationOwner": "#590",
-      "rationale": "Reviewed prepared-SQL atom \"AND m.graph_version = j.graph_version AND m.application_id = j.application_id AND m.node_id = j.node_id \" at ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/BusinessHistoryStorage.java#finishRequestedClosure: scalar join phase, actual missing member/count/seal/availability and terminal result vocabulary, with exact tenant/deployment/version/history/node/round parameter correlation. Result-column positions and CASE constants are protocol facts, never configurable admission limits; READY and original contribution data remain preserved."
+      "rationale": "Reviewed prepared-SQL atom \"AND m.graph_version = j.graph_version AND m.application_id = j.application_id AND m.node_id = j.node_id \" at ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/BusinessHistoryStorage.java#finishRequestedClosure: scalar join phase, actual missing member/count/seal/availability and terminal result vocabulary, with exact tenant/deployment/version/history/node/round parameter correlation. Result-column positions and CASE constants are protocol facts, never configurable admission limits; READY and original contribution data remain preserved.",
+      "identityMigration": {
+        "history": "issue-590-unsatisfied-retained-manifest-completeness-v1",
+        "fromId": "oc-f7198de859a472b5ad7e"
+      }
     },
     {
-      "id": "oc-6cad8ff87ad0d388799b",
+      "id": "oc-0c876dcc9fbdd3a6f89e",
       "path": "ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/BusinessHistoryStorage.java",
       "line": 254,
       "symbol": "finishRequestedClosure",
@@ -204025,15 +204041,19 @@
       "role": "count",
       "expression": "\"AND m.round_id = j.round_id AND m.expected_member = 1 AND m.received_member = 0) THEN 1 ELSE 0 END), \"",
       "expressionDigest": "abe6800d10b04260fb3755bba1e56993a43899b97ddeab782c11b79064d0c8fb",
-      "evidenceDigest": "706f5a458bf473fb6a9ef5d03db56adf5d8b74dda1bd3bf9c7d1a39d5a33af80",
+      "evidenceDigest": "3a23e88811677cd662be28875b2248d1d9435362d3d4742f857e7bf43f53bc3b",
       "surface": "java",
       "status": "retained",
       "classification": "protocol-or-format-invariant",
       "remediationOwner": "#590",
-      "rationale": "Reviewed prepared-SQL atom \"AND m.round_id = j.round_id AND m.expected_member = 1 AND m.received_member = 0) THEN 1 ELSE 0 END), \" at ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/BusinessHistoryStorage.java#finishRequestedClosure: scalar join phase, actual missing member/count/seal/availability and terminal result vocabulary, with exact tenant/deployment/version/history/node/round parameter correlation. Result-column positions and CASE constants are protocol facts, never configurable admission limits; READY and original contribution data remain preserved."
+      "rationale": "Reviewed prepared-SQL atom \"AND m.round_id = j.round_id AND m.expected_member = 1 AND m.received_member = 0) THEN 1 ELSE 0 END), \" at ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/BusinessHistoryStorage.java#finishRequestedClosure: scalar join phase, actual missing member/count/seal/availability and terminal result vocabulary, with exact tenant/deployment/version/history/node/round parameter correlation. Result-column positions and CASE constants are protocol facts, never configurable admission limits; READY and original contribution data remain preserved.",
+      "identityMigration": {
+        "history": "issue-590-unsatisfied-retained-manifest-completeness-v1",
+        "fromId": "oc-6cad8ff87ad0d388799b"
+      }
     },
     {
-      "id": "oc-7a549a81f82d8c8b5af1",
+      "id": "oc-68e89e797777fcb393ae",
       "path": "ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/BusinessHistoryStorage.java",
       "line": 255,
       "symbol": "finishRequestedClosure",
@@ -204041,15 +204061,19 @@
       "role": "count",
       "expression": "\"SUM(CASE WHEN phase IN ('FAILED','CANCELLED','EXPIRED') THEN 1 ELSE 0 END) \"",
       "expressionDigest": "cb62db50db6e8515a269d14b264a6d973eb49473a2e03525d666fee13f523834",
-      "evidenceDigest": "706f5a458bf473fb6a9ef5d03db56adf5d8b74dda1bd3bf9c7d1a39d5a33af80",
+      "evidenceDigest": "3a23e88811677cd662be28875b2248d1d9435362d3d4742f857e7bf43f53bc3b",
       "surface": "java",
       "status": "retained",
       "classification": "protocol-or-format-invariant",
       "remediationOwner": "#590",
-      "rationale": "Reviewed prepared-SQL atom \"SUM(CASE WHEN phase IN ('FAILED','CANCELLED','EXPIRED') THEN 1 ELSE 0 END) \" at ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/BusinessHistoryStorage.java#finishRequestedClosure: scalar join phase, actual missing member/count/seal/availability and terminal result vocabulary, with exact tenant/deployment/version/history/node/round parameter correlation. Result-column positions and CASE constants are protocol facts, never configurable admission limits; READY and original contribution data remain preserved."
+      "rationale": "Reviewed prepared-SQL atom \"SUM(CASE WHEN phase IN ('FAILED','CANCELLED','EXPIRED') THEN 1 ELSE 0 END) \" at ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/BusinessHistoryStorage.java#finishRequestedClosure: scalar join phase, actual missing member/count/seal/availability and terminal result vocabulary, with exact tenant/deployment/version/history/node/round parameter correlation. Result-column positions and CASE constants are protocol facts, never configurable admission limits; READY and original contribution data remain preserved.",
+      "identityMigration": {
+        "history": "issue-590-unsatisfied-retained-manifest-completeness-v1",
+        "fromId": "oc-7a549a81f82d8c8b5af1"
+      }
     },
     {
-      "id": "oc-8853c8392042f7da324e",
+      "id": "oc-5b0b9111a6ab58335af1",
       "path": "ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/BusinessHistoryStorage.java",
       "line": 256,
       "symbol": "finishRequestedClosure",
@@ -204057,18 +204081,18 @@
       "role": "count",
       "expression": "\" AND application_id = ?\"",
       "expressionDigest": "c3952dc284fc2091b5799048b2a66a8a37d2e2627f6bbc01b986965a28c02782",
-      "evidenceDigest": "706f5a458bf473fb6a9ef5d03db56adf5d8b74dda1bd3bf9c7d1a39d5a33af80",
+      "evidenceDigest": "3a23e88811677cd662be28875b2248d1d9435362d3d4742f857e7bf43f53bc3b",
       "surface": "java",
       "status": "retained",
       "classification": "protocol-or-format-invariant",
       "rationale": "Exact prepared SQL scope/column vocabulary enforces tenant/deployment/version or process/traversal identity; numeric atoms are result-column positions and settled/expiry counters, not admission limits.",
       "identityMigration": {
-        "history": "issue-590-atomic-truthful-successful-business-closure-v1",
-        "fromId": "oc-8ebae48df9fcf82a1f9a"
+        "history": "issue-590-unsatisfied-retained-manifest-completeness-v1",
+        "fromId": "oc-8853c8392042f7da324e"
       }
     },
     {
-      "id": "oc-595f72b04685caf02d22",
+      "id": "oc-3e7beff265af613c1561",
       "path": "ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/BusinessHistoryStorage.java",
       "line": 256,
       "symbol": "finishRequestedClosure",
@@ -204076,15 +204100,19 @@
       "role": "count",
       "expression": "\"FROM correlated_business_join j WHERE \"",
       "expressionDigest": "385605b484f0b84c555dae561c5460e356fe2ee79b360b5fe2d024c8890f5a29",
-      "evidenceDigest": "706f5a458bf473fb6a9ef5d03db56adf5d8b74dda1bd3bf9c7d1a39d5a33af80",
+      "evidenceDigest": "3a23e88811677cd662be28875b2248d1d9435362d3d4742f857e7bf43f53bc3b",
       "surface": "java",
       "status": "retained",
       "classification": "protocol-or-format-invariant",
       "remediationOwner": "#590",
-      "rationale": "Reviewed prepared-SQL atom \"FROM correlated_business_join j WHERE \" at ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/BusinessHistoryStorage.java#finishRequestedClosure: scalar join phase, actual missing member/count/seal/availability and terminal result vocabulary, with exact tenant/deployment/version/history/node/round parameter correlation. Result-column positions and CASE constants are protocol facts, never configurable admission limits; READY and original contribution data remain preserved."
+      "rationale": "Reviewed prepared-SQL atom \"FROM correlated_business_join j WHERE \" at ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/BusinessHistoryStorage.java#finishRequestedClosure: scalar join phase, actual missing member/count/seal/availability and terminal result vocabulary, with exact tenant/deployment/version/history/node/round parameter correlation. Result-column positions and CASE constants are protocol facts, never configurable admission limits; READY and original contribution data remain preserved.",
+      "identityMigration": {
+        "history": "issue-590-unsatisfied-retained-manifest-completeness-v1",
+        "fromId": "oc-595f72b04685caf02d22"
+      }
     },
     {
-      "id": "oc-499c82df7dedfa09078d",
+      "id": "oc-4fad697bf5b63e171386",
       "path": "ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/BusinessHistoryStorage.java",
       "line": 257,
       "symbol": "finishRequestedClosure",
@@ -204092,14 +204120,14 @@
       "role": "count",
       "expression": "1",
       "expressionDigest": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
-      "evidenceDigest": "706f5a458bf473fb6a9ef5d03db56adf5d8b74dda1bd3bf9c7d1a39d5a33af80",
+      "evidenceDigest": "3a23e88811677cd662be28875b2248d1d9435362d3d4742f857e7bf43f53bc3b",
       "surface": "java",
       "status": "retained",
       "classification": "derived",
       "rationale": "Exact prepared SQL scope/column vocabulary enforces tenant/deployment/version or process/traversal identity; numeric atoms are result-column positions and settled/expiry counters, not admission limits.",
       "identityMigration": {
-        "history": "issue-590-atomic-truthful-successful-business-closure-v1",
-        "fromId": "oc-e3d55aa6f0181838bdff"
+        "history": "issue-590-unsatisfied-retained-manifest-completeness-v1",
+        "fromId": "oc-499c82df7dedfa09078d"
       }
     },
     {
@@ -208018,7 +208046,7 @@
       "rationale": "Exact prepared SQL scope/column vocabulary enforces tenant/deployment/version or process/traversal identity; numeric atoms are result-column positions and settled/expiry counters, not admission limits."
     },
     {
-      "id": "oc-229ea1c2c243efdf72c0",
+      "id": "oc-08591ff59f2c2e082de9",
       "path": "ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/BusinessHistoryStorage.java",
       "line": 249,
       "symbol": "finishRequestedClosure",
@@ -208026,15 +208054,19 @@
       "role": "count",
       "expression": "\"SELECT SUM(CASE WHEN phase = 'READY' THEN 1 ELSE 0 END), \"",
       "expressionDigest": "e7a543fe969090018b3e57557277d0546af6dc06fc69a1ab037b2f7b89f0d17a",
-      "evidenceDigest": "706f5a458bf473fb6a9ef5d03db56adf5d8b74dda1bd3bf9c7d1a39d5a33af80",
+      "evidenceDigest": "3a23e88811677cd662be28875b2248d1d9435362d3d4742f857e7bf43f53bc3b",
       "surface": "java",
       "status": "retained",
       "classification": "protocol-or-format-invariant",
       "remediationOwner": "#590",
-      "rationale": "Reviewed prepared-SQL atom \"SELECT SUM(CASE WHEN phase = 'READY' THEN 1 ELSE 0 END), \" at ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/BusinessHistoryStorage.java#finishRequestedClosure: scalar join phase, actual missing member/count/seal/availability and terminal result vocabulary, with exact tenant/deployment/version/history/node/round parameter correlation. Result-column positions and CASE constants are protocol facts, never configurable admission limits; READY and original contribution data remain preserved."
+      "rationale": "Reviewed prepared-SQL atom \"SELECT SUM(CASE WHEN phase = 'READY' THEN 1 ELSE 0 END), \" at ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/BusinessHistoryStorage.java#finishRequestedClosure: scalar join phase, actual missing member/count/seal/availability and terminal result vocabulary, with exact tenant/deployment/version/history/node/round parameter correlation. Result-column positions and CASE constants are protocol facts, never configurable admission limits; READY and original contribution data remain preserved.",
+      "identityMigration": {
+        "history": "issue-590-unsatisfied-retained-manifest-completeness-v1",
+        "fromId": "oc-229ea1c2c243efdf72c0"
+      }
     },
     {
-      "id": "oc-8554eee64786a965967f",
+      "id": "oc-7febcf577ad876dd2908",
       "path": "ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/BusinessHistoryStorage.java",
       "line": 250,
       "symbol": "finishRequestedClosure",
@@ -208042,31 +208074,35 @@
       "role": "count",
       "expression": "\"SUM(CASE WHEN phase = 'OPEN' OR phase = 'EXPIRED' OR sealed = 0 OR snapshot IS NULL \"",
       "expressionDigest": "12bdb741980d53676682d046cefc49e3115f343b8b232da4b62f1bf5c0929fef",
-      "evidenceDigest": "706f5a458bf473fb6a9ef5d03db56adf5d8b74dda1bd3bf9c7d1a39d5a33af80",
+      "evidenceDigest": "3a23e88811677cd662be28875b2248d1d9435362d3d4742f857e7bf43f53bc3b",
       "surface": "java",
       "status": "retained",
       "classification": "protocol-or-format-invariant",
       "remediationOwner": "#590",
-      "rationale": "Reviewed prepared-SQL atom \"SUM(CASE WHEN phase = 'OPEN' OR phase = 'EXPIRED' OR sealed = 0 OR snapshot IS NULL \" at ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/BusinessHistoryStorage.java#finishRequestedClosure: scalar join phase, actual missing member/count/seal/availability and terminal result vocabulary, with exact tenant/deployment/version/history/node/round parameter correlation. Result-column positions and CASE constants are protocol facts, never configurable admission limits; READY and original contribution data remain preserved."
+      "rationale": "Reviewed prepared-SQL atom \"SUM(CASE WHEN phase = 'OPEN' OR phase = 'EXPIRED' OR sealed = 0 OR snapshot IS NULL \" at ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/BusinessHistoryStorage.java#finishRequestedClosure: scalar join phase, actual missing member/count/seal/availability and terminal result vocabulary, with exact tenant/deployment/version/history/node/round parameter correlation. Result-column positions and CASE constants are protocol facts, never configurable admission limits; READY and original contribution data remain preserved.",
+      "identityMigration": {
+        "history": "issue-590-unsatisfied-retained-manifest-completeness-v1",
+        "fromId": "oc-8554eee64786a965967f"
+      }
     },
     {
-      "id": "oc-bb17ee19fac46aa3e4d3",
+      "id": "oc-f456af4d45d7f774724c",
       "path": "ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/BusinessHistoryStorage.java",
       "line": 251,
       "symbol": "finishRequestedClosure",
       "kind": "operational-declaration",
       "role": "count",
-      "expression": "\"OR (expectation = 'COUNT' AND expected_count <> received_count) OR EXISTS \"",
-      "expressionDigest": "fb0023e0f450cef3ac58d01c878ec97c6cbca868bce01b6059989c78e425cccb",
-      "evidenceDigest": "706f5a458bf473fb6a9ef5d03db56adf5d8b74dda1bd3bf9c7d1a39d5a33af80",
+      "expression": "\"OR expected_count <> received_count OR EXISTS \"",
+      "expressionDigest": "b3362f2d1cec98d78fba9c096d5f082dbdba2feca0c79061d0cae140e093b300",
+      "evidenceDigest": "3a23e88811677cd662be28875b2248d1d9435362d3d4742f857e7bf43f53bc3b",
       "surface": "java",
       "status": "retained",
       "classification": "protocol-or-format-invariant",
       "remediationOwner": "#590",
-      "rationale": "Reviewed prepared-SQL atom \"OR (expectation = 'COUNT' AND expected_count <> received_count) OR EXISTS \" at ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/BusinessHistoryStorage.java#finishRequestedClosure: scalar join phase, actual missing member/count/seal/availability and terminal result vocabulary, with exact tenant/deployment/version/history/node/round parameter correlation. Result-column positions and CASE constants are protocol facts, never configurable admission limits; READY and original contribution data remain preserved."
+      "rationale": "Exact prepared-SQL manifest/count satisfaction comparison at ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/BusinessHistoryStorage.java#finishRequestedClosure. Expected and received scalar counts must agree, alongside the existing expected-member anti-join, to project the public exact-set satisfaction rule. This protocol predicate preserves retained received/missing rows; it is neither a new configurable limit nor admission/closure authority."
     },
     {
-      "id": "oc-1c949988c9c1d42416e2",
+      "id": "oc-e9aa97f7890fd4ef2e37",
       "path": "ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/BusinessHistoryStorage.java",
       "line": 252,
       "symbol": "finishRequestedClosure",
@@ -208074,15 +208110,19 @@
       "role": "count",
       "expression": "\"(SELECT 1 FROM correlated_join_member m WHERE m.tenant_id = j.tenant_id AND m.deployment_id = j.deployment_id \"",
       "expressionDigest": "ba7a0eae08eacb03e695ab3952a6a803a4c977d28ae513438d0648ce6e4c3aed",
-      "evidenceDigest": "706f5a458bf473fb6a9ef5d03db56adf5d8b74dda1bd3bf9c7d1a39d5a33af80",
+      "evidenceDigest": "3a23e88811677cd662be28875b2248d1d9435362d3d4742f857e7bf43f53bc3b",
       "surface": "java",
       "status": "retained",
       "classification": "protocol-or-format-invariant",
       "remediationOwner": "#590",
-      "rationale": "Reviewed prepared-SQL atom \"(SELECT 1 FROM correlated_join_member m WHERE m.tenant_id = j.tenant_id AND m.deployment_id = j.deployment_id \" at ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/BusinessHistoryStorage.java#finishRequestedClosure: scalar join phase, actual missing member/count/seal/availability and terminal result vocabulary, with exact tenant/deployment/version/history/node/round parameter correlation. Result-column positions and CASE constants are protocol facts, never configurable admission limits; READY and original contribution data remain preserved."
+      "rationale": "Reviewed prepared-SQL atom \"(SELECT 1 FROM correlated_join_member m WHERE m.tenant_id = j.tenant_id AND m.deployment_id = j.deployment_id \" at ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/BusinessHistoryStorage.java#finishRequestedClosure: scalar join phase, actual missing member/count/seal/availability and terminal result vocabulary, with exact tenant/deployment/version/history/node/round parameter correlation. Result-column positions and CASE constants are protocol facts, never configurable admission limits; READY and original contribution data remain preserved.",
+      "identityMigration": {
+        "history": "issue-590-unsatisfied-retained-manifest-completeness-v1",
+        "fromId": "oc-1c949988c9c1d42416e2"
+      }
     },
     {
-      "id": "oc-2563c8368853e18c73e3",
+      "id": "oc-d29ac36a5a8d8c9c9820",
       "path": "ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/BusinessHistoryStorage.java",
       "line": 253,
       "symbol": "finishRequestedClosure",
@@ -208090,15 +208130,19 @@
       "role": "count",
       "expression": "\"AND m.graph_version = j.graph_version AND m.application_id = j.application_id AND m.node_id = j.node_id \"",
       "expressionDigest": "1883f549356d63758ad580fb5eadba6ec67d2099c8755b57b92559148e830159",
-      "evidenceDigest": "706f5a458bf473fb6a9ef5d03db56adf5d8b74dda1bd3bf9c7d1a39d5a33af80",
+      "evidenceDigest": "3a23e88811677cd662be28875b2248d1d9435362d3d4742f857e7bf43f53bc3b",
       "surface": "java",
       "status": "retained",
       "classification": "protocol-or-format-invariant",
       "remediationOwner": "#590",
-      "rationale": "Reviewed prepared-SQL atom \"AND m.graph_version = j.graph_version AND m.application_id = j.application_id AND m.node_id = j.node_id \" at ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/BusinessHistoryStorage.java#finishRequestedClosure: scalar join phase, actual missing member/count/seal/availability and terminal result vocabulary, with exact tenant/deployment/version/history/node/round parameter correlation. Result-column positions and CASE constants are protocol facts, never configurable admission limits; READY and original contribution data remain preserved."
+      "rationale": "Reviewed prepared-SQL atom \"AND m.graph_version = j.graph_version AND m.application_id = j.application_id AND m.node_id = j.node_id \" at ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/BusinessHistoryStorage.java#finishRequestedClosure: scalar join phase, actual missing member/count/seal/availability and terminal result vocabulary, with exact tenant/deployment/version/history/node/round parameter correlation. Result-column positions and CASE constants are protocol facts, never configurable admission limits; READY and original contribution data remain preserved.",
+      "identityMigration": {
+        "history": "issue-590-unsatisfied-retained-manifest-completeness-v1",
+        "fromId": "oc-2563c8368853e18c73e3"
+      }
     },
     {
-      "id": "oc-db9f54908d81ece4d228",
+      "id": "oc-469acb092305f7ea9440",
       "path": "ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/BusinessHistoryStorage.java",
       "line": 254,
       "symbol": "finishRequestedClosure",
@@ -208106,15 +208150,19 @@
       "role": "count",
       "expression": "\"AND m.round_id = j.round_id AND m.expected_member = 1 AND m.received_member = 0) THEN 1 ELSE 0 END), \"",
       "expressionDigest": "abe6800d10b04260fb3755bba1e56993a43899b97ddeab782c11b79064d0c8fb",
-      "evidenceDigest": "706f5a458bf473fb6a9ef5d03db56adf5d8b74dda1bd3bf9c7d1a39d5a33af80",
+      "evidenceDigest": "3a23e88811677cd662be28875b2248d1d9435362d3d4742f857e7bf43f53bc3b",
       "surface": "java",
       "status": "retained",
       "classification": "protocol-or-format-invariant",
       "remediationOwner": "#590",
-      "rationale": "Reviewed prepared-SQL atom \"AND m.round_id = j.round_id AND m.expected_member = 1 AND m.received_member = 0) THEN 1 ELSE 0 END), \" at ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/BusinessHistoryStorage.java#finishRequestedClosure: scalar join phase, actual missing member/count/seal/availability and terminal result vocabulary, with exact tenant/deployment/version/history/node/round parameter correlation. Result-column positions and CASE constants are protocol facts, never configurable admission limits; READY and original contribution data remain preserved."
+      "rationale": "Reviewed prepared-SQL atom \"AND m.round_id = j.round_id AND m.expected_member = 1 AND m.received_member = 0) THEN 1 ELSE 0 END), \" at ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/BusinessHistoryStorage.java#finishRequestedClosure: scalar join phase, actual missing member/count/seal/availability and terminal result vocabulary, with exact tenant/deployment/version/history/node/round parameter correlation. Result-column positions and CASE constants are protocol facts, never configurable admission limits; READY and original contribution data remain preserved.",
+      "identityMigration": {
+        "history": "issue-590-unsatisfied-retained-manifest-completeness-v1",
+        "fromId": "oc-db9f54908d81ece4d228"
+      }
     },
     {
-      "id": "oc-2249e5e61976a468f807",
+      "id": "oc-197cfaf8d0d50458d5bc",
       "path": "ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/BusinessHistoryStorage.java",
       "line": 255,
       "symbol": "finishRequestedClosure",
@@ -208122,15 +208170,19 @@
       "role": "count",
       "expression": "\"SUM(CASE WHEN phase IN ('FAILED','CANCELLED','EXPIRED') THEN 1 ELSE 0 END) \"",
       "expressionDigest": "cb62db50db6e8515a269d14b264a6d973eb49473a2e03525d666fee13f523834",
-      "evidenceDigest": "706f5a458bf473fb6a9ef5d03db56adf5d8b74dda1bd3bf9c7d1a39d5a33af80",
+      "evidenceDigest": "3a23e88811677cd662be28875b2248d1d9435362d3d4742f857e7bf43f53bc3b",
       "surface": "java",
       "status": "retained",
       "classification": "protocol-or-format-invariant",
       "remediationOwner": "#590",
-      "rationale": "Reviewed prepared-SQL atom \"SUM(CASE WHEN phase IN ('FAILED','CANCELLED','EXPIRED') THEN 1 ELSE 0 END) \" at ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/BusinessHistoryStorage.java#finishRequestedClosure: scalar join phase, actual missing member/count/seal/availability and terminal result vocabulary, with exact tenant/deployment/version/history/node/round parameter correlation. Result-column positions and CASE constants are protocol facts, never configurable admission limits; READY and original contribution data remain preserved."
+      "rationale": "Reviewed prepared-SQL atom \"SUM(CASE WHEN phase IN ('FAILED','CANCELLED','EXPIRED') THEN 1 ELSE 0 END) \" at ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/BusinessHistoryStorage.java#finishRequestedClosure: scalar join phase, actual missing member/count/seal/availability and terminal result vocabulary, with exact tenant/deployment/version/history/node/round parameter correlation. Result-column positions and CASE constants are protocol facts, never configurable admission limits; READY and original contribution data remain preserved.",
+      "identityMigration": {
+        "history": "issue-590-unsatisfied-retained-manifest-completeness-v1",
+        "fromId": "oc-2249e5e61976a468f807"
+      }
     },
     {
-      "id": "oc-0e50a8533418d29289c3",
+      "id": "oc-577b3375f0ccf43e847f",
       "path": "ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/BusinessHistoryStorage.java",
       "line": 256,
       "symbol": "finishRequestedClosure",
@@ -208138,18 +208190,18 @@
       "role": "count",
       "expression": "\" AND application_id = ?\"",
       "expressionDigest": "c3952dc284fc2091b5799048b2a66a8a37d2e2627f6bbc01b986965a28c02782",
-      "evidenceDigest": "706f5a458bf473fb6a9ef5d03db56adf5d8b74dda1bd3bf9c7d1a39d5a33af80",
+      "evidenceDigest": "3a23e88811677cd662be28875b2248d1d9435362d3d4742f857e7bf43f53bc3b",
       "surface": "java",
       "status": "retained",
       "classification": "protocol-or-format-invariant",
       "rationale": "Exact prepared SQL scope/column vocabulary enforces tenant/deployment/version or process/traversal identity; numeric atoms are result-column positions and settled/expiry counters, not admission limits.",
       "identityMigration": {
-        "history": "issue-590-atomic-truthful-successful-business-closure-v1",
-        "fromId": "oc-127dabbd8a74e015a849"
+        "history": "issue-590-unsatisfied-retained-manifest-completeness-v1",
+        "fromId": "oc-0e50a8533418d29289c3"
       }
     },
     {
-      "id": "oc-bbc8bd8da90011a9c894",
+      "id": "oc-eeb136ab0d2ce65602f6",
       "path": "ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/BusinessHistoryStorage.java",
       "line": 256,
       "symbol": "finishRequestedClosure",
@@ -208157,15 +208209,19 @@
       "role": "count",
       "expression": "\"FROM correlated_business_join j WHERE \"",
       "expressionDigest": "385605b484f0b84c555dae561c5460e356fe2ee79b360b5fe2d024c8890f5a29",
-      "evidenceDigest": "706f5a458bf473fb6a9ef5d03db56adf5d8b74dda1bd3bf9c7d1a39d5a33af80",
+      "evidenceDigest": "3a23e88811677cd662be28875b2248d1d9435362d3d4742f857e7bf43f53bc3b",
       "surface": "java",
       "status": "retained",
       "classification": "protocol-or-format-invariant",
       "remediationOwner": "#590",
-      "rationale": "Reviewed prepared-SQL atom \"FROM correlated_business_join j WHERE \" at ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/BusinessHistoryStorage.java#finishRequestedClosure: scalar join phase, actual missing member/count/seal/availability and terminal result vocabulary, with exact tenant/deployment/version/history/node/round parameter correlation. Result-column positions and CASE constants are protocol facts, never configurable admission limits; READY and original contribution data remain preserved."
+      "rationale": "Reviewed prepared-SQL atom \"FROM correlated_business_join j WHERE \" at ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/BusinessHistoryStorage.java#finishRequestedClosure: scalar join phase, actual missing member/count/seal/availability and terminal result vocabulary, with exact tenant/deployment/version/history/node/round parameter correlation. Result-column positions and CASE constants are protocol facts, never configurable admission limits; READY and original contribution data remain preserved.",
+      "identityMigration": {
+        "history": "issue-590-unsatisfied-retained-manifest-completeness-v1",
+        "fromId": "oc-bbc8bd8da90011a9c894"
+      }
     },
     {
-      "id": "oc-f950670e2cff44289871",
+      "id": "oc-041b1d11674d9647dcc8",
       "path": "ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/BusinessHistoryStorage.java",
       "line": 257,
       "symbol": "finishRequestedClosure",
@@ -208173,14 +208229,14 @@
       "role": "count",
       "expression": "1",
       "expressionDigest": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
-      "evidenceDigest": "706f5a458bf473fb6a9ef5d03db56adf5d8b74dda1bd3bf9c7d1a39d5a33af80",
+      "evidenceDigest": "3a23e88811677cd662be28875b2248d1d9435362d3d4742f857e7bf43f53bc3b",
       "surface": "java",
       "status": "retained",
       "classification": "derived",
       "rationale": "Exact prepared SQL scope/column vocabulary enforces tenant/deployment/version or process/traversal identity; numeric atoms are result-column positions and settled/expiry counters, not admission limits.",
       "identityMigration": {
-        "history": "issue-590-atomic-truthful-successful-business-closure-v1",
-        "fromId": "oc-1bb68e30ce9a59a4d6de"
+        "history": "issue-590-unsatisfied-retained-manifest-completeness-v1",
+        "fromId": "oc-f950670e2cff44289871"
       }
     },
     {
@@ -211394,7 +211450,7 @@
     {
       "id": "oc-276887b95074c74a2091",
       "path": "ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/BusinessClosureContract.java",
-      "line": 134,
+      "line": 159,
       "symbol": "try",
       "kind": "operational-declaration",
       "role": "beforeRetry",
@@ -211409,7 +211465,7 @@
     {
       "id": "oc-cd9bf5e40ece9d6ce530",
       "path": "ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/BusinessClosureContract.java",
-      "line": 136,
+      "line": 161,
       "symbol": "try",
       "kind": "operational-declaration",
       "role": "retry",
@@ -211424,7 +211480,7 @@
     {
       "id": "oc-ee5a4b90637cbba1a7bd",
       "path": "ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/BusinessClosureContract.java",
-      "line": 154,
+      "line": 179,
       "symbol": "try",
       "kind": "operational-declaration",
       "role": "lease",
@@ -211439,7 +211495,7 @@
     {
       "id": "oc-0b9d4a94669162aadbcc",
       "path": "ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/BusinessClosureContract.java",
-      "line": 154,
+      "line": 179,
       "symbol": "try",
       "kind": "operational-declaration",
       "role": "lease",
@@ -211454,7 +211510,7 @@
     {
       "id": "oc-bd04f20f86d2604a343a",
       "path": "ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/BusinessClosureContract.java",
-      "line": 230,
+      "line": 255,
       "symbol": "work",
       "kind": "inline-operational-call",
       "role": "Duration.ofSeconds",
@@ -211469,7 +211525,7 @@
     {
       "id": "oc-cd0304912d42d31f4155",
       "path": "ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/BusinessClosureContract.java",
-      "line": 230,
+      "line": 255,
       "symbol": "work",
       "kind": "inline-operational-call",
       "role": "Duration.ofSeconds",
@@ -211484,7 +211540,7 @@
     {
       "id": "oc-a499e6a398b112a37721",
       "path": "ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/BusinessClosureContract.java",
-      "line": 259,
+      "line": 284,
       "symbol": "contribution",
       "kind": "inline-operational-call",
       "role": "timeunit-get",
@@ -681727,6 +681783,42 @@
       "rationale": "Exact prepared SQL scope/column vocabulary enforces tenant/deployment/version or process/traversal identity; numeric atoms are result-column positions and settled/expiry counters, not admission limits.",
       "retirementRationale": "This exact former SQL fragment \"FROM correlated_business_join WHERE \" was replaced by the expanded scoped aggregate distinguishing READY release, actual member/count/seal/payload completeness and unsuccessful terminal phases. It is not a removed safety check; original reviewed metadata is preserved in retirement and the new prepared SQL remains bound to the same exact scope/history.",
       "evidence": "try (var count = db.prepareStatement(\"SELECT SUM(CASE WHEN phase = 'READY' THEN 1 ELSE 0 END), SUM(CASE WHEN phase = 'OPEN' THEN 1 ELSE 0 END) \" + \"FROM correlated_business_join WHERE \" + SCOPE + \" AND application_id = ?\")) { int at = bindScope(count, 1, scope);"
+    },
+    {
+      "id": "oc-bb17ee19fac46aa3e4d3",
+      "path": "ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/BusinessHistoryStorage.java",
+      "line": 251,
+      "symbol": "finishRequestedClosure",
+      "kind": "operational-declaration",
+      "role": "count",
+      "expression": "\"OR (expectation = 'COUNT' AND expected_count <> received_count) OR EXISTS \"",
+      "expressionDigest": "fb0023e0f450cef3ac58d01c878ec97c6cbca868bce01b6059989c78e425cccb",
+      "evidenceDigest": "706f5a458bf473fb6a9ef5d03db56adf5d8b74dda1bd3bf9c7d1a39d5a33af80",
+      "surface": "java",
+      "status": "retained",
+      "classification": "protocol-or-format-invariant",
+      "remediationOwner": "#590",
+      "rationale": "Reviewed prepared-SQL atom \"OR (expectation = 'COUNT' AND expected_count <> received_count) OR EXISTS \" at ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/BusinessHistoryStorage.java#finishRequestedClosure: scalar join phase, actual missing member/count/seal/availability and terminal result vocabulary, with exact tenant/deployment/version/history/node/round parameter correlation. Result-column positions and CASE constants are protocol facts, never configurable admission limits; READY and original contribution data remain preserved.",
+      "retirementRationale": "The COUNT-only qualification of the scalar exact collection-size comparison was replaced by an unconditional comparison, matching public CorrelatedJoinRecord.satisfied for manifest and count checkpoints. Original received/missing metadata is unchanged; this superseded prepared-SQL fragment and its reviewed record remain in retirement history.",
+      "evidence": "try (var count = db.prepareStatement(\"SELECT SUM(CASE WHEN phase = 'READY' THEN 1 ELSE 0 END), \" + \"SUM(CASE WHEN phase = 'OPEN' OR phase = 'EXPIRED' OR sealed = 0 OR snapshot IS NULL \" + \"OR (expectation = 'COUNT' AND expected_count <> received_count) OR EXISTS \" + \"(SELECT 1 FROM correlated_join_member m WHERE m.tenant_id = j.tenant_id AND m.deployment_id = j.deployment_id \" + \"AND m.graph_version = j.graph_version AND m.application_id = j.application_id AND m.node_id = j.node_id \" + \"AND m.round_id = j.round_id AND m.expected_member = 1 AND m.received_member = 0) THEN 1 ELSE 0 END), \" + \"SUM(CASE WHEN phase IN ('FAILED','CANCELLED','EXPIRED') THEN 1 ELSE 0 END) \" + \"FROM correlated_business_join j WHERE \" + SCOPE + \" AND application_id = ?\")) { int at = bindScope(count, 1, scope);"
+    },
+    {
+      "id": "oc-d8e299dfff760d722f7e",
+      "path": "ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/BusinessHistoryStorage.java",
+      "line": 251,
+      "symbol": "finishRequestedClosure",
+      "kind": "operational-declaration",
+      "role": "count",
+      "expression": "\"OR (expectation = 'COUNT' AND expected_count <> received_count) OR EXISTS \"",
+      "expressionDigest": "fb0023e0f450cef3ac58d01c878ec97c6cbca868bce01b6059989c78e425cccb",
+      "evidenceDigest": "706f5a458bf473fb6a9ef5d03db56adf5d8b74dda1bd3bf9c7d1a39d5a33af80",
+      "surface": "java",
+      "status": "retained",
+      "classification": "protocol-or-format-invariant",
+      "remediationOwner": "#590",
+      "rationale": "Reviewed prepared-SQL atom \"OR (expectation = 'COUNT' AND expected_count <> received_count) OR EXISTS \" at ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/BusinessHistoryStorage.java#finishRequestedClosure: scalar join phase, actual missing member/count/seal/availability and terminal result vocabulary, with exact tenant/deployment/version/history/node/round parameter correlation. Result-column positions and CASE constants are protocol facts, never configurable admission limits; READY and original contribution data remain preserved.",
+      "retirementRationale": "The COUNT-only qualification of the scalar exact collection-size comparison was replaced by an unconditional comparison, matching public CorrelatedJoinRecord.satisfied for manifest and count checkpoints. Original received/missing metadata is unchanged; this superseded prepared-SQL fragment and its reviewed record remain in retirement history.",
+      "evidence": "try (var count = db.prepareStatement(\"SELECT SUM(CASE WHEN phase = 'READY' THEN 1 ELSE 0 END), \" + \"SUM(CASE WHEN phase = 'OPEN' OR phase = 'EXPIRED' OR sealed = 0 OR snapshot IS NULL \" + \"OR (expectation = 'COUNT' AND expected_count <> received_count) OR EXISTS \" + \"(SELECT 1 FROM correlated_join_member m WHERE m.tenant_id = j.tenant_id AND m.deployment_id = j.deployment_id \" + \"AND m.graph_version = j.graph_version AND m.application_id = j.application_id AND m.node_id = j.node_id \" + \"AND m.round_id = j.round_id AND m.expected_member = 1 AND m.received_member = 0) THEN 1 ELSE 0 END), \" + \"SUM(CASE WHEN phase IN ('FAILED','CANCELLED','EXPIRED') THEN 1 ELSE 0 END) \" + \"FROM correlated_business_join j WHERE \" + SCOPE + \" AND application_id = ?\")) { int at = bindScope(count, 1, scope);"
     }
   ],
   "evidenceRecords": {
@@ -684332,6 +684424,7 @@
     "3a1a133606c97775d50afd01359bbe8c37c6e4231c1757e7b99d7bbf0ea792da": "final class GithubValues { static final PayloadLimits LIMITS = new PayloadLimits(4 * 1024 * 1024, 32, 512, 20_000, 2 * 1024 * 1024, 256);",
     "3a1ccdb406af366a648a1f6ca6e3f7444af2315bb182d1fcbc635e435d567989": "public static final String EXCHANGE_PATH = \"/v1/embed/exchange\";",
     "3a1d738e301c001de6cdf3202306b704cd3b02910249c237d142a48579864425": "find \"$dir/src/main/java\" -name '*NodePackage.java' -print -quit 2>/dev/null | grep -q . || continue",
+    "3a23e88811677cd662be28875b2248d1d9435362d3d4742f857e7bf43f53bc3b": "try (var count = db.prepareStatement(\"SELECT SUM(CASE WHEN phase = 'READY' THEN 1 ELSE 0 END), \" + \"SUM(CASE WHEN phase = 'OPEN' OR phase = 'EXPIRED' OR sealed = 0 OR snapshot IS NULL \" + \"OR expected_count <> received_count OR EXISTS \" + \"(SELECT 1 FROM correlated_join_member m WHERE m.tenant_id = j.tenant_id AND m.deployment_id = j.deployment_id \" + \"AND m.graph_version = j.graph_version AND m.application_id = j.application_id AND m.node_id = j.node_id \" + \"AND m.round_id = j.round_id AND m.expected_member = 1 AND m.received_member = 0) THEN 1 ELSE 0 END), \" + \"SUM(CASE WHEN phase IN ('FAILED','CANCELLED','EXPIRED') THEN 1 ELSE 0 END) \" + \"FROM correlated_business_join j WHERE \" + SCOPE + \" AND application_id = ?\")) { int at = bindScope(count, 1, scope);",
     "3a36ed6ad2a865ccd37956c19e635ecd26f4eaaba25a0b134b9be42876e0df52": "const options = allowed.map(identifier => `<option value=\"${escapeAttribute(identifier)}\" ${resolved.declared && resolved.value === identifier ? 'selected' : ''}>${escapeHtml(natureLabel(identifier))}</option>`).join('');",
     "3a394efc78279ce4e3a6f3f7e80a70ff9b21c6fee2619fbe69e8fd4782564db4": "\"defaults.connectTimeout().toSeconds(), 1, 300\",",
     "3a42676db1e6eb7f68f52168cef74a7e2cc3b368027091bf14b11c8820ff5f94": "Duration waited = Duration.ofNanos(Math.max(0, System.nanoTime() - start));",
@@ -686833,7 +686926,6 @@
     "7057d4ba25ad15c7bbcc1ce8ca80a8bb0e211577736725e93319bd94756f737b": "compose_config \"$TEMP_DIR/compose-malformed.json\" RAVENROOT_RATELIMIT_ADDRESS_RPS=not-a-number",
     "70597e4e84d1f3eb749d44895a1b18694b8d5427a13a8c9ef7facb62b061399e": "public static final int DEFAULT_MAX_DISCOVERED_MCP_TOOLS_PER_SERVER = 1_024;",
     "70699400e5d031aa84b013b23d6ce03d7268cd2971600ed18e94c07bc8245a7b": "self.assertEqual(\"graph\", group(\"RAVENROOT_GRAPHML_MAX_DEPTH\"))",
-    "706f5a458bf473fb6a9ef5d03db56adf5d8b74dda1bd3bf9c7d1a39d5a33af80": "try (var count = db.prepareStatement(\"SELECT SUM(CASE WHEN phase = 'READY' THEN 1 ELSE 0 END), \" + \"SUM(CASE WHEN phase = 'OPEN' OR phase = 'EXPIRED' OR sealed = 0 OR snapshot IS NULL \" + \"OR (expectation = 'COUNT' AND expected_count <> received_count) OR EXISTS \" + \"(SELECT 1 FROM correlated_join_member m WHERE m.tenant_id = j.tenant_id AND m.deployment_id = j.deployment_id \" + \"AND m.graph_version = j.graph_version AND m.application_id = j.application_id AND m.node_id = j.node_id \" + \"AND m.round_id = j.round_id AND m.expected_member = 1 AND m.received_member = 0) THEN 1 ELSE 0 END), \" + \"SUM(CASE WHEN phase IN ('FAILED','CANCELLED','EXPIRED') THEN 1 ELSE 0 END) \" + \"FROM correlated_business_join j WHERE \" + SCOPE + \" AND application_id = ?\")) { int at = bindScope(count, 1, scope);",
     "7070c8838f9d052745fa8733a1a5bb4c179ed6ae99027f7d93939fbb89148f01": "\"$PROJECT_DIR/deploy/kubernetes/ravenroot.yaml\" \"$POLICY_ENV\" <<'PY'",
     "7070df66d1bfb1cc495770dd33fa46f9cdfac7c7732777d8f9940bc9214088d2": "RAVENROOT_HUMAN_TASK_MAX_CONFIRMATION_PROMPT_BYTES: ${RAVENROOT_HUMAN_TASK_MAX_CONFIRMATION_PROMPT_BYTES:-}",
     "70744e6e7ab695e4de074c5c7c01fbc7cfa499b52e4fb4136dc2df81d1a2f2c2": "private static final Set<String> FIELDS = Set.of(\"origin\", \"region\", \"bucket\", \"keyPrefix\", \"addressingStyle\", \"signingBindingId\", \"operations\", \"contentTypes\", \"allowIfMatch\", \"allowIfNoneMatch\", \"maxObjectBytes\", \"timeoutMs\", \"maxConcurrency\", \"maxRequestsPerSecond\");",
@@ -1379252,6 +1379344,247 @@
             "classification": "test-fixture",
             "remediationOwner": "#590",
             "rationale": "Reviewed fixture atom 10 at ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/CorrelatedJoinContract.java#try: finite concurrent-client completion bound or exact test selection for CAS expiry and reopen; no production policy or permission."
+          }
+        }
+      ]
+    },
+    {
+      "id": "issue-590-unsatisfied-retained-manifest-completeness-v1",
+      "issue": "#590",
+      "sourceRevision": "b0e5c3e77a9999f2ae037d4ed2fa7510cbc842d7",
+      "targetRevision": "643fd2baa17ccee5f890973a50489e2b1933b957",
+      "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+      "sourceInventoryDigest": "04a091396f25a30d09c9e3ddeeca6fd163e38ced150d5f1a7d630181ea246df8",
+      "targetCandidateDigest": "8e9d619cf2f647f31c57dc7297128b776bb1f922490a075f99527daded6b4624",
+      "mappings": [
+        {
+          "fromId": "oc-0e50a8533418d29289c3",
+          "toId": "oc-577b3375f0ccf43e847f",
+          "approved": true,
+          "rationale": "Preserve this exact prepared-SQL atom and its prior explicit review: path, symbol, kind, role and expression are identical; only containing aggregate evidence changed with the manifest completeness comparison. No owner/default/proof/cohort semantics change.",
+          "equivalence": {
+            "kind": "same-atom-v1",
+            "beforeEvidenceDigest": "706f5a458bf473fb6a9ef5d03db56adf5d8b74dda1bd3bf9c7d1a39d5a33af80",
+            "afterEvidenceDigest": "3a23e88811677cd662be28875b2248d1d9435362d3d4742f857e7bf43f53bc3b"
+          }
+        },
+        {
+          "fromId": "oc-1c949988c9c1d42416e2",
+          "toId": "oc-e9aa97f7890fd4ef2e37",
+          "approved": true,
+          "rationale": "Preserve this exact prepared-SQL atom and its prior explicit review: path, symbol, kind, role and expression are identical; only containing aggregate evidence changed with the manifest completeness comparison. No owner/default/proof/cohort semantics change.",
+          "equivalence": {
+            "kind": "same-atom-v1",
+            "beforeEvidenceDigest": "706f5a458bf473fb6a9ef5d03db56adf5d8b74dda1bd3bf9c7d1a39d5a33af80",
+            "afterEvidenceDigest": "3a23e88811677cd662be28875b2248d1d9435362d3d4742f857e7bf43f53bc3b"
+          }
+        },
+        {
+          "fromId": "oc-2249e5e61976a468f807",
+          "toId": "oc-197cfaf8d0d50458d5bc",
+          "approved": true,
+          "rationale": "Preserve this exact prepared-SQL atom and its prior explicit review: path, symbol, kind, role and expression are identical; only containing aggregate evidence changed with the manifest completeness comparison. No owner/default/proof/cohort semantics change.",
+          "equivalence": {
+            "kind": "same-atom-v1",
+            "beforeEvidenceDigest": "706f5a458bf473fb6a9ef5d03db56adf5d8b74dda1bd3bf9c7d1a39d5a33af80",
+            "afterEvidenceDigest": "3a23e88811677cd662be28875b2248d1d9435362d3d4742f857e7bf43f53bc3b"
+          }
+        },
+        {
+          "fromId": "oc-229ea1c2c243efdf72c0",
+          "toId": "oc-08591ff59f2c2e082de9",
+          "approved": true,
+          "rationale": "Preserve this exact prepared-SQL atom and its prior explicit review: path, symbol, kind, role and expression are identical; only containing aggregate evidence changed with the manifest completeness comparison. No owner/default/proof/cohort semantics change.",
+          "equivalence": {
+            "kind": "same-atom-v1",
+            "beforeEvidenceDigest": "706f5a458bf473fb6a9ef5d03db56adf5d8b74dda1bd3bf9c7d1a39d5a33af80",
+            "afterEvidenceDigest": "3a23e88811677cd662be28875b2248d1d9435362d3d4742f857e7bf43f53bc3b"
+          }
+        },
+        {
+          "fromId": "oc-2563c8368853e18c73e3",
+          "toId": "oc-d29ac36a5a8d8c9c9820",
+          "approved": true,
+          "rationale": "Preserve this exact prepared-SQL atom and its prior explicit review: path, symbol, kind, role and expression are identical; only containing aggregate evidence changed with the manifest completeness comparison. No owner/default/proof/cohort semantics change.",
+          "equivalence": {
+            "kind": "same-atom-v1",
+            "beforeEvidenceDigest": "706f5a458bf473fb6a9ef5d03db56adf5d8b74dda1bd3bf9c7d1a39d5a33af80",
+            "afterEvidenceDigest": "3a23e88811677cd662be28875b2248d1d9435362d3d4742f857e7bf43f53bc3b"
+          }
+        },
+        {
+          "fromId": "oc-48f3fd775d8371501631",
+          "toId": "oc-0074a660a8bc92abdb30",
+          "approved": true,
+          "rationale": "Preserve this exact prepared-SQL atom and its prior explicit review: path, symbol, kind, role and expression are identical; only containing aggregate evidence changed with the manifest completeness comparison. No owner/default/proof/cohort semantics change.",
+          "equivalence": {
+            "kind": "same-atom-v1",
+            "beforeEvidenceDigest": "706f5a458bf473fb6a9ef5d03db56adf5d8b74dda1bd3bf9c7d1a39d5a33af80",
+            "afterEvidenceDigest": "3a23e88811677cd662be28875b2248d1d9435362d3d4742f857e7bf43f53bc3b"
+          }
+        },
+        {
+          "fromId": "oc-499c82df7dedfa09078d",
+          "toId": "oc-4fad697bf5b63e171386",
+          "approved": true,
+          "rationale": "Preserve this exact prepared-SQL atom and its prior explicit review: path, symbol, kind, role and expression are identical; only containing aggregate evidence changed with the manifest completeness comparison. No owner/default/proof/cohort semantics change.",
+          "equivalence": {
+            "kind": "same-atom-v1",
+            "beforeEvidenceDigest": "706f5a458bf473fb6a9ef5d03db56adf5d8b74dda1bd3bf9c7d1a39d5a33af80",
+            "afterEvidenceDigest": "3a23e88811677cd662be28875b2248d1d9435362d3d4742f857e7bf43f53bc3b"
+          }
+        },
+        {
+          "fromId": "oc-595f72b04685caf02d22",
+          "toId": "oc-3e7beff265af613c1561",
+          "approved": true,
+          "rationale": "Preserve this exact prepared-SQL atom and its prior explicit review: path, symbol, kind, role and expression are identical; only containing aggregate evidence changed with the manifest completeness comparison. No owner/default/proof/cohort semantics change.",
+          "equivalence": {
+            "kind": "same-atom-v1",
+            "beforeEvidenceDigest": "706f5a458bf473fb6a9ef5d03db56adf5d8b74dda1bd3bf9c7d1a39d5a33af80",
+            "afterEvidenceDigest": "3a23e88811677cd662be28875b2248d1d9435362d3d4742f857e7bf43f53bc3b"
+          }
+        },
+        {
+          "fromId": "oc-6cad8ff87ad0d388799b",
+          "toId": "oc-0c876dcc9fbdd3a6f89e",
+          "approved": true,
+          "rationale": "Preserve this exact prepared-SQL atom and its prior explicit review: path, symbol, kind, role and expression are identical; only containing aggregate evidence changed with the manifest completeness comparison. No owner/default/proof/cohort semantics change.",
+          "equivalence": {
+            "kind": "same-atom-v1",
+            "beforeEvidenceDigest": "706f5a458bf473fb6a9ef5d03db56adf5d8b74dda1bd3bf9c7d1a39d5a33af80",
+            "afterEvidenceDigest": "3a23e88811677cd662be28875b2248d1d9435362d3d4742f857e7bf43f53bc3b"
+          }
+        },
+        {
+          "fromId": "oc-74e5b6680da19d9a4e69",
+          "toId": "oc-9e5277a69fc963956573",
+          "approved": true,
+          "rationale": "Preserve this exact prepared-SQL atom and its prior explicit review: path, symbol, kind, role and expression are identical; only containing aggregate evidence changed with the manifest completeness comparison. No owner/default/proof/cohort semantics change.",
+          "equivalence": {
+            "kind": "same-atom-v1",
+            "beforeEvidenceDigest": "706f5a458bf473fb6a9ef5d03db56adf5d8b74dda1bd3bf9c7d1a39d5a33af80",
+            "afterEvidenceDigest": "3a23e88811677cd662be28875b2248d1d9435362d3d4742f857e7bf43f53bc3b"
+          }
+        },
+        {
+          "fromId": "oc-7a549a81f82d8c8b5af1",
+          "toId": "oc-68e89e797777fcb393ae",
+          "approved": true,
+          "rationale": "Preserve this exact prepared-SQL atom and its prior explicit review: path, symbol, kind, role and expression are identical; only containing aggregate evidence changed with the manifest completeness comparison. No owner/default/proof/cohort semantics change.",
+          "equivalence": {
+            "kind": "same-atom-v1",
+            "beforeEvidenceDigest": "706f5a458bf473fb6a9ef5d03db56adf5d8b74dda1bd3bf9c7d1a39d5a33af80",
+            "afterEvidenceDigest": "3a23e88811677cd662be28875b2248d1d9435362d3d4742f857e7bf43f53bc3b"
+          }
+        },
+        {
+          "fromId": "oc-8554eee64786a965967f",
+          "toId": "oc-7febcf577ad876dd2908",
+          "approved": true,
+          "rationale": "Preserve this exact prepared-SQL atom and its prior explicit review: path, symbol, kind, role and expression are identical; only containing aggregate evidence changed with the manifest completeness comparison. No owner/default/proof/cohort semantics change.",
+          "equivalence": {
+            "kind": "same-atom-v1",
+            "beforeEvidenceDigest": "706f5a458bf473fb6a9ef5d03db56adf5d8b74dda1bd3bf9c7d1a39d5a33af80",
+            "afterEvidenceDigest": "3a23e88811677cd662be28875b2248d1d9435362d3d4742f857e7bf43f53bc3b"
+          }
+        },
+        {
+          "fromId": "oc-8853c8392042f7da324e",
+          "toId": "oc-5b0b9111a6ab58335af1",
+          "approved": true,
+          "rationale": "Preserve this exact prepared-SQL atom and its prior explicit review: path, symbol, kind, role and expression are identical; only containing aggregate evidence changed with the manifest completeness comparison. No owner/default/proof/cohort semantics change.",
+          "equivalence": {
+            "kind": "same-atom-v1",
+            "beforeEvidenceDigest": "706f5a458bf473fb6a9ef5d03db56adf5d8b74dda1bd3bf9c7d1a39d5a33af80",
+            "afterEvidenceDigest": "3a23e88811677cd662be28875b2248d1d9435362d3d4742f857e7bf43f53bc3b"
+          }
+        },
+        {
+          "fromId": "oc-ae6f4eefa0c21e39a9a3",
+          "toId": "oc-2447790f3b035171817e",
+          "approved": true,
+          "rationale": "Preserve this exact prepared-SQL atom and its prior explicit review: path, symbol, kind, role and expression are identical; only containing aggregate evidence changed with the manifest completeness comparison. No owner/default/proof/cohort semantics change.",
+          "equivalence": {
+            "kind": "same-atom-v1",
+            "beforeEvidenceDigest": "706f5a458bf473fb6a9ef5d03db56adf5d8b74dda1bd3bf9c7d1a39d5a33af80",
+            "afterEvidenceDigest": "3a23e88811677cd662be28875b2248d1d9435362d3d4742f857e7bf43f53bc3b"
+          }
+        },
+        {
+          "fromId": "oc-bbc8bd8da90011a9c894",
+          "toId": "oc-eeb136ab0d2ce65602f6",
+          "approved": true,
+          "rationale": "Preserve this exact prepared-SQL atom and its prior explicit review: path, symbol, kind, role and expression are identical; only containing aggregate evidence changed with the manifest completeness comparison. No owner/default/proof/cohort semantics change.",
+          "equivalence": {
+            "kind": "same-atom-v1",
+            "beforeEvidenceDigest": "706f5a458bf473fb6a9ef5d03db56adf5d8b74dda1bd3bf9c7d1a39d5a33af80",
+            "afterEvidenceDigest": "3a23e88811677cd662be28875b2248d1d9435362d3d4742f857e7bf43f53bc3b"
+          }
+        },
+        {
+          "fromId": "oc-db9f54908d81ece4d228",
+          "toId": "oc-469acb092305f7ea9440",
+          "approved": true,
+          "rationale": "Preserve this exact prepared-SQL atom and its prior explicit review: path, symbol, kind, role and expression are identical; only containing aggregate evidence changed with the manifest completeness comparison. No owner/default/proof/cohort semantics change.",
+          "equivalence": {
+            "kind": "same-atom-v1",
+            "beforeEvidenceDigest": "706f5a458bf473fb6a9ef5d03db56adf5d8b74dda1bd3bf9c7d1a39d5a33af80",
+            "afterEvidenceDigest": "3a23e88811677cd662be28875b2248d1d9435362d3d4742f857e7bf43f53bc3b"
+          }
+        },
+        {
+          "fromId": "oc-f7198de859a472b5ad7e",
+          "toId": "oc-137851a9d6f8cb6a0183",
+          "approved": true,
+          "rationale": "Preserve this exact prepared-SQL atom and its prior explicit review: path, symbol, kind, role and expression are identical; only containing aggregate evidence changed with the manifest completeness comparison. No owner/default/proof/cohort semantics change.",
+          "equivalence": {
+            "kind": "same-atom-v1",
+            "beforeEvidenceDigest": "706f5a458bf473fb6a9ef5d03db56adf5d8b74dda1bd3bf9c7d1a39d5a33af80",
+            "afterEvidenceDigest": "3a23e88811677cd662be28875b2248d1d9435362d3d4742f857e7bf43f53bc3b"
+          }
+        },
+        {
+          "fromId": "oc-f950670e2cff44289871",
+          "toId": "oc-041b1d11674d9647dcc8",
+          "approved": true,
+          "rationale": "Preserve this exact prepared-SQL atom and its prior explicit review: path, symbol, kind, role and expression are identical; only containing aggregate evidence changed with the manifest completeness comparison. No owner/default/proof/cohort semantics change.",
+          "equivalence": {
+            "kind": "same-atom-v1",
+            "beforeEvidenceDigest": "706f5a458bf473fb6a9ef5d03db56adf5d8b74dda1bd3bf9c7d1a39d5a33af80",
+            "afterEvidenceDigest": "3a23e88811677cd662be28875b2248d1d9435362d3d4742f857e7bf43f53bc3b"
+          }
+        }
+      ],
+      "retirements": [
+        {
+          "id": "oc-bb17ee19fac46aa3e4d3",
+          "approved": true,
+          "rationale": "The COUNT-only qualification of the scalar exact collection-size comparison was replaced by an unconditional comparison, matching public CorrelatedJoinRecord.satisfied for manifest and count checkpoints. Original received/missing metadata is unchanged; this superseded prepared-SQL fragment and its reviewed record remain in retirement history."
+        },
+        {
+          "id": "oc-d8e299dfff760d722f7e",
+          "approved": true,
+          "rationale": "The COUNT-only qualification of the scalar exact collection-size comparison was replaced by an unconditional comparison, matching public CorrelatedJoinRecord.satisfied for manifest and count checkpoints. Original received/missing metadata is unchanged; this superseded prepared-SQL fragment and its reviewed record remain in retirement history."
+        }
+      ],
+      "additions": [
+        {
+          "id": "oc-dd467d11cfd3e50446c0",
+          "metadata": {
+            "status": "retained",
+            "classification": "protocol-or-format-invariant",
+            "remediationOwner": "#590",
+            "rationale": "Exact prepared-SQL manifest/count satisfaction comparison at ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/BusinessHistoryStorage.java#finishRequestedClosure. Expected and received scalar counts must agree, alongside the existing expected-member anti-join, to project the public exact-set satisfaction rule. This protocol predicate preserves retained received/missing rows; it is neither a new configurable limit nor admission/closure authority."
+          }
+        },
+        {
+          "id": "oc-f456af4d45d7f774724c",
+          "metadata": {
+            "status": "retained",
+            "classification": "protocol-or-format-invariant",
+            "remediationOwner": "#590",
+            "rationale": "Exact prepared-SQL manifest/count satisfaction comparison at ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/BusinessHistoryStorage.java#finishRequestedClosure. Expected and received scalar counts must agree, alongside the existing expected-member anti-join, to project the public exact-set satisfaction rule. This protocol predicate preserves retained received/missing rows; it is neither a new configurable limit nor admission/closure authority."
           }
         }
       ]

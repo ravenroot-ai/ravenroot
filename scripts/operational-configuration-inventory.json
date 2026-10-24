@@ -1374153,6 +1374153,18 @@
       "mappings": [],
       "retirements": [],
       "additions": []
+    },
+    {
+      "id": "issue-590-browser-history-measurement-scope-v1",
+      "issue": "#590",
+      "sourceRevision": "cb3762acf550d2f3809ef0088dc2914c6b35f3c6",
+      "targetRevision": "842adf1548fcae404e6f7139e634f15c4d9a491f",
+      "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+      "sourceInventoryDigest": "c75f78f9bb972d058cf582ad2267f6e11b4531ca234aac812001ba1d8028be0c",
+      "targetCandidateDigest": "c77f5529bd6bacdd78ca8a508e4756771ff961efe192a209d8f5274e30ac4cc8",
+      "mappings": [],
+      "retirements": [],
+      "additions": []
     }
   ],
   "semanticReviewHistory": [

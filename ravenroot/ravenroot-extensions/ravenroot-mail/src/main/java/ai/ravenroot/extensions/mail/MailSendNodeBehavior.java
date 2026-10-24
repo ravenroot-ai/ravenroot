@@ -110,7 +110,8 @@ public final class MailSendNodeBehavior implements NodeBehavior {
                 //
                 // Nothing about when this node retries changed with that finding: connect() retries
                 // only connection establishment, and sendMessage() is invoked exactly once.
-        ), Set.of("network", "credential-reference", "side-effect"));
+        ), Set.of("network", "credential-reference", "side-effect"))
+                .withProperties(ai.ravenroot.api.correlation.CorrelationHeaderMapping.descriptors());
     }
 
     private static NodePropertyDescriptor required(String n, String display, String description) {
@@ -128,14 +129,18 @@ public final class MailSendNodeBehavior implements NodeBehavior {
 
     @Override public NodeAction create(NodeConfiguration configuration) {
         var actionSlots = new java.util.concurrent.ConcurrentHashMap<String, Gate>();
+        var correlationHeaders = ai.ravenroot.api.correlation.CorrelationHeaderMapping.read(configuration.properties(), List.of());
         return message -> {
             final Settings settings;
             try {
+                final Object outgoingPayload;
+                try { outgoingPayload = correlationHeaders.attachPayloadHeaders(message.payload(), message.applicationCorrelation()); }
+                catch (IllegalArgumentException refused) { return CompletableFuture.failedFuture(new MailSendException(MailSendException.Code.INVALID_INPUT, refused.getMessage())); }
                 settings = Settings.from(configuration, profiles, destinationPolicy, message.tenantId());
                 if (!MAIL_SLOTS.tryAcquire()) return CompletableFuture.failedFuture(new MailSendException(MailSendException.Code.CAPACITY_UNAVAILABLE, "Mail delivery capacity is unavailable"));
                 Admission admission = Admission.acquire(message.tenantId(), settings, actionSlots);
                 if (!admission.acquired()) { MAIL_SLOTS.release(); return CompletableFuture.failedFuture(new MailSendException(MailSendException.Code.CAPACITY_UNAVAILABLE, "Mail delivery capacity is unavailable")); }
-                try { return CompletableFuture.supplyAsync(() -> { try { return send(settings, message.payload()); } finally { admission.release(); MAIL_SLOTS.release(); } }, MAIL_EXECUTOR); }
+                try { return CompletableFuture.supplyAsync(() -> { try { return send(settings, outgoingPayload); } finally { admission.release(); MAIL_SLOTS.release(); } }, MAIL_EXECUTOR); }
                 catch (RuntimeException rejected) { admission.release(); MAIL_SLOTS.release(); return CompletableFuture.failedFuture(new MailSendException(MailSendException.Code.CAPACITY_UNAVAILABLE, "Mail delivery capacity is unavailable")); }
                 catch (Error rejected) { admission.release(); MAIL_SLOTS.release(); throw rejected; }
             } catch (MailSendException failure) { return CompletableFuture.failedFuture(failure); }

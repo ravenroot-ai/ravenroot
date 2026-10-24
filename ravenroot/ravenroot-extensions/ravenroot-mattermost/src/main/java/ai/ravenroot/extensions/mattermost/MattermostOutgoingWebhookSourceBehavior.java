@@ -143,7 +143,7 @@ final class MattermostOutgoingWebhookSourceBehavior implements NodeBehavior, Inb
                 if (!source.runtime.rates.allow(context.identity().tenantId() + "\u0000"
                         + source.profile.name() + "\u0000inbound", source.profile.maxPerSecond())) return empty(429);
                 if (!live(window, deadlineNanos) || source.active(generation) == null) return empty(503);
-                IngressReceipt receipt = context.ingress().offerDurably(context.identity(), IngressTarget.start(),
+                IngressReceipt receipt = context.ingress().offerDurably(context.identity(), IngressTarget.node(context.nodeId()),
                         Map.copyOf(payload), context.nodeId(), source.profile.name() + ":" + sourceId + ":" + postId);
                 if (!live(window, deadlineNanos) || source.active(generation) == null) return empty(503);
                 return switch (receipt) {

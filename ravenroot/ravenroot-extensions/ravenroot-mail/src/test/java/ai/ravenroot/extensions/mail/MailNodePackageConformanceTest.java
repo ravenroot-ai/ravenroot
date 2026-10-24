@@ -39,7 +39,12 @@ class MailNodePackageConformanceTest extends NodeBehaviorContract {
                 java.util.Map.entry("maxBodyChars", NodePropertyType.INTEGER), java.util.Map.entry("maxAttachments", NodePropertyType.INTEGER),
                 java.util.Map.entry("maxAttachmentBytes", NodePropertyType.INTEGER), java.util.Map.entry("maxTotalAttachmentBytes", NodePropertyType.INTEGER),
                 java.util.Map.entry("maxEncodedAttachmentBytes", NodePropertyType.INTEGER), java.util.Map.entry("maxConcurrency", NodePropertyType.INTEGER),
-                java.util.Map.entry("defaultFrom", NodePropertyType.STRING));
+                java.util.Map.entry("defaultFrom", NodePropertyType.STRING),
+                java.util.Map.entry("correlation.outgoing.applicationHeader", NodePropertyType.STRING),
+                java.util.Map.entry("correlation.outgoing.kindHeader", NodePropertyType.STRING),
+                java.util.Map.entry("correlation.outgoing.referenceHeader", NodePropertyType.STRING),
+                java.util.Map.entry("correlation.outgoing.roundHeader", NodePropertyType.STRING),
+                java.util.Map.entry("correlation.outgoing.contributionHeader", NodePropertyType.STRING));
         assertEquals(expected, types);
         assertTrue(descriptor.properties().stream().filter(property -> property.name().equals("maxConcurrency"))
                 .findFirst().orElseThrow().description().contains("1–16"));
@@ -59,6 +64,10 @@ class MailNodePackageConformanceTest extends NodeBehaviorContract {
         var properties = new java.util.LinkedHashMap<>(base.properties());
         properties.put("mailProfile", MailTestSupport.PROFILE);
         properties.put("credentialRef", "");
+        // Optional mappings default to disabled; the generic placeholder is not a valid X-header.
+        // Actual enabled mappings and malformed/duplicate/reserved refusals have protocol tests.
+        for (var mapping : ai.ravenroot.api.correlation.CorrelationHeaderMapping.descriptors())
+            properties.put(mapping.name(), "");
         return new NodeConfiguration(base.nodeId(), base.behavior(), properties);
     }
 }

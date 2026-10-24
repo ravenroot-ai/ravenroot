@@ -39,10 +39,16 @@
       url: /examples/intergraph/
     - title: Illustrated lakehouse scenario
       url: /examples/lakehouse/
+    - title: Execute six correlated file results
+      url: /examples/correlation/lakehouse.html
+    - title: Startup work and four AMQP sources
+      url: /examples/correlation/mixed.html
     - title: Credentials, providers, and artifacts
       url: /user-guide/integrations-artifacts.html
     - title: Embedded viewing and accessibility
       url: /user-guide/embed-accessibility.html
+    - title: Business context from text email
+      url: /user-guide/email-business-context.html
 
 - title: Operator guide
   items:
@@ -56,6 +62,8 @@
       url: /operator-guide/kubernetes-ui-only.html
     - title: Identity and browser boundary
       url: /operator-guide/identity-browser.html
+    - title: Correlation history upgrade and rollback
+      url: /operator-guide/correlation-migration.html
     - title: Persistence, lifecycle, and recovery
       url: /operator-guide/persistence-lifecycle.html
     - title: Graph source control and published deployments
@@ -106,6 +114,14 @@
 
 - title: Architecture and security
   items:
+    - title: Deployment and business identity glossary
+      url: /reference/execution-identity.html
+    - title: Source entry contract
+      url: /reference/source-entry-contract.html
+    - title: Business correlation operations
+      url: /reference/business-correlation-operations.html
+    - title: Business history acceptance and release qualification
+      url: /qa/business-history-acceptance.html
     - title: Architecture overview
       url: /architecture/
     - title: UI internationalization

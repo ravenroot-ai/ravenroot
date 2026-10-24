@@ -14,7 +14,14 @@ pnpm build
 node bin/ravenroot-config.mjs ui
 ```
 
-The guided UI binds to `127.0.0.1`. It renders typed controls for every profile field and deployment target, including independent Kubernetes Secret name and key fields. It selects one or more profile families, target and tenant identities, secret handling, and the closed bundle directories required by the selected optional nodes. `pnpm check:coverage` compares its registry with the current shipped and governed descriptor inventories and the first-party bundle index. A newly shipped node or bundle therefore fails the configurator build until its operator configuration is mapped or it is explicitly classified as author-only. The standalone workflow also generates fixtures from the shared registry and passes them through all 25 extension resolvers and the six core runtime configuration loaders; normal Maven builds do not depend on configurator output.
+The guided UI binds to `127.0.0.1`. It renders typed controls for every profile field and deployment target, including independent Kubernetes Secret name and key fields. It selects one or more profile families, target and tenant identities, secret handling, and the closed bundle directories required by the selected optional nodes. `pnpm check:coverage` compares its registry with the current shipped and governed descriptor inventories and the first-party bundle index. A newly shipped node or bundle therefore fails the configurator build until its operator configuration is mapped or it is explicitly classified as author-only. The standalone workflow also generates fixtures from the shared registry and passes them through all 26 extension resolver contracts and the seven core runtime configuration loaders; normal Maven builds do not depend on configurator output.
+
+The **Business history and correlated joins** family (`core.history`) emits the 18 bounded
+`RAVENROOT_HISTORY_*` settings documented in [configuration](../reference/configuration.md#business-history-and-correlated-join-limits).
+It validates page/response capacity, open/retained join counts and join-deadline/retention relationships
+before packaging. The generated positive and 39 negative environment vectors also execute the actual
+server store-configuration loader. These are shared deployment limits; selecting the family never
+grants a graph new authority, enables activity capture or supplies per-event business identities.
 
 ## Package review
 

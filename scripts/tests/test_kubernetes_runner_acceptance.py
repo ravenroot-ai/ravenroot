@@ -3,9 +3,14 @@ import ast
 import json
 import importlib.util
 import itertools
+import io
+from contextlib import ExitStack, redirect_stdout, redirect_stderr
+from types import SimpleNamespace
 from pathlib import Path
 import re
 import tempfile
+import subprocess
+import sys
 import unittest
 from unittest.mock import patch
 from scripts.fixtures import kubernetes_runner_acceptance as fixture
@@ -134,6 +139,176 @@ class KubernetesAcceptanceFixtureTest(unittest.TestCase):
                 else:
                     with self.assertRaisesRegex(RuntimeError, "positive CPU throttling evidence is missing"):
                         attester.cgroups()
+
+    @staticmethod
+    def attester():
+        spec = importlib.util.spec_from_file_location("diagnostic_attestation", fixture.ROOT / "docs/examples/governed-runner/kubernetes_attestation.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def attestation_environment(self, module):
+        stack = ExitStack()
+        stack.enter_context(patch.object(module, "network_isolated"))
+        stack.enter_context(patch.object(module.os, "getuid", return_value=65532))
+        stack.enter_context(patch.object(module.os, "getgid", return_value=65532))
+        stack.enter_context(patch.object(module.pathlib.Path, "read_text", return_value="CapEff: 0\nNoNewPrivs: 1\n"))
+        stack.enter_context(patch.object(module.pathlib.Path, "exists", return_value=False))
+        stack.enter_context(patch.object(module.os, "statvfs", return_value=SimpleNamespace(f_flag=module.os.ST_RDONLY)))
+        stack.enter_context(patch.object(module.ctypes, "CDLL", return_value=SimpleNamespace(syscall=lambda *args: 7)))
+        stack.enter_context(patch.dict(module.os.environ, {"RAVENROOT_WORKSPACE_LIMIT_BYTES": "67108864", "RAVENROOT_PROCESS_LIMIT": "256"}))
+        stack.enter_context(patch.object(module, "quota", return_value={"withinQuotaWrite": True}))
+        stack.enter_context(patch.object(module, "processes", return_value={"processBoundaryRejected": True}))
+        stack.enter_context(patch.object(module, "cgroups", return_value={"cpuThrottlingObserved": True}))
+        stack.enter_context(patch.object(module, "initialize_workspace"))
+        return stack
+
+    def test_original_failure_markers_are_finite_single_attempt_and_never_echo_dynamic_data(self):
+        module = self.attester()
+        cases = [
+            ("network_isolated", RuntimeError("secret-token /private/host/path"), "NETWORK:REFUSED"),
+            ("quota", OSError("secret filesystem"), "STORAGE:OS_ERROR"),
+            ("processes", module.subprocess.CalledProcessError(4, "secret command", output=b"secret stdout", stderr=b"secret stderr"), "PROCESS:PROCESS_EXIT"),
+            ("processes", module.subprocess.TimeoutExpired("secret command", 30, output=b"secret stdout"), "PROCESS:PROCESS_TIMEOUT"),
+            ("cgroups", RuntimeError("positive CPU throttling evidence is missing"), "CGROUP:CPU_THROTTLING_MISSING"),
+            ("cgroups", ValueError("secret value"), "CGROUP:INVALID_VALUE"),
+            ("initialize_workspace", RuntimeError("Workspace seed initialization is uncertain; refusing a fresh clone"), "WORKSPACE:SEED_UNCERTAIN"),
+            ("initialize_workspace", RuntimeError("Workspace initialization identity changed"), "WORKSPACE:SEED_IDENTITY_CHANGED"),
+            ("initialize_workspace", ZeroDivisionError("secret unknown"), "WORKSPACE:UNKNOWN"),
+        ]
+        for function, failure, marker in cases:
+            with self.subTest(marker=marker), self.attestation_environment(module), \
+                    patch.object(module, function, side_effect=failure) as called, \
+                    redirect_stdout(io.StringIO()) as out, redirect_stderr(io.StringIO()) as err:
+                self.assertEqual(1, module.entrypoint([]))
+                self.assertEqual("", out.getvalue())
+                self.assertEqual("RR_ATTESTATION_FAILURE_V1:" + marker + "\n", err.getvalue())
+                self.assertEqual(1, called.call_count, "diagnostics cannot retry the original probe")
+
+    def test_original_fixed_entrypoint_preserves_success_proof_and_fail_closed_identity(self):
+        module = self.attester()
+        with self.attestation_environment(module), redirect_stdout(io.StringIO()) as out, redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(0, module.entrypoint([]))
+            self.assertEqual({"withinQuotaWrite": True, "processBoundaryRejected": True, "cpuThrottlingObserved": True,
+                              "protocolVersion": 1, "nonRoot": True, "capabilitiesDropped": True, "noNewPrivileges": True,
+                              "readOnlyRoot": True, "landlockAbi": 7, "serviceAccountAbsent": True, "networkBlocked": True}, json.loads(out.getvalue()))
+            self.assertEqual("", err.getvalue())
+        with self.attestation_environment(module), patch.object(module.os, "getuid", return_value=0), \
+                redirect_stdout(io.StringIO()) as out, redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(1, module.entrypoint([]))
+            self.assertEqual("", out.getvalue())
+            self.assertEqual("RR_ATTESTATION_FAILURE_V1:IDENTITY:REFUSED\n", err.getvalue())
+            module.quota.assert_not_called()
+        for args, phase in [(["--network-control"], "CONTROL"), (["secret-argument"], "ARGUMENTS")]:
+            with patch.object(module, "network_isolated", side_effect=RuntimeError("secret")) as called, \
+                    redirect_stdout(io.StringIO()) as out, redirect_stderr(io.StringIO()) as err:
+                self.assertEqual(1, module.entrypoint(args))
+                self.assertEqual("", out.getvalue())
+                reason = "REFUSED" if phase == "CONTROL" else "INVALID_VALUE"
+                self.assertEqual("RR_ATTESTATION_FAILURE_V1:" + phase + ":" + reason + "\n", err.getvalue())
+                self.assertEqual(int(phase == "CONTROL"), called.call_count)
+
+    def test_actual_original_executable_missing_configuration_is_closed_and_nonzero(self):
+        path = fixture.ROOT / "docs/examples/governed-runner/kubernetes_attestation.py"
+        result = subprocess.run([sys.executable, str(path)], env={"UNRELATED_SECRET": "secret-token"},
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
+        self.assertEqual(1, result.returncode)
+        self.assertEqual(b"", result.stdout)
+        self.assertEqual(b"RR_ATTESTATION_FAILURE_V1:NETWORK:INVALID_VALUE\n", result.stderr)
+
+    def test_unexpected_or_forged_executable_failure_still_cannot_echo_exception_data(self):
+        module = self.attester()
+        for failure in (RuntimeError("secret outside a phase"), module.DiagnosticFailure("secret-phase", "secret-reason"), module.DiagnosticFailure(["secret"], {"secret": 1})):
+            with patch.object(module, "run", side_effect=failure), redirect_stdout(io.StringIO()) as out, redirect_stderr(io.StringIO()) as err:
+                self.assertEqual(1, module.entrypoint([]))
+                self.assertEqual("", out.getvalue())
+                self.assertEqual("RR_ATTESTATION_FAILURE_V1:UNKNOWN:UNKNOWN\n", err.getvalue())
+
+    def test_retained_native_results_never_copy_properties_messages_or_output(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name, count in fixture.CLASSES.items():
+                cases = []
+                for index, case in enumerate(fixture.NATIVE_CASES[name]):
+                    failure = ("<error message='secret-token'>secret-stdout /private/path "
+                        "Native Kubernetes case scope=PROCESS_INSTANCE lifecycle=PER_INVOCATION index=4 command=IMPLEMENT; effect remains unconfirmed "
+                        "Kubernetes operation UNAVAILABLE (client exit 1); effect remains unconfirmed; command=ATTEST diagnostic=ATTESTER_MARKER phase=CGROUP reason=CPU_THROTTLING_MISSING"
+                        "</error>") if index == 0 else ""
+                    cases.append("<testcase classname='" + name + "' name='" + case + "'>" + failure + "<system-out>secret-out</system-out></testcase>")
+                xml = "<testsuite name='" + name + "' tests='" + str(count) + "' failures='0' errors='1' skipped='0'><properties><property name='credential' value='secret-config'/></properties>" + "".join(cases) + "</testsuite>"
+                (root / ("TEST-" + name + ".xml")).write_text(xml)
+            fixture.retain_reports(root, root / "safe")
+            self.assertEqual({"KubernetesPodRunnerNativeTest.json", "KubernetesWorkspaceGraphNativeTest.json"}, {path.name for path in (root / "safe").iterdir()})
+            for path in (root / "safe").iterdir():
+                raw = path.read_text()
+                self.assertNotIn("secret", raw)
+                self.assertNotIn("/private", raw)
+                report = json.loads(raw)
+                self.assertTrue(report["available"])
+                self.assertEqual(1, report["counts"]["errors"])
+                self.assertEqual({"scope": "PROCESS_INSTANCE", "lifecycle": "PER_INVOCATION", "index": 4, "command": "IMPLEMENT"}, report["cases"][0]["context"])
+                self.assertEqual({"category": "UNAVAILABLE", "exit": 1, "command": "ATTEST", "origin": "ATTESTER_MARKER", "phase": "CGROUP", "reason": "CPU_THROTTLING_MISSING"}, report["cases"][0]["diagnostic"])
+
+    def test_missing_malformed_oversized_or_foreign_native_reports_are_explicitly_unavailable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            name = next(iter(fixture.CLASSES))
+            for raw, expected in [(None, "MISSING"), ("<truncated secret", "MALFORMED"), ("X" * 4_194_305, "OVERSIZED"),
+                                  ("<!DOCTYPE secret><testsuite/>", "MALFORMED"),
+                                  ("<!DOCTYPE testsuite [<!ENTITY x 'secret'>]><testsuite>&x;</testsuite>".encode("utf-16"), "MALFORMED"),
+                                  (b"\xff\xfe\x00\x00secret", "MALFORMED"), ("<testsuite name='secret'/>", "UNEXPECTED_SUITE")]:
+                with self.subTest(expected=expected):
+                    if raw is not None:
+                        (root / ("TEST-" + name + ".xml")).write_bytes(raw if isinstance(raw, bytes) else raw.encode())
+                    fixture.retain_reports(root, root / "safe")
+                    report = json.loads((root / "safe/KubernetesPodRunnerNativeTest.json").read_text())
+                    self.assertEqual({"schemaVersion": 1, "suite": name, "available": False, "unavailable": expected}, report)
+
+    def test_contradictory_foreign_and_duplicate_case_statuses_are_unavailable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            name = next(iter(fixture.CLASSES))
+            case = fixture.NATIVE_CASES[name][0]
+            base = "<testsuite name='" + name + "' tests='1' failures='0' errors='0' skipped='0'><testcase classname='" + name + "' name='" + case + "'>{}</testcase></testsuite>"
+            values = [base.format("<error/>"), base.format("<failure/><skipped/>"), base.format("<error/><error/>").replace("errors='0'", "errors='1'"),
+                      base.format("").replace("classname='" + name, "classname='foreign"),
+                      base.format("").replace("<testcase", "<testcase name='duplicate'"), base.format("").replace("tests='1'", "tests='0'")]
+            for xml in values:
+                with self.subTest(xml=xml):
+                    (root / ("TEST-" + name + ".xml")).write_text(xml)
+                    fixture.retain_reports(root, root / "safe")
+                    report = json.loads((root / "safe/KubernetesPodRunnerNativeTest.json").read_text())
+                    self.assertFalse(report["available"])
+                    self.assertNotIn("cases", report)
+
+    def test_retained_diagnostics_do_not_partially_accept_malformed_reason_suffixes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            name = next(iter(fixture.CLASSES))
+            case = fixture.NATIVE_CASES[name][0]
+            for suffix in ("1", "SECRET", "secret", "_FORGED"):
+                xml = ("<testsuite name='" + name + "' tests='1' failures='0' errors='1' skipped='0'><testcase classname='" + name + "' name='" + case + "'><error>"
+                       "Kubernetes operation UNAVAILABLE (client exit 1); effect remains unconfirmed; command=ATTEST diagnostic=ATTESTER_MARKER phase=CGROUP reason=CPU_THROTTLING_MISSING" + suffix + "</error></testcase></testsuite>")
+                (root / ("TEST-" + name + ".xml")).write_text(xml)
+                fixture.retain_reports(root, root / "safe")
+                report = json.loads((root / "safe/KubernetesPodRunnerNativeTest.json").read_text())
+                self.assertTrue(report["available"])
+                self.assertEqual("ERROR", report["cases"][0]["status"])
+                self.assertNotIn("diagnostic", report["cases"][0])
+
+    def test_native_failure_handling_never_reexecutes_attester_and_uploads_only_safe_fixed_reports(self):
+        source = Path(fixture.__file__).read_text()
+        failure_path = source[source.index("retain_reports()", source.index("def run():")):source.index("verify_reports()", source.index("def run():"))]
+        self.assertNotIn("subprocess", failure_path)
+        self.assertNotIn("exec", failure_path)
+        self.assertIn('if result.returncode:', failure_path)
+        workflow = self.support_sources()["workflow"]
+        upload = workflow.split("- name: Retain sanitized native Kubernetes results", 1)[1].split("- name:", 1)[0]
+        self.assertIn("if: always() && steps.backend-scope.outputs.mode == 'all'", upload)
+        self.assertEqual(["ravenroot/ravenroot-core/target/native-kubernetes-reports/KubernetesPodRunnerNativeTest.json",
+                          "ravenroot/ravenroot-core/target/native-kubernetes-reports/KubernetesWorkspaceGraphNativeTest.json"],
+                         re.findall(r"(?m)^            (\S+)$", upload))
+        self.assertNotIn("surefire-reports", upload)
 
     def test_inventory_uses_finite_retained_pvs_and_minimal_manager_authority(self):
         objects = fixture.resources("owned-node")["items"]

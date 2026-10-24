@@ -51,7 +51,8 @@ public record PostgresStoreConfig(Duration lockTimeout, Duration statementTimeou
                                   Duration maxClockSkew, Duration journalRetention,
                                   int maxInventoryPageSize, Duration terminalRetention,
                                   Duration executionResultRetention,
-                                  int graphDefinitionUpsertAttempts) {
+                                  int graphDefinitionUpsertAttempts,
+                                  ai.ravenroot.api.correlation.BusinessHistoryPolicy businessHistories) {
 
     /**
      * Five seconds of lock timeout, thirty of statement timeout, three serialization retries, and the
@@ -87,7 +88,22 @@ public record PostgresStoreConfig(Duration lockTimeout, Duration statementTimeou
                 executionResultRetention, defaults().graphDefinitionUpsertAttempts());
     }
 
+    /** Source-compatible configuration before explicit business-history budgets. */
+    public PostgresStoreConfig(Duration lockTimeout, Duration statementTimeout, int serializationRetries,
+            Duration maxLeaseTtl, int maxPayloadBytes, Duration maxClockSkew, Duration journalRetention,
+            int maxInventoryPageSize, Duration terminalRetention, Duration executionResultRetention,
+            int graphDefinitionUpsertAttempts) {
+        this(lockTimeout, statementTimeout, serializationRetries, maxLeaseTtl, maxPayloadBytes, maxClockSkew,
+                journalRetention, maxInventoryPageSize, terminalRetention, executionResultRetention,
+                graphDefinitionUpsertAttempts, ai.ravenroot.api.correlation.BusinessHistoryPolicy.DEFAULTS);
+    }
+
+    /** Supplies operator-owned business-history, pagination and response projection budgets. */
+    public PostgresStoreConfig withBusinessHistories(ai.ravenroot.api.correlation.BusinessHistoryPolicy policy) {
+        return new PostgresStoreConfig(lockTimeout, statementTimeout, serializationRetries, maxLeaseTtl, maxPayloadBytes, maxClockSkew, journalRetention, maxInventoryPageSize, terminalRetention, executionResultRetention, graphDefinitionUpsertAttempts, policy);
+    }
     public PostgresStoreConfig {
+        Objects.requireNonNull(businessHistories, "businessHistories");
         Objects.requireNonNull(lockTimeout, "lockTimeout");
         Objects.requireNonNull(statementTimeout, "statementTimeout");
         Objects.requireNonNull(maxLeaseTtl, "maxLeaseTtl");

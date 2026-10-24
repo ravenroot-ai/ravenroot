@@ -54,6 +54,12 @@ public final class ServiceAwareOrchestratorFixtureNodePackage implements NodePac
         }
 
         @Override public InboundSource createSource(NodeConfiguration configuration,
+                InboundSourceContext context, NodePackageServices services) {
+            RECEIVED_SERVICES.set(services);
+            return createSource(configuration, context);
+        }
+
+        @Override public InboundSource createSource(NodeConfiguration configuration,
                                                      InboundSourceContext context) {
             return new InboundSource() {
                 @Override public java.util.concurrent.CompletionStage<Void> start(

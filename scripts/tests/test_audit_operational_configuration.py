@@ -1603,12 +1603,14 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         self.assertIsNotNone(expected)
         self.assertEqual(43, len(expected["contracts"]))
         self.assertEqual(97, len(expected["candidateIds"]))
-        self.assertEqual(
-            "471891f10e915939b5d29ae276a5ece19c8ada9abc8513f2ccf24beef9872e83",
-            hashlib.sha256(json.dumps(expected["contracts"][:40], sort_keys=True,
-                                      separators=(",", ":")).encode("utf-8")).hexdigest(),
-            "the accepted 40-contract prefix must not be rewritten to add the new path policies",
-        )
+        baseline = committed_inventory("cf76f96ead7fad1ad7eb6a6f3922afcee81a1a2c")[0]
+        original = baseline["persistencePolicyAuthorities"][audit.PERSISTENCE_POLICY_AUTHORITY_ID]["contracts"][:40]
+        def semantic_contracts(contracts):
+            # Appending source-compatible history policy changes lexical declaration IDs only.
+            # Preserve every original owner/field/default/binding and resolver-call proof.
+            return [{key: value for key, value in contract.items()
+                     if key not in {"candidateIds", "defaultCandidateIds"}} for contract in contracts]
+        self.assertEqual(semantic_contracts(original), semantic_contracts(expected["contracts"][:40]))
         self.assertEqual(
             {
                 "execution.store.selector", "execution.store.url", "execution.store.user",
@@ -2254,12 +2256,12 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as location:
             root = Path(location)
             authority, entries, candidates, details = self.route_table_authority_fixture(root)
-            self.assertEqual(122, len(details))
+            self.assertEqual(128, len(details))
             self.assertEqual(
-                {"methods": 135, "path": 122, "summary": 463, "successStatuses": 126},
+                {'methods': 141, 'path': 128, 'summary': 480, 'successStatuses': 132},
                 {role: len(ids) for role, ids in authority["candidateIdsByRole"].items()},
             )
-            self.assertEqual(846, len(entries))
+            self.assertEqual(881, len(entries))
             self.assertEqual([], self.route_table_errors(root, authority, entries, candidates))
             self.assertEqual({
                 "StableEdgeId.MAX_UTF8_BYTES": 8192,
@@ -4422,6 +4424,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         with mock.patch.object(audit, "assistant_limit_authority_errors", return_value=[]), \
                 mock.patch.object(audit, "helm_authority_errors", return_value=[]), \
                 mock.patch.object(audit, "persistence_policy_authority_errors", return_value=[]), \
+                    mock.patch.object(audit, "history_policy_authority_errors", return_value=[]), \
                 mock.patch.object(audit, "external_io_policy_authority_errors", return_value=[]), \
                 mock.patch.object(audit, "program_github_policy_authority_errors", return_value=[]), \
                 mock.patch.object(audit, "agent_budget_authority_errors", return_value=[]), \
@@ -4672,7 +4675,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             document = {"entries": list(entries.values()), "retiredEntries": [],
                         "migrationHistory": []}
             self.assertIn(
-                "| Retained published contract descriptions | 463 |",
+                "| Retained published contract descriptions | 480 |",
                 audit.render_report(document),
             )
             deferred = copy.deepcopy(document)
@@ -4680,7 +4683,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                              if entry["classification"] == "published-contract-description")
             published.update(status="deferred", followUp="#225")
             self.assertIn(
-                "| Retained published contract descriptions | 462 |",
+                "| Retained published contract descriptions | 479 |",
                 audit.render_report(deferred),
             )
         self.assertIn(
@@ -6507,6 +6510,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             with mock.patch.object(audit, "assistant_limit_authority_errors", return_value=[]), \
                     mock.patch.object(audit, "helm_authority_errors", return_value=[]), \
                     mock.patch.object(audit, "persistence_policy_authority_errors", return_value=[]), \
+                    mock.patch.object(audit, "history_policy_authority_errors", return_value=[]), \
                     mock.patch.object(audit, "external_io_policy_authority_errors", return_value=[]), \
                     mock.patch.object(audit, "program_github_policy_authority_errors", return_value=[]), \
                     mock.patch.object(audit, "agent_budget_authority_errors", return_value=[]), \
@@ -10033,6 +10037,64 @@ class VersionHistoryTopologyTest(unittest.TestCase):
             reachable_version_transition(
                 self.root, self.target_version, merged,
                 mode="initial-normalization")
+
+
+
+
+class BusinessHistoryPolicyAuthorityTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.candidates = {candidate.id: candidate for candidate in audit.discover(ROOT)}
+        cls.authority = audit.history_policy_authority_from_source(ROOT, cls.candidates)
+
+    def test_all_eighteen_bindings_and_four_sdk_only_dimensions_have_exact_metadata(self):
+        self.assertIsNotNone(self.authority)
+        contracts = self.authority['contracts']
+        self.assertEqual(22, len(contracts))
+        self.assertEqual(18, sum(any(binding.startswith('RAVENROOT_HISTORY_')
+                                     for binding in contract['metadata']['bindings']) for contract in contracts))
+        entries = {identifier: dict(contract['metadata']) for contract in contracts
+                   for identifier in contract['candidateIds']}
+        authorities = {audit.HISTORY_POLICY_AUTHORITY_ID: self.authority}
+        self.assertEqual([], audit.history_policy_authority_errors(ROOT, authorities, entries, self.candidates))
+        for field, value in [('field', 'ignored'), ('default', '0'), ('bindings', []),
+                             ('historyPolicyAuthority', None), ('classification', 'derived')]:
+            with self.subTest(field=field):
+                changed = copy.deepcopy(entries)
+                changed[next(iter(changed))][field] = value
+                self.assertTrue(audit.history_policy_authority_errors(ROOT, authorities, changed, self.candidates))
+        self.assertTrue(audit.history_policy_authority_errors(ROOT, None, entries, self.candidates))
+        missing = dict(self.candidates); missing.pop(next(iter(entries)))
+        self.assertIsNone(audit.history_policy_authority_from_source(ROOT, missing))
+
+    def test_inventory_refresh_cannot_bless_changed_defaults_binding_precedence_or_store_composition(self):
+        mutations = [
+            ('BusinessHistoryPolicy.java', '100_000, 64, 1024, 1024', '100_001, 64, 1024, 1024'),
+            ('CorrelationLimits.java', 'new CorrelationLimits(256', 'new CorrelationLimits(257'),
+            ('BusinessHistoryConfiguration.java', 'properties.get(property)', 'environment.get(variable)'),
+            ('BusinessHistoryConfiguration.java', 'RAVENROOT_HISTORY_', 'RAVENROOT_IGNORED_'),
+            ('ExecutionStoreConfiguration.java', '.withBusinessHistories(historyPolicy)', ''),
+            ('SqliteStoreConfig.java', 'businessHistories);', 'ai.ravenroot.api.correlation.BusinessHistoryPolicy.DEFAULTS);'),
+        ]
+        for filename, before, after in mutations:
+            with self.subTest(filename=filename, before=before), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                for relative in audit.HISTORY_POLICY_SOURCE_LOCKS:
+                    destination = root / relative; destination.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(ROOT / relative, destination)
+                relative = next(path for path in audit.HISTORY_POLICY_SOURCE_LOCKS if path.endswith('/' + filename))
+                path = root / relative; source = path.read_text(); self.assertIn(before, source)
+                path.write_text(source.replace(before, after, 1))
+                self.assertIsNone(audit.history_policy_authority_from_source(root, self.candidates))
+
+    def test_compatible_constructor_prefix_cannot_hide_an_unrelated_record_component(self):
+        source = 'record P(int first, int second, History businessHistories) { static final P DEFAULTS = new P(1, 2); }'
+        self.assertEqual('2', audit.java_record_default_expression_span(
+            source, 'P', 'DEFAULTS', 'second', compatible_components=('first', 'second'))[0])
+        self.assertIsNone(audit.java_record_default_expression_span(
+            source.replace('businessHistories', 'unreviewed'), 'P', 'DEFAULTS', 'second',
+            compatible_components=('first', 'second')))
+        self.assertIsNone(audit.java_record_default_expression_span(source, 'P', 'DEFAULTS', 'second'))
 
 
 if __name__ == "__main__":

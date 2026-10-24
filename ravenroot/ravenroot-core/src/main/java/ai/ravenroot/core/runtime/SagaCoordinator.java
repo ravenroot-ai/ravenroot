@@ -138,7 +138,7 @@ final class SagaCoordinator {
             NodeMessage compensationMessage = new NodeMessage(original.security(), original.processInstanceId(),
                     original.traversalId(), original.invocationId(), original.attemptId(),
                     original.parentInvocationIds(), compensationNode.id(), original.payload(), original.attributes(),
-                    original.command());
+                    original.command(), original.applicationCorrelation());
             compensationMessage = enrich(compensationNode, compensationMessage, sagaId, occurrenceId,
                     compensationOperation, forwardOperation, compensationOperation, fingerprint);
             compensationIntent = participantIntent(compensationNode, compensationMessage, sagaId,
@@ -439,7 +439,7 @@ final class SagaCoordinator {
         return new NodeMessage(current.security(), process, traversal,
                 uuid(envelope.get("invocationId"), "invocationId"),
                 uuid(envelope.get("attemptId"), "attemptId"), current.parentInvocationIds(), node.id(),
-                envelope.get("payload"), attributes, current.command());
+                envelope.get("payload"), attributes, current.command(), current.applicationCorrelation());
     }
 
     private static Map<String, Object> stringMap(Object value, String name) {
@@ -564,6 +564,16 @@ final class SagaCoordinator {
         frozen.put("traversalId", message.traversalId().toString());
         frozen.put("invocationId", message.invocationId().toString());
         frozen.put("attemptId", message.attemptId().toString());
+        var context = message.applicationCorrelation();
+        if (context != null) {
+            var fields = new LinkedHashMap<String, Object>();
+            fields.put("applicationCorrelationId", context.applicationCorrelationId());
+            fields.put("contributionId", context.contributionId().orElse(null));
+            fields.put("contributionKind", context.contributionKind().orElse(null));
+            fields.put("roundId", context.roundId());
+            fields.put("publicReference", context.publicReference().orElse(null));
+            frozen.put("applicationContext", fields);
+        }
         byte[] payload = ai.ravenroot.api.payload.PayloadJson.write(
                 ai.ravenroot.api.payload.PayloadValue.fromJava(frozen,
                         ai.ravenroot.api.payload.PayloadLimits.DEFAULTS)).getBytes(StandardCharsets.UTF_8);
@@ -634,7 +644,7 @@ final class SagaCoordinator {
         }
         return new NodeMessage(original.security(), original.processInstanceId(), original.traversalId(),
                 original.invocationId(), original.attemptId(), original.parentInvocationIds(), original.nodeId(),
-                payload, attributes, original.command());
+                payload, attributes, original.command(), original.applicationCorrelation());
     }
 
     private static void putIdentity(Map<String, Object> target, UUID sagaId, UUID occurrenceId,

@@ -1,4 +1,5 @@
 import { sourceSessionIsActive } from './source-session.js';
+import { boundDeploymentNeedsCloseDecision } from './deployment-run.js';
 
 /** Capture the exact open-document incarnations targeted by one bulk-close invocation. */
 export function captureDocumentCloseSnapshot(documents = []) {
@@ -6,6 +7,7 @@ export function captureDocumentCloseSnapshot(documents = []) {
     id: document_.id,
     incarnation: document_.incarnation,
     document: document_,
+    deploymentRun: document_.deploymentRun,
   })));
 }
 
@@ -13,7 +15,8 @@ export function captureDocumentCloseSnapshot(documents = []) {
 export function resolveDocumentCloseSnapshot(workspace, snapshot = []) {
   return snapshot.map(entry => {
     const current = workspace.find(entry.id);
-    return current === entry.document && current?.incarnation === entry.incarnation ? current : null;
+    return current === entry.document && current?.incarnation === entry.incarnation
+      && current.deploymentRun === entry.deploymentRun ? current : null;
   }).filter(Boolean);
 }
 
@@ -21,6 +24,7 @@ export function classifyDocumentCloseTargets(documents = []) {
   return {
     dirty: documents.filter(document_ => Boolean(document_.history?.isDirty()
       || document_.authoring?.localChanges)),
-    activeSessions: documents.filter(document_ => sourceSessionIsActive(document_.sourceSession)),
+    activeSessions: documents.filter(document_ => sourceSessionIsActive(document_.sourceSession)
+      || boundDeploymentNeedsCloseDecision(document_)),
   };
 }

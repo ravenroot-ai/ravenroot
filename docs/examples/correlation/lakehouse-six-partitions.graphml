@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Replace localhost:19090 with the explicitly authorized external fixture/service endpoint. -->
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+<key id="kind" for="node" attr.name="kind" attr.type="string"/>
+<key id="behavior" for="node" attr.name="behavior" attr.type="string"/>
+<key id="apiProfile" for="node" attr.name="apiProfile" attr.type="string"/>
+<key id="operations" for="node" attr.name="operations" attr.type="string"/>
+<key id="url" for="node" attr.name="url" attr.type="string"/>
+<key id="recovery.repeatable" for="node" attr.name="recovery.repeatable" attr.type="string"/>
+<key id="method" for="node" attr.name="method" attr.type="string"/>
+<key id="body" for="node" attr.name="body" attr.type="string"/>
+<key id="correlation.mode" for="node" attr.name="correlation.mode" attr.type="string"/>
+<key id="correlation.selector" for="node" attr.name="correlation.selector" attr.type="string"/>
+<key id="correlation.secondarySelector" for="node" attr.name="correlation.secondarySelector" attr.type="string"/>
+<key id="correlation.contributionSelector" for="node" attr.name="correlation.contributionSelector" attr.type="string"/>
+<key id="correlation.kindSelector" for="node" attr.name="correlation.kindSelector" attr.type="string"/>
+<key id="correlation.roundSelector" for="node" attr.name="correlation.roundSelector" attr.type="string"/>
+<key id="correlation.referenceSelector" for="node" attr.name="correlation.referenceSelector" attr.type="string"/>
+<key id="correlation.outgoing.applicationHeader" for="node" attr.name="correlation.outgoing.applicationHeader" attr.type="string"/>
+<key id="correlation.outgoing.contributionHeader" for="node" attr.name="correlation.outgoing.contributionHeader" attr.type="string"/>
+<key id="correlation.outgoing.roundHeader" for="node" attr.name="correlation.outgoing.roundHeader" attr.type="string"/>
+<key id="correlatedJoin.mode" for="node" attr.name="correlatedJoin.mode" attr.type="string"/>
+<key id="correlatedJoin.expectedIds" for="node" attr.name="correlatedJoin.expectedIds" attr.type="string"/>
+<key id="auditReason" for="node" attr.name="auditReason" attr.type="string"/>
+<key id="disposition" for="node" attr.name="disposition" attr.type="string"/>
+<key id="outcome" for="edge" attr.name="outcome" attr.type="string"/>
+<key id="join.semantics" for="graph" attr.name="join.semantics" attr.type="string"/>
+<key id="layoutX" for="node" attr.name="layoutX" attr.type="double"/>
+<key id="layoutY" for="node" attr.name="layoutY" attr.type="double"/>
+<key id="label" for="node" attr.name="label" attr.type="string"/>
+<key id="layoutWidth" for="node" attr.name="layoutWidth" attr.type="double"/>
+<key id="layoutHeight" for="node" attr.name="layoutHeight" attr.type="double"/>
+<graph id="correlated-lakehouse" edgedefault="directed"><data key="join.semantics">declared</data>
+<node id="start"><data key="kind">START</data><data key="layoutX">80</data><data key="layoutY">40</data><data key="label">start</data><data key="layoutWidth">140</data><data key="layoutHeight">70</data></node>
+<node id="landing"><data key="kind">BEHAVIOR</data><data key="layoutX">80</data><data key="layoutY">200</data><data key="label">landing</data><data key="apiProfile">lakehouse-landing</data><data key="correlation.selector">/body/ingestionId</data><data key="correlation.secondarySelector">/headers/x-business-operation</data><data key="correlation.kindSelector">/body/stage</data><data key="correlation.roundSelector">/body/round</data><data key="correlation.referenceSelector">/body/filename</data><data key="operations">landFile</data><data key="correlation.mode">ACCEPT_OR_CREATE</data><data key="behavior">openapi.receive</data><data key="layoutWidth">140</data><data key="layoutHeight">70</data></node>
+<node id="bronze"><data key="kind">BEHAVIOR</data><data key="layoutX">300</data><data key="layoutY">200</data><data key="label">bronze</data><data key="url">http://localhost:19090/bronze</data><data key="method">POST</data><data key="recovery.repeatable">not-repeatable</data><data key="body">{"ingestionId":"{{payload.body.ingestionId}}","filename":"{{payload.body.filename}}","version":"{{payload.body.version}}","round":"{{payload.body.round}}"}</data><data key="correlation.outgoing.applicationHeader">X-Business-Operation</data><data key="correlation.outgoing.contributionHeader">X-Business-Part</data><data key="correlation.outgoing.roundHeader">X-Business-Round</data><data key="behavior">http-request</data><data key="layoutWidth">140</data><data key="layoutHeight">70</data></node>
+<node id="parse-bronze"><data key="kind">BEHAVIOR</data><data key="layoutX">520</data><data key="layoutY">200</data><data key="label">parse-bronze</data><data key="behavior">json-parse</data><data key="layoutWidth">140</data><data key="layoutHeight">70</data></node>
+<node id="spark-submit"><data key="kind">BEHAVIOR</data><data key="layoutX">740</data><data key="layoutY">200</data><data key="label">spark-submit</data><data key="url">http://localhost:19090/spark</data><data key="method">POST</data><data key="recovery.repeatable">not-repeatable</data><data key="body">{"ingestionId":"{{payload.ingestionId}}","filename":"{{payload.filename}}","version":"{{payload.version}}","round":"{{payload.round}}"}</data><data key="correlation.outgoing.applicationHeader">X-Business-Operation</data><data key="correlation.outgoing.contributionHeader">X-Business-Part</data><data key="correlation.outgoing.roundHeader">X-Business-Round</data><data key="behavior">http-request</data><data key="layoutWidth">140</data><data key="layoutHeight">70</data></node>
+<node id="silver-events"><data key="kind">BEHAVIOR</data><data key="layoutX">80</data><data key="layoutY">420</data><data key="label">silver-events</data><data key="apiProfile">lakehouse-silver</data><data key="correlation.selector">/body/ingestionId</data><data key="correlation.secondarySelector">/headers/x-business-operation</data><data key="correlation.kindSelector">/body/stage</data><data key="correlation.roundSelector">/body/round</data><data key="correlation.referenceSelector">/body/filename</data><data key="operations">silverPartition</data><data key="correlation.mode">REQUIRE_EXISTING</data><data key="correlation.contributionSelector">/body/partition</data><data key="behavior">openapi.receive</data><data key="layoutWidth">140</data><data key="layoutHeight">70</data></node>
+<node id="silver-write"><data key="kind">BEHAVIOR</data><data key="layoutX">300</data><data key="layoutY">420</data><data key="label">silver-write</data><data key="url">http://localhost:19090/silver</data><data key="method">POST</data><data key="recovery.repeatable">not-repeatable</data><data key="body">{"ingestionId":"{{payload.body.ingestionId}}","partition":"{{payload.body.partition}}","round":"{{payload.body.round}}"}</data><data key="correlation.outgoing.applicationHeader">X-Business-Operation</data><data key="correlation.outgoing.contributionHeader">X-Business-Part</data><data key="correlation.outgoing.roundHeader">X-Business-Round</data><data key="behavior">http-request</data><data key="layoutWidth">140</data><data key="layoutHeight">70</data></node>
+<node id="six-partitions"><data key="kind">PASSTHROUGH</data><data key="layoutX">520</data><data key="layoutY">420</data><data key="label">six-partitions</data><data key="correlatedJoin.mode">FIXED_MANIFEST</data><data key="correlatedJoin.expectedIds">["part-1","part-2","part-3","part-4","part-5","part-6"]</data><data key="layoutWidth">140</data><data key="layoutHeight">70</data></node>
+<node id="gold"><data key="kind">BEHAVIOR</data><data key="layoutX">740</data><data key="layoutY">420</data><data key="label">gold</data><data key="url">http://localhost:19090/gold</data><data key="method">POST</data><data key="recovery.repeatable">not-repeatable</data><data key="body">six distinct silver partitions committed</data><data key="correlation.outgoing.applicationHeader">X-Business-Operation</data><data key="correlation.outgoing.contributionHeader">X-Business-Part</data><data key="correlation.outgoing.roundHeader">X-Business-Round</data><data key="behavior">http-request</data><data key="layoutWidth">140</data><data key="layoutHeight">70</data></node>
+<node id="close-operation"><data key="kind">BEHAVIOR</data><data key="layoutX">960</data><data key="layoutY">420</data><data key="label">close-operation</data><data key="auditReason">Six declared silver partitions and gold output committed</data><data key="disposition">COMPLETED</data><data key="behavior">correlation-close</data><data key="layoutWidth">140</data><data key="layoutHeight">70</data></node>
+<node id="end"><data key="kind">END</data><data key="layoutX">1180</data><data key="layoutY">200</data><data key="label">end</data><data key="layoutWidth">140</data><data key="layoutHeight">70</data></node>
+<node id="error"><data key="kind">ERROR</data><data key="layoutX">1180</data><data key="layoutY">570</data><data key="label">error</data><data key="layoutWidth">140</data><data key="layoutHeight">70</data></node>
+<edge id="route-0" source="start" target="end"><data key="outcome">continue</data></edge>
+<edge id="route-1" source="landing" target="bronze"><data key="outcome">continue</data></edge>
+<edge id="route-2" source="bronze" target="parse-bronze"><data key="outcome">continue</data></edge>
+<edge id="route-3" source="parse-bronze" target="spark-submit"><data key="outcome">continue</data></edge>
+<edge id="route-4" source="spark-submit" target="end"><data key="outcome">continue</data></edge>
+<edge id="route-5" source="silver-events" target="silver-write"><data key="outcome">continue</data></edge>
+<edge id="route-6" source="silver-write" target="six-partitions"><data key="outcome">continue</data></edge>
+<edge id="route-7" source="six-partitions" target="gold"><data key="outcome">continue</data></edge>
+<edge id="route-8" source="gold" target="close-operation"><data key="outcome">continue</data></edge>
+<edge id="route-9" source="close-operation" target="end"><data key="outcome">continue</data></edge>
+</graph></graphml>

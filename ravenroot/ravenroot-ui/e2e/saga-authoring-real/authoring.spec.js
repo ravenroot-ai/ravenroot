@@ -18,7 +18,8 @@ async function inspect(page) {
 }
 async function run(page, button) {
   const started = page.waitForResponse(response => response.request().method() === 'POST'
-    && new URL(response.url()).pathname === '/v1/executions');
+    && (button === '#btn-run' ? new URL(response.url()).pathname.endsWith('/initial-start')
+      : new URL(response.url()).pathname === '/v1/executions'));
   await page.locator(button).click();
   expect((await started).status()).toBe(202);
 }
@@ -126,7 +127,26 @@ test('mixed sagas survive import/export and forged or incomplete declarations ha
 });
 
 
-test('Log before a real source remains ordinary for Test and source-session Run', async ({ page }) => {
+test('Log before a real source remains ordinary for Test and deployment-bound Run', async ({ page }) => {
+  // Hold only the application's consumption of the actual server Stop response. The real HTTP
+  // request, authorization, effect, headers and response bytes remain unchanged. This makes the
+  // headers-before-settlement window deterministic without any sleep or retry-as-acceptance.
+  await page.addInitScript(() => {
+    const fetch = globalThis.fetch.bind(globalThis);
+    const held = { waiting: false, release: null }; globalThis.__sagaStopBody = held;
+    globalThis.fetch = async (input, options) => {
+      const response = await fetch(input, options);
+      if (options?.method === 'POST' && /\/v1\/deployments\/[^/]+\/stop$/.test(new URL(String(input), location.href).pathname)) {
+        const text = response.text.bind(response);
+        response.text = async () => {
+          held.waiting = true;
+          await new Promise(resolve => { held.release = resolve; });
+          return text();
+        };
+      }
+      return response;
+    };
+  });
   await connect(page);
   const xml = graph().replace('<node id="end">', '<node id="source"><data key="kind">BEHAVIOR</data><data key="behavior">test.saga.source</data></node><node id="end">')
     .replace('<edge source="log" target="transform"/>', '<edge source="log" target="source"/><edge source="source" target="transform"/>');
@@ -134,8 +154,77 @@ test('Log before a real source remains ordinary for Test and source-session Run'
   expect((await inspect(page)).summary.valid).toBe(true);
   await run(page, '#btn-play');
   await expect(page.locator('#btn-run')).toBeEnabled();
-  const start = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === '/v1/source-sessions');
+  const mutations = [];
+  page.on('request', request => { if (request.method() === 'POST') mutations.push(new URL(request.url()).pathname); });
+  const start = page.waitForResponse(response => response.request().method() === 'POST'
+    && new URL(response.url()).pathname.endsWith('/initial-start'));
   await page.locator('#btn-run').click();
   expect((await start).status()).toBe(202);
+  expect(mutations.filter(path => path.endsWith('/initial-start'))).toHaveLength(1);
+  expect(mutations).not.toContain('/v1/source-sessions');
+  await expect.poll(() => page.evaluate(() => { const run = window.ravenroot.activeDocument().deploymentRun; return run?.phase === 'READY' && Boolean(run.processInstanceId && run.traversalId); })).toBe(true);
+  const binding = await page.evaluate(() => window.ravenroot.activeDocument().deploymentRun);
+  expect(binding.processInstanceId).toBeTruthy(); expect(binding.traversalId).toBeTruthy();
   expect((await inspect(page)).xml).not.toContain('<data key="scope">');
+  // Hosted admissions settle in the durable process inventory, not the one-shot result cache.
+  await expect.poll(async () => {
+    const admitted = await page.request.get(new URL(`/v1/executions/${binding.processInstanceId}/traversals`, process.env.RAVENROOT_SAGA_ORIGIN).href);
+    if (admitted.status() === 404) return null;
+    expect(admitted.status()).toBe(200);
+    return (await admitted.json()).traversals.find(row => row.traversalId === binding.traversalId)?.status;
+  }).toBe('COMPLETED');
+  const origin = await page.evaluate(() => window.ravenroot.activeDocument().id);
+  await page.evaluate(id => window.ravenroot.requestCloseDocument(id), origin);
+  await expect(page.locator('#active-deployment-dialog')).toBeVisible();
+  const other = await page.evaluate(() => window.ravenroot.openDocument({ name: 'later.graphml' }));
+  const stopped = page.waitForResponse(response => response.request().method() === 'POST'
+    && new URL(response.url()).pathname === `/v1/deployments/${binding.deploymentId}/stop`);
+  await page.locator('[data-active-deployment-action="stop-and-close"]').click();
+  const stopResponse = await stopped; expect(stopResponse.status()).toBe(200);
+  expect((await stopResponse.request().allHeaders())['x-ravenroot-deployment-incarnation']).toBe(binding.incarnationId);
+  expect((await stopResponse.request().allHeaders())['x-ravenroot-graph-version']).toBe(binding.graphVersion);
+  await expect.poll(() => page.evaluate(() => globalThis.__sagaStopBody.waiting)).toBe(true);
+  // Returning a rich Document makes Playwright serialize the viewer, graph, controllers and DOM
+  // while Stop is still reading its body. Observe membership as a primitive in both states.
+  const originIsOpen = () => page.evaluate(id => Boolean(window.ravenroot.workspace.find(id)), origin);
+  await expect.poll(originIsOpen).toBe(true);
+  expect(await page.evaluate(id => window.ravenroot.workspace.find(id).deploymentRunStopPending, origin)).toBe(true);
+  expect(await page.evaluate(() => window.ravenroot.workspace.activeId)).toBe(other);
+  expect(mutations.filter(path => path.endsWith('/initial-start'))).toHaveLength(1);
+  await page.evaluate(() => globalThis.__sagaStopBody.release());
+  await stopResponse.finished();
+  await expect.poll(originIsOpen).toBe(false);
+  expect(await page.evaluate(() => window.ravenroot.workspace.activeId)).toBe(other);
+  const status = await page.request.get(new URL(`/v1/deployments/${binding.deploymentId}`, process.env.RAVENROOT_SAGA_ORIGIN).href);
+  expect(status.status()).toBe(200); expect((await status.json()).state).toBe('STOPPED');
+  expect(mutations.filter(path => path.endsWith('/initial-start'))).toHaveLength(1);
+
+});
+
+test('catalog and kind transitions preserve correlation controls and explicit saga opt-in independently', async ({ page }) => {
+  await connect(page); await importGraph(page, graph(), 'combined-authoring.graphml');
+  await page.locator('#btn-modify').click();
+  await page.evaluate(() => { const cy = window.ravenroot.activeDocument().cy; cy.elements().unselect(); cy.getElementById('transform').select(); });
+  await expect(page.locator('#node-editor [name="id"]')).toHaveValue('transform');
+  await expect(page.locator('[data-saga-enabled]')).not.toBeChecked();
+  await page.locator('[data-saga-enabled]').check();
+  await page.locator('[data-catalog-property="saga.scope"]').fill('order');
+  await page.locator('[data-catalog-property="saga.step"]').fill('reserve');
+  await page.locator('[data-catalog-property="saga.participant"]').selectOption('pure');
+  await page.locator('#node-editor [name="kind"]').selectOption('START');
+  await expect(page.locator('[data-saga-enabled]')).toHaveCount(0);
+  await page.locator('[data-catalog-property="correlation.mode"]').selectOption('ACCEPT_OR_CREATE');
+  await page.locator('[data-catalog-property="correlation.selector"]').fill('/businessId');
+  await page.locator('#node-editor [name="catalogBehavior"]').selectOption('timer');
+  await expect(page.locator('[data-catalog-property="correlation.selector"]')).toHaveValue('/businessId');
+  await expect(page.locator('[data-catalog-property="correlation.mode"]')).toHaveCount(1);
+  await expect(page.locator('[data-saga-enabled]')).toHaveCount(0);
+  await page.locator('#node-editor [name="catalogBehavior"]').selectOption('http-request');
+  await expect(page.locator('[data-saga-enabled]')).not.toBeChecked();
+  await expect(page.locator('[data-catalog-property="saga.scope"]')).toBeDisabled();
+  await expect(page.locator('[data-catalog-property="saga.scope"]')).toHaveCount(1);
+  await page.locator('[data-saga-enabled]').check();
+  await expect(page.locator('[data-catalog-property="saga.scope"]')).toBeEnabled();
+  await page.locator('[data-saga-enabled]').uncheck();
+  await expect(page.locator('[data-catalog-property="saga.scope"]')).toBeDisabled();
 });

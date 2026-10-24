@@ -165,6 +165,9 @@ public final class RouteTable {
                     + "instance counts.", true, true, 200, STANDARD_ERRORS, READ, true),
             new RouteDescriptor(Set.of("GET"), "/v1/node-types", "The trusted node-type catalog.", true, true,
                     200, STANDARD_ERRORS, READ, true),
+            new RouteDescriptor(Set.of("POST"), "/v1/correlation/preview",
+                    "Non-mutating bounded extraction preview over a caller-supplied actual connector sample. Requires catalog-read authority.",
+                    true, true, 200, STANDARD_ERRORS, NEVER, false),
             new RouteDescriptor(Set.of("GET", "POST"), "/v1/node-palettes",
                     "Lists or creates durable personal node palettes for the exact authenticated tenant, issuer, and subject. "
                             + "Palette content is never assistant-visible and responses are private and non-cacheable.",
@@ -389,6 +392,12 @@ public final class RouteTable {
                             WireErrorCodes.EMBED_SESSION_UNAVAILABLE,
                             WireErrorCodes.EMBED_TEMPORARILY_UNAVAILABLE,
                             WireErrorCodes.EMBED_REQUEST_TOO_LARGE), NEVER, false),
+            new RouteDescriptor(Set.of("POST"), "/v1/embed/history",
+                    "Proof-protected bounded read-only business histories, actual traversals, visits, attempts, parents and captured content for the exact v2 deployment.",
+                    true, false, 200,
+                    List.of(WireErrorCodes.EMBED_REQUEST_INVALID, WireErrorCodes.EMBED_METHOD_NOT_ALLOWED,
+                            WireErrorCodes.EMBED_SESSION_UNAVAILABLE, WireErrorCodes.EMBED_TEMPORARILY_UNAVAILABLE,
+                            WireErrorCodes.EMBED_REQUEST_TOO_LARGE), NEVER, true),
             new RouteDescriptor(Set.of("POST"), "/v1/embed/runs",
                     "Reads a bounded, server-filtered run list for one exact v2 embed deployment binding.",
                     true, false, 200,
@@ -489,6 +498,30 @@ public final class RouteTable {
                     true, false, 200,
                     concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_RESOURCE.code(),
                             ErrorCode.INVALID_REQUEST.code()), NEVER, false),
+            new RouteDescriptor(Set.of("GET"), "/v1/deployments/{id}/history",
+                    "Store-paged exact-version business histories and actual traversal/visit/attempt/parent metadata; captured content follows existing redaction and retention.",
+                    true, false, 200,
+                    concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(), ErrorCode.UNKNOWN_RESOURCE.code(),
+                            ErrorCode.CONFLICT.code(), ErrorCode.REQUEST_INTERRUPTED.code()), READ, true),
+            new RouteDescriptor(Set.of("POST"), "/v1/deployments/{id}/restore",
+                    "Explicitly restores only an exact retained durable registration and canonical graph under registration and lifecycle authority; creates no registration or initial START.",
+                    true, false, 200, concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(), ErrorCode.UNKNOWN_RESOURCE.code(),
+                            ErrorCode.CONFLICT.code()), NEVER, false),
+            new RouteDescriptor(Set.of("GET"), "/v1/deployments/{id}/initial-start",
+                    "Reads the retained permanent initial START marker under current incarnation/version observation authority. "
+                            + "Requires incarnationId, graphVersion and requestId query fields. Returns original process/traversal IDs "
+                            + "without admitting work; missing or unavailable custody is explicit and never becomes an empty initial execution.",
+                    true, false, 200, concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(), ErrorCode.CONFLICT.code(),
+                            ErrorCode.REQUEST_INTERRUPTED.code()), READ, true),
+            new RouteDescriptor(Set.of("POST"), "/v1/deployments/{id}/initial-start",
+                    "Accepts or reconciles the single initial START for the authorized deployment. "
+                            + "Requires exact incarnationId and graphVersion, a bounded requestId and structured input. "
+                            + "Distinct requests reconcile the original processInstanceId and traversalId; "
+                            + "restart, completion, failure and retention never restore eligibility. "
+                            + "A permanent initial-start-capable execution store is required before effects.",
+                    true, false, 202,
+                    concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_RESOURCE.code(),
+                            ErrorCode.INVALID_REQUEST.code(), ErrorCode.CONFLICT.code()), NEVER, false),
             new RouteDescriptor(Set.of("POST"), "/v1/deployments/{id}/start",
                     "Starts one process-local deployment and answers when it has reached READY, or with "
                             + "the truthful FAILED status if startup failed and rolled back. Idempotent: "
@@ -496,20 +529,25 @@ public final class RouteTable {
                             + "Subject to this pod's active-deployment cap, which counts deployments a "
                             + "graceful shutdown would owe time to and so is checked here rather than at "
                             + "registration; exceeding it is a 429. Durable targets require Idempotency-Key and "
-                            + "X-Ravenroot-Expected-Generation and return DeploymentCommandOutcome.",
+                            + "X-Ravenroot-Expected-Generation and return DeploymentCommandOutcome. Document-bound Start "
+                            + "supplies exact runtime incarnation and graph version headers, plus durable registration "
+                            + "identity when applicable; changed bindings are refused before activation.",
                     true, false, 200,
                     concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_RESOURCE.code(),
                             ErrorCode.INVALID_REQUEST.code(), ErrorCode.REQUEST_INTERRUPTED.code(),
-                            ErrorCode.REQUEST_LIMIT_EXCEEDED.code()), NEVER, false),
+                            ErrorCode.REQUEST_LIMIT_EXCEEDED.code(), ErrorCode.CONFLICT.code()), NEVER, false),
             new RouteDescriptor(Set.of("POST"), "/v1/deployments/{id}/stop",
                     "Stops one process-local deployment and leaves it registered and re-startable. Closes "
                             + "admission and inbound sources first, then releases only that deployment's own "
                             + "domain -- never a sibling deployment and never the shared ActorSystem. "
                             + "Idempotent: stopping a stopped deployment answers STOPPED. Durable targets also "
-                            + "require Idempotency-Key, X-Ravenroot-Expected-Generation and X-Ravenroot-Reason.",
+                            + "require Idempotency-Key, X-Ravenroot-Expected-Generation and X-Ravenroot-Reason. "
+                            + "Document-bound Stop additionally supplies X-Ravenroot-Deployment-Incarnation and "
+                            + "X-Ravenroot-Graph-Version, plus X-Ravenroot-Registration-Identity for durable targets; "
+                            + "the server refuses changed identities before mutation.",
                     true, false, 200,
                     concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_RESOURCE.code(),
-                            ErrorCode.INVALID_REQUEST.code(), ErrorCode.REQUEST_INTERRUPTED.code()), NEVER, false),
+                            ErrorCode.INVALID_REQUEST.code(), ErrorCode.CONFLICT.code(), ErrorCode.REQUEST_INTERRUPTED.code()), NEVER, false),
             new RouteDescriptor(Set.of("POST"), "/v1/deployments/{id}/restart",
                     "A completed stop followed by a start, never the two overlapping, so no source "
                             + "subscription is duplicated across the restart. Durable targets require "

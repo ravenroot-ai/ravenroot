@@ -278,6 +278,30 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
      */
     private final ConcurrentHashMap<LocalDeploymentKey, LocalDeploymentRecord> localDeployments =
             new ConcurrentHashMap<>();
+    /** Trusted host composition seam; authorization belongs to the public adapter. */
+    @FunctionalInterface public interface DurableLocalRegistrationRestorer {
+        java.util.Optional<LocalDeploymentStatus> restore(SecurityContext security, String logicalId, String registrationIdentity, String graphVersion);
+    }
+    private final java.util.concurrent.atomic.AtomicReference<DurableLocalRegistrationRestorer> durableRegistrationRestorer =
+            new java.util.concurrent.atomic.AtomicReference<>();
+    /** Finite configured store read wait for durable host restoration. */
+    public java.time.Duration durableDeploymentRestoreReadTimeout() {
+        return executionStore == null ? ai.ravenroot.api.correlation.BusinessHistoryPolicy.DEFAULTS.readTimeout()
+                : executionStore.businessHistoryPolicy().readTimeout();
+    }
+    /** Exact configured graph byte limit used by durable host restoration. */
+    public int maximumLocalDeploymentGraphBytes() { return graphExecutionLimits.graphMl().maxBytes(); }
+    /** Installs one durable host authority and returns its exact uninstaller. */
+    public Runnable installDurableLocalRegistrationRestorer(DurableLocalRegistrationRestorer restorer) {
+        java.util.Objects.requireNonNull(restorer);
+        if (!durableRegistrationRestorer.compareAndSet(null, restorer)) throw new IllegalStateException("durable restore authority already installed");
+        return () -> durableRegistrationRestorer.compareAndSet(restorer, null);
+    }
+    @Override public java.util.Optional<LocalDeploymentStatus> restoreLocalDeployment(SecurityContext security,
+            String deploymentId, String registrationIdentity, String graphVersion) {
+        var restorer = durableRegistrationRestorer.get();
+        return restorer == null ? java.util.Optional.empty() : restorer.restore(security, deploymentId, registrationIdentity, graphVersion);
+    }
     private final Object localDeploymentLock = new Object();
     /**
      * Serializes the admission decision against concurrent activations. A {@link ConcurrentHashMap}
@@ -738,7 +762,16 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
 
     @Override
     public List<ai.ravenroot.api.catalog.NodeTypeDescriptor> nodeTypes() {
-        return behaviors.descriptors();
+        var limits = executionStore == null ? ai.ravenroot.api.correlation.CorrelationLimits.DEFAULTS
+                : executionStore.businessHistoryPolicy().selection();
+        var mapping = java.util.Arrays.stream(ai.ravenroot.api.correlation.CorrelationMappingProperties.descriptors(limits))
+                .collect(java.util.stream.Collectors.toMap(ai.ravenroot.api.catalog.NodePropertyDescriptor::name, value -> value));
+        return behaviors.descriptors().stream().map(type -> {
+            if (type.properties().stream().noneMatch(property -> mapping.containsKey(property.name()))) return type;
+            return new ai.ravenroot.api.catalog.NodeTypeDescriptor(type.behavior(), type.displayName(), type.category(), type.description(),
+                    type.visualType(), type.agentic(), type.properties().stream().map(property -> mapping.getOrDefault(property.name(), property)).toList(),
+                    type.capabilities(), type.defaultNature(), type.allowedNatures(), type.commands(), type.outcomes(), type.runtimeConcurrency(), type.additionalProperties());
+        }).toList();
     }
 
     @Override
@@ -3163,6 +3196,12 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
     }
 
     @Override
+    public ai.ravenroot.api.correlation.CorrelationPreview previewCorrelation(Map<String, ?> properties, Object sample) {
+        return ai.ravenroot.api.correlation.CorrelationPreview.evaluate(properties, sample, executionStore == null
+                ? ai.ravenroot.api.correlation.CorrelationLimits.DEFAULTS : executionStore.businessHistoryPolicy().selection());
+    }
+
+    @Override
     public List<DurableExecutionEvent> durableEventsAfter(String tenantId, long afterOffset, int limit) {
         if (!durableEventJournalAvailable()) {
             throw new IllegalStateException(
@@ -3170,37 +3209,8 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                             + "replay is unavailable; the in-memory-only degradation must be chosen "
                             + "by the caller, not discovered by catching this)");
         }
-        List<JournalRecord> page = await(executionStore.readJournal(tenantId, afterOffset, limit));
-        // Scoped to this one page rather than kept as instance state: bounded by `limit`, so the
-        // cost is bounded too, and a cache that outlived a single call would need its own staleness
-        // policy for no benefit -- a page's own records rarely span more than a handful of instances.
-        var nodeNamesByInstance = new HashMap<ExecutionKey, Map<UUID, String>>();
-        var events = new ArrayList<DurableExecutionEvent>(page.size());
-        for (JournalRecord record : page) {
-            EventEnvelope envelope = record.envelope();
-            String nodeId = envelope.invocation()
-                    .map(invocationId -> nodeNamesByInstance
-                            .computeIfAbsent(record.key(), this::loadInvocationNodeNames)
-                            .get(invocationId))
-                    .orElse(null);
-            events.add(new DurableExecutionEvent(envelope.eventId(), record.journalOffset(),
-                    record.streamSequence(), envelope.tenantId(), envelope.eventType(),
-                    envelope.processInstanceId(), envelope.traversalId(), envelope.invocationId(),
-                    envelope.attemptId(), envelope.causationId(), envelope.correlationId(),
-                    envelope.graphVersion(), envelope.occurredAt(), nodeId,
-                    ExecutionEventType.EDGE_TRAVERSED.name().equals(envelope.eventType())
-                            ? ai.ravenroot.api.persistence.EdgeTraversalEventData.edgeId(envelope.payload())
-                                    .orElse(null)
-                            : null,
-                    // Decoded from the body under its own media type, exactly as the edge identity
-                    // above is, so a foreign or malformed payload stays absent rather than becoming
-                    // a plausible-looking handler id attributed to a handler that may exist.
-                    ai.ravenroot.api.persistence.HandlerEventData.isHandlerEvent(envelope.eventType())
-                            ? ai.ravenroot.api.persistence.HandlerEventData.handlerId(envelope.payload())
-                                    .orElse(null)
-                            : null));
-        }
-        return List.copyOf(events);
+        requireEventPageLimit(limit);
+        return projectDurableEvents(await(executionStore.readJournal(tenantId, afterOffset, limit)));
     }
 
     @Override
@@ -3213,50 +3223,51 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
     public DurableProcessEventPage durableEventPageForProcess(String tenantId, UUID processInstanceId,
                                                                long afterSequence, int limit) {
         if (!durableEventJournalAvailable()) return new DurableProcessEventPage(List.of(), 1, 1);
+        requireEventPageLimit(limit);
         var key = new ExecutionKey(requireTenant(tenantId), java.util.Objects.requireNonNull(processInstanceId));
         var page = await(executionStore.readProcessJournalPage(key, afterSequence, limit));
-        var nodeNames = loadInvocationNodeNames(key);
-        var events = new ArrayList<DurableExecutionEvent>(page.records().size());
-        for (JournalRecord record : page.records()) {
-            EventEnvelope envelope = record.envelope();
-            String nodeId = envelope.invocation().map(nodeNames::get).orElse(null);
-            events.add(new DurableExecutionEvent(envelope.eventId(), record.journalOffset(),
-                    record.streamSequence(), envelope.tenantId(), envelope.eventType(),
-                    envelope.processInstanceId(), envelope.traversalId(), envelope.invocationId(),
-                    envelope.attemptId(), envelope.causationId(), envelope.correlationId(),
-                    envelope.graphVersion(), envelope.occurredAt(), nodeId,
-                    ExecutionEventType.EDGE_TRAVERSED.name().equals(envelope.eventType())
-                            ? ai.ravenroot.api.persistence.EdgeTraversalEventData.edgeId(envelope.payload())
-                            .orElse(null) : null));
-        }
-        return new DurableProcessEventPage(events, page.retainedFromSequence(), page.nextSequence());
+        return new DurableProcessEventPage(projectDurableEvents(page.records()), page.retainedFromSequence(), page.nextSequence());
     }
 
-    /**
-     * The invocation-to-node binding {@code InvocationAdded} recorded as structure, in the same
-     * transaction as the events themselves. The envelope deliberately carries no node id; see
-     * {@link EventEnvelope}'s own Javadoc for why the binding is joined here rather than added to the
-     * payload schema. A best-effort join, not a second source of truth: an instance whose current state is no
-     * longer loadable (its own retention is independent of the journal's) resolves every one of its
-     * node ids to {@code null} rather than failing the whole page over one unresolved instance.
-     */
-    private Map<UUID, String> loadInvocationNodeNames(ExecutionKey key) {
-        StoredProcessInstance stored;
-        try {
-            stored = await(executionStore.load(key));
-        } catch (ExecutionStoreException notFound) {
-            if (notFound.failure() instanceof ExecutionStoreFailure.NotFound) {
-                return Map.of();
+    private static void requireEventPageLimit(int limit) {
+        if (limit < 1 || limit > 1000) throw new IllegalArgumentException("event page limit must be 1 through 1000");
+    }
+
+    /** Resolves only this page's selected metadata; retained execution payloads are never loaded. */
+    private List<DurableExecutionEvent> projectDurableEvents(List<JournalRecord> page) {
+        var selected = new HashMap<ExecutionKey, java.util.Set<UUID>>();
+        for (var record : page) record.envelope().invocation().ifPresent(id ->
+                selected.computeIfAbsent(record.key(), ignored -> new java.util.HashSet<>()).add(id));
+        var bindings = new HashMap<ExecutionKey, Map<UUID, String>>();
+        if (executionStore.supports(ai.ravenroot.api.persistence.StoreCapability.EXECUTION_HISTORY))
+            selected.forEach((key, ids) -> bindings.put(key, await(executionStore.executionInvocationNodeIds(key, ids))));
+        var contexts = new HashMap<ExecutionKey, Map<UUID, ai.ravenroot.api.correlation.ApplicationCorrelationContext>>();
+        var events = new ArrayList<DurableExecutionEvent>(page.size());
+        for (var record : page) {
+            var envelope = record.envelope();
+            ai.ravenroot.api.correlation.ApplicationCorrelationContext context = null;
+            if (executionStore.supports(ai.ravenroot.api.persistence.StoreCapability.BUSINESS_HISTORIES)) {
+                var byTraversal = contexts.computeIfAbsent(record.key(), ignored -> new HashMap<>());
+                if (!byTraversal.containsKey(envelope.traversalId())) {
+                    var relation = await(executionStore.correlatedTraversal(envelope.tenantId(),
+                            envelope.processInstanceId(), envelope.traversalId()));
+                    byTraversal.put(envelope.traversalId(), relation.map(ai.ravenroot.api.correlation.CorrelatedTraversal::context).orElse(null));
+                }
+                context = byTraversal.get(envelope.traversalId());
             }
-            throw notFound;
+            events.add(new DurableExecutionEvent(envelope.eventId(), record.journalOffset(), record.streamSequence(),
+                    envelope.tenantId(), envelope.eventType(), envelope.processInstanceId(), envelope.traversalId(),
+                    envelope.invocationId(), envelope.attemptId(), envelope.causationId(), envelope.correlationId(),
+                    envelope.graphVersion(), envelope.occurredAt(),
+                    envelope.invocationId() == null ? null
+                            : bindings.getOrDefault(record.key(), Map.of()).get(envelope.invocationId()),
+                    ExecutionEventType.EDGE_TRAVERSED.name().equals(envelope.eventType())
+                            ? ai.ravenroot.api.persistence.EdgeTraversalEventData.edgeId(envelope.payload()).orElse(null) : null,
+                    ai.ravenroot.api.persistence.HandlerEventData.isHandlerEvent(envelope.eventType())
+                            ? ai.ravenroot.api.persistence.HandlerEventData.handlerId(envelope.payload()).orElse(null) : null,
+                    context, ai.ravenroot.api.persistence.NodeOutcomeEventData.outcome(envelope.payload()).orElse(null)));
         }
-        var bindings = new HashMap<UUID, String>();
-        for (Traversal traversal : stored.state().traversals().values()) {
-            for (NodeInvocation invocation : traversal.invocations().values()) {
-                bindings.put(invocation.invocationId(), invocation.nodeId());
-            }
-        }
-        return bindings;
+        return List.copyOf(events);
     }
 
     /**
@@ -3472,7 +3483,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         byte[] graphBytes = readGraphMlBytes(graphMl);
         int sourceCount = inspectEffectiveSources(graphBytes,
                 ai.ravenroot.api.application.GraphAdmissionPurpose.LOCAL_DEPLOYMENT);
-        Registration registration = register(key, graphBytes, sourceCount, lifecycleId);
+        Registration registration = register(key, graphBytes, sourceCount, lifecycleId, true);
         bindLifecycleIdentity(registration.record(), security);
         return localDeploymentStatus(key.deploymentId(), registration.record());
     }
@@ -3544,6 +3555,23 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
     }
 
     @Override
+    public ai.ravenroot.api.history.DeploymentHistoryReader deploymentHistory(String tenantId,
+            ai.ravenroot.api.history.DeploymentHistorySource source) {
+        java.util.Objects.requireNonNull(source, "source");
+        var key = new LocalDeploymentKey(requireTenant(tenantId), requireLocalDeploymentId(source.deploymentId()));
+        var captured = localDeployments.get(key);
+        if (captured == null) throw new ai.ravenroot.api.history.HistoryReadException(
+                ai.ravenroot.api.history.HistoryReadException.Reason.NOT_FOUND);
+        return new DefaultDeploymentHistoryReader(executionStore,
+                new ai.ravenroot.api.correlation.BusinessScope(key.tenantId(), captured.lifecycleId().value(), source.graphVersion()), source,
+                () -> localDeployments.get(key) == captured && deployments.get(captured.engineId()) == captured.deployment()
+                        && source.incarnationId().equals(captured.deployment().incarnationId())
+                        && source.graphVersion().equals(captured.deployment().graphVersion()),
+                this::activityArchiveAvailable, this::activityArchiveMaxPageSize,
+                query -> behaviors.activityCapture().read(key.tenantId(), query));
+    }
+
+    @Override
     public java.util.Optional<DeploymentViewerView> localDeploymentView(String tenantId, String deploymentId) {
         var key = new LocalDeploymentKey(requireTenant(tenantId), requireLocalDeploymentId(deploymentId));
         LocalDeploymentRecord record = localDeployments.get(key);
@@ -3584,7 +3612,46 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                                                                String incarnationId,
                                                                String graphVersion,
                                                                String requestId) {
+        return startLocalDeploymentExecution(security, deploymentId, incarnationId, graphVersion,
+                requestId, ai.ravenroot.api.payload.PayloadValue.fromJava(java.util.Map.of(),
+                        ai.ravenroot.api.payload.PayloadLimits.DEFAULTS));
+    }
+
+    @Override
+    public EmbedDeploymentStart reconcileLocalDeploymentInitialStart(SecurityContext security, String deploymentId,
+            String incarnationId, String graphVersion, String requestId) {
+        java.util.Objects.requireNonNull(security);
+        if (requestId == null || !requestId.matches("[A-Za-z0-9][A-Za-z0-9._:-]{0,127}")) throw new IllegalArgumentException("invalid initial START reconciliation id");
+        var key = new LocalDeploymentKey(requireTenant(security.tenantId()), requireLocalDeploymentId(deploymentId));
+        var record = localDeployments.get(key);
+        if (record == null || deployments.get(record.engineId()) != record.deployment()
+                || !record.deployment().incarnationId().equals(incarnationId) || !record.graphHash().equals(graphVersion)
+                || executionStore == null || !executionStore.supports(ai.ravenroot.api.persistence.StoreCapability.DURABLE)
+                || !executionStore.supports(ai.ravenroot.api.persistence.StoreCapability.INITIAL_START_ADMISSION))
+            return new EmbedDeploymentStart(EmbedDeploymentStart.Outcome.REFUSED, requestId);
+        try {
+            var original = executionStore.initialStart(security.tenantId(), record.lifecycleId().value()).toCompletableFuture()
+                    .get(executionStore.businessHistoryPolicy().readTimeout().toNanos(), java.util.concurrent.TimeUnit.NANOSECONDS);
+            if (localDeployments.get(key) != record || deployments.get(record.engineId()) != record.deployment()
+                    || !record.deployment().incarnationId().equals(incarnationId) || original.isEmpty()
+                    || !original.orElseThrow().graphVersion().equals(graphVersion)) return new EmbedDeploymentStart(EmbedDeploymentStart.Outcome.REFUSED, requestId);
+            return new EmbedDeploymentStart(EmbedDeploymentStart.Outcome.DUPLICATE, requestId,
+                    original.orElseThrow().processInstanceId(), original.orElseThrow().traversalId());
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt(); return new EmbedDeploymentStart(EmbedDeploymentStart.Outcome.RECONCILE, requestId);
+        } catch (java.util.concurrent.ExecutionException | java.util.concurrent.TimeoutException unresolved) {
+            return new EmbedDeploymentStart(EmbedDeploymentStart.Outcome.RECONCILE, requestId);
+        }
+    }
+
+    @Override
+    public EmbedDeploymentStart startLocalDeploymentExecution(SecurityContext security,
+            String deploymentId, String incarnationId, String graphVersion, String requestId,
+            ai.ravenroot.api.payload.PayloadValue input) {
         java.util.Objects.requireNonNull(security, "security");
+        java.util.Objects.requireNonNull(input, "input");
+        ai.ravenroot.api.payload.PayloadLimits.DEFAULTS.enforce(input);
+        ai.ravenroot.api.payload.PayloadValue.requireNoReservedKeys(input);
         if (requestId == null || !requestId.matches("[A-Za-z0-9][A-Za-z0-9._:-]{0,127}")) {
             throw new IllegalArgumentException("invalid embed execution request id");
         }
@@ -3596,9 +3663,14 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                 || !record.deployment().graphVersion().equals(graphVersion)) {
             return new EmbedDeploymentStart(EmbedDeploymentStart.Outcome.REFUSED, requestId);
         }
+        if (executionStore == null || !executionStore.supports(
+                ai.ravenroot.api.persistence.StoreCapability.INITIAL_START_ADMISSION)
+                || !executionStore.supports(ai.ravenroot.api.persistence.StoreCapability.DURABLE)) {
+            return new EmbedDeploymentStart(EmbedDeploymentStart.Outcome.REFUSED, requestId);
+        }
         var receipt = record.deployment().ingress().offerDurably(security,
-                ai.ravenroot.api.deployment.IngressTarget.start(), java.util.Map.of(),
-                "embed-viewer", requestId);
+                ai.ravenroot.api.deployment.IngressTarget.start(), input.toJava(),
+                "initial-start-client", requestId);
         var outcome = switch (receipt) {
             case ai.ravenroot.api.deployment.IngressReceipt.DurablyCommitted ignored ->
                     EmbedDeploymentStart.Outcome.ACCEPTED;
@@ -3611,6 +3683,19 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
             case ai.ravenroot.api.deployment.IngressReceipt.VolatileCustody ignored ->
                     EmbedDeploymentStart.Outcome.REFUSED;
         };
+        if (outcome == EmbedDeploymentStart.Outcome.ACCEPTED || outcome == EmbedDeploymentStart.Outcome.DUPLICATE) {
+            try {
+                var initial = executionStore.initialStart(security.tenantId(), record.lifecycleId().value())
+                        .toCompletableFuture().get(executionStore.businessHistoryPolicy().readTimeout().toNanos(), java.util.concurrent.TimeUnit.NANOSECONDS);
+                if (initial.isPresent()) return new EmbedDeploymentStart(outcome, requestId,
+                        initial.orElseThrow().processInstanceId(), initial.orElseThrow().traversalId());
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                return new EmbedDeploymentStart(EmbedDeploymentStart.Outcome.RECONCILE, requestId);
+            } catch (java.util.concurrent.ExecutionException | java.util.concurrent.TimeoutException unavailable) {
+                return new EmbedDeploymentStart(EmbedDeploymentStart.Outcome.RECONCILE, requestId);
+            }
+        }
         return new EmbedDeploymentStart(outcome, requestId);
     }
 
@@ -3692,6 +3777,51 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
             String tenantId, String deploymentId) {
         var key = new LocalDeploymentKey(requireTenant(tenantId), requireLocalDeploymentId(deploymentId));
         return command(key, GraphDeployment::stop);
+    }
+
+    @Override
+    public CompletionStage<java.util.Optional<LocalDeploymentStatus>> startLocalDeployment(
+            SecurityContext security, String deploymentId, String incarnationId, String graphVersion) {
+        java.util.Objects.requireNonNull(incarnationId, "incarnationId");
+        java.util.Objects.requireNonNull(graphVersion, "graphVersion");
+        var key = new LocalDeploymentKey(requireTenant(security.tenantId()), requireLocalDeploymentId(deploymentId));
+        // Capture and validate the actual object under registration's lock. Never resolve the alias
+        // again after checking: a concurrent removal/re-registration cannot redirect this start.
+        synchronized (localDeploymentLock) {
+            LocalDeploymentRecord record = localDeployments.get(key);
+            if (record == null) return java.util.concurrent.CompletableFuture.completedFuture(java.util.Optional.empty());
+            var deployment = record.deployment();
+            if (deployments.get(record.engineId()) != deployment
+                    || !deployment.incarnationId().equals(incarnationId)
+                    || !deployment.graphVersion().equals(graphVersion))
+                throw new IllegalStateException("deployment start binding changed");
+            synchronized (deploymentAdmissionLock) {
+                requireAdmissionSlot(deployment.id(), deployment);
+                return deployment.start(security).handle((ignored, failure) ->
+                        java.util.Optional.of(localDeploymentStatus(deploymentId, record)));
+            }
+        }
+    }
+
+    @Override
+    public CompletionStage<java.util.Optional<LocalDeploymentStatus>> stopLocalDeployment(
+            String tenantId, String deploymentId, String incarnationId, String graphVersion) {
+        java.util.Objects.requireNonNull(incarnationId, "incarnationId");
+        java.util.Objects.requireNonNull(graphVersion, "graphVersion");
+        var key = new LocalDeploymentKey(requireTenant(tenantId), requireLocalDeploymentId(deploymentId));
+        // Capture and validate the actual object under registration's lock. Never resolve the alias
+        // again after checking: a concurrent removal/re-registration cannot redirect this stop.
+        synchronized (localDeploymentLock) {
+            LocalDeploymentRecord record = localDeployments.get(key);
+            if (record == null) return java.util.concurrent.CompletableFuture.completedFuture(java.util.Optional.empty());
+            var deployment = record.deployment();
+            if (deployments.get(record.engineId()) != deployment
+                    || !deployment.incarnationId().equals(incarnationId)
+                    || !deployment.graphVersion().equals(graphVersion))
+                throw new IllegalStateException("deployment stop binding changed");
+            return deployment.stop().handle((ignored, failure) ->
+                    java.util.Optional.of(localDeploymentStatus(deploymentId, record)));
+        }
     }
 
     @Override
@@ -3783,6 +3913,11 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
 
     private Registration register(LocalDeploymentKey key, byte[] graphBytes, int sourceCount,
                                   DeploymentId lifecycleId) {
+        return register(key, graphBytes, sourceCount, lifecycleId, false);
+    }
+
+    private Registration register(LocalDeploymentKey key, byte[] graphBytes, int sourceCount,
+                                  DeploymentId lifecycleId, boolean durableRegistration) {
         if (closed.get()) {
             throw new IllegalStateException("Ravenroot application is closed");
         }
@@ -3795,7 +3930,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                 if (!existing.graphHash().equals(graphHash)) {
                     throw new LocalDeploymentException(LocalDeploymentException.Reason.GRAPH_CONFLICT);
                 }
-                if (!existing.lifecycleId().equals(lifecycleId)) {
+                if (!existing.lifecycleId().equals(lifecycleId) || existing.durableRegistration() != durableRegistration) {
                     throw new LocalDeploymentException(LocalDeploymentException.Reason.GRAPH_CONFLICT);
                 }
                 return new Registration(existing, false);
@@ -3810,7 +3945,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
             var deployment = (DefaultGraphDeployment) registerDeployment(
                     engineId, graphBytes, lifecycleId.value());
             var created = new LocalDeploymentRecord(
-                    graphHash, engineId, lifecycleId, sourceCount, deployment);
+                    graphHash, engineId, lifecycleId, sourceCount, deployment, durableRegistration);
             localDeployments.put(key, created);
             return new Registration(created, true);
         }
@@ -3818,16 +3953,16 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
 
     private LocalDeploymentStatus localDeploymentStatus(String deploymentId, LocalDeploymentRecord record) {
         GraphDeployment deployment = deployments.get(record.engineId());
-        if (deployment == null) {
-            return LocalDeploymentStatus.withGraph(deploymentId, LocalDeploymentState.STOPPED,
-                    record.sourceCount(), record.graphHash());
+        if (deployment == null || deployment != record.deployment()) {
+            var stopped = LocalDeploymentStatus.withGraph(deploymentId, LocalDeploymentState.STOPPED, record.sourceCount(), record.graphHash()).withRuntimeIncarnationId(record.deployment().incarnationId());
+            return record.durableRegistration() ? stopped.withRegistrationIdentity(record.lifecycleId().value()) : stopped;
         }
         // The diagnostics are fixed strings chosen here, not the engine's own DeploymentStatus.cause().
         // That cause is sanitized for an operator log, and the degraded one originates in an inbound
         // adapter; neither has been reviewed for a client-facing wire surface, and widening this
         // response to carry adapter-authored text is a decision for whoever needs it, not a side
         // effect of adding the route.
-        return switch (deployment.status().state()) {
+        var result = switch (deployment.status().state()) {
             case COLD -> LocalDeploymentStatus.withGraph(
                     deploymentId, LocalDeploymentState.REGISTERED, record.sourceCount(), record.graphHash());
             case STARTING -> LocalDeploymentStatus.withGraph(
@@ -3847,6 +3982,8 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
             case STOPPED -> LocalDeploymentStatus.withGraph(
                     deploymentId, LocalDeploymentState.STOPPED, record.sourceCount(), record.graphHash());
         };
+        result = result.withRuntimeIncarnationId(record.deployment().incarnationId());
+        return record.durableRegistration() ? result.withRegistrationIdentity(record.lifecycleId().value()) : result;
     }
 
     /**
@@ -4070,7 +4207,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
 
     private record LocalDeploymentRecord(String graphHash, DeploymentId engineId,
                                          DeploymentId lifecycleId, int sourceCount,
-                                         DefaultGraphDeployment deployment) { }
+                                         DefaultGraphDeployment deployment, boolean durableRegistration) { }
 
     /** A registration plus whether this call is the one that created it. */
     private record Registration(LocalDeploymentRecord record, boolean created) { }

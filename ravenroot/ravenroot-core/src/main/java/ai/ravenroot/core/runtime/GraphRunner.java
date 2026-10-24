@@ -217,6 +217,16 @@ public final class GraphRunner implements AutoCloseable {
 
     /** Validated fan-in configuration, one entry per join node. Fixed for this runner's lifetime. */
     private final Map<String, JoinSpec> joinSpecs;
+    private java.util.function.BiConsumer<ai.ravenroot.api.correlation.CorrelatedJoinRecord, UUID> correlatedJoinRelease;
+    private java.util.function.BiConsumer<ai.ravenroot.api.persistence.DeploymentEntryIntent, UUID> derivedEntryRelease;
+    void bindDerivedEntryRelease(java.util.function.BiConsumer<ai.ravenroot.api.persistence.DeploymentEntryIntent, UUID> release) {
+        this.derivedEntryRelease = java.util.Objects.requireNonNull(release);
+    }
+
+    void bindCorrelatedJoinRelease(java.util.function.BiConsumer<ai.ravenroot.api.correlation.CorrelatedJoinRecord, UUID> release) {
+        this.correlatedJoinRelease = java.util.Objects.requireNonNull(release);
+    }
+
 
     /**
      * Which join branches a node's failure invalidates, precomputed once from the topology.
@@ -364,7 +374,8 @@ public final class GraphRunner implements AutoCloseable {
      * submission (an atomic removal from its own map guards the call), on that submission's own
      * single-traversal runner, which it hands to {@code close()} on the next line.</p>
      */
-    private final Set<UUID> cancelledTraversals = ConcurrentHashMap.newKeySet();
+    // Origin travels atomically with refusal: shutdown must not invent an operator cancellation.
+    private final ConcurrentHashMap<UUID, StopOrigin> cancelledTraversals = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<UUID, ActiveBudget> activeBudgets = new ConcurrentHashMap<>();
     /** Runtime state used by the saga boundary around actual node dispatch. */
     private final ConcurrentHashMap<UUID, ExecutionState> activeExecutionStates = new ConcurrentHashMap<>();
@@ -890,7 +901,7 @@ public final class GraphRunner implements AutoCloseable {
         validateGraphAdmission(this.graph, this.behaviors, executionPolicy, this.executionLimits,
                 this.completedHumanTaskNode);
         validateAdmittedCommands(this.graph, this.behaviors, executionPolicy);
-        this.operationallyReachableNodes = operationallyReachableNodes(this.graph, executionPolicy);
+        this.operationallyReachableNodes = operationallyReachableNodes(this.graph, this.behaviors, executionPolicy);
         if (operationalPolicy == null) {
             var live = this.behaviors.unpinnedOperationalPolicy(this.executionLimits);
             this.operationalPolicy = new ai.ravenroot.api.persistence.ResolvedOperationalPolicy(
@@ -936,7 +947,13 @@ public final class GraphRunner implements AutoCloseable {
         // CORE-03 joins the same fail-first group, for the same reason: a quorum larger than the
         // branch count is unsatisfiable for every input this graph will ever receive, so finding out
         // on the first execution that happens to reach the join is finding out too late.
-        this.joinSpecs = JoinSpec.validate(graph);
+        this.joinSpecs = JoinSpec.validate(graph).entrySet().stream()
+                .filter(entry -> {
+                    var node = graph.node(entry.getKey());
+                    return !CorrelatedJoinConfiguration.enabled(node) && NodeRuntimeNatureProperty.effectiveNature(
+                            node.kind() == NodeKind.BEHAVIOR ? behaviors.descriptor(node).orElse(null) : null,
+                            node.properties()) != NodeRuntimeNature.SOURCE;
+                }).collect(java.util.stream.Collectors.toUnmodifiableMap(Map.Entry::getKey, Map.Entry::getValue));
         this.failureBranches = precomputeFailureBranches(graph, joinSpecs);
         this.directJoinBranches = precomputeDirectJoinBranches(joinSpecs);
         this.distinctSuccessors = precomputeDistinctSuccessors(graph);
@@ -1115,6 +1132,38 @@ public final class GraphRunner implements AutoCloseable {
                 recorder, executionOperationalPolicy, executionGraphLimits, null, false);
     }
 
+    /** Executes a deployment ingress at its validated SOURCE node, or at START when absent. */
+    CompletionStage<GraphExecutionResult> executeIngress(SecurityContext security, UUID processInstanceId,
+            UUID traversalId, String entryNodeId, Object payload, String graphVersion,
+            String deploymentId, String workloadId, ExecutionRecorder recorder,
+            ai.ravenroot.api.persistence.ResolvedOperationalPolicy policy, GraphExecutionLimits limits) {
+        String entry = entryNodeId == null ? graph.start().id() : entryNodeId;
+        if (entryNodeId != null && (runtimeDefinitions.get(entry) == null
+                || runtimeDefinitions.get(entry).nature() != NodeRuntimeNature.SOURCE
+                || authoredBypassNodes.contains(entry))) {
+            throw new IllegalArgumentException("ingress target must be an enabled SOURCE");
+        }
+        return executeStartingAt(security, processInstanceId, traversalId, entry, null, payload,
+                Map.of(), NodeCommand.PROCESS, graphVersion, deploymentId, workloadId, recorder,
+                policy, limits, null, false);
+    }
+
+    CompletionStage<GraphExecutionResult> executeCorrelatedContinuation(SecurityContext security,
+            UUID processInstanceId, UUID traversalId, String entryNodeId, Object payload, String graphVersion,
+            String deploymentId, String workloadId, ExecutionRecorder recorder,
+            ai.ravenroot.api.persistence.ResolvedOperationalPolicy policy, GraphExecutionLimits limits) {
+        if (recorder == null || !CorrelatedJoinConfiguration.enabled(graph.node(entryNodeId)))
+            throw new IllegalArgumentException("correlated continuation requires its pinned durable join");
+        var context = recorder.applicationCorrelation(traversalId);
+        var key = new ai.ravenroot.api.correlation.CorrelatedJoinKey(
+                new ai.ravenroot.api.correlation.BusinessScope(security.tenantId(), deploymentId, graphVersion),
+                context.applicationCorrelationId(), entryNodeId, context.roundId());
+        if (!key.continuationProcessId().equals(processInstanceId) || !key.continuationTraversalId().equals(traversalId))
+            throw new IllegalArgumentException("correlated continuation identity mismatch");
+        return executeStartingAt(security, processInstanceId, traversalId, entryNodeId, null, payload,
+                Map.of(), NodeCommand.PROCESS, graphVersion, deploymentId, workloadId, recorder, policy, limits, null, false);
+    }
+
     /** Starts a fresh derived traversal at one proven pending boundary in the pinned graph. */
     public CompletionStage<GraphExecutionResult> executeDerived(
             SecurityContext security, UUID processInstanceId, UUID traversalId,
@@ -1150,6 +1199,17 @@ public final class GraphRunner implements AutoCloseable {
                 recorder, operationalPolicy, executionLimits, null, true);
     }
 
+    private ai.ravenroot.api.correlation.ApplicationCorrelationContext transientCorrelation(
+            String entryNodeId, Object payload, UUID processInstanceId) {
+        var limits = ai.ravenroot.api.correlation.CorrelationLimits.DEFAULTS;
+        var mapping = ai.ravenroot.api.correlation.CorrelationMappingProperties.read(graph.node(entryNodeId).properties(), limits);
+        if (mapping.mode() == ai.ravenroot.api.correlation.CorrelationMapping.Mode.REQUIRE_EXISTING)
+            throw new IllegalStateException("require-existing needs a business-history store");
+        return mapping.extract(ai.ravenroot.api.payload.PayloadValue.fromJava(payload, limits.input()),
+                () -> UUID.nameUUIDFromBytes((processInstanceId + "\0application-correlation-v1")
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+    }
+
     private CompletionStage<GraphExecutionResult> executeStartingAt(
             SecurityContext security, UUID processInstanceId, UUID traversalId, String startNodeId,
             String sourceNodeId, Object payload, Map<String, Object> attributes, NodeCommand initialCommand,
@@ -1158,31 +1218,89 @@ public final class GraphRunner implements AutoCloseable {
             GraphExecutionLimits executionGraphLimits,
             ai.ravenroot.api.persistence.DerivedExecutionWork preparedRoot,
             boolean calledExecution) {
+        return executeStartingAt(security, processInstanceId, traversalId, startNodeId, sourceNodeId, payload,
+                attributes, initialCommand, graphVersion, deploymentId, workloadId, recorder, executionOperationalPolicy,
+                executionGraphLimits, preparedRoot, calledExecution, null);
+    }
+
+    CompletionStage<GraphExecutionResult> executeRetainedSource(ai.ravenroot.api.persistence.DeploymentEntryIntent entry,
+            String graphVersion, String deploymentId, ExecutionRecorder recorder,
+            ai.ravenroot.api.persistence.ResolvedOperationalPolicy policy, GraphExecutionLimits limits) {
+        if (!entry.scope().graphVersion().equals(graphVersion) || !entry.scope().deploymentId().equals(deploymentId)
+                || !entry.processInstanceId().equals(recorder.processInstanceId()) || !entry.scope().tenantId().equals(recorder.tenantId()))
+            throw new IllegalArgumentException("retained SOURCE scope mismatch");
+        if (entry.cause() == ai.ravenroot.api.correlation.CorrelatedTraversal.Cause.DERIVED_CONTEXT) {
+            if (entry.checkpoint() != null) return CompletableFuture.failedFuture(new RetainedEntryPendingException());
+            @SuppressWarnings("unchecked") var attributes = (Map<String, Object>) ai.ravenroot.api.payload.PayloadJson.read(entry.attributes().bytes(), limits.payload()).toJava();
+            return executeStartingAt(entry.identity(), entry.processInstanceId(), entry.traversalId(), entry.entryNodeId(), null,
+                    ai.ravenroot.api.payload.PayloadJson.read(entry.input().bytes(), limits.payload()).toJava(), attributes, entry.command(),
+                    graphVersion, deploymentId, entry.traversalId().toString(), recorder, policy, limits, null, false, null);
+        }
+        if (entry.checkpoint() == null) return executeIngress(entry.identity(), entry.processInstanceId(), entry.traversalId(),
+                entry.entryNodeId(), ai.ravenroot.api.payload.PayloadJson.read(entry.input().bytes(), limits.payload()).toJava(),
+                graphVersion, deploymentId, entry.traversalId().toString(), recorder, policy, limits);
+        var definition = runtimeDefinitions.get(entry.entryNodeId());
+        if (definition == null || definition.nature() != NodeRuntimeNature.SOURCE || authoredBypassNodes.contains(entry.entryNodeId()))
+            throw new IllegalArgumentException("retained entry requires its enabled pinned SOURCE");
+        return executeStartingAt(entry.identity(), entry.processInstanceId(), entry.traversalId(), entry.entryNodeId(), null,
+                ai.ravenroot.api.payload.PayloadJson.read(entry.input().bytes(), limits.payload()).toJava(), Map.of(), NodeCommand.PROCESS,
+                graphVersion, deploymentId, entry.traversalId().toString(), recorder, policy, limits, null, false, entry.checkpoint());
+    }
+
+    private CompletionStage<GraphExecutionResult> executeStartingAt(
+            SecurityContext security, UUID processInstanceId, UUID traversalId, String startNodeId,
+            String sourceNodeId, Object payload, Map<String, Object> attributes, NodeCommand initialCommand,
+            String graphVersion, String deploymentId, String workloadId, ExecutionRecorder recorder,
+            ai.ravenroot.api.persistence.ResolvedOperationalPolicy executionOperationalPolicy,
+            GraphExecutionLimits executionGraphLimits, ai.ravenroot.api.persistence.DerivedExecutionWork preparedRoot,
+            boolean calledExecution, ai.ravenroot.api.persistence.DeploymentEntryCheckpoint retainedEntry) {
         java.util.Objects.requireNonNull(security, "security");
         java.util.Objects.requireNonNull(executionGraphLimits, "executionGraphLimits");
         if (processInstanceId == null) throw new IllegalArgumentException("processInstanceId cannot be null");
         if (traversalId == null) throw new IllegalArgumentException("traversalId cannot be null");
         new GraphComplexityAdmission(behaviors, executionGraphLimits).validate(graph);
         var identity = new ExecutionMonitor.ExecutionIdentity(security, engine.id(), graphVersion, processInstanceId,
-                traversalId, nodeCatalogKeys, deploymentId, workloadId);
+                traversalId, nodeCatalogKeys, deploymentId, workloadId,
+                recorder == null ? transientCorrelation(startNodeId, payload, processInstanceId)
+                        : recorder.applicationCorrelation(traversalId));
         GraphNode start = graph.node(startNodeId);
-        var budget = new ExecutionBudget(executionGraphLimits, runnerActorCapacity);
-        ExecutionBudget.Hop rootHop = budget.reserveRoot(
-                measureDelivery(payload, attributes, executionGraphLimits));
-        var state = preparedRoot == null
+        var budget = retainedEntry == null ? new ExecutionBudget(executionGraphLimits, runnerActorCapacity)
+                : ExecutionBudget.restore(executionGraphLimits, new GraphExecutionBudgetSnapshot(
+                        retainedEntry.runtimeState().traversalSteps(), retainedEntry.runtimeState().amplifiedDeliveries(),
+                        retainedEntry.runtimeState().payloadBytes(), 1, 0), runnerActorCapacity);
+        ExecutionBudget.Hop rootHop = retainedEntry == null ? budget.reserveRoot(
+                measureDelivery(payload, attributes, executionGraphLimits)) : budget.resumeReservedHop();
+        var state = preparedRoot == null && retainedEntry == null
                 ? new ExecutionState(processInstanceId, traversalId, start.id(), new BranchLiveness(start.id()),
                         recorder, identity, identitySource, clock, executionGraphLimits, budget, calledExecution)
                 : new ExecutionState(processInstanceId, traversalId, start.id(), new BranchLiveness(start.id()),
                         recorder, identity, identitySource, clock, recorder.storedState(),
                         executionGraphLimits, budget, calledExecution, List.of());
+        if (retainedEntry != null) {
+            state.retainedSourceRecovery = true;
+            state.sourceFanOutReserved = retainedEntry.runtimeState().rootFanOutReserved();
+            state.traversalAcceptedPublished = true;
+            state.recoveredSourceInvocation = retainedEntry.invocationId();
+            state.preexistingSourceChildren = state.lifecycle.traversals().get(traversalId).invocations().values().stream()
+                    .anyMatch(visit -> visit.parentInvocationIds().contains(retainedEntry.invocationId()));
+            state.everFannedOut = targetDeliveries(graph.nextEdges(startNodeId, "continue"), NodeCommand.PROCESS).size() > 1;
+            state.recoveredOriginalVisits = Set.copyOf(state.lifecycle.traversals().get(traversalId).invocations().keySet());
+            state.lifecycle.traversals().get(traversalId).invocations().values().forEach(visit -> state.visitedNodes.add(visit.nodeId()));
+        }
         var coordinator = new JoinCoordinator(joinStore, engine.scheduler(), monitor, identity, joinSpecs, clock,
                 timeoutRelinquishedObserver);
         if (coordinators.putIfAbsent(traversalId, coordinator) != null) {
             throw new IllegalStateException("Traversal " + traversalId + " is already running on this runner");
         }
         try {
+            // A hosted application composed without manifests has no per-execution policy read.
+            // Bind the trusted snapshot captured when this runner was constructed, just as the
+            // ordinary execute overload does. Manifest-backed runners must still supply their
+            // exact execution pin; a missing pin is never replaced by current startup defaults.
+            var boundPolicy = executionOperationalPolicy == null && !executionScopedExternalIo
+                    ? operationalPolicy : executionOperationalPolicy;
             behaviors.bindOperationalPolicy(new ai.ravenroot.api.persistence.ExecutionKey(
-                    security.tenantId(), processInstanceId), traversalId, executionOperationalPolicy,
+                    security.tenantId(), processInstanceId), traversalId, boundPolicy,
                     graph.nodes(), executionScopedExternalIo);
         } catch (RuntimeException refused) {
             coordinators.remove(traversalId, coordinator);
@@ -1202,13 +1320,15 @@ public final class GraphRunner implements AutoCloseable {
         // The traversal starts with an empty iteration context, so every join reads lap 0.
         // Nodes proven dead before anything runs are dead on that first lap by construction: nothing
         // has fired yet, so there is no later lap for them to be dead on.
-        var opening = new ArrayList<>(state.liveness.reportDead(unreachableFromStart, coordinator,
+        var opening = new ArrayList<>(state.liveness.reportDead(ingressUnreachable(start.id()), coordinator,
                 IterationContext.EMPTY));
         // The start node's dispatch was triggered by the traversal being accepted, and that is the
         // one event this journal holds whose own cause lies outside it — the authenticated request.
         NodeCommand routedCommand = executionPolicy == ExecutionPolicy.TEST_PASSTHROUGH
                 ? NodeCommand.PASSTHROUGH : initialCommand;
-        CompletionStage<Void> root = preparedRoot == null
+        CompletionStage<Void> root = retainedEntry != null
+                ? dispatchRetainedSource(start, payload, state, identity, coordinator, retainedEntry, rootHop)
+                : preparedRoot == null
                 ? dispatch(start, sourceNodeId, payload, attributes, Set.of(), routedCommand,
                         state.traversalAcceptedEventId(), state, identity, coordinator,
                         IterationContext.EMPTY, rootHop)
@@ -1217,7 +1337,17 @@ public final class GraphRunner implements AutoCloseable {
                         preparedRoot, rootHop);
         opening.add(root.toCompletableFuture());
         return allOrFirstFailure(opening)
-                .handle((ignored, error) -> error)
+                // A terminated join discards late arrivals and may absorb a late branch failure.
+                // Neither is evidence of traversal success after cancellation. Preserve the refusal
+                // here, before release() removes its marker; an existing failure or suspension wins.
+                .handle((ignored, error) -> {
+                    if (error != null) return error;
+                    StopOrigin origin = cancelledTraversals.get(traversalId);
+                    if (origin == null) return null;
+                    return origin == StopOrigin.OPERATOR
+                            ? new TraversalCancelledException(traversalId, null)
+                            : new IllegalStateException("Runner shutdown ended traversal before completion");
+                })
                 // Cleanup is sequenced *into* the returned stage rather than hung off a whenComplete.
                 // A caller that has seen this stage complete must be able to assert that the join
                 // records of this traversal are gone; with cleanup running concurrently that
@@ -1269,6 +1399,11 @@ public final class GraphRunner implements AutoCloseable {
                     }
                     if (suspension instanceof VerifiedExternalWorkSuspension verified) {
                         return CompletableFuture.<GraphExecutionResult>failedFuture(verified.signal());
+                    }
+                    if (outcome == null && state.preexistingSourceChildren && !recoveredSourceBranchesAreClosedLeaves(state)) {
+                        // Reconciliation owns only missing SOURCE successors. Existing real effects and
+                        // their pending continuations retain their original recovery authority.
+                        return CompletableFuture.<GraphExecutionResult>failedFuture(new RetainedEntryPendingException());
                     }
                     if (outcome == null) {
                         try {
@@ -1396,7 +1531,7 @@ public final class GraphRunner implements AutoCloseable {
         UUID startedEventId = state.nodeStarted(node.id(), Set.of(), invocationId, attemptId,
                 NodeCommand.PROCESS, state.traversalAcceptedEventId());
         NodeMessage delivered = new NodeMessage(security, processInstanceId, traversalId,
-                invocationId, attemptId, Set.of(), node.id(), null, Map.of(), NodeCommand.PROCESS);
+                invocationId, attemptId, Set.of(), node.id(), null, Map.of(), NodeCommand.PROCESS, identity.applicationCorrelation());
         var captureContext = activityContext(identity, delivered, FIRST_ATTEMPT_ORDINAL, startedEventId);
         CompletionStage<ToolCallContinuationResult> resumed;
         try {
@@ -1684,7 +1819,8 @@ public final class GraphRunner implements AutoCloseable {
         NodeMessage delivered = new NodeMessage(security, processInstanceId, traversalId,
                 invocationId, attemptId, Set.copyOf(reentryParents), node.id(), result.payload(), result.attributes(),
                 existingAttemptId == null ? NodeCommand.PROCESS
-                        : storedLifecycle.traversals().get(traversalId).invocations().get(invocationId).command());
+                        : storedLifecycle.traversals().get(traversalId).invocations().get(invocationId).command(),
+                identity.applicationCorrelation());
         int captureAttemptOrdinal = existingAttemptId == null ? FIRST_ATTEMPT_ORDINAL
                 : attemptOrdinal(storedLifecycle.traversals().get(traversalId)
                         .invocations().get(invocationId), existingAttemptId);
@@ -1958,7 +2094,8 @@ public final class GraphRunner implements AutoCloseable {
         ExecutionOrigin origin = recorder.origin();
         return new ExecutionMonitor.ExecutionIdentity(security, engine.id(), graphVersion,
                 processInstanceId, traversalId, nodeCatalogKeys,
-                origin.deploymentId().orElse(null), origin.workloadId().orElse(null));
+                origin.deploymentId().orElse(null), origin.workloadId().orElse(null),
+                recorder.applicationCorrelation(traversalId));
     }
 
     private CompletionStage<Void> release(UUID traversalId, JoinCoordinator coordinator) {
@@ -2117,7 +2254,8 @@ public final class GraphRunner implements AutoCloseable {
      */
     private boolean cancelTraversal(UUID traversalId, GateRelease release) {
         java.util.Objects.requireNonNull(traversalId, "traversalId");
-        if (!cancelledTraversals.add(traversalId)) {
+        StopOrigin origin = release == GateRelease.ON_CALLER ? StopOrigin.SHUTDOWN : StopOrigin.OPERATOR;
+        if (cancelledTraversals.putIfAbsent(traversalId, origin) != null) {
             return false;
         }
         ExecutionState sagaState = activeExecutionStates.get(traversalId);
@@ -2201,7 +2339,7 @@ public final class GraphRunner implements AutoCloseable {
      */
     public boolean pauseTraversal(UUID traversalId) {
         java.util.Objects.requireNonNull(traversalId, "traversalId");
-        if (cancelledTraversals.contains(traversalId)) {
+        if (cancelledTraversals.containsKey(traversalId)) {
             return false;
         }
         TraversalControl control = controlFor(traversalId);
@@ -2533,6 +2671,8 @@ public final class GraphRunner implements AutoCloseable {
         java.util.Objects.requireNonNull(traversalId, "traversalId");
         return releasePauseGate(traversalId, GateRelease.OFF_CALLER, GateReleaseReason.RESUMED);
     }
+
+    private enum StopOrigin { OPERATOR, SHUTDOWN }
 
     /**
      * Where the hop a pause gate parked resumes.
@@ -2913,6 +3053,53 @@ public final class GraphRunner implements AutoCloseable {
                 coordinator, iteration, hop);
     }
 
+    private boolean recoveredSourceBranchesAreClosedLeaves(ExecutionState state) {
+        if (state.hasUnfinishedInvocation()) return false;
+        var visits = state.lifecycle.traversals().get(state.traversalId).invocations();
+        return state.recoveredOriginalVisits.stream().filter(id -> !id.equals(state.recoveredSourceInvocation))
+                .map(visits::get).allMatch(visit -> visit != null && visit.status() == NodeInvocationStatus.COMPLETED
+                        && graph.edges().stream().noneMatch(edge -> edge.source().equals(visit.nodeId())));
+    }
+
+    /** A partial source reconciliation leaves existing real work under its original authority. */
+    static final class RetainedEntryPendingException extends RuntimeException {
+        RetainedEntryPendingException() { super("retained source has original downstream work requiring reconciliation"); }
+    }
+
+    private CompletionStage<Void> dispatchRetainedSource(GraphNode node, Object payload, ExecutionState state,
+            ExecutionMonitor.ExecutionIdentity identity, JoinCoordinator coordinator,
+            ai.ravenroot.api.persistence.DeploymentEntryCheckpoint checkpoint, ExecutionBudget.Hop hop) {
+        var invocation = state.lifecycle.traversals().get(state.traversalId).invocations().get(checkpoint.invocationId());
+        var attempt = invocation == null ? null : invocation.attempts().stream()
+                .filter(value -> value.attemptId().equals(checkpoint.attemptId())).findFirst().orElse(null);
+        if (invocation == null || attempt == null || !invocation.nodeId().equals(node.id())
+                || !invocation.parentInvocationIds().isEmpty() || !invocation.command().equals(NodeCommand.PROCESS)
+                || checkpoint.completedEventId() == null && (invocation.status() != NodeInvocationStatus.RUNNING
+                    || attempt.status() != NodeAttemptStatus.RUNNING)
+                || checkpoint.completedEventId() != null && (invocation.status() != NodeInvocationStatus.COMPLETED
+                    || attempt.status() != NodeAttemptStatus.COMPLETED)) {
+            hop.close(); return CompletableFuture.failedFuture(new IllegalStateException("original SOURCE checkpoint mismatch"));
+        }
+        var definition = runtimeDefinitions.get(node.id());
+        var admission = new TraversalAdmissionRegistry.Key(identity.security().tenantId(), identity.deploymentId(),
+                identity.graphVersion(), identity.traversalId(), node.id());
+        return traversalAdmission.acquire(admission, definition.maxConcurrency(), state.limits.maxLiveActorsPerTraversal(),
+                state.limits.maxQueuedAdmissionsPerNode()).thenCompose(lease -> {
+            if (cancelledTraversals.containsKey(identity.traversalId())) {
+                lease.close(); hop.close(); return CompletableFuture.failedFuture(new TraversalCancelledException(state.traversalId, node.id()));
+            }
+            UUID completed = checkpoint.completedEventId() == null
+                    ? state.sourceCompleted(checkpoint.invocationId(), checkpoint.attemptId(), checkpoint.startedEventId(), false)
+                    : checkpoint.completedEventId();
+            lease.close(); hop.close();
+            var result = new NodeResult("continue", payload, Map.of());
+            return dispatchSuccessors(graph.nextEdges(node.id(), "continue"), node, result, measure(result, state.limits),
+                    new NodeMessage(identity.security(), identity.processInstanceId(), identity.traversalId(),
+                            checkpoint.invocationId(), checkpoint.attemptId(), Set.of(), node.id(), payload, Map.of(),
+                            NodeCommand.PROCESS, identity.applicationCorrelation()), completed, state, identity, coordinator, IterationContext.EMPTY);
+        }).whenComplete((ignored, failed) -> hop.close());
+    }
+
     /** Dispatches the one root attempt already admitted atomically with derived ancestry. */
     private CompletionStage<Void> dispatchPrepared(GraphNode node, String sourceNodeId, Object payload,
                                                    Map<String, Object> attributes, NodeCommand command,
@@ -2926,7 +3113,7 @@ public final class GraphRunner implements AutoCloseable {
             return CompletableFuture.failedFuture(new IllegalStateException(
                     "a derived boundary cannot begin inside a join"));
         }
-        if (cancelledTraversals.contains(identity.traversalId())) {
+        if (cancelledTraversals.containsKey(identity.traversalId())) {
             hop.close();
             return CompletableFuture.failedFuture(
                     new TraversalCancelledException(identity.traversalId(), node.id()));
@@ -2942,7 +3129,7 @@ public final class GraphRunner implements AutoCloseable {
         return traversalAdmission.acquire(admissionKey, definition.maxConcurrency(),
                         state.limits.maxLiveActorsPerTraversal(), state.limits.maxQueuedAdmissionsPerNode())
                 .thenCompose(lease -> {
-                    if (cancelledTraversals.contains(identity.traversalId())) {
+                    if (cancelledTraversals.containsKey(identity.traversalId())) {
                         lease.close();
                         hop.close();
                         return CompletableFuture.failedFuture(
@@ -2955,6 +3142,51 @@ public final class GraphRunner implements AutoCloseable {
                             work.attemptId(), FIRST_ATTEMPT_ORDINAL, startedEventId, hop);
                 })
                 .whenComplete((ignored, error) -> hop.close());
+    }
+
+    private ai.ravenroot.api.persistence.DerivedEntryHandoff derivedEntryHandoff(GraphNode node, NodeMessage delivered,
+            NodeResult result, ExecutionMonitor.ExecutionIdentity identity, ExecutionState state) {
+        if (state.recorder == null || identity.applicationCorrelation() == null || identity.deploymentId() == null)
+            throw new IllegalStateException("explicit context derivation requires durable original business context");
+        var deliveries = targetDeliveries(graph.nextEdges(node.id(), "continue"), delivered.command());
+        if (deliveries.size() != 1) throw new IllegalArgumentException("context derivation requires exactly one authored continue successor");
+        var target = deliveries.getFirst(); var targetDefinition = runtimeDefinitions.get(target.targetId());
+        if (targetDefinition == null || graph.node(target.targetId()).kind() == NodeKind.START || authoredBypassNodes.contains(target.targetId()) || targetDefinition.nature() == NodeRuntimeNature.SOURCE
+                || joinSpecs.containsKey(target.targetId()) && !CorrelatedJoinConfiguration.enabled(graph.node(target.targetId())))
+            throw new IllegalArgumentException("context derivation target must be an enabled non-source entry outside an ordinary join");
+        var policy = state.recorder.businessHistoryPolicy();
+        var mapping = ai.ravenroot.api.correlation.CorrelationMappingProperties.read(node.properties(), policy.selection());
+        String stable = identity.security().tenantId() + "\0" + identity.deploymentId() + "\0" + identity.graphVersion()
+                + "\0" + identity.processInstanceId() + "\0" + identity.traversalId() + "\0" + delivered.invocationId();
+        var input = ai.ravenroot.api.payload.PayloadValue.fromJava(result.payload(), policy.selection().input());
+        var context = mapping.extract(input, () -> UUID.nameUUIDFromBytes(("business-context/derived/v1\0" + stable).getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        if (context.applicationCorrelationId().equals(identity.applicationCorrelation().applicationCorrelationId()))
+            throw new IllegalArgumentException("explicit context derivation requires a distinct application identity");
+        var now = clock.instant();
+        var cause = new ai.ravenroot.api.correlation.JoinCause(identity.processInstanceId(), identity.traversalId(),
+                delivered.invocationId(), delivered.attemptId(), identity.security());
+        var intent = new ai.ravenroot.api.persistence.DeploymentEntryIntent(
+                new ai.ravenroot.api.correlation.BusinessScope(identity.security().tenantId(), identity.deploymentId(), identity.graphVersion()),
+                UUID.nameUUIDFromBytes(("business-context/process/v1\0" + stable).getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+                UUID.nameUUIDFromBytes(("business-context/traversal/v1\0" + stable).getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+                target.targetId(), context, identity.security(), OpaquePayload.of(ai.ravenroot.api.payload.PayloadJson.write(input).getBytes(java.nio.charset.StandardCharsets.UTF_8), "application/json"),
+                now, now.plus(policy.historyRetention()), ai.ravenroot.api.correlation.CorrelatedTraversal.Cause.DERIVED_CONTEXT,
+                cause, ai.ravenroot.api.correlation.CorrelationOperationProperties.auditReason(node.properties()), null,
+                OpaquePayload.of(ai.ravenroot.api.payload.PayloadJson.write(ai.ravenroot.api.payload.PayloadValue.fromJava(result.attributes(), policy.selection().input()))
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8), "application/json"), target.command());
+        return new ai.ravenroot.api.persistence.DerivedEntryHandoff(intent, mapping.mode());
+    }
+
+    private ai.ravenroot.api.correlation.BusinessClosureSignal businessCloseSignal(GraphNode node, NodeMessage delivered,
+            ExecutionMonitor.ExecutionIdentity identity) {
+        if (identity.deploymentId() == null || delivered.applicationCorrelation() == null)
+            throw new IllegalStateException("business close requires an authorized deployment history");
+        return new ai.ravenroot.api.correlation.BusinessClosureSignal(new ai.ravenroot.api.correlation.BusinessScope(
+                identity.security().tenantId(), identity.deploymentId(), identity.graphVersion()),
+                delivered.applicationCorrelation().applicationCorrelationId(),
+                ai.ravenroot.api.correlation.CorrelationOperationProperties.disposition(node.properties()),
+                ai.ravenroot.api.correlation.CorrelationOperationProperties.auditReason(node.properties()),
+                identity.processInstanceId(), identity.traversalId(), delivered.invocationId(), delivered.attemptId(), clock.instant());
     }
 
     /**
@@ -3002,7 +3234,7 @@ public final class GraphRunner implements AutoCloseable {
         // aggregate: the traversal's record ends at the last node that actually ran, which is what a
         // reader reconstructing what happened needs it to say. A gate placed after the send instead
         // would be a gate on the node that already started.
-        if (cancelledTraversals.contains(identity.traversalId())) {
+        if (cancelledTraversals.containsKey(identity.traversalId())) {
             hop.close();
             return CompletableFuture.failedFuture(new TraversalCancelledException(identity.traversalId(), node.id()));
         }
@@ -3032,6 +3264,32 @@ public final class GraphRunner implements AutoCloseable {
                 .whenComplete((ignored, error) -> hop.close());
     }
 
+    private boolean isCorrelatedContinuationRoot(GraphNode node, Set<UUID> parents, ExecutionState state,
+                                                  ExecutionMonitor.ExecutionIdentity identity) {
+        if (!parents.isEmpty() || identity.applicationCorrelation() == null || identity.deploymentId() == null
+                || !state.lifecycle.traversals().get(state.traversalId).ingressNodeId().equals(node.id())) return false;
+        var key = new ai.ravenroot.api.correlation.CorrelatedJoinKey(
+                new ai.ravenroot.api.correlation.BusinessScope(identity.security().tenantId(), identity.deploymentId(), identity.graphVersion()),
+                identity.applicationCorrelation().applicationCorrelationId(), node.id(), identity.applicationCorrelation().roundId());
+        return key.continuationProcessId().equals(identity.processInstanceId())
+                && key.continuationTraversalId().equals(identity.traversalId());
+    }
+
+    /** SOURCE listeners are deployment resources; incoming graph edges are stopping boundaries. */
+    private List<String> ingressUnreachable(String entry) {
+        var reached = new LinkedHashSet<String>();
+        var pending = new ArrayDeque<String>();
+        pending.add(entry);
+        while (!pending.isEmpty()) {
+            String node = pending.removeFirst();
+            if (!reached.add(node)) continue;
+            if (!node.equals(entry) && (runtimeDefinitions.get(node).nature() == NodeRuntimeNature.SOURCE
+                    || CorrelatedJoinConfiguration.enabled(graph.node(node)))) continue;
+            pending.addAll(distinctSuccessors.getOrDefault(node, List.of()));
+        }
+        return graph.nodes().stream().map(GraphNode::id).filter(id -> !reached.contains(id)).toList();
+    }
+
     private CompletionStage<Void> runAdmitted(GraphNode node, Object payload, Map<String, Object> attributes,
                                                Set<UUID> parentInvocationIds, NodeCommand command, UUID causedBy,
                                                ExecutionState state,
@@ -3041,7 +3299,7 @@ public final class GraphRunner implements AutoCloseable {
                                                TraversalAdmissionRegistry.Lease admissionLease,
                                                ExecutionBudget.Hop hop) {
         // A queued admission may have been cancelled before its permit became available.
-        if (cancelledTraversals.contains(identity.traversalId())) {
+        if (cancelledTraversals.containsKey(identity.traversalId())) {
             admissionLease.close();
             hop.close();
             return CompletableFuture.failedFuture(
@@ -3054,9 +3312,57 @@ public final class GraphRunner implements AutoCloseable {
         // Cancellation can arrive while the durable NODE_STARTED write is unresolved. The write may
         // still commit, so it is not rolled back or relabelled as absent; once it returns, however,
         // the cancelled traversal must not deliver the node effect that the caller already refused.
-        if (cancelledTraversals.contains(identity.traversalId())) {
+        if (cancelledTraversals.containsKey(identity.traversalId())) {
             return CompletableFuture.failedFuture(
                     new TraversalCancelledException(identity.traversalId(), node.id()));
+        }
+        if (CorrelatedJoinConfiguration.enabled(node) && command.directive() != NodeDirective.APPLICATION
+                && !isCorrelatedContinuationRoot(node, parentInvocationIds, state, identity)) {
+            if (state.recorder == null || correlatedJoinRelease == null)
+                return CompletableFuture.failedFuture(new IllegalStateException("correlated joins require a durable deployment"));
+            var delivered = new NodeMessage(identity.security(), identity.processInstanceId(), identity.traversalId(),
+                    invocationId, attemptId, parentInvocationIds, node.id(), payload, attributes, command,
+                    identity.applicationCorrelation());
+            monitor.nodeStarted(identity, node.id(), invocationId, attemptId, 1, FIRST_ATTEMPT_ORDINAL);
+            var captureContext = activityContext(identity, delivered, FIRST_ATTEMPT_ORDINAL, startedEventId);
+            return activityCapture.input(captureContext, delivered).thenCompose(ignored ->
+                    CompletableFuture.supplyAsync(() -> state.recorder.contribute(node,
+                            state.lifecycle.traversals().get(state.traversalId).ingressNodeId(), delivered, clock.instant()),
+                            task -> Thread.ofVirtual().name("ravenroot-correlated-contribution").start(task)))
+                    .thenCompose(record -> {
+                        String outcome = record.phase() == ai.ravenroot.api.correlation.CorrelatedJoinRecord.Phase.READY
+                                ? "correlated-ready" : "correlated-waiting";
+                        state.classifiedBoundaryCompleted(invocationId, attemptId, startedEventId,
+                                ExecutionEventType.NODE_COMPLETED, outcome);
+                        monitor.nodeCompleted(identity, node.id(), invocationId, attemptId, false, outcome, 1);
+                        admissionLease.close();
+                        hop.close();
+                        if (record.phase() == ai.ravenroot.api.correlation.CorrelatedJoinRecord.Phase.READY)
+                            correlatedJoinRelease.accept(record, identity.traversalId());
+                        return allOrFirstFailure(state.liveness.reportUntaken(node.id(), List.of(), coordinator, iteration));
+                    });
+        }
+        if (definition.nature() == NodeRuntimeNature.SOURCE
+                && command.directive() != NodeDirective.APPLICATION) {
+            // Only the admitted root may emit. A loop back to the same source has a parent visit,
+            // so it is a boundary too; retries do not manufacture new source events.
+            boolean emission = parentInvocationIds.isEmpty()
+                    && state.lifecycle.traversals().get(state.traversalId).ingressNodeId().equals(node.id());
+            monitor.nodeStarted(identity, node.id(), invocationId, attemptId, 1, FIRST_ATTEMPT_ORDINAL);
+            UUID completed = state.sourceCompleted(invocationId, attemptId, startedEventId, !emission);
+            if (!emission) {
+                monitor.sourceBoundary(identity, node.id(), invocationId, attemptId);
+                hop.close();
+                return allOrFirstFailure(state.liveness.reportUntaken(node.id(), List.of(), coordinator, iteration));
+            }
+            monitor.nodeCompleted(identity, node.id(), invocationId, attemptId, false, "continue", 1);
+            NodeResult result = new NodeResult("continue", payload, attributes);
+            admissionLease.close();
+            hop.close();
+            return dispatchSuccessors(graph.nextEdges(node.id(), result.outcome()), node, result,
+                    measure(result, state.limits), new NodeMessage(identity.security(), identity.processInstanceId(),
+                            identity.traversalId(), invocationId, attemptId, parentInvocationIds, node.id(),
+                            payload, attributes, command, identity.applicationCorrelation()), completed, state, identity, coordinator, iteration);
         }
         return deliverAttempt(node, payload, attributes, parentInvocationIds, command, state, identity,
                 coordinator, iteration, definition, admissionLease, invocationId, attemptId,
@@ -3111,7 +3417,7 @@ public final class GraphRunner implements AutoCloseable {
         // previous node controlled, nor from the node's GraphML properties.
         NodeMessage delivered = new NodeMessage(identity.security(), identity.processInstanceId(),
                 identity.traversalId(), invocationId, attemptId, parentInvocationIds, node.id(), payload, attributes,
-                command);
+                command, identity.applicationCorrelation());
         var captureContext = activityContext(identity, delivered, attemptOrdinal, startedEventId);
         if (("workspace".equals(node.behavior()) || ai.ravenroot.core.runner.GovernedAgent.isNamed(node)) && behaviors.runnerJobs() != null) {
             behaviors.runnerJobs().bindLive(attemptId, state.recorder, this, startedEventId);
@@ -3346,16 +3652,30 @@ public final class GraphRunner implements AutoCloseable {
                     // successful attempt is recorded or any downstream work can be allocated.
                     NodeResult routed;
                     long routedBytes;
+                    ai.ravenroot.api.persistence.DerivedEntryHandoff handoff = null;
+                    ai.ravenroot.api.correlation.BusinessClosureSignal closureSignal = null;
                     try {
                         routed = markSyntheticProvenance(node, delivered, result);
                         routedBytes = measure(routed, state.limits);
+                        if (!bypassed && ai.ravenroot.api.correlation.CorrelationOperationProperties.DERIVE.equals(node.behavior()))
+                            handoff = derivedEntryHandoff(node, delivered, routed, identity, state);
+                        if (!bypassed && ai.ravenroot.api.correlation.CorrelationOperationProperties.CLOSE.equals(node.behavior()))
+                            closureSignal = businessCloseSignal(node, delivered, identity);
                         // STRICT output persistence is the boundary between a node effect and the
                         // runtime claiming completion or making that content visible downstream.
                         activityCapture.output(captureContext, routed).toCompletableFuture().join();
                     } catch (RuntimeException rejectedOutput) {
-                        state.nodeFailed(invocationId, attemptId, startedEventId);
+                        UUID failed = state.nodeFailed(invocationId, attemptId, startedEventId);
                         monitor.nodeFailed(identity, node.id(), invocationId, attemptId, rejectedOutput,
                                 liveInstances(node.id(), definition.nature()));
+                        if (Set.of(ai.ravenroot.api.correlation.CorrelationOperationProperties.CLOSE,
+                                ai.ravenroot.api.correlation.CorrelationOperationProperties.DERIVE).contains(node.behavior())
+                                && !graph.failureEdges(node.id()).isEmpty()) {
+                            completedEventId.set(failed);
+                            var failureResult = new NodeResult(GraphEdge.DEFAULT_OUTCOME,
+                                    NodeFailurePayload.of(node.id(), rejectedOutput, delivered.payload()), delivered.attributes());
+                            return NodeOutcome.failedRouted(failureResult, graph.failureEdges(node.id()), measure(failureResult, state.limits));
+                        }
                         throw rejectedOutput;
                     }
                     // `fallback` now reaches the journal as well as the monitor, read from
@@ -3367,7 +3687,8 @@ public final class GraphRunner implements AutoCloseable {
                     // in its Javadoc; this path neither widens nor narrows it.
                     completedEventId.set(state.nodeCompleted(invocationId, attemptId, startedEventId,
                             bypassed, fallback, null, node.id(), parentInvocationIds, command,
-                            routed, iteration));
+                            routed, iteration, closureSignal, handoff));
+                    if (handoff != null && derivedEntryRelease != null) derivedEntryRelease.accept(handoff.intent(), identity.traversalId());
                     int stillAlive = liveInstances(node.id(), definition.nature());
                     if (bypassed) {
                         state.bypassedNodes.add(node.id());
@@ -3407,6 +3728,12 @@ public final class GraphRunner implements AutoCloseable {
                     // retaining every ancestor until the entire downstream subtree completes. A
                     // retry keeps the same visit reservation until one attempt finally settles.
                     hop.close();
+                    if (!outcome.failureRouted() && delivered.command().directive() != NodeDirective.PASSTHROUGH
+                            && !authoredBypassNodes.contains(node.id())
+                            && ai.ravenroot.api.correlation.CorrelationOperationProperties.DERIVE.equals(node.behavior())) {
+                        state.recordDanglingTerminal(result.payload());
+                        return allOrFirstFailure(state.liveness.reportUntaken(node.id(), List.of(), coordinator, iteration));
+                    }
                     if (outcome.failureRouted()) {
                         // Handled failure: the failed attempt and invocation stay FAILED,
                         // recorded above unconditionally -- handled routing changes what happens
@@ -3626,7 +3953,7 @@ public final class GraphRunner implements AutoCloseable {
         return awaitBackoff(identity.traversalId(), node.id(), outcome.retryDelay())
                 .thenCompose(released -> awaitPauseGate(identity.traversalId()))
                 .thenCompose(released -> {
-                    if (cancelledTraversals.contains(identity.traversalId())) {
+                    if (cancelledTraversals.containsKey(identity.traversalId())) {
                         return CompletableFuture.<Void>failedFuture(
                                 new TraversalCancelledException(identity.traversalId(), node.id()));
                     }
@@ -3714,7 +4041,7 @@ public final class GraphRunner implements AutoCloseable {
      * different thread pool.</p>
      */
     private CompletionStage<Void> awaitBackoff(UUID traversalId, String nodeId, Duration delay) {
-        if (cancelledTraversals.contains(traversalId)) {
+        if (cancelledTraversals.containsKey(traversalId)) {
             return CompletableFuture.failedFuture(new TraversalCancelledException(traversalId, nodeId));
         }
         if (delay == null || delay.isZero() || delay.isNegative()) {
@@ -3726,7 +4053,7 @@ public final class GraphRunner implements AutoCloseable {
         waits.add(registration);
         // Registered first, then re-checked: a cancellation that landed between the check at the top
         // of this method and the registration above would otherwise leave a wait nobody can end.
-        if (cancelledTraversals.contains(traversalId)) {
+        if (cancelledTraversals.containsKey(traversalId)) {
             waits.remove(registration);
             return CompletableFuture.failedFuture(new TraversalCancelledException(traversalId, nodeId));
         }
@@ -3843,17 +4170,30 @@ public final class GraphRunner implements AutoCloseable {
                                                         ExecutionMonitor.ExecutionIdentity identity,
                                                         JoinCoordinator coordinator, IterationContext iteration) {
         var deliveries = targetDeliveries(edges, delivered.command());
+        boolean sourceRoot = runtimeDefinitions.get(node.id()).nature() == NodeRuntimeNature.SOURCE
+                && delivered.parentInvocationIds().isEmpty()
+                && state.lifecycle.traversals().get(state.traversalId).ingressNodeId().equals(node.id());
+        boolean alreadyReserved = sourceRoot && state.retainedSourceRecovery && state.sourceFanOutReserved;
+        if (sourceRoot && state.retainedSourceRecovery) {
+            var originalVisits = state.lifecycle.traversals().get(state.traversalId).invocations().values();
+            deliveries = deliveries.stream().filter(target -> originalVisits.stream().noneMatch(visit ->
+                    visit.parentInvocationIds().contains(state.recoveredSourceInvocation)
+                            && visit.nodeId().equals(target.targetId()) && visit.command().equals(target.command()))).toList();
+        }
         // Reserve the entire batch before any liveness change, event, actor, or child state exists.
         // An over-budget fan-out therefore has no successfully dispatched prefix.
-        List<ExecutionBudget.Hop> hops = state.budget.reserveFanOut(deliveries.size(), routedBytes);
-        var taken = deliveries.stream().map(TargetDelivery::targetId).toList();
+        List<ExecutionBudget.Hop> hops = alreadyReserved ? state.budget.resumeFanOut(deliveries.size())
+                : state.budget.reserveFanOut(deliveries.size(), routedBytes);
+        if (sourceRoot) state.sourceFanOutReserved = true;
+        final var selectedDeliveries = deliveries;
+        var taken = targetDeliveries(edges, delivered.command()).stream().map(TargetDelivery::targetId).toList();
         // `iteration` is read from this runner's scope and from `delivered`, never from `result`.
         // That is the whole of why the token cannot be forged: result is what the node returned.
         var dispatches = new ArrayList<>(state.liveness.reportUntaken(node.id(), taken, coordinator, iteration));
         // Record the complete fan-out before any child can reach a durable pause boundary.
         state.successorsDispatched(deliveries.size());
         List<Integer> humanTaskRoutes = java.util.stream.IntStream.range(0, deliveries.size())
-                .filter(index -> reachesHumanTask(deliveries.get(index).targetId()))
+                .filter(index -> reachesHumanTask(selectedDeliveries.get(index).targetId()))
                 .boxed().toList();
         if (humanTaskRoutes.size() == 1 && deliveries.size() > 1) {
             int withheld = humanTaskRoutes.getFirst();
@@ -3866,7 +4206,7 @@ public final class GraphRunner implements AutoCloseable {
             }
             return coordinator.awaitContinuationBoundary(state.budget, 1, dispatches)
                     .thenCompose(ignored -> {
-                        CompletableFuture<Void> humanTask = dispatchSuccessor(deliveries.get(withheld), node,
+                        CompletableFuture<Void> humanTask = dispatchSuccessor(selectedDeliveries.get(withheld), node,
                                 result, delivered, causedBy, state, identity, coordinator, iteration,
                                 hops.get(withheld));
                         withheldDispatched.set(true);
@@ -4628,7 +4968,10 @@ public final class GraphRunner implements AutoCloseable {
                 && behaviors.requiresExternalIoCapacity(node);
         // Preserve composition-time snapshots for operational graphs while never creating a factory
         // for a node whose every possible arrival is under the sticky passthrough ceiling.
-        NodeHandler composed = node.kind() == NodeKind.BEHAVIOR && !authoredBypass
+        boolean source = NodeRuntimeNatureProperty.effectiveNature(
+                node.kind() == NodeKind.BEHAVIOR ? behaviors.descriptor(node).orElse(null) : null,
+                node.properties()) == NodeRuntimeNature.SOURCE;
+        NodeHandler composed = node.kind() == NodeKind.BEHAVIOR && !source && !authoredBypass
                 && !node.id().equals(completedHumanTaskNode)
                 && operationallyReachableNodes.contains(node.id())
                 && !executionScopedHandler
@@ -4753,18 +5096,30 @@ public final class GraphRunner implements AutoCloseable {
         return nodeId;
     }
 
+    private static Set<String> admittedEntryNodes(GraphDefinition graph, BehaviorRegistry behaviors) {
+        var entries = new java.util.LinkedHashSet<String>();
+        entries.add(graph.start().id());
+        for (var node : graph.nodes()) {
+            if (ai.ravenroot.api.catalog.NodeBypassProperty.isBypassed(node.properties())) continue;
+            if (CorrelatedJoinConfiguration.enabled(node) || node.kind() == NodeKind.BEHAVIOR
+                    && NodeRuntimeNatureProperty.effectiveNature(behaviors.descriptor(node).orElse(null), node.properties())
+                    == NodeRuntimeNature.SOURCE) entries.add(node.id());
+        }
+        return Set.copyOf(entries);
+    }
+
     /**
      * Conservative command-flow analysis. Every outcome edge is considered, so a factory is skipped
      * only when no possible route can deliver an operational command to that node.
      */
-    private static Set<String> operationallyReachableNodes(GraphDefinition graph, ExecutionPolicy policy) {
+    private static Set<String> operationallyReachableNodes(GraphDefinition graph, BehaviorRegistry behaviors, ExecutionPolicy policy) {
         NodeCommand initial = policy == ExecutionPolicy.TEST_PASSTHROUGH
                 ? NodeCommand.PASSTHROUGH : NodeCommand.PROCESS;
         record Reachability(String nodeId, NodeCommand command) { }
         var visited = new java.util.HashSet<Reachability>();
         var pending = new java.util.ArrayDeque<Reachability>();
         var operational = new java.util.HashSet<String>();
-        pending.add(new Reachability(graph.start().id(), initial));
+        for (String entry : admittedEntryNodes(graph, behaviors)) pending.add(new Reachability(entry, initial));
         while (!pending.isEmpty()) {
             Reachability current = pending.removeFirst();
             if (!visited.add(current)) continue;
@@ -4790,7 +5145,7 @@ public final class GraphRunner implements AutoCloseable {
         record Reachability(String nodeId, NodeCommand command) { }
         var visited = new java.util.HashSet<Reachability>();
         var pending = new java.util.ArrayDeque<Reachability>();
-        pending.add(new Reachability(graph.start().id(), initial));
+        for (String entry : admittedEntryNodes(graph, behaviors)) pending.add(new Reachability(entry, initial));
         while (!pending.isEmpty()) {
             Reachability current = pending.removeFirst();
             if (!visited.add(current)) continue;
@@ -4906,13 +5261,12 @@ public final class GraphRunner implements AutoCloseable {
         // Set before the first traversal is touched. Everything below releases holds through paths
         // whose reason is ENDED, and none of those is a decision about the traversal; see the field.
         shuttingDown = true;
-        // Snapshotted BEFORE the loop below, and the order is load-bearing. That loop cancels every
-        // traversal this runner holds, so after it `cancelledTraversals` names all of them and can no
-        // longer answer "which of these did an operator ask to stop" -- the question the forced
-        // teardown has to answer if it is to record an operator's act as theirs without inventing one
-        // for a traversal a shutdown merely happened to catch. Read here, it names exactly the
-        // traversals somebody stopped before this shutdown began.
-        Set<UUID> operatorStopped = Set.copyOf(cancelledTraversals);
+        // Keep the pre-shutdown operator snapshot used by forced teardown. Filter by the
+        // first publisher's origin, so a repeated close cannot turn an earlier shutdown mark
+        // into an operator request while a late branch is still unresolved.
+        Set<UUID> operatorStopped = cancelledTraversals.entrySet().stream()
+                .filter(entry -> entry.getValue() == StopOrigin.OPERATOR)
+                .map(Map.Entry::getKey).collect(java.util.stream.Collectors.toUnmodifiableSet());
         coordinators.keySet().forEach(traversalId -> cancelTraversal(traversalId, GateRelease.ON_CALLER));
         // Refuse every queued admission before draining traversal continuations. Active leases are
         // released by their attempt handlers; queued hops fail immediately and cannot spawn actors.
@@ -5342,10 +5696,8 @@ public final class GraphRunner implements AutoCloseable {
             //
             // The node named is a join the traversal is actually parked at, which is the truthful
             // reading of "the first hop that did not run": the branch was waiting to pass through it.
-            // `cancelledTraversals` answers "did somebody ask to stop this" honestly here, unlike
-            // inside close(), which cancels every traversal it holds before tearing them down and so
-            // has to be handed the set as it stood beforehand.
-            coordinator.terminate(cancelledTraversals.contains(traversalId)
+            // Preserve the first stop's origin even if reconciliation races shutdown.
+            coordinator.terminate(cancelledTraversals.get(traversalId) == StopOrigin.OPERATOR
                     ? operatorStop(traversalId, coordinator)
                     : new TraversalUnreachableException(traversalId, parked));
             reconciled.add(traversalId);
@@ -5825,6 +6177,7 @@ public final class GraphRunner implements AutoCloseable {
                                boolean calledExecution) {
             this.traversalId = traversalId;
             this.recorder = recorder;
+            this.sourceFanOutReserved = recorder != null && recorder.sourceFanOutReserved();
             this.liveness = liveness;
             this.identity = identity;
             this.identitySource = identitySource;
@@ -5858,6 +6211,7 @@ public final class GraphRunner implements AutoCloseable {
                                List<ai.ravenroot.api.payload.PayloadValue> priorCalledEndOutputs) {
             this.traversalId = traversalId;
             this.recorder = recorder;
+            this.sourceFanOutReserved = recorder != null && recorder.sourceFanOutReserved();
             this.liveness = liveness;
             this.identity = identity;
             this.identitySource = identitySource;
@@ -5909,6 +6263,11 @@ public final class GraphRunner implements AutoCloseable {
          * traversal that had two.</p>
          */
         private volatile boolean everFannedOut;
+        private boolean sourceFanOutReserved;
+        private boolean retainedSourceRecovery;
+        private UUID recoveredSourceInvocation;
+        private boolean preexistingSourceChildren;
+        private Set<UUID> recoveredOriginalVisits = Set.of();
 
         /** Records what a node's successor dispatch did, so a later hold can know whether to trust it. */
         private void successorsDispatched(int count) {
@@ -6342,6 +6701,34 @@ public final class GraphRunner implements AutoCloseable {
          *                       {@code bypassed} by construction at the call site.
          * @return the identity of the completion event, for the successors it dispatches to name
          */
+        private UUID sourceCompleted(UUID invocationId, UUID attemptId, UUID startedEventId, boolean boundary) {
+            return classifiedBoundaryCompleted(invocationId, attemptId, startedEventId,
+                    boundary ? ExecutionEventType.SOURCE_BOUNDARY : ExecutionEventType.NODE_COMPLETED,
+                    boundary ? "source-boundary" : ai.ravenroot.api.catalog.NodeOutcomeDescriptor.BLANK_OUTCOME);
+        }
+
+        /** Public classification without a fabricated result or ordinary successor replay evidence. */
+        private UUID classifiedBoundaryCompleted(UUID invocationId, UUID attemptId, UUID startedEventId,
+                ExecutionEventType eventType, String outcome) {
+            stateLock.lock();
+            try {
+                if (terminal) return null;
+                var transitions = List.<ExecutionTransition>of(
+                        new ExecutionTransition.AttemptTransitioned(traversalId, invocationId, attemptId,
+                                NodeAttemptStatus.COMPLETED),
+                        new ExecutionTransition.InvocationTransitioned(traversalId, invocationId,
+                                NodeInvocationStatus.COMPLETED));
+                UUID completed = eventId();
+                record(transitions, events(List.of(new PublishedEvent(eventType, completed,
+                        ai.ravenroot.api.persistence.NodeOutcomeEventData.of(outcome))),
+                        startedEventId, invocationId, attemptId));
+                lifecycle = fold(lifecycle, transitions);
+                return completed;
+            } finally {
+                stateLock.unlock();
+            }
+        }
+
         private UUID nodeCompleted(UUID invocationId, UUID attemptId, UUID startedEventId,
                                                 boolean bypassed, boolean defaulted) {
             stateLock.lock();
@@ -6367,6 +6754,20 @@ public final class GraphRunner implements AutoCloseable {
                                                 boolean bypassed, boolean defaulted, UUID assignedEventId,
                                                 String nodeId, Set<UUID> parents, NodeCommand command,
                                                 NodeResult result, IterationContext iteration) {
+            return nodeCompleted(invocationId, attemptId, startedEventId, bypassed, defaulted, assignedEventId,
+                    nodeId, parents, command, result, iteration, null);
+        }
+        private UUID nodeCompleted(UUID invocationId, UUID attemptId, UUID startedEventId,
+                boolean bypassed, boolean defaulted, UUID assignedEventId, String nodeId, Set<UUID> parents,
+                NodeCommand command, NodeResult result, IterationContext iteration,
+                ai.ravenroot.api.correlation.BusinessClosureSignal closureSignal) {
+            return nodeCompleted(invocationId, attemptId, startedEventId, bypassed, defaulted, assignedEventId,
+                    nodeId, parents, command, result, iteration, closureSignal, null);
+        }
+        private UUID nodeCompleted(UUID invocationId, UUID attemptId, UUID startedEventId,
+                boolean bypassed, boolean defaulted, UUID assignedEventId, String nodeId, Set<UUID> parents,
+                NodeCommand command, NodeResult result, IterationContext iteration,
+                ai.ravenroot.api.correlation.BusinessClosureSignal closureSignal, ai.ravenroot.api.persistence.DerivedEntryHandoff handoff) {
             stateLock.lock();
             try {
                 if (terminal) {
@@ -6384,10 +6785,17 @@ public final class GraphRunner implements AutoCloseable {
                         ? ExecutionEventType.NODE_BYPASSED : ExecutionEventType.NODE_COMPLETED;
                 var published = defaulted
                         ? List.of(new PublishedEvent(ExecutionEventType.NODE_DEFAULTED, defaultedEventId),
-                                new PublishedEvent(completionType, completedEventId))
-                        : List.of(new PublishedEvent(completionType, completedEventId));
+                                new PublishedEvent(completionType, completedEventId, ai.ravenroot.api.persistence.NodeOutcomeEventData.of(
+                                        result == null ? null : result.outcome())))
+                        : List.of(new PublishedEvent(completionType, completedEventId,
+                                ai.ravenroot.api.persistence.NodeOutcomeEventData.of(result == null ? null : result.outcome())));
                 var evidence = replayEvidence(invocationId, attemptId, nodeId, parents, command, result, iteration);
-                record(transitions, events(published, startedEventId, invocationId, attemptId), evidence);
+                if (closureSignal == null && handoff == null) record(transitions, events(published, startedEventId, invocationId, attemptId), evidence);
+                else {
+                    if (recorder == null) throw new IllegalStateException("business close requires durable history custody");
+                    recorder.record(transitions, events(published, startedEventId, invocationId, attemptId), List.of(), evidence,
+                            entryRuntimeState(), closureSignal == null ? List.of() : List.of(closureSignal), handoff);
+                }
                 lifecycle = fold(lifecycle, transitions);
                 return completedEventId;
             } finally {
@@ -6755,13 +7163,19 @@ public final class GraphRunner implements AutoCloseable {
             if (recorder == null || (transitions.isEmpty() && events.isEmpty())) {
                 return;
             }
-            recorder.record(transitions, events);
+            recorder.record(transitions, events, List.of(), List.of(), entryRuntimeState());
         }
 
         private void record(List<ExecutionTransition> transitions, List<EventEnvelope> events,
                             List<ai.ravenroot.api.persistence.ReplayInvocationEvidence> evidence) {
             if (recorder == null || (transitions.isEmpty() && events.isEmpty() && evidence.isEmpty())) return;
-            recorder.record(transitions, events, List.of(), evidence);
+            recorder.record(transitions, events, List.of(), evidence, entryRuntimeState());
+        }
+
+        private ai.ravenroot.api.persistence.DeploymentEntryRuntimeState entryRuntimeState() {
+            var counters = budget.snapshot();
+            return new ai.ravenroot.api.persistence.DeploymentEntryRuntimeState(counters.traversalSteps(),
+                    counters.amplifiedDeliveries(), counters.payloadBytes(), sourceFanOutReserved);
         }
 
         private UUID eventId() {
@@ -6811,13 +7225,14 @@ public final class GraphRunner implements AutoCloseable {
                 published.add(envelope(each.type(), each.eventId(), java.util.Objects.requireNonNull(causedBy,
                         () -> "a " + each.type() + " event is caused by another event in this journal; "
                                 + "publishing it with absent causation would state, permanently and falsely, "
-                                + "that its cause lies outside"), invocationId, attemptId));
+                                + "that its cause lies outside"), invocationId, attemptId, each.payload() == null ? OpaquePayload.empty(EVENT_CONTENT_TYPE) : each.payload()));
             }
             return List.copyOf(published);
         }
 
         /** One event a batch is about to journal, paired with the identity minted for it. */
-        private record PublishedEvent(ExecutionEventType type, UUID eventId) {
+        private record PublishedEvent(ExecutionEventType type, UUID eventId, OpaquePayload payload) {
+            private PublishedEvent(ExecutionEventType type, UUID eventId) { this(type, eventId, null); }
         }
 
         private EventEnvelope envelope(ExecutionEventType type, UUID eventId, UUID causationId,

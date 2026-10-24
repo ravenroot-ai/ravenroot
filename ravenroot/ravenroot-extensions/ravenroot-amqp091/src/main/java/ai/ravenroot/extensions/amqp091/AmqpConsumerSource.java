@@ -242,7 +242,7 @@ final class AmqpConsumerSource implements InboundSource {
         }
         int attempt = attempts.merge(projected.idempotentKey(), 1, Integer::sum);
         projected = AmqpDeliveryEvent.project(delivery, policy, settings.destination, attempt);
-        IngressReceipt receipt = context.ingress().offerDurably(context.identity(), IngressTarget.start(),
+        IngressReceipt receipt = context.ingress().offerDurably(context.identity(), IngressTarget.node(context.nodeId()),
                 projected.payload(), context.nodeId(), projected.idempotentKey());
         if (!current(sessionGeneration)) return;
         if (receipt.acknowledgeable()) {

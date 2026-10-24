@@ -496,6 +496,18 @@ public interface RavenrootApplication extends AutoCloseable {
     }
 
     /**
+     * Captures a read-only deployment history facade. Each read fences its physical source before and after storage access.
+     * @param tenantId authenticated tenant whose retained history is read
+     * @param source exact current logical deployment, physical incarnation and immutable graph version
+     * @return bounded reader that preserves original process and traversal identities across incarnation changes
+     */
+    default ai.ravenroot.api.history.DeploymentHistoryReader deploymentHistory(String tenantId,
+            ai.ravenroot.api.history.DeploymentHistorySource source) {
+        throw new ai.ravenroot.api.history.HistoryReadException(
+                ai.ravenroot.api.history.HistoryReadException.Reason.UNAVAILABLE);
+    }
+
+    /**
      * Resolves a browser-safe view from the immutable definition retained by one local deployment.
      * Unknown and cross-tenant identifiers are the same empty result.
      * @param tenantId tenant whose deployment is read
@@ -554,7 +566,7 @@ public interface RavenrootApplication extends AutoCloseable {
     }
 
     /**
-     * Starts one payload-free traversal from an exact immutable local deployment binding.
+     * Accepts or reconciles the single payload-free initial START from an exact deployment binding.
      * Implementations must compare both graph version and incarnation before admitting the request,
      * and must reconcile {@code requestId} through durable ingress rather than dispatch twice.
      * @param security authenticated tenant and principal
@@ -563,6 +575,61 @@ public interface RavenrootApplication extends AutoCloseable {
      * @param graphVersion exact immutable graph version
      * @param requestId bounded idempotency identity
      * @return sanitized authoritative admission outcome
+     */
+    /** Restores an existing durable registration from retained canonical graph custody.
+     * This explicit operation creates neither a registration nor an initial START. Unsupported
+     * process-local hosts refuse by returning empty.
+     * @param security authenticated owning tenant and principal
+     * @param deploymentId tenant-local logical deployment identity
+     * @param registrationIdentity exact retained opaque registration identity
+     * @param graphVersion exact canonical graph digest
+     * @return current hosted status, or empty when existing authority does not match
+     */
+    default java.util.Optional<LocalDeploymentStatus> restoreLocalDeployment(SecurityContext security,
+            String deploymentId, String registrationIdentity, String graphVersion) {
+        return java.util.Optional.empty();
+    }
+
+    /** Reads the permanent initial START marker without admitting work or returning input.
+     * @param security authenticated tenant and principal
+     * @param deploymentId tenant-scoped logical deployment
+     * @param incarnationId current runtime incarnation
+     * @param graphVersion exact pinned graph version
+     * @param requestId bounded caller reconciliation identity; never an admission
+     * @return DUPLICATE and original identities when retained, otherwise explicit refusal or unresolved read
+     */
+    default EmbedDeploymentStart reconcileLocalDeploymentInitialStart(SecurityContext security, String deploymentId,
+            String incarnationId, String graphVersion, String requestId) {
+        return new EmbedDeploymentStart(EmbedDeploymentStart.Outcome.REFUSED, requestId);
+    }
+
+    /**
+     * Accepts or reconciles the one initial START of an exact deployment binding with bounded input.
+     * A retry or a distinct request ID cannot replace the original work. Requires a store supporting
+     * permanent initial-START admission; refusal must happen before effects when unavailable.
+     *
+     * @param security authenticated tenant and principal
+     * @param deploymentId exact tenant-scoped logical deployment
+     * @param incarnationId current admission incarnation
+     * @param graphVersion exact deployed version, never an editor draft
+     * @param requestId bounded caller request identity
+     * @param input bounded structured initial payload
+     * @return admission outcome and original process/traversal identities when available
+     */
+    default EmbedDeploymentStart startLocalDeploymentExecution(SecurityContext security,
+            String deploymentId, String incarnationId, String graphVersion, String requestId,
+            ai.ravenroot.api.payload.PayloadValue input) {
+        return new EmbedDeploymentStart(EmbedDeploymentStart.Outcome.REFUSED, requestId);
+    }
+
+    /**
+     * Admits or reconciles the permanent original START under the exact embedded deployment binding.
+     * @param security authenticated tenant and principal from the embed authorization boundary
+     * @param deploymentId tenant-scoped logical deployment
+     * @param incarnationId current physical registration incarnation
+     * @param graphVersion immutable version captured by the authorized session
+     * @param requestId bounded client reconciliation identity; another value never grants another START
+     * @return authoritative admission result and original process/traversal identities when established
      */
     default EmbedDeploymentStart startEmbedDeploymentExecution(SecurityContext security,
                                                                  String deploymentId,
@@ -577,7 +644,7 @@ public interface RavenrootApplication extends AutoCloseable {
      * @param tenantId owning tenant
      * @param processInstanceId exact process identity
      * @param afterSequence exclusive durable per-process sequence
-     * @param limit maximum number of events to return
+     * @param limit maximum number of events to return, from 1 through 1000
      * @return ordered durable events after the requested sequence
      */
     default List<DurableExecutionEvent> durableEventsForProcess(String tenantId, UUID processInstanceId,
@@ -590,7 +657,7 @@ public interface RavenrootApplication extends AutoCloseable {
      * @param tenantId exact owning tenant
      * @param processInstanceId exact process identity
      * @param afterSequence exclusive durable process sequence
-     * @param limit maximum event count
+     * @param limit maximum event count, from 1 through 1000
      * @return bounded events and authoritative retained/allocation boundaries
      */
     default DurableProcessEventPage durableEventPageForProcess(String tenantId, UUID processInstanceId,
@@ -623,6 +690,19 @@ public interface RavenrootApplication extends AutoCloseable {
         return java.util.concurrent.CompletableFuture.completedFuture(java.util.Optional.empty());
     }
 
+    /** Starts only an exact observed runtime; unsupported implementations fail closed.
+     * @param security authenticated serving identity
+     * @param deploymentId logical deployment name
+     * @param incarnationId observed runtime incarnation
+     * @param graphVersion immutable graph digest
+     * @return readiness of the captured runtime, or empty when absent
+     */
+    default CompletionStage<java.util.Optional<LocalDeploymentStatus>> startLocalDeployment(
+            SecurityContext security, String deploymentId, String incarnationId, String graphVersion) {
+        return java.util.concurrent.CompletableFuture.failedFuture(
+                new UnsupportedOperationException("identity-fenced deployment start is unavailable"));
+    }
+
     /**
  * Stops one of this tenant's deployments and <b>leaves it registered</b>.
  *
@@ -639,6 +719,21 @@ public interface RavenrootApplication extends AutoCloseable {
     default CompletionStage<java.util.Optional<LocalDeploymentStatus>> stopLocalDeployment(
             String tenantId, String deploymentId) {
         return java.util.concurrent.CompletableFuture.completedFuture(java.util.Optional.empty());
+    }
+
+    /**
+     * Stops only the exact process-local deployment observed by a document. Implementations that
+     * cannot fence this identity refuse rather than falling back to an alias-only stop.
+     * @param tenantId owning tenant
+     * @param deploymentId logical deployment name
+     * @param incarnationId observed runtime incarnation
+     * @param graphVersion observed immutable graph digest
+     * @return authoritative status of the captured deployment, or empty when absent
+     */
+    default CompletionStage<java.util.Optional<LocalDeploymentStatus>> stopLocalDeployment(
+            String tenantId, String deploymentId, String incarnationId, String graphVersion) {
+        return java.util.concurrent.CompletableFuture.failedFuture(
+                new UnsupportedOperationException("identity-fenced deployment stop is unavailable"));
     }
 
     /**
@@ -1175,10 +1270,20 @@ public interface RavenrootApplication extends AutoCloseable {
  * states for itself)
  * @param tenantId tenant whose durable events are being read
  * @param afterOffset exclusive durable offset from which the page begins
- * @param limit maximum number of events to return in the page
+ * @param limit maximum number of events to return in the page, from 1 through 1000
  * @return a page of retained tenant-scoped durable events after the requested offset
  */
     List<DurableExecutionEvent> durableEventsAfter(String tenantId, long afterOffset, int limit);
+
+    /** Previews explicit correlation extraction from a caller-supplied sample without state changes.
+     * @param properties mapping controls from the shared source/context descriptor
+     * @param sample actual exposed connector input or computed structured value
+     * @return bounded sample evaluation; generated identities are illustrative placeholders
+     */
+    default ai.ravenroot.api.correlation.CorrelationPreview previewCorrelation(Map<String, ?> properties, Object sample) {
+        return ai.ravenroot.api.correlation.CorrelationPreview.evaluate(properties, sample,
+                ai.ravenroot.api.correlation.CorrelationLimits.DEFAULTS);
+    }
 
     /**
      * Reports whether this application has a durable activity-content archive.

@@ -6,6 +6,7 @@
   const PROJECTION_PATH = '/v1/embed/projection';
   const OBSERVATION_PATH = '/v1/embed/observation';
   const RUNS_PATH = '/v1/embed/runs';
+  const HISTORY_PATH = '/v1/embed/history';
   const START_EXECUTION_PATH = '/v1/embed/executions';
   const MAX_STREAM_FRAME_BYTES = 64 * 1024;
   const MAX_OBSERVATION_RETRIES = 5;
@@ -109,14 +110,14 @@
       ackCorrelationId, jti, EXCHANGE_PATH, issuedAt),
   ));
 
-  const postJson = async (path, body, bearer) => {
+  const postJson = async (path, body, bearer, signal) => {
     const headers = { 'Content-Type': 'application/json' };
     if (bearer !== undefined) headers.Authorization = `Bearer ${bearer}`;
     let response;
     try {
       response = await fetch(path, {
         method: 'POST',
-        headers,
+        headers, signal,
         body: JSON.stringify(body),
         credentials: 'omit',
         cache: 'no-store',
@@ -273,6 +274,7 @@
 
   let localization = null;
   const showFailure = kind => {
+    historyMonitor?.destroy();
     const state = FAILURE_STATES.includes(kind) ? kind : 'error';
     const root = document.getElementById('ravenroot-embed-viewer');
     const status = root?.querySelector('[data-viewer-status]');
@@ -284,6 +286,7 @@
   };
 
   let viewer = null;
+  let historyMonitor = null;
   let observation = null;
   const run = async () => {
     const bootstrap = readBootstrap({ requireFresh: false });
@@ -338,7 +341,7 @@
         const validated = viewerModule.validateEmbedLocaleChange(message.locale, message.catalog);
         if (validated.catalog !== null) localization.registerCatalog(validated.catalog);
         localization.setLocale(validated.locale);
-        viewer?.refreshLocale();
+        viewer?.refreshLocale(); historyMonitor?.refreshLocale();
         sendToParent('LOCALE_CHANGED', message.correlationId, { locale: localization.locale });
       } catch { /* Invalid presentation input cannot affect the viewer or its protocol state. */ }
     });
@@ -501,10 +504,18 @@
     });
     await viewer.mount(projection);
     if (projection.viewerSourceVersion === '2' && projection.source?.kind === 'deployment') {
+      const historyContainer = document.createElement('section');
+      historyContainer.dataset.embedHistory = '';
+      document.getElementById('ravenroot-embed-viewer').after(historyContainer);
+      historyMonitor = viewerModule.createDeploymentHistoryMonitor({ container: historyContainer, projection, theme,
+        t: localization.text, localization, read: async (query, { signal }) => postJson(HISTORY_PATH,
+          await signedBody(HISTORY_PATH, { query: JSON.stringify(query) }), exchanged.bearer, signal) });
+      addEventListener('pagehide', () => historyMonitor?.destroy(), { once: true });
       await refreshRuns();
       refreshTimer = setInterval(() => {
         void refreshRuns().catch(failure => {
           clearInterval(refreshTimer);
+          historyMonitor?.destroy();
           observation?.abort();
           viewer.clearRuntime(failure?.kind === 'expired'
             ? localization.text('embed.observation.authorizationEnded')
@@ -553,6 +564,7 @@
 
   run().catch(async failure => {
     observation?.abort();
+    historyMonitor?.destroy();
     viewer?.destroy({ preserveState: true });
     // Stable, non-sensitive failure signal. There is deliberately no console output or error detail.
     showFailure(failure?.kind ?? 'error');

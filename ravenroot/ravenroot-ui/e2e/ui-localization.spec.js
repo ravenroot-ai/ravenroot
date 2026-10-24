@@ -39,7 +39,7 @@ Object.assign(italian.messages, {
 // Keep long RTL labels while omitting redundant English prose from long messages.
 const arabic = { schema: 'ravenroot.ui-catalog/v1', locale: 'ar', direction: 'rtl',
   messages: mapMessages(value => '⟦نص واجهة طويل للاختبار⟧'
-    + (value.length > 80 ? (value.match(/\{[A-Za-z][A-Za-z0-9_]*\}/gu) || []).join(' ') : value)),
+    + (value.length > 40 ? (value.match(/\{[A-Za-z][A-Za-z0-9_]*\}/gu) || []).join(' ') : value)),
 };
 const german = pseudo('de', 'ltr', '⟦DE⟧');
 Object.assign(german.messages, {

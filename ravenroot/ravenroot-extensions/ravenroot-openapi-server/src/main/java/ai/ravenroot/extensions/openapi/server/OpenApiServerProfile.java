@@ -1,6 +1,5 @@
 package ai.ravenroot.extensions.openapi.server;
 
-import ai.ravenroot.api.deployment.IngressTarget;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -46,7 +45,6 @@ public record OpenApiServerProfile(
 
     @Override public byte[] specification() { return specification.clone(); }
 
-    IngressTarget target() { return IngressTarget.start(); }
 
     static String header(String value) {
         String normalized = token(value, "header", 64).toLowerCase(Locale.ROOT);

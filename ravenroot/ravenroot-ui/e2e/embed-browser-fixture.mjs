@@ -400,7 +400,7 @@ const parentServer = createHttpsServer(tls, async (request, response) => {
     ['/theme-light', 'theme-light'], ['/theme-dark', 'theme-dark'],
     ['/theme-auto-light', 'theme-auto-light'], ['/theme-auto-dark', 'theme-auto-dark'],
     ['/theme-invalid', 'theme-invalid'], ['/deployment', 'live-registration'],
-    ['/deployment-stale', 'live-stale-registration'], ['/localized', 'browser-registration'],
+    ['/deployment-stale', 'live-stale-registration'], ['/deployment-history', 'history-registration'], ['/localized', 'browser-registration'],
     ['/localized-regional', 'browser-registration'],
   ]).get(request.url) ?? 'browser-registration';
   try {

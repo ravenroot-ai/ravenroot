@@ -159,6 +159,19 @@ public final class AuthorizedRavenrootApplication {
         return delegate.nodeTypes();
     }
 
+    /** Evaluates caller-supplied correlation samples under catalog-read authority and audit.
+     * @param context authenticated authoring request context
+     * @param properties explicit correlation mapping controls
+     * @param sample actual exposed connector input or computed structured value
+     * @return non-mutating bounded sample extraction result
+     */
+    public ai.ravenroot.api.correlation.CorrelationPreview previewCorrelation(RequestContext context,
+            Map<String, ?> properties, Object sample) {
+        require(context, AuthorizationAction.CATALOG_READ, collection("node-catalog", context));
+        return delegate.previewCorrelation(properties, sample);
+    }
+
+
 /**
  * Lists trusted node catalog provenance after catalog-read authorization.
  * @param context authenticated request context used for authorization and audit attribution.
@@ -652,6 +665,20 @@ public final class AuthorizedRavenrootApplication {
         return delegate.sourceSession(context.tenantId(), sessionId);
     }
 
+    /** Starts an exact observed runtime under ordinary deployment control authorization.
+     * @param context authenticated caller and tenant
+     * @param deploymentId logical deployment name
+     * @param incarnationId observed runtime incarnation
+     * @param graphVersion immutable graph digest
+     * @return readiness of the captured runtime, or empty when absent
+     */
+    public CompletionStage<java.util.Optional<LocalDeploymentStatus>> startLocalDeployment(
+            RequestContext context, String deploymentId, String incarnationId, String graphVersion) {
+        require(context, AuthorizationAction.EXECUTION_CONTROL,
+                ProtectedResource.owned("deployment", requireText(deploymentId, "deployment id"), context.tenantId()));
+        return delegate.startLocalDeployment(SecurityContext.of(context), deploymentId, incarnationId, graphVersion);
+    }
+
     /**
  * Stops only the caller tenant's named session and never the shared execution engine.
 * @param context authenticated request context authorizing the operation
@@ -696,6 +723,21 @@ public final class AuthorizedRavenrootApplication {
                                                          InputStream graphMl) {
         require(context, AuthorizationAction.EXECUTION_START, collection("deployments", context));
         return delegate.registerLocalDeployment(SecurityContext.of(context), deploymentId, graphMl);
+    }
+
+    /** Restores only an existing durable registration under registration and lifecycle authority.
+     * @param context authenticated caller
+     * @param deploymentId exact tenant-local logical identity
+     * @param registrationIdentity saved opaque durable registration identity
+     * @param graphVersion saved immutable canonical graph digest
+     * @return restored hosted status or nondisclosing absence
+     */
+    public java.util.Optional<LocalDeploymentStatus> restoreLocalDeployment(RequestContext context,
+            String deploymentId, String registrationIdentity, String graphVersion) {
+        require(context, AuthorizationAction.EXECUTION_START, collection("deployments", context));
+        require(context, AuthorizationAction.EXECUTION_CONTROL, ProtectedResource.owned("deployment", requireText(deploymentId, "deployment id"), context.tenantId()));
+        return delegate.restoreLocalDeployment(SecurityContext.of(context), requireText(deploymentId, "deployment id"),
+                requireText(registrationIdentity, "registration identity"), requireText(graphVersion, "graph version"));
     }
 
     /**
@@ -791,6 +833,73 @@ public final class AuthorizedRavenrootApplication {
         require(context, AuthorizationAction.EXECUTION_READ,
                 ProtectedResource.owned("deployment", requireText(deploymentId, "deployment id"), context.tenantId()));
         return delegate.localDeployment(context.tenantId(), deploymentId);
+    }
+
+    /** Read-only history under ordinary authenticated execution-read authority.
+ * @param context authenticated request identity supplying the tenant and action authority
+ * @param source exact captured logical deployment, physical incarnation and immutable graph version
+ * @return read-only facade that fences the captured source and authorizes every history read
+ */
+    public ai.ravenroot.api.history.DeploymentHistoryReader deploymentHistory(RequestContext context,
+            ai.ravenroot.api.history.DeploymentHistorySource source) {
+        return historyReader(context, source, AuthorizationAction.EXECUTION_READ);
+    }
+    /** Read-only history under the separate deployment embed capability.
+ * @param context authenticated request identity supplying the tenant and action authority
+ * @param source exact captured logical deployment, physical incarnation and immutable graph version
+ * @return read-only facade governed by the separate embed deployment-read action
+ */
+    public ai.ravenroot.api.history.DeploymentHistoryReader embedDeploymentHistory(RequestContext context,
+            ai.ravenroot.api.history.DeploymentHistorySource source) {
+        return historyReader(context, source, AuthorizationAction.EMBED_DEPLOYMENT_RUN_READ);
+    }
+    private ai.ravenroot.api.history.DeploymentHistoryReader historyReader(RequestContext context,
+            ai.ravenroot.api.history.DeploymentHistorySource source, AuthorizationAction action) {
+        Objects.requireNonNull(source, "source");
+        var resource = ProtectedResource.owned("deployment-view", source.deploymentId(), context.tenantId());
+        require(context, action, resource);
+        var reader = delegate.deploymentHistory(context.tenantId(), source);
+        return new ai.ravenroot.api.history.DeploymentHistoryReader() {
+            @Override public ai.ravenroot.api.history.HistoryPage<ai.ravenroot.api.history.TraversalSummary> uncorrelatedTraversals(java.util.Optional<String> cursor, int limit) {
+                require(context, action, resource); return reader.uncorrelatedTraversals(cursor, limit);
+            }
+            @Override public ai.ravenroot.api.correlation.BusinessHistoryPolicy policy() { require(context, action, resource); return reader.policy(); }
+            @Override public ai.ravenroot.api.history.DeploymentHistorySource source() { require(context, action, resource); return reader.source(); }
+            @Override public ai.ravenroot.api.correlation.BusinessHistoryPage histories(ai.ravenroot.api.correlation.BusinessHistoryQuery query) {
+                require(context, action, resource); return reader.histories(query);
+            }
+            @Override public ai.ravenroot.api.correlation.CorrelatedTraversalPage traversals(String id, java.util.Optional<String> cursor, int limit) {
+                require(context, action, resource); return reader.traversals(id, cursor, limit);
+            }
+            @Override public ai.ravenroot.api.history.HistoryPage<ai.ravenroot.api.history.TraversalSummary> processTraversals(java.util.UUID process, java.util.Optional<String> cursor, int limit) {
+                require(context, action, resource); return reader.processTraversals(process, cursor, limit);
+            }
+            @Override public ai.ravenroot.api.history.HistoryPage<ai.ravenroot.api.history.TraversalNodeSummary> nodes(java.util.UUID process, java.util.UUID traversal, java.util.Optional<String> cursor, int limit) {
+                require(context, action, resource); return reader.nodes(process, traversal, cursor, limit);
+            }
+            @Override public ai.ravenroot.api.history.HistoryPage<ai.ravenroot.api.history.TraversalEdgeSummary> edges(java.util.UUID process, java.util.UUID traversal, java.util.Optional<String> cursor, int limit) {
+                require(context, action, resource); return reader.edges(process, traversal, cursor, limit);
+            }
+            @Override public ai.ravenroot.api.history.HistoryPage<ai.ravenroot.api.history.NodeVisitSummary> visits(java.util.UUID process, java.util.UUID traversal, java.util.Optional<String> node, java.util.Optional<String> cursor, int limit) {
+                require(context, action, resource); return reader.visits(process, traversal, node, cursor, limit);
+            }
+            @Override public ai.ravenroot.api.history.HistoryPage<ai.ravenroot.api.history.NodeAttemptSummary> attempts(java.util.UUID process, java.util.UUID traversal, java.util.UUID invocation, java.util.Optional<String> cursor, int limit) {
+                require(context, action, resource); return reader.attempts(process, traversal, invocation, cursor, limit);
+            }
+            @Override public ai.ravenroot.api.history.HistoryPage<ai.ravenroot.api.history.VisitParent> parents(java.util.UUID process, java.util.UUID traversal, java.util.UUID invocation, java.util.Optional<String> cursor, int limit) {
+                require(context, action, resource); return reader.parents(process, traversal, invocation, cursor, limit);
+            }
+            @Override public ai.ravenroot.api.correlation.CorrelatedJoinPage joins(String id, java.util.Optional<String> cursor, int limit) {
+                require(context, action, resource); return reader.joins(id, cursor, limit);
+            }
+            @Override public ai.ravenroot.api.history.HistoryPage<ai.ravenroot.api.correlation.JoinMemberSummary> members(
+                    String id, String node, String round, ai.ravenroot.api.correlation.JoinMemberFilter filter, java.util.Optional<String> cursor, int limit) {
+                require(context, action, resource); return reader.members(id, node, round, filter, cursor, limit);
+            }
+            @Override public ai.ravenroot.api.history.HistoryActivityPage activity(java.util.UUID process, java.util.UUID traversal, java.util.UUID invocation, java.util.UUID attempt, long afterCursor, int limit) {
+                require(context, action, resource); return reader.activity(process, traversal, invocation, attempt, afterCursor, limit);
+            }
+        };
     }
 
     /**
@@ -989,6 +1098,49 @@ public final class AuthorizedRavenrootApplication {
      * @param requestId bounded idempotency identity
      * @return sanitized authoritative admission outcome
      */
+    /** Reads original initial START identity under exact deployment observation authorization.
+     * @param context authenticated observation request
+     * @param deploymentId tenant-local logical deployment
+     * @param incarnationId current runtime incarnation
+     * @param graphVersion pinned deployment version
+     * @param requestId bounded original client reconciliation identity
+     * @return original identities, refusal or unresolved read; never admits a traversal
+     */
+    public EmbedDeploymentStart reconcileLocalDeploymentInitialStart(RequestContext context, String deploymentId,
+            String incarnationId, String graphVersion, String requestId) {
+        require(context, AuthorizationAction.DEPLOYMENT_OBSERVE,
+                ProtectedResource.owned("deployment-view", requireText(deploymentId, "deployment id"), context.tenantId()));
+        return delegate.reconcileLocalDeploymentInitialStart(SecurityContext.of(context), deploymentId,
+                requireText(incarnationId, "incarnation id"), requireText(graphVersion, "graph version"), requireText(requestId, "request id"));
+    }
+
+    /** Starts or reconciles initial START under ordinary execution authorization.
+ * @param context authenticated request identity supplying the tenant and action authority
+ * @param deploymentId logical deployment identity; a new incarnation does not change it
+ * @param incarnationId captured physical registration incarnation used as a stale-source fence
+ * @param graphVersion exact immutable graph version admitted for this history
+ * @param requestId client request identity being admitted or reconciled; it does not grant another START
+ * @param input actual bounded ingress or workflow input to select; no implicit envelope is invented
+ * @return authoritative initial START admission or reconciliation with its original process and traversal identities
+ */
+    public EmbedDeploymentStart startLocalDeploymentExecution(RequestContext context,
+            String deploymentId, String incarnationId, String graphVersion, String requestId,
+            ai.ravenroot.api.payload.PayloadValue input) {
+        require(context, AuthorizationAction.EXECUTION_START, collection("deployments", context));
+        return delegate.startLocalDeploymentExecution(SecurityContext.of(context),
+                requireText(deploymentId, "deployment id"), requireText(incarnationId, "incarnation id"),
+                requireText(graphVersion, "graph version"), requireText(requestId, "request id"),
+                java.util.Objects.requireNonNull(input, "input"));
+    }
+    /** Admits or reconciles initial START under the separate exact-bound embed execution action.
+ * @param context authenticated request identity supplying the tenant and action authority
+ * @param deploymentId logical deployment identity; a new incarnation does not change it
+ * @param incarnationId captured physical registration incarnation used as a stale-source fence
+ * @param graphVersion exact immutable graph version admitted for this history
+ * @param requestId client request identity being admitted or reconciled; it does not grant another START
+ * @return authoritative initial START admission under the separate embed execution capability, retaining original identities
+ */
+
     public EmbedDeploymentStart startEmbedDeploymentExecution(RequestContext context,
                                                                String deploymentId,
                                                                String incarnationId,
@@ -1026,6 +1178,21 @@ public final class AuthorizedRavenrootApplication {
         require(context, AuthorizationAction.EXECUTION_CONTROL,
                 ProtectedResource.owned("deployment", requireText(deploymentId, "deployment id"), context.tenantId()));
         return delegate.stopLocalDeployment(context.tenantId(), deploymentId);
+    }
+
+    /**
+     * Stops an exact observed runtime under the same control authorization as ordinary Stop.
+     * @param context authenticated caller and tenant
+     * @param deploymentId logical deployment name
+     * @param incarnationId observed runtime incarnation
+     * @param graphVersion immutable graph digest
+     * @return authoritative stopped status, or empty when absent
+     */
+    public CompletionStage<java.util.Optional<LocalDeploymentStatus>> stopLocalDeployment(
+            RequestContext context, String deploymentId, String incarnationId, String graphVersion) {
+        require(context, AuthorizationAction.EXECUTION_CONTROL,
+                ProtectedResource.owned("deployment", requireText(deploymentId, "deployment id"), context.tenantId()));
+        return delegate.stopLocalDeployment(context.tenantId(), deploymentId, incarnationId, graphVersion);
     }
 
     /**

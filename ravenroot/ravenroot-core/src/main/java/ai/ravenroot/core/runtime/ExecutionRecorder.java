@@ -415,12 +415,34 @@ public final class ExecutionRecorder implements AutoCloseable {
     public void record(List<ExecutionTransition> transitions, List<EventEnvelope> events,
                                     List<AgentBudgetOperation> agentBudgetOperations,
                                     List<ReplayInvocationEvidence> replayEvidence) {
+        record(transitions, events, agentBudgetOperations, replayEvidence, null);
+    }
+
+    /** Commits original SOURCE budget counters in the same lifecycle transaction. */
+    public void record(List<ExecutionTransition> transitions, List<EventEnvelope> events,
+            List<AgentBudgetOperation> agentBudgetOperations, List<ReplayInvocationEvidence> replayEvidence,
+            ai.ravenroot.api.persistence.DeploymentEntryRuntimeState entryState) {
+        record(transitions, events, agentBudgetOperations, replayEvidence, entryState, List.of());
+    }
+
+    /** Commits authored close barriers with their actual original visit completion. */
+    public void record(List<ExecutionTransition> transitions, List<EventEnvelope> events,
+            List<AgentBudgetOperation> agentBudgetOperations, List<ReplayInvocationEvidence> replayEvidence,
+            ai.ravenroot.api.persistence.DeploymentEntryRuntimeState entryState,
+            List<ai.ravenroot.api.correlation.BusinessClosureSignal> closureSignals) {
+        record(transitions, events, agentBudgetOperations, replayEvidence, entryState, closureSignals, null);
+    }
+
+    void record(List<ExecutionTransition> transitions, List<EventEnvelope> events,
+            List<AgentBudgetOperation> agentBudgetOperations, List<ReplayInvocationEvidence> replayEvidence,
+            ai.ravenroot.api.persistence.DeploymentEntryRuntimeState entryState,
+            List<ai.ravenroot.api.correlation.BusinessClosureSignal> closureSignals, ai.ravenroot.api.persistence.DerivedEntryHandoff handoff) {
         operationLock.lock();
         try {
             requireFence();
             if ((transitions == null || transitions.isEmpty()) && (events == null || events.isEmpty())
                     && (agentBudgetOperations == null || agentBudgetOperations.isEmpty())
-                    && (replayEvidence == null || replayEvidence.isEmpty())) {
+                    && (replayEvidence == null || replayEvidence.isEmpty()) && closureSignals.isEmpty() && handoff == null) {
                 return;
             }
             var batch = ExecutionBatch.to(key)
@@ -448,6 +470,14 @@ public final class ExecutionRecorder implements AutoCloseable {
                 agentBudgetOperations.forEach(batch::applyAgentBudget);
             }
             if (replayEvidence != null) replayEvidence.forEach(batch::captureReplayEvidence);
+            if (entryState != null) batch.deploymentEntryRuntimeState(entryState);
+            if (!closureSignals.isEmpty() && !store.supports(StoreCapability.BUSINESS_CLOSURE_SIGNALS))
+                throw new IllegalStateException("store lacks authored business close barriers");
+            closureSignals.forEach(batch::requestBusinessClosure);
+            if (handoff != null) {
+                if (!store.supports(StoreCapability.DEPLOYMENT_ENTRY_CUSTODY)) throw new IllegalStateException("store lacks derived input custody");
+                batch.handoffDerivedEntry(handoff);
+            }
             try {
                 StoredProcessInstance applied = await(store.apply(batch.build()));
                 revision = applied.revision();
@@ -950,6 +980,54 @@ public final class ExecutionRecorder implements AutoCloseable {
         }
     }
 
+    /** Commits a contribution while the same original process fence is checked by the adapter. */
+    ai.ravenroot.api.correlation.CorrelatedJoinRecord contribute(ai.ravenroot.core.graph.GraphNode node,
+            String entryNodeId, ai.ravenroot.api.execution.NodeMessage message, Instant now) {
+        operationLock.lock();
+        try {
+            requireFence();
+            long startedNanos = System.nanoTime();
+            long waitNanos = Math.max(1, leaseTtl.toNanos() / 3);
+            return CorrelatedJoinRuntime.accept(store, lease, node, entryNodeId, message, now, new CorrelatedJoinRuntime.StoreAwait() {
+                @Override public <T> T get(CompletionStage<T> stage) { return awaitCorrelation(stage, startedNanos, waitNanos); }
+            });
+        } finally {
+            operationLock.unlock();
+        }
+    }
+
+    private <T> T awaitCorrelation(CompletionStage<T> stage, long startedNanos, long waitNanos) {
+        try {
+            long remaining = waitNanos - (System.nanoTime() - startedNanos);
+            if (remaining <= 0) throw new java.util.concurrent.TimeoutException("correlation deadline elapsed");
+            return stage.toCompletableFuture().get(remaining, java.util.concurrent.TimeUnit.NANOSECONDS);
+        } catch (java.util.concurrent.ExecutionException failed) {
+            Throwable cause = failed.getCause();
+            if (cause instanceof RuntimeException runtime) throw runtime;
+            throw new IllegalStateException("correlated join persistence failed", cause);
+        } catch (java.util.concurrent.TimeoutException unresolved) {
+            throw new IllegalStateException("correlated join persistence must be reconciled", unresolved);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("correlated join persistence interrupted", interrupted);
+        }
+    }
+
+    ai.ravenroot.api.correlation.BusinessHistoryPolicy businessHistoryPolicy() { return store.businessHistoryPolicy(); }
+
+    /** Restores the immutable business context of an original traversal after recovery. */
+    public ai.ravenroot.api.correlation.ApplicationCorrelationContext applicationCorrelation(UUID traversalId) {
+        operationLock.lock();
+        try {
+            requireFence();
+            if (!store.supports(ai.ravenroot.api.persistence.StoreCapability.BUSINESS_HISTORIES)) return null;
+            return await(store.correlatedTraversal(key.tenantId(), key.processInstanceId(), traversalId))
+                    .map(ai.ravenroot.api.correlation.CorrelatedTraversal::context).orElse(null);
+        } finally {
+            operationLock.unlock();
+        }
+    }
+
     private void loseFence(ExecutionStoreFailure because) {
         fenceLost = true;
         fenceLostBecause = because;
@@ -980,6 +1058,12 @@ public final class ExecutionRecorder implements AutoCloseable {
         } finally {
             operationLock.unlock();
         }
+    }
+
+    boolean sourceFanOutReserved() {
+        if (!store.supports(StoreCapability.DEPLOYMENT_ENTRY_CUSTODY)) return false;
+        return await(store.deploymentEntry(key)).map(entry -> entry.checkpoint() != null
+                && entry.checkpoint().runtimeState().rootFanOutReserved()).orElse(false);
     }
 
     /**

@@ -145,7 +145,7 @@ class DeploymentHostedGraphDefinitionBindingTest {
                     fixedIdentities(processInstanceId));
             deployment.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
 
-            var receipt = deployment.ingress().offerDurably(IDENTITY, IngressTarget.start(), "payload",
+            var receipt = deployment.ingress().offerDurably(IDENTITY, IngressTarget.node("start"), "payload",
                     "poller-1", "key-A");
             assertInstanceOf(IngressReceipt.DurablyCommitted.class, receipt);
 
@@ -188,7 +188,7 @@ class DeploymentHostedGraphDefinitionBindingTest {
              var manifestStore = new ai.ravenroot.persistence.sqlite.SqliteExecutionManifestStore(
                      database, clock(), ai.ravenroot.api.persistence.ExecutionManifestReferences.NONE)) {
 
-            BehaviorRegistry behaviors = BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults());
+            BehaviorRegistry behaviors = ManualSourceFixture.register(BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults()));
             var manifests = new ai.ravenroot.core.manifest.ExecutionManifestService(manifestStore,
                     ai.ravenroot.core.manifest.ExecutionManifestResolver.from(engine,
                             executions.capabilities(), behaviors,
@@ -203,7 +203,7 @@ class DeploymentHostedGraphDefinitionBindingTest {
                     definitions, GraphExecutionLimits.DEFAULTS, null, manifests);
             deployment.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
 
-            var receipt = deployment.ingress().offerDurably(IDENTITY, IngressTarget.start(), "payload",
+            var receipt = deployment.ingress().offerDurably(IDENTITY, IngressTarget.node("start"), "payload",
                     "poller-1", "key-A");
             assertInstanceOf(IngressReceipt.DurablyCommitted.class, receipt);
 
@@ -244,7 +244,7 @@ class DeploymentHostedGraphDefinitionBindingTest {
             deployment.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
 
             assertInstanceOf(IngressReceipt.DurablyCommitted.class,
-                    deployment.ingress().offerDurably(IDENTITY, IngressTarget.start(), "payload",
+                    deployment.ingress().offerDurably(IDENTITY, IngressTarget.node("start"), "payload",
                             "poller-1", "key-A"));
 
             assertEquals(Boolean.FALSE, pinExistedWhenTheDocumentWasWritten.get(),
@@ -272,7 +272,7 @@ class DeploymentHostedGraphDefinitionBindingTest {
                     fixedIdentities(processInstanceId));
             deployment.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
 
-            var receipt = deployment.ingress().offerDurably(IDENTITY, IngressTarget.start(), "payload",
+            var receipt = deployment.ingress().offerDurably(IDENTITY, IngressTarget.node("start"), "payload",
                     "poller-1", "key-A");
             assertInstanceOf(IngressReceipt.Ambiguous.class, receipt,
                     "the inbox may already be durable, so a later prerequisite refusal must require "
@@ -302,7 +302,7 @@ class DeploymentHostedGraphDefinitionBindingTest {
             deployment.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
 
             long started = System.nanoTime();
-            var receipt = deployment.ingress().offerDurably(IDENTITY, IngressTarget.start(), "payload",
+            var receipt = deployment.ingress().offerDurably(IDENTITY, IngressTarget.node("start"), "payload",
                     "poller-1", "key-A");
             long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
 
@@ -330,13 +330,13 @@ class DeploymentHostedGraphDefinitionBindingTest {
             deployment.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
 
             CompletableFuture<IngressReceipt> first = CompletableFuture.supplyAsync(() ->
-                    deployment.ingress().offerDurably(IDENTITY, IngressTarget.start(), "payload",
+                    deployment.ingress().offerDurably(IDENTITY, IngressTarget.node("start"), "payload",
                             "poller-1", "key-A"));
             assertTrue(definitions.entered.await(10, TimeUnit.SECONDS),
                     "the first offer must own the event while its definition write is unresolved");
 
             IngressReceipt concurrent = deployment.ingress().offerDurably(IDENTITY,
-                    IngressTarget.start(), "payload", "poller-1", "key-A");
+                    IngressTarget.node("start"), "payload", "poller-1", "key-A");
             assertInstanceOf(IngressReceipt.Ambiguous.class, concurrent,
                     "a second same-key offer must not install or remove the owner's admission ticket");
             assertFalse(concurrent.acknowledgeable());
@@ -362,7 +362,7 @@ class DeploymentHostedGraphDefinitionBindingTest {
         var effects = new AtomicInteger();
         var terminal = new CountDownLatch(1);
         var monitor = new ExecutionMonitor();
-        var behaviors = new BehaviorRegistry().register("record-effect", message -> {
+        var behaviors = ManualSourceFixture.register(new BehaviorRegistry()).register("record-effect", message -> {
             effects.incrementAndGet();
             return CompletableFuture.completedFuture(NodeResult.continueWith(message.payload()));
         });
@@ -379,7 +379,7 @@ class DeploymentHostedGraphDefinitionBindingTest {
                  }
              })) {
             var executions = new DelayedNodeStartedStore(realExecutions);
-            byte[] graph = ONE_EFFECT_GRAPH.getBytes(StandardCharsets.UTF_8);
+            byte[] graph = ManualSourceFixture.graph(ONE_EFFECT_GRAPH).getBytes(StandardCharsets.UTF_8);
             var deployment = new DefaultGraphDeployment(deploymentId, engine, behaviors, monitor,
                     fixedIdentities(processInstanceId), graph,
                     DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY, executions.store(),
@@ -391,7 +391,7 @@ class DeploymentHostedGraphDefinitionBindingTest {
             deployment.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
 
             long started = System.nanoTime();
-            IngressReceipt receipt = deployment.ingress().offerDurably(IDENTITY, IngressTarget.start(),
+            IngressReceipt receipt = deployment.ingress().offerDurably(IDENTITY, IngressTarget.node("start"),
                     "payload", "poller-1", "key-A");
             long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
 
@@ -416,7 +416,7 @@ class DeploymentHostedGraphDefinitionBindingTest {
                     GraphRunner.DEFAULT_SHUTDOWN_BOUND, Duration.ofMillis(300));
             redelivery.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
             assertInstanceOf(IngressReceipt.Duplicate.class,
-                    redelivery.ingress().offerDurably(IDENTITY, IngressTarget.start(), "payload",
+                    redelivery.ingress().offerDurably(IDENTITY, IngressTarget.node("start"), "payload",
                             "poller-1", "key-A"));
             redelivery.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
 
@@ -443,11 +443,11 @@ class DeploymentHostedGraphDefinitionBindingTest {
             var handoff = new QueuedExecutor();
             var deployment = boundedDeployment(deploymentId, engine, executions, definitions, null,
                     fixedIdentities(processInstanceId), Duration.ofSeconds(2),
-                    BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults()), handoff);
+                    ManualSourceFixture.register(BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults())), handoff);
             deployment.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
 
             assertInstanceOf(IngressReceipt.DurablyCommitted.class,
-                    deployment.ingress().offerDurably(IDENTITY, IngressTarget.start(), "payload",
+                    deployment.ingress().offerDurably(IDENTITY, IngressTarget.node("start"), "payload",
                             "poller-1", "key-A"));
             assertTrue(handoff.submitted.await(10, TimeUnit.SECONDS));
 
@@ -476,34 +476,36 @@ class DeploymentHostedGraphDefinitionBindingTest {
                      database, clock(), ai.ravenroot.api.persistence.ExecutionManifestReferences.NONE)) {
             var definitions = new DelayedDefinitionStore(realDefinitions);
             var manifests = new DelayedManifestStore(realManifests, DelayOperation.PIN);
-            BehaviorRegistry behaviors = BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults());
+            BehaviorRegistry behaviors = ManualSourceFixture.register(BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults()));
             var service = manifestService(engine, executions, behaviors, manifests);
             var deployment = boundedDeployment(deploymentId, engine, executions, definitions, service,
                     fixedIdentities(processInstanceId), Duration.ofMillis(120), behaviors);
             deployment.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
+            int residentSources = engine.spawnCount();
+            assertEquals(1, residentSources, "activation owns one passive SOURCE actor and dispatches no traversal");
 
             var first = assertInstanceOf(IngressReceipt.Ambiguous.class,
                     deployment.ingress().offerDurably(
-                            IDENTITY, IngressTarget.start(), "payload", "poller-1", "key-A"));
+                            IDENTITY, IngressTarget.node("start"), "payload", "poller-1", "key-A"));
             assertFalse(first.acknowledgeable(), () -> "ambiguous definition result: " + first.reason());
-            assertEquals(1, executions.inboxRecordCount(IDENTITY.tenantId())
+            assertEquals(0, executions.inboxRecordCount(IDENTITY.tenantId())
                     .toCompletableFuture().get(10, TimeUnit.SECONDS),
-                    "the first ambiguous attempt must already have committed the inbox record");
+                    "a SOURCE receipt cannot record delivery before its durable graph/input prerequisites resolve");
             assertFalse(instanceExists(executions, IDENTITY.tenantId(), processInstanceId),
                     "an execution cannot exist before the definition becomes visible");
-            assertEquals(0, engine.spawnCount(),
+            assertEquals(residentSources, engine.spawnCount(),
                     "the unresolved definition must prevent traversal dispatch");
             definitions.release();
             var second = assertInstanceOf(IngressReceipt.Ambiguous.class,
                     deployment.ingress().offerDurably(
-                            IDENTITY, IngressTarget.start(), "payload", "poller-1", "key-A"));
+                            IDENTITY, IngressTarget.node("start"), "payload", "poller-1", "key-A"));
             assertFalse(second.acknowledgeable(), () -> "ambiguous manifest result: " + second.reason());
-            assertEquals(1, executions.inboxRecordCount(IDENTITY.tenantId())
+            assertEquals(0, executions.inboxRecordCount(IDENTITY.tenantId())
                     .toCompletableFuture().get(10, TimeUnit.SECONDS),
-                    "redelivery must reuse the first attempt's durable inbox record");
+                    "an unresolved manifest still cannot transfer SOURCE input custody or acknowledge delivery");
             assertFalse(instanceExists(executions, IDENTITY.tenantId(), processInstanceId),
                     "an execution cannot exist before the manifest becomes visible");
-            assertEquals(0, engine.spawnCount(),
+            assertEquals(residentSources, engine.spawnCount(),
                     "the unresolved manifest must prevent traversal dispatch");
             manifests.release();
             deployment.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
@@ -514,11 +516,13 @@ class DeploymentHostedGraphDefinitionBindingTest {
                     repairedService, fixedIdentities(processInstanceId),
                     DefaultGraphDeployment.DEFAULT_STORE_CALL_BOUND, behaviors, handoff);
             repairedDeployment.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
+            int repairedResidents = engine.spawnCount();
+            assertEquals(residentSources + 1, repairedResidents, "reactivation owns one replacement SOURCE actor");
 
             var repaired = repairedDeployment.ingress().offerDurably(
-                    IDENTITY, IngressTarget.start(), "payload", "poller-1", "key-A");
-            assertInstanceOf(IngressReceipt.Duplicate.class, repaired,
-                    () -> "the inbox and prerequisites committed before the single repaired redelivery; "
+                    IDENTITY, IngressTarget.node("start"), "payload", "poller-1", "key-A");
+            assertInstanceOf(IngressReceipt.DurablyCommitted.class, repaired,
+                    () -> "the prerequisites committed before the single repaired redelivery takes original custody; "
                             + "actual receipt: " + repaired
                             + (repaired instanceof IngressReceipt.Ambiguous ambiguous
                                     ? "; ambiguous reason: " + ambiguous.reason() : ""));
@@ -531,18 +535,20 @@ class DeploymentHostedGraphDefinitionBindingTest {
                     "the repaired delivery must submit its one durable traversal handoff");
             assertEquals(1, handoff.submissionCount(),
                     "the single repaired delivery must submit exactly one durable traversal handoff");
-            assertEquals(0, engine.spawnCount(),
+            assertEquals(repairedResidents, engine.spawnCount(),
                     "the deterministic executor must hold the intended traversal until its explicit boundary");
             handoff.runSubmitted();
             awaitExecutionStarted(executions, IDENTITY.tenantId(), 1,
                     "the repaired delivery must record exactly one execution start");
-            awaitSpawnCount(engine, 2,
-                    "the repaired delivery must run the start and end nodes exactly once");
+            awaitSpawnCount(engine, repairedResidents + 1,
+                    "the repaired delivery must emit its SOURCE in the runtime and run END exactly once");
             repairedDeployment.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            // The committed source receipt survives redelivery without a second handoff.
+            assertEquals(1, executions.inboxRecordCount(IDENTITY.tenantId()).toCompletableFuture().join());
             assertEquals(1, executionStartedCount(executions, IDENTITY.tenantId()),
                     "orderly stop must leave exactly one execution start");
-            assertEquals(2, engine.spawnCount(),
-                    "orderly stop must leave exactly one completed start-to-end traversal");
+            assertEquals(repairedResidents + 1, engine.spawnCount(),
+                    "orderly stop must leave exactly one completed SOURCE-to-END traversal");
             assertEquals(1, handoff.submissionCount(),
                     "the repaired delivery must not submit an additional traversal handoff");
             assertFalse(handoff.hasPendingCommand(),
@@ -586,7 +592,7 @@ class DeploymentHostedGraphDefinitionBindingTest {
                     fixedIdentities(processInstanceId), Duration.ofMillis(120));
             deployment.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
 
-            IngressReceipt first = deployment.ingress().offerDurably(IDENTITY, IngressTarget.start(),
+            IngressReceipt first = deployment.ingress().offerDurably(IDENTITY, IngressTarget.node("start"),
                     "payload", "poller-1", "key-A");
             assertInstanceOf(IngressReceipt.Ambiguous.class, first,
                     "a timed-out create may have committed and cannot license acknowledgement");
@@ -600,7 +606,7 @@ class DeploymentHostedGraphDefinitionBindingTest {
             });
 
             assertInstanceOf(IngressReceipt.Duplicate.class, deployment.ingress().offerDurably(
-                    IDENTITY, IngressTarget.start(), "payload", "poller-1", "key-A"),
+                    IDENTITY, IngressTarget.node("start"), "payload", "poller-1", "key-A"),
                     "redelivery must adopt the late committed identity rather than create another execution");
             var page = realExecutions.listProcessInstances(IDENTITY.tenantId(),
                             ai.ravenroot.api.persistence.ProcessInventoryQuery.everything(10))
@@ -622,14 +628,14 @@ class DeploymentHostedGraphDefinitionBindingTest {
              var realManifests = new ai.ravenroot.persistence.sqlite.SqliteExecutionManifestStore(
                      database, clock(), ai.ravenroot.api.persistence.ExecutionManifestReferences.NONE)) {
             var manifests = new DelayedManifestStore(realManifests, DelayOperation.LOAD);
-            BehaviorRegistry behaviors = BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults());
+            BehaviorRegistry behaviors = ManualSourceFixture.register(BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults()));
             var service = manifestService(engine, executions, behaviors, manifests);
             var deployment = boundedDeployment(deploymentId, engine, executions, definitions, service,
                     fixedIdentities(processInstanceId), Duration.ofSeconds(2), behaviors);
             deployment.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
 
             CompletableFuture<IngressReceipt> offering = CompletableFuture.supplyAsync(() ->
-                    deployment.ingress().offerDurably(IDENTITY, IngressTarget.start(), "payload",
+                    deployment.ingress().offerDurably(IDENTITY, IngressTarget.node("start"), "payload",
                             "poller-1", "key-A"));
             assertTrue(manifests.entered.await(10, TimeUnit.SECONDS), "policy load must reach the delayed store");
             deployment.barrier(2).toCompletableFuture().get(500, TimeUnit.MILLISECONDS);
@@ -641,7 +647,7 @@ class DeploymentHostedGraphDefinitionBindingTest {
 
             deployment.openAdmission(3).toCompletableFuture().get(10, TimeUnit.SECONDS);
             assertInstanceOf(IngressReceipt.Duplicate.class, deployment.ingress().offerDurably(
-                    IDENTITY, IngressTarget.start(), "payload", "poller-1", "key-A"));
+                    IDENTITY, IngressTarget.node("start"), "payload", "poller-1", "key-A"));
             deployment.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
         }
     }
@@ -657,12 +663,12 @@ class DeploymentHostedGraphDefinitionBindingTest {
             // The composition the shipped server actually uses for a registered deployment: a
             // definition store is threaded through, no execution store is.
             var deployment = new DefaultGraphDeployment(DeploymentId.of("volatile-" + UUID.randomUUID()),
-                    engine, BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults()),
+                    engine, ManualSourceFixture.register(BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults())),
                     new ExecutionMonitor(), ExecutionIdentitySource.randomUuids(), graphBytes(),
                     DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY, definitions);
             deployment.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
 
-            var receipt = deployment.ingress().offerDurably(IDENTITY, IngressTarget.start(), "payload",
+            var receipt = deployment.ingress().offerDurably(IDENTITY, IngressTarget.node("start"), "payload",
                     "poller-1", "key-A");
             assertInstanceOf(IngressReceipt.VolatileCustody.class, receipt,
                     "nothing durable is claimed for this composition, and this test exists so that "
@@ -723,7 +729,7 @@ class DeploymentHostedGraphDefinitionBindingTest {
                                               GraphDefinitionStore definitions,
                                               ExecutionIdentitySource identities) {
         return new DefaultGraphDeployment(deploymentId, engine,
-                BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults()), new ExecutionMonitor(),
+                ManualSourceFixture.register(BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults())), new ExecutionMonitor(),
                 identities, graphBytes(), DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY,
                 executions, DefaultGraphDeployment.DEFAULT_INBOX_RETENTION,
                 "worker-" + UUID.randomUUID(), Duration.ofSeconds(30),
@@ -745,7 +751,7 @@ class DeploymentHostedGraphDefinitionBindingTest {
             ai.ravenroot.core.manifest.ExecutionManifestService manifests,
             ExecutionIdentitySource identities, Duration bound) {
         return boundedDeployment(deploymentId, engine, executions, definitions, manifests, identities, bound,
-                BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults()));
+                ManualSourceFixture.register(BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults())));
     }
 
     private DefaultGraphDeployment boundedDeployment(DeploymentId deploymentId, JoinTestEngine engine,
@@ -777,7 +783,7 @@ class DeploymentHostedGraphDefinitionBindingTest {
 
     private static UUID durableProcessId(DeploymentId deploymentId) {
         return UUID.nameUUIDFromBytes((IDENTITY.tenantId() + '\0' + deploymentId.value()
-                + "/poller-1" + '\0' + "key-A").getBytes(StandardCharsets.UTF_8));
+                + "/source/c3RhcnQ/poller-1" + '\0' + "key-A").getBytes(StandardCharsets.UTF_8));
     }
 
     private static ExecutionIdentitySource fixedIdentities(UUID processInstanceId) {
@@ -791,7 +797,7 @@ class DeploymentHostedGraphDefinitionBindingTest {
     }
 
     private static byte[] graphBytes() {
-        return GRAPH.getBytes(StandardCharsets.UTF_8);
+        return ManualSourceFixture.graph(GRAPH).getBytes(StandardCharsets.UTF_8);
     }
 
     /** Delegates everything, and runs a probe at the moment the document is written. */

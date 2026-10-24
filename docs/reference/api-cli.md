@@ -48,6 +48,194 @@ source package declared them at registration; unknown or undeclared failures use
 and an incident handle. Property values, adapter exception messages, profiles, hosts, and stacks are
 never part of this response. `diagnostic` remains for older consumers and stays a fixed bounded text.
 
+## Correlation sample preview
+
+`POST /v1/correlation/preview` evaluates explicit mapping controls against caller-supplied sample
+input under catalog-read authority. It uses the same bounded JSON Pointer extraction as ingress and
+creates no history or execution. A successful `REQUIRE_EXISTING` preview still requires actual
+admission to find an open history in the authorized deployment/version scope.
+
+```json
+{
+  "properties": {
+    "correlation.mode": "ACCEPT_OR_CREATE",
+    "correlation.selector": "/metadata/ingestionId",
+    "correlation.contributionSelector": "/partition"
+  },
+  "sample": {
+    "metadata": {"ingestionId": "ingestion-42"},
+    "partition": "part-3"
+  }
+}
+```
+
+Save that request as `sample.json` and run `ravenroot correlation-preview sample.json`, either
+against an embedded application or with the CLI's normal remote-server option. The ordinary SDK
+exposes the same operation as `authorizedApplication.previewCorrelation(context, properties, sample)`.
+The result includes `valid`, `applicationContext`, `generatedIdentity`, `requiresExistingHistory`,
+`selector` and `reason`. A generated UUID is an illustrative preview placeholder. Invalid IDs,
+missing fields, type mismatches, conflicting mappings and configured bounds produce a fixed failure
+category without echoing the rejected sample value. The selector addresses the actual supplied
+structure; it does not infer connector envelopes, interpret text or evaluate expressions.
+
+## Initial START and retained deployment history
+
+Activating a deployment starts its eligible SOURCE listeners. It does not dispatch START. An
+explicit `POST /v1/deployments/{id}/initial-start` admits the deployment's original START once,
+using a JSON body with `incarnationId`, `graphVersion`, `requestId`, and `input`. The permanent
+admission marker belongs to the tenant and logical deployment. A different request ID, a restart,
+another replica, or expiry of transport deduplication cannot replace its original input or create
+another initial START. An explicitly new logical deployment has its own admission.
+
+The response always contains `outcome`, `requestId`, `processInstanceId`, and `traversalId`.
+`ACCEPTED` returns HTTP 202; `DUPLICATE` returns 200 and the same original identities. `REFUSED`
+returns 409, and `RECONCILE` returns 503 when admission cannot yet be established. Identifiers may
+be null for refused or unresolved requests. Durable initial START requires a durable execution
+store with initial-admission support.
+
+`GET /v1/deployments/{id}/initial-start?incarnationId=...&graphVersion=...&requestId=...`
+observes the permanent marker under deployment observation authority. It never admits work or
+returns retained input. A retained marker returns `DUPLICATE` and its original identities; an absent
+marker or stale binding returns `REFUSED`. Reads carry `Cache-Control: private, no-store`.
+
+Durable deployment status includes an opaque `registrationIdentity`, retained independently of the
+runtime `incarnationId`. After a server restart, the process-local hosted projection may be absent
+while the durable registration remains. On a later explicit Run the editor uses
+`POST /v1/deployments/{id}/restore` with only `registrationIdentity` and `graphVersion`. This operation
+requires both registration and lifecycle authority. It resolves the existing retained tenant alias,
+refuses tombstones and mismatched identities or versions, checks bounded canonical graph bytes and
+their digest in durable custody, and reapplies current credential admission before rehosting. It
+creates no registry aggregate or initial START. Existing fenced lifecycle reconciliation governs
+listener activation; repeated restore does not duplicate listeners. A failed activation remains a
+truthful failed status and rolls back its listeners. Hosts without durable restore support refuse.
+The ordinary SDK exposes `restoreLocalDeployment`; embedded and remote CLI backends expose
+`deployments restore`. Read-only embed sessions have no restore authority: their host must restore
+the deployment and establish a current authorized embed binding.
+
+The editor saves the originating document's deployment, exact version,
+activation request, initial request and bounded input before its first network effect. Reload only
+restores this association. A later explicit Run may rebind a changed runtime incarnation only after
+matching tenant, logical deployment, pinned version and durable registration identity. Saved process
+and traversal identities must match the read-only permanent marker. When no admission identities
+were received, the original request and input may complete initial admission; the same permanent
+marker returns the original traversal if the earlier response was lost. Process-local registrations
+provide no durable rebind proof. Retained durable aliases and tombstones prevent logical deployment
+reuse after command-ledger expiry; deleting and recreating authority cannot silently inherit a saved
+association. A fresh identical file creates an independent deployment only through an explicit Run.
+The document header shows its deployment and pinned version separately from later draft edits.
+
+`GET /v1/deployments/{id}/history` reads one page under ordinary execution-read authorization.
+Supply the current immutable `graphVersion` query parameter and the captured
+`X-Ravenroot-Deployment-Incarnation` header. Every response carries that exact `source` tuple.
+The deployment binding is checked before and after each read. A stale incarnation is a conflict;
+a foreign or absent selection is a nondisclosing 404. Historical traversals from an earlier
+incarnation remain readable through the current binding when their logical deployment and exact
+version match.
+
+| `view` | Required selection | Optional filter |
+|---|---|---|
+| `policy` | Current deployment binding | None; one policy record, no cursor |
+| `histories` (default) | Current deployment binding | Exact `applicationCorrelationId`, `publicReference`, or `lifecycle` |
+| `traversals` | `applicationCorrelationId` | None |
+| `uncorrelated-traversals` | Current deployment binding | None; legacy records retain no invented business ID |
+| `process-traversals` | `processInstanceId` | None |
+| `nodes` | `processInstanceId`, `traversalId` | Scalar per-node visit and attempt counts |
+| `edges` | `processInstanceId`, `traversalId` | Scalar counts of actual `EDGE_TRAVERSED` IDs |
+| `visits` | `processInstanceId`, `traversalId` | Exact `nodeId` |
+| `attempts` | Process, traversal, and `invocationId` | None |
+| `parents` | Process, traversal, and `invocationId` | None |
+| `joins` | `applicationCorrelationId` | None |
+| `join-members` | Application ID, `nodeId`, `roundId` | `memberState`: `ALL`, `EXPECTED`, `RECEIVED`, or `MISSING` |
+| `activity` | Process and traversal | Exact `invocationId` and `attemptId`; an attempt requires its invocation |
+
+Paged views accept `limit` and an opaque `cursor`. The `policy` view accepts `limit=1` and publishes
+`maxPageSize`, `readTimeoutMillis`, and `maxResponseBytes`; it has no continuation. Keep the source, selection, filters, and page size
+unchanged while following `nextCursor`; cursors grant no authority and cannot cross a tenant,
+incarnation, or selection. Store queries apply the limit before serializing metadata. A process can
+contain several real traversal IDs, and a visit can have several retry attempts. Visit position is
+creation order, not a claim that parallel work happened sequentially. Causal parents carry their
+actual traversal IDs.
+
+Node and edge summaries are separate bounded metadata queries. Node totals distinguish active,
+completed, and failed visits from retry attempts. Edge totals count recorded traversal events by the
+stable authored edge ID. An empty `AVAILABLE` edge page proves zero recorded edges for that traversal;
+`NOT_RECORDED` means the traversal predates scalar edge coverage and must not be displayed as zero.
+These counters survive ordinary journal expiry. Queries never load contribution payloads or the
+whole process aggregate to build a page.
+
+Native Monitoring and the v2 embedded viewer share paged business-history and actual-traversal
+controls. They mount at most two requested graph previews, using the immutable deployed projection
+rather than a later editor draft. A node opens a persistent visits inspector; selecting a visit shows
+its attempts and causal parents. Captured content requires a separate action and reports its capture
+and retention availability. The graph preserves authored positions, loops, and parallel edges.
+Record details expose the allowlisted application context, requested closure, audit reason, and
+original derivation process/traversal/visit/attempt identities without loading captured content.
+A pending close request remains visible while admitted work settles; its requested result does
+not override the recorded running or failed work.
+
+Native Monitoring opens a responsive read-only surface with its own return control and a visible
+draft-divergence notice. Editing the draft does not change a pinned preview. A failed initial view
+or policy read offers an explicit retry against the same deployment; this read does not activate
+the deployment or admit START.
+
+Coverage loads one node page and one edge page when a preview opens. If more rows exist, omitted
+activity remains explicitly unknown. Use **Load more node coverage** or **Load more edge coverage**
+to extend it; the viewer does not drain pages automatically. **Refresh coverage** replaces the loaded
+coverage with the current first pages while preserving the selected inspector. Business selection,
+document replacement, workspace authority changes, and preview close retire pending reads; a late
+response cannot repaint an old selection. The operator page cap also applies when it is one record.
+
+Join summaries expose `COUNT`, `MANIFEST`, `UNANNOUNCED`, or legacy `UNKNOWN` expectation form.
+An unannounced expectation is not zero work. Manifest counts are provisional until the trusted
+producer seals them. `join-members` pages distinct expected, received or missing identities and the
+first accepted process, traversal, visit, attempt and time. Duplicate deliveries retain these first
+causal coordinates. Membership metadata remains readable after contribution data expires; captured
+content is still unavailable according to its own retention policy.
+
+A complete, sealed join records a durable `READY` continuation intent with its own stable process
+and traversal identities. Recovery reconciles that intent after a lost response or restart; retrying
+does not create a new round. Only explicitly authored producer entries may announce or seal a
+dynamic expectation. Results received before that announcement remain subject to the configured
+contribution and byte limits. The combined continuation must also fit the graph execution payload
+limits; a permanent refusal records `FAILED` before admitting a continuation process. Cancellation
+and collection expiry prevent release. Draining currently admitted traversals does not imply that an
+open business history or incomplete join has completed.
+
+Durable event replay resolves only invocation bindings selected by its page, with at most 1000
+events per SDK request. It retains the established `applicationCorrelationId`, contribution and round
+fields independently from the transport request ID, process ID and traversal ID. Safe recorded
+outcomes are available without copying captured input or contribution data into event metadata.
+Legacy uncorrelated rows keep null business fields.
+
+Visit timing and safe outcome fields can be null after event retention or for older records.
+`eventHistoryAvailable=false` states that absence explicitly. Captured inputs and outputs are read
+only through `activity`, using the existing activity capture, redaction, size and retention policy.
+`CAPTURE_DISABLED`, `NOT_RETAINED`, and `EXPIRED` distinguish unavailable capture from available
+content; an empty retained page never proves that a node received an empty payload. Metadata reads
+never load a whole execution or retained join payloads.
+
+The ordinary SDK exposes these reads through
+`authorizedApplication.deploymentHistory(context, source)`, returning a read-only
+`DeploymentHistoryReader`. Its `policy()` publishes operator-owned limits. The embedded viewer uses
+`POST /v1/embed/history` with the existing v2 deployment-read capability, session currency,
+origin checks, and one-use proof bound to that path. Its `query` is a JSON object encoded as text;
+the deployment and tenant come from the authorized session. A read-only grant cannot dispatch START.
+
+The CLI provides the same ordinary application and HTTP operations:
+
+```text
+ravenroot deployments restore orders --registration-identity SAVED_REGISTRY_ID --graph-version PINNED_VERSION
+ravenroot deployments observe-initial orders --incarnation CAPTURED_ID --graph-version PINNED_VERSION --request-id observe-1
+ravenroot deployments run-initial orders --incarnation CAPTURED_ID --graph-version PINNED_VERSION --request-id run-1 --input-file input.json
+ravenroot deployments history orders --incarnation CAPTURED_ID --graph-version PINNED_VERSION --view histories --limit 50
+ravenroot deployments history orders --incarnation CAPTURED_ID --graph-version PINNED_VERSION --view visits --process-instance-id PROCESS_ID --traversal-id TRAVERSAL_ID --limit 50
+```
+
+Both embedded and remote CLI transports print the shared JSON page, including `nextCursor`.
+Use `--application-correlation-id`, `--public-reference`, `--node-id`, `--invocation-id`, and
+`--attempt-id`, `--round-id`, and `--member-state` for the corresponding view fields. Read deadlines, page ceilings and response budgets
+are described in [configuration](configuration.md#business-history-and-correlated-join-limits).
+
 ## Execution and events
 
 | Method and path | Result |

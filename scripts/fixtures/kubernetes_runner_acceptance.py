@@ -104,6 +104,74 @@ def verify_reports():
             raise RuntimeError("native Kubernetes acceptance did not execute completely without skips")
 
 
+NATIVE_CASES = {
+    "ai.ravenroot.core.runner.KubernetesPodRunnerNativeTest": ("materializesAttestedPodAndPvcWithFencedRestartAndCleanup(Path)",),
+    "ai.ravenroot.core.runtime.KubernetesWorkspaceGraphNativeTest": (
+        "literalThreeAgentGraph(Path)", "retainedPodDevelopmentAndRemediationLoop(Path)",
+        "invocationPodsKeepTheSameUncommittedFilesystem(Path)",
+        "ephemeralInvocationsHaveFreshPodAndVolumeWithoutSentinelLeakage(Path)"),
+}
+REPORT_DIRECTORY = ROOT / "ravenroot/ravenroot-core/target/native-kubernetes-reports"
+
+
+def retain_reports(source=None, destination=None):
+    """Project fixed native reports into closed data; raw XML contains host/auth properties."""
+    source = source or ROOT / "ravenroot/ravenroot-core/target/surefire-reports"
+    destination = destination or REPORT_DIRECTORY
+    destination.mkdir(parents=True, exist_ok=True)
+    for name, count in CLASSES.items():
+        report = {"schemaVersion": 1, "suite": name, "available": False, "unavailable": "MISSING"}
+        try:
+            with (source / ("TEST-" + name + ".xml")).open("rb") as stream:
+                raw = stream.read(4_194_305)
+            if len(raw) > 4_194_304:
+                report["unavailable"] = "OVERSIZED"
+            else:
+                text_xml = raw.decode("utf-8")
+                if "\0" in text_xml or "<!DOCTYPE" in text_xml or "<!ENTITY" in text_xml:
+                    raise ValueError("unsafe report encoding or declaration")
+                suite = ET.fromstring(text_xml)
+                fields = ("tests", "failures", "errors", "skipped")
+                values = {field: suite.get(field, "") for field in fields}
+                cases = suite.findall("testcase")
+                if (suite.tag != "testsuite" or suite.get("name") != name
+                        or any(not re.fullmatch(r"[0-5]", value) for value in values.values())
+                        or values["tests"] != str(count) or len(cases) != count
+                        or len({case.get("name") for case in cases}) != len(cases)
+                        or sum(int(values[field]) for field in ("failures", "errors", "skipped")) > count
+                        or any(case.get("name") not in NATIVE_CASES[name] or case.get("classname") != name for case in cases)
+                        or any(sum(len(case.findall(tag)) for tag in ("error", "failure", "skipped")) > 1 for case in cases)
+                        or any(sum(case.find(tag) is not None for case in cases) != int(values[field])
+                               for tag, field in (("error", "errors"), ("failure", "failures"), ("skipped", "skipped")))):
+                    report["unavailable"] = "UNEXPECTED_SUITE"
+                else:
+                    report = {"schemaVersion": 1, "suite": name, "available": True,
+                              "counts": {key: int(value) for key, value in values.items()}, "cases": []}
+                    for case in cases:
+                        failures = case.findall("error") + case.findall("failure")
+                        item = {"case": case.get("name"), "status": "ERROR" if case.find("error") is not None else
+                                "FAILURE" if case.find("failure") is not None else
+                                "SKIPPED" if case.find("skipped") is not None else "PASSED"}
+                        # Search only for closed diagnostic grammar. Never forward a message,
+                        # stack, property, dynamic identifier, path, stdout or stderr.
+                        text = "\n".join((failure.get("message", "") + "\n" + (failure.text or "")) for failure in failures)
+                        context = re.findall(r"Native Kubernetes case scope=(PROCESS_INSTANCE|EPHEMERAL) lifecycle=(PER_WORKSPACE|PER_INVOCATION) index=(10|[0-9]) command=(OPEN|PLAN|READ|RESUME|IMPLEMENT|TEST|REMEDIATE|REVIEW|HANDOFF|CLOSE); effect remains unconfirmed", text)
+                        if len(set(context)) == 1:
+                            scope, lifecycle, index, command_kind = context[0]
+                            item["context"] = {"scope": scope, "lifecycle": lifecycle, "index": int(index), "command": command_kind}
+                        diagnostics = re.findall(r"Kubernetes operation (QUOTA|ADMISSION|AUTHORIZATION|CONFLICT|UNAVAILABLE) \(client exit (-1|[0-9]{1,3})\); effect remains unconfirmed; command=(OTHER|ATTEST|NETWORK_CONTROL) diagnostic=(UNKNOWN|ATTESTER_MARKER|CLIENT_DEADLINE) phase=(UNKNOWN|NETWORK|IDENTITY|PRIVILEGES|CREDENTIAL|ROOT|LANDLOCK|CEILINGS|STORAGE|PROCESS|CGROUP|WORKSPACE|CONTROL) reason=(UNKNOWN|REFUSED|OS_ERROR|INVALID_VALUE|PROCESS_EXIT|PROCESS_TIMEOUT|CPU_THROTTLING_MISSING|SEED_UNCERTAIN|SEED_IDENTITY_CHANGED)(?=$|[\s)])", text)
+                        if len(set(diagnostics)) == 1:
+                            kind, exit_code, command_kind, origin, phase, reason = diagnostics[0]
+                            item["diagnostic"] = {"category": kind, "exit": int(exit_code), "command": command_kind,
+                                                  "origin": origin, "phase": phase, "reason": reason}
+                        report["cases"].append(item)
+        except FileNotFoundError:
+            pass
+        except (OSError, ET.ParseError, ValueError):
+            report["unavailable"] = "MALFORMED"
+        (destination / (name.rsplit(".", 1)[1] + ".json")).write_text(json.dumps(report, sort_keys=True) + "\n")
+
+
 def run():
     for tool in ("docker", "minikube", "kubectl", "helm", "mvn"):
         if not shutil.which(tool):
@@ -165,26 +233,18 @@ def run():
             with endpoint_module.ModelProtocolEndpoint() as endpoint:
                 configuration = directory / "model.json"
                 configuration.write_text(json.dumps(endpoint.configuration()))
-                result = subprocess.run(["mvn", "-B", "--no-transfer-progress", "-f", str(ROOT / "ravenroot/pom.xml"),
-                    "-pl", "ravenroot-core", "-am", "-Dtest=" + ",".join(name.rsplit(".", 1)[1] for name in CLASSES),
-                    "-Dsurefire.failIfNoSpecifiedTests=false", "-Dravenroot.kubernetes.kubeconfig=" + str(credential),
-                    "-Dravenroot.kubernetes.kubectl=" + shutil.which("kubectl"), "-Dravenroot.kubernetes.image=" + image,
-                    "-Dravenroot.kubernetes.networkControlHost=" + control,
-                    "-Dravenroot.kubernetes.modelConfiguration=" + str(configuration), "test"], cwd=ROOT, timeout=900)
+                try:
+                    result = subprocess.run(["mvn", "-B", "--no-transfer-progress", "-f", str(ROOT / "ravenroot/pom.xml"),
+                        "-pl", "ravenroot-core", "-am", "-Dtest=" + ",".join(name.rsplit(".", 1)[1] for name in CLASSES),
+                        "-Dsurefire.failIfNoSpecifiedTests=false", "-Dravenroot.kubernetes.kubeconfig=" + str(credential),
+                        "-Dravenroot.kubernetes.kubectl=" + shutil.which("kubectl"), "-Dravenroot.kubernetes.image=" + image,
+                        "-Dravenroot.kubernetes.networkControlHost=" + control,
+                        "-Dravenroot.kubernetes.modelConfiguration=" + str(configuration), "test"], cwd=ROOT, timeout=900)
+                finally:
+                    # Original finite evidence only, including absent/truncated Maven reports.
+                    # Never rerun an attester with another identity to diagnose a failure.
+                    retain_reports()
                 if result.returncode:
-                    # These are our secretless fixture Pods, before the profile is destroyed. Only
-                    # the immutable attester is executable; never dump assignments, env or tokens.
-                    inventory = json.loads(command(kubectl + ["get", "pods", "-n", NAMESPACE, "-o", "json"]))
-                    for pod in inventory["items"][:16]:
-                        print("Owned Pod diagnostic: " + json.dumps({"name": pod["metadata"]["name"],
-                            "phase": pod.get("status", {}).get("phase"), "reason": pod.get("status", {}).get("reason"),
-                            "containers": [{"state": c.get("state")} for c in pod.get("status", {}).get("containerStatuses", [])]}), flush=True)
-                        if pod.get("status", {}).get("phase") == "Running":
-                            diagnostic = subprocess.run(kubectl + ["exec", "-n", NAMESPACE, pod["metadata"]["name"], "-c", "agent", "--",
-                                "python3", "/opt/kubernetes_attestation.py"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=45)
-                            print("Immutable attester diagnostic: " + str(diagnostic.returncode) + " "
-                                  + diagnostic.stdout[-4096:].decode(errors="replace") + " "
-                                  + diagnostic.stderr[-4096:].decode(errors="replace"), flush=True)
                     raise RuntimeError("native Kubernetes production acceptance failed")
                 verify_reports()
                 if endpoint.requests < 40:

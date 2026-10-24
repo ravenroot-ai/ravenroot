@@ -49,6 +49,7 @@ public final class EmbedBrowserHttpHandler {
     public static final String EXCHANGE_PATH = "/v1/embed/exchange";
     public static final String PROJECTION_PATH = "/v1/embed/projection";
     public static final String OBSERVATION_PATH = "/v1/embed/observation";
+    public static final String HISTORY_PATH = "/v1/embed/history";
     public static final String RUNS_PATH = "/v1/embed/runs";
     public static final String START_EXECUTION_PATH = "/v1/embed/executions";
     public static final String BOOTSTRAP_SCRIPT_PATH = "/embed-bootstrap.js";
@@ -735,6 +736,42 @@ public final class EmbedBrowserHttpHandler {
         }
     }
 
+    /** Proof-protected read-only history for the exact current v2 deployment binding. */
+    public void history(HttpExchange exchange, HttpRequestContext requestContext) throws IOException {
+        if (!requireExactPath(exchange, HISTORY_PATH)) return;
+        privateResponse(exchange);
+        if (!method(exchange, "POST") || !viewerRequest(exchange) || hasCookie(exchange)) return;
+        String bearer = bearer(exchange);
+        if (bearer == null) { unavailable(exchange, false); return; }
+        Map<String, String> body = body(exchange, Set.of("nonce", "jti", "issuedAt", "signature", "query"));
+        if (body == null) return;
+        var session = sessions.resolve(bearer, currency);
+        if (session == null || !session.challenge().equals(body.get("nonce"))) { unavailable(exchange, false); return; }
+        var authorization = sessions.authorization(session);
+        if (authorization == null || !(authorization.source() instanceof EmbedViewerSource.DeploymentV2 source)
+                || deployments == null || !authorization.capabilities().contains(EmbedCapability.DEPLOYMENT_RUN_READ)) {
+            unavailable(exchange, false); return;
+        }
+        try {
+            validatedParentOrigin(authorization);
+            if (!verifyProof(body, bearer, authorization, session, HISTORY_PATH)) { unavailable(exchange, false); return; }
+            RequestContext context = deploymentContext(requestContext.requestId(), authorization);
+            var view = deployments.localDeploymentView(context, source.deploymentId());
+            if (view.isEmpty() || !sessions.bind(session, view.orElseThrow())) { unavailable(exchange, false); return; }
+            var captured = view.orElseThrow().source();
+            var reader = deployments.embedDeploymentHistory(context, new ai.ravenroot.api.history.DeploymentHistorySource(
+                    captured.deploymentId(), captured.incarnationId(), captured.graphVersion()));
+            var request = ai.ravenroot.api.history.DeploymentHistoryRequest.fromJson(body.get("query"));
+            String response = request.read(reader, context.tenantId());
+            if (!sessions.bind(session, view.orElseThrow())) { unavailable(exchange, false); return; }
+            json(exchange, 200, response);
+        } catch (IllegalArgumentException | ai.ravenroot.api.correlation.BusinessHistoryException invalid) {
+            invalid(exchange);
+        } catch (ai.ravenroot.api.security.AuthorizationDeniedException | ai.ravenroot.api.history.HistoryReadException denied) {
+            unavailable(exchange, false);
+        } catch (RuntimeException failure) { temporary(exchange); }
+    }
+
     /** Separately authorized, idempotent server-side start for an exact v2 deployment binding. */
     public void startExecution(HttpExchange exchange) throws IOException {
         startExecution(exchange, () -> AuthenticatedPrincipalAttribute.requestId(exchange));
@@ -784,7 +821,9 @@ public final class EmbedBrowserHttpHandler {
                 case RECONCILE -> 503;
             };
             json(exchange, status, "{\"outcome\":\"" + result.outcome()
-                    + "\",\"requestId\":\"" + JsonStrings.escape(result.requestId()) + "\"}");
+                    + "\",\"requestId\":\"" + JsonStrings.escape(result.requestId())
+                    + "\",\"processInstanceId\":" + (result.processInstanceId() == null ? "null" : "\"" + result.processInstanceId() + "\"")
+                    + ",\"traversalId\":" + (result.traversalId() == null ? "null" : "\"" + result.traversalId() + "\"") + "}");
         } catch (IllegalArgumentException invalid) {
             invalid(exchange);
         } catch (ai.ravenroot.api.security.AuthorizationDeniedException denied) {

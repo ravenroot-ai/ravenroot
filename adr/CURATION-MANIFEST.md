@@ -51,6 +51,7 @@ without presenting the same choice as two independent contracts.
 | 2026-09-16 | [0042](0042-explicit-workspaces-and-runner-coordinators.md) | Accepted | Explicit Workspace lifecycles, named Agents, independent runtime reuse, fleet capacity and runner-only shared-authority scaling. |
 | 2026-09-18 | [0043](0043-kubernetes-native-governed-runner.md) | Accepted | Native Pod/PVC materialization, positive enforcement attestation, credential separation and report-only Kubernetes recovery. |
 | 2026-09-26 | [0044](0044-encapsulated-finite-automata.md) | Accepted contract | Defines the five-kind declarative automata format, bounded encapsulated execution and deferred authoring/SDK boundary; production bundle not implemented. |
+| 2026-10-23 | [0045](0045-deployment-entry-and-business-history.md) | Accepted | Defines permanent initial START, source-local custody, immutable scoped context, correlated joins and bounded history observation. |
 
 ## Publication rules
 

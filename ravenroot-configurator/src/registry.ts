@@ -18,6 +18,17 @@ const requiredInt = (name: string, minimum = 1, maximum?: number): FieldSpec => 
 const requiredBoolean = (name: string): FieldSpec => ({ name, label: name, type: "boolean", required: true });
 const requiredCsv = (name: string): FieldSpec => ({ name, label: name, type: "csv", required: true });
 const optionalCsv = (name: string): FieldSpec => ({ name, label: name, type: "csv", required: false });
+const historyFields: FieldSpec[] = [
+  ["MAX_HISTORIES_PER_SCOPE", 10000000, 100000], ["MAX_OPEN_JOINS", 1024, 64],
+  ["MAX_RETAINED_JOINS", 100000, 1024], ["MAX_CONTRIBUTIONS", 10000, 1024],
+  ["MAX_JOIN_PAYLOAD_BYTES", 50331648, 16777216], ["MAX_PENDING_ENTRIES", 100000, 1024],
+  ["MAX_PENDING_ENTRY_BYTES", 67108864, 16777216], ["MAX_PAGE_SIZE", 1000, 100],
+  ["RETENTION_SECONDS", 315360000, 2592000], ["JOIN_DEADLINE_SECONDS", 315360000, 86400],
+  ["MAX_ID_CHARACTERS", 4096, 256], ["MAX_SELECTOR_CHARACTERS", 16384, 1024],
+  ["MAX_SELECTOR_SEGMENTS", 256, 32], ["MAX_MANIFEST_ITEMS", 10000, 1024],
+  ["MAX_CAS_ATTEMPTS", 10000, 128], ["READ_TIMEOUT_MS", 60000, 10000],
+  ["RESPONSE_MAX_BYTES", 16777216, 4194304], ["RESPONSE_MAX_VALUES", 1000000, 100000]
+].map(([suffix, maximum, suggestion]) => ({ ...requiredInt(`RAVENROOT_HISTORY_${suffix}`, 1, Number(maximum)), suggestion: Number(suggestion) }));
 const strictJson = (contractId: string, name: string, label: string, suggestion: Readonly<Record<string, unknown>>): FieldSpec => ({
   name, label, type: "json", required: true, suggestion, schema: schemaFor(`${contractId}:${name}`)
 });
@@ -396,6 +407,13 @@ export const CONTRACTS: readonly ConfigurationContract[] = [
     }, ["credential-resolution", "outbound-http"]),
   {
     schemaVersion: CONTRACT_SCHEMA_VERSION,
+    id: "core.history", title: "Business history and correlated joins", family: "Business history", nodeIds: ["correlation-close", "correlation-derive"],
+    environment: "*", identity: [], encoding: "plain-environment", runtimeVerifier: "core.history", restartRequired: true, credentialResolver: "none",
+    externalRequirements: ["Requires the configured durable execution store. Settings apply to the shared history policy, not only one node."],
+    fields: historyFields
+  },
+  {
+    schemaVersion: CONTRACT_SCHEMA_VERSION,
     id: "core.http", title: "Built-in HTTP policy", family: "Built-in HTTP", nodeIds: ["http-request"], environment: "*",
     identity: [], encoding: "plain-environment", runtimeVerifier: "core.http", restartRequired: true, credentialResolver: "shared",
     fields: [
@@ -534,6 +552,12 @@ function scalar(field: FieldSpec, value: unknown): string {
 }
 
 function validateCoreDocumentRelations(contractId: string, values: Readonly<Record<string, unknown>>): void {
+  if (contractId === "core.history") {
+    const value = (suffix: string): number => Number(values[`RAVENROOT_HISTORY_${suffix}`]);
+    if (value("MAX_RETAINED_JOINS") < value("MAX_OPEN_JOINS")) throw new Error("Retained joins must cover open joins");
+    if (value("JOIN_DEADLINE_SECONDS") > value("RETENTION_SECONDS")) throw new Error("Join deadline must not exceed history retention");
+    if (value("RESPONSE_MAX_VALUES") < value("MAX_PAGE_SIZE") * 32 + 64) throw new Error("Response value budget must cover the maximum page");
+  }
   const document = (values.interactionDocument ?? values.policyDocument ?? values.runnerDocument) as Record<string, unknown> | undefined;
   if (!document) return;
   if (contractId === "core.human-task") {

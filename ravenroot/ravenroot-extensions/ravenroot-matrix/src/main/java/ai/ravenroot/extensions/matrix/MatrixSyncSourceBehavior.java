@@ -140,7 +140,7 @@ public final class MatrixSyncSourceBehavior implements NodeBehavior, InboundSour
                                 if (!current(session)) return;
                                 bindEvent(key, event);
                                 IngressReceipt receipt = context.ingress().offerDurably(context.identity(),
-                                        IngressTarget.start(), event.payload(profile.name()), context.nodeId(),
+                                        IngressTarget.node(context.nodeId()), event.payload(profile.name()), context.nodeId(),
                                         sourceId(key) + ":" + event.eventId);
                                 if (!receipt.acknowledgeable()) {
                                     if (receipt instanceof IngressReceipt.VolatileCustody)

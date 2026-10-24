@@ -120,7 +120,7 @@ public final class DiscordInteractionsSourceBehavior implements NodeBehavior, In
                 payload.put("applicationId", source.profile.applicationId()); payload.put("guildId", guild);
                 payload.put("channelId", channel); payload.put("command", command);
                 payload.put("data", withoutToken(data));
-                IngressReceipt receipt = context.ingress().offerDurably(context.identity(), IngressTarget.start(),
+                IngressReceipt receipt = context.ingress().offerDurably(context.identity(), IngressTarget.node(context.nodeId()),
                         Map.copyOf(payload), context.nodeId(), source.profile.name() + ":" + interaction);
                 if (!window.live()) return empty(503);
                 return switch (receipt) {

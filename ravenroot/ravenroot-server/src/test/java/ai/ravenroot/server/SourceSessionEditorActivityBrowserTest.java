@@ -23,6 +23,7 @@ import ai.ravenroot.core.runtime.ExecutionMonitor;
 import ai.ravenroot.core.runtime.NodePackages;
 import ai.ravenroot.core.runtime.UnknownBehaviorPolicy;
 import ai.ravenroot.pekko.PekkoExecutionEngine;
+import ai.ravenroot.persistence.sqlite.SqliteExecutionStore;
 import ai.ravenroot.server.security.DisabledLoopbackAuthenticator;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
@@ -134,10 +135,11 @@ class SourceSessionEditorActivityBrowserTest {
             @Override public List<NodeBehavior> behaviors() { return List.of(source); }
         });
 
-        try (var engine = new PekkoExecutionEngine("source-session-editor-activity")) {
+        try (var store = new SqliteExecutionStore(output.resolve("execution.db"), java.time.Clock.systemUTC());
+             var engine = new PekkoExecutionEngine("source-session-editor-activity")) {
             var application = new DefaultRavenrootApplication(engine, new ExecutionMonitor(), behaviors,
                     new InMemoryArtifactRegistry(), new DisabledProgramRuntime(),
-                    ExecutionIdentitySource.randomUuids(), null, 8, UnknownBehaviorPolicy.passThrough());
+                    ExecutionIdentitySource.randomUuids(), store, 8, UnknownBehaviorPolicy.passThrough());
             // A concrete port, chosen before construction, because the default browser-origin policy
             // is derived from the port the server is ASKED for. Passing 0 would allow
             // `http://127.0.0.1:0` and refuse the real editor's own same-origin POST with a 403 that
@@ -262,7 +264,7 @@ class SourceSessionEditorActivityBrowserTest {
                     scheduler.scheduleAtFixedRate(() -> {
                         int ordinal = admitted.incrementAndGet();
                         IngressDisposition disposition = started.ingress().offer(started.identity(),
-                                IngressTarget.start(), "message-" + ordinal);
+                                IngressTarget.node(configuration.nodeId()), "message-" + ordinal);
                         // A refused offer is an expected operating condition, not a fault; it simply
                         // did not happen, so it must not be counted as traffic the browser should see.
                         if (disposition != IngressDisposition.ACCEPTED) admitted.decrementAndGet();

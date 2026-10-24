@@ -538,6 +538,25 @@ jobs:
           -Dtest=HumanTaskConfirmationBrowserProcessIntegrationTest,HumanTaskExternalProviderProcessIntegrationTest
           -Dravenroot.humanTaskConfirmation.browserTest=true
           -Dsurefire.failIfNoSpecifiedTests=false test
+      - name: Verify durable first Run and native and embedded history in real browsers
+        working-directory: ravenroot
+        run: >-
+          mvn -B --no-transfer-progress -pl ravenroot-server,ravenroot-extensions/ravenroot-openapi-server -am
+          -Dtest=FirstRunPersistenceBrowserTest,DeploymentHistoryBrowserTest,EmbedBrowserPlaywrightIntegrationTest,LakehouseExampleBrowserTest
+          -Dravenroot.deploymentPersistence.browserTest=true
+          -Dravenroot.embed.browserTest=true
+          -Dsurefire.failIfNoSpecifiedTests=false test
+      - name: Archive durable first Run browser evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: first-run-persistence-browser
+          path: |
+            ravenroot/ravenroot-server/target/first-run-persistence-browser/
+            ravenroot/ravenroot-server/target/history-monitor-browser/
+            ravenroot/ravenroot-server/target/embed-browser-evidence/
+            ravenroot/ravenroot-extensions/ravenroot-openapi-server/target/lakehouse-example/
+          if-no-files-found: warn
       - name: Run the saga authoring real-server browser regression
         working-directory: ravenroot
         run: >-
@@ -841,6 +860,16 @@ jobs:
         if: steps.backend-scope.outputs.mode == 'all'
         timeout-minutes: 20
         run: python3 scripts/fixtures/kubernetes_runner_acceptance.py
+      - name: Retain sanitized native Kubernetes results
+        if: always() && steps.backend-scope.outputs.mode == 'all'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: native-kubernetes-results
+          path: |
+            ravenroot/ravenroot-core/target/native-kubernetes-reports/KubernetesPodRunnerNativeTest.json
+            ravenroot/ravenroot-core/target/native-kubernetes-reports/KubernetesWorkspaceGraphNativeTest.json
+          if-no-files-found: warn
+          retention-days: 7
       - name: Verify the published extension pack from a clean staged consumer
         if: steps.backend-scope.outputs.mode == 'all'
         run: ./scripts/verify-extension-pack-consumer.sh

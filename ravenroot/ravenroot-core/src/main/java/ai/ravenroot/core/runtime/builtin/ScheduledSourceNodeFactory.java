@@ -227,7 +227,7 @@ abstract class ScheduledSourceNodeFactory implements CoreInboundSourceFactory {
                         Map.entry("missedCount", missed),
                         Map.entry("schedule", selected.selector()),
                         Map.entry("tzdbVersion", tzdbVersion(configuration.schedule().zone())));
-                IngressReceipt receipt = durable.offerDurably(owner.identity(), IngressTarget.start(), payload,
+                IngressReceipt receipt = durable.offerDurably(owner.identity(), IngressTarget.node(owner.nodeId()), payload,
                         OCCURRENCES, occurrenceId);
                 DurableIngressStartState afterOffer = await(durable.startState(owner.identity(), OCCURRENCES, occurrenceId));
                 if (afterOffer == DurableIngressStartState.STARTED) {

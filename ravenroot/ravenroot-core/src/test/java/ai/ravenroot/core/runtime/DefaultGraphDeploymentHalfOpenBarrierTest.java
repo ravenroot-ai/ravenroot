@@ -117,7 +117,7 @@ class DefaultGraphDeploymentHalfOpenBarrierTest {
 
             for (int i = 0; i < 3; i++) {
                 assertEquals(IngressDisposition.ACCEPTED,
-                        deployment.ingress().offer(IDENTITY, IngressTarget.start(), "before-" + i));
+                        deployment.ingress().offer(IDENTITY, IngressTarget.node("start"), "before-" + i));
             }
             awaitInFlight(deployment, 3);
 
@@ -127,7 +127,7 @@ class DefaultGraphDeploymentHalfOpenBarrierTest {
 
             for (int i = 0; i < 3; i++) {
                 assertEquals(IngressDisposition.ACCEPTED,
-                        deployment.ingress().offer(IDENTITY, IngressTarget.start(), "after-" + i),
+                        deployment.ingress().offer(IDENTITY, IngressTarget.node("start"), "after-" + i),
                         "a barrier opens the new generation; it does not close the deployment");
             }
 
@@ -174,7 +174,7 @@ class DefaultGraphDeploymentHalfOpenBarrierTest {
             deployment.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
             try {
                 assertEquals(IngressDisposition.ACCEPTED,
-                        deployment.ingress().offer(IDENTITY, IngressTarget.start(), "before"));
+                        deployment.ingress().offer(IDENTITY, IngressTarget.node("start"), "before"));
                 assertTrue(beforeEntered.await(10, TimeUnit.SECONDS),
                         "the old generation must enter blocked work before the barrier");
                 deployment.barrier(2).toCompletableFuture().get(10, TimeUnit.SECONDS);
@@ -182,7 +182,7 @@ class DefaultGraphDeploymentHalfOpenBarrierTest {
 
                 for (int i = 0; i < 2; i++) {
                     assertEquals(IngressDisposition.ACCEPTED,
-                            deployment.ingress().offer(IDENTITY, IngressTarget.start(), "opened-" + i));
+                            deployment.ingress().offer(IDENTITY, IngressTarget.node("start"), "opened-" + i));
                 }
                 assertTrue(openedEntered.await(10, TimeUnit.SECONDS),
                         "both units admitted by the barrier must enter blocked work before its re-drive");
@@ -224,7 +224,7 @@ class DefaultGraphDeploymentHalfOpenBarrierTest {
             assertSame(DeploymentState.READY, deployment.status().state(),
                     "a pause retains the activation: the state machine is not what closed admission");
             assertEquals(IngressDisposition.REJECTED_ADMISSION_CLOSED,
-                    deployment.ingress().offer(IDENTITY, IngressTarget.start(), "held"));
+                    deployment.ingress().offer(IDENTITY, IngressTarget.node("start"), "held"));
             assertSame(ObservedKind.PAUSED,
                     deployment.observe().toCompletableFuture().get(10, TimeUnit.SECONDS).state());
 
@@ -232,7 +232,7 @@ class DefaultGraphDeploymentHalfOpenBarrierTest {
             assertSame(ObservedKind.READY,
                     deployment.observe().toCompletableFuture().get(10, TimeUnit.SECONDS).state());
             assertEquals(IngressDisposition.ACCEPTED,
-                    deployment.ingress().offer(IDENTITY, IngressTarget.start(), "resumed"));
+                    deployment.ingress().offer(IDENTITY, IngressTarget.node("start"), "resumed"));
 
             gate.complete(NodeResult.continueWith("released"));
             awaitInFlight(deployment, 0);
@@ -264,7 +264,7 @@ class DefaultGraphDeploymentHalfOpenBarrierTest {
             deployment.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
             try {
                 CompletableFuture<IngressDisposition> held = CompletableFuture.supplyAsync(
-                        () -> deployment.ingress().offer(IDENTITY, IngressTarget.start(), "held"));
+                        () -> deployment.ingress().offer(IDENTITY, IngressTarget.node("start"), "held"));
                 assertTrue(store.awaitFirstWrite(Duration.ofSeconds(10)),
                         "the arrival must be parked between its admission and its dispatch");
 
@@ -281,7 +281,7 @@ class DefaultGraphDeploymentHalfOpenBarrierTest {
                 awaitInFlight(deployment, 0);
 
                 assertEquals(IngressDisposition.ACCEPTED,
-                        deployment.ingress().offer(IDENTITY, IngressTarget.start(), "after"));
+                        deployment.ingress().offer(IDENTITY, IngressTarget.node("start"), "after"));
                 gate.complete(NodeResult.continueWith("released"));
                 awaitInFlight(deployment, 0);
                 assertEquals(1, settled.get(), "only the arrival admitted at the opened generation completes");
@@ -310,7 +310,7 @@ class DefaultGraphDeploymentHalfOpenBarrierTest {
             deployment.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
             try {
                 CompletableFuture<IngressDisposition> held = CompletableFuture.supplyAsync(
-                        () -> deployment.ingress().offer(IDENTITY, IngressTarget.start(), "held"));
+                        () -> deployment.ingress().offer(IDENTITY, IngressTarget.node("start"), "held"));
                 assertTrue(store.awaitFirstWrite(Duration.ofSeconds(10)),
                         "the arrival must be parked between its admission and its dispatch");
 
@@ -360,7 +360,7 @@ class DefaultGraphDeploymentHalfOpenBarrierTest {
 
             for (int i = 0; i < 8; i++) {
                 assertEquals(IngressDisposition.ACCEPTED,
-                        deployment.ingress().offer(IDENTITY, IngressTarget.start(), "before-" + i));
+                        deployment.ingress().offer(IDENTITY, IngressTarget.node("start"), "before-" + i));
                 accepted.incrementAndGet();
             }
             awaitInFlight(deployment, 8);
@@ -379,7 +379,7 @@ class DefaultGraphDeploymentHalfOpenBarrierTest {
                     }
                     for (int i = 0; i < 20; i++) {
                         IngressDisposition disposition =
-                                deployment.ingress().offer(IDENTITY, IngressTarget.start(), "racing");
+                                deployment.ingress().offer(IDENTITY, IngressTarget.node("start"), "racing");
                         if (disposition == IngressDisposition.ACCEPTED) {
                             accepted.incrementAndGet();
                         } else {
@@ -400,7 +400,7 @@ class DefaultGraphDeploymentHalfOpenBarrierTest {
 
             for (int i = 0; i < 8; i++) {
                 IngressDisposition disposition =
-                        deployment.ingress().offer(IDENTITY, IngressTarget.start(), "after-" + i);
+                        deployment.ingress().offer(IDENTITY, IngressTarget.node("start"), "after-" + i);
                 assertEquals(IngressDisposition.ACCEPTED, disposition);
                 accepted.incrementAndGet();
             }
@@ -496,8 +496,8 @@ class DefaultGraphDeploymentHalfOpenBarrierTest {
                     return CompletableFuture.completedFuture(NodeResult.continueWith("settled"));
                 });
         return new DefaultGraphDeployment(DeploymentId.of("barrier-" + java.util.UUID.randomUUID()),
-                engine, behaviors, new ExecutionMonitor(), ExecutionIdentitySource.randomUuids(),
-                GRAPH.getBytes(StandardCharsets.UTF_8), CAPACITY, store,
+                engine, ManualSourceFixture.register(behaviors), new ExecutionMonitor(), ExecutionIdentitySource.randomUuids(),
+                ManualSourceFixture.graph(GRAPH).getBytes(StandardCharsets.UTF_8), CAPACITY, store,
                 DefaultGraphDeployment.DEFAULT_INBOX_RETENTION);
     }
 

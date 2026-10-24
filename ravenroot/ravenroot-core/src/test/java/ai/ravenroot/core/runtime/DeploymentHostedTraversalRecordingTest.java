@@ -94,7 +94,7 @@ class DeploymentHostedTraversalRecordingTest {
             deployment.start(security()).toCompletableFuture().get(20, TimeUnit.SECONDS);
 
             assertEquals(IngressDisposition.ACCEPTED,
-                    deployment.ingress().offer(security(), IngressTarget.start(), "payload"));
+                    deployment.ingress().offer(security(), IngressTarget.node("start"), "payload"));
             assertTrue(completions.latch().await(20, TimeUnit.SECONDS), "traversal never completed");
 
             List<ExecutionKey> recorded = distinct(observed);
@@ -115,12 +115,12 @@ class DeploymentHostedTraversalRecordingTest {
         try (var engine = new JoinTestEngine()) {
             var completions = countCompletions();
             var deployment = new DefaultGraphDeployment(DeploymentId.of("no-store"), engine,
-                    BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults()), completions.monitor(),
-                    ExecutionIdentitySource.randomUuids(), GRAPH.getBytes(StandardCharsets.UTF_8),
+                    ManualSourceFixture.register(BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults())), completions.monitor(),
+                    ExecutionIdentitySource.randomUuids(), ManualSourceFixture.graph(GRAPH).getBytes(StandardCharsets.UTF_8),
                     DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY);
             deployment.start(security()).toCompletableFuture().get(20, TimeUnit.SECONDS);
             assertEquals(IngressDisposition.ACCEPTED,
-                    deployment.ingress().offer(security(), IngressTarget.start(), "payload"));
+                    deployment.ingress().offer(security(), IngressTarget.node("start"), "payload"));
             assertTrue(completions.latch().await(20, TimeUnit.SECONDS));
             deployment.stop().toCompletableFuture().get(20, TimeUnit.SECONDS);
         }
@@ -150,7 +150,7 @@ class DeploymentHostedTraversalRecordingTest {
             deployment.start(security()).toCompletableFuture().get(20, TimeUnit.SECONDS);
 
             assertEquals(IngressDisposition.ACCEPTED,
-                    deployment.ingress().offer(security(), IngressTarget.start(), "payload"));
+                    deployment.ingress().offer(security(), IngressTarget.node("start"), "payload"));
             assertTrue(completions.latch().await(20, TimeUnit.SECONDS), "traversal never completed");
 
             assertTrue(sweepWhileLive.get() != null, "the interception never fired; the assertion below "
@@ -189,7 +189,7 @@ class DeploymentHostedTraversalRecordingTest {
 
             for (int i = 0; i < 3; i++) {
                 assertEquals(IngressDisposition.ACCEPTED,
-                        deployment.ingress().offer(security(), IngressTarget.start(), "payload-" + i));
+                        deployment.ingress().offer(security(), IngressTarget.node("start"), "payload-" + i));
             }
             assertTrue(completions.latch().await(30, TimeUnit.SECONDS), "not every traversal completed");
 
@@ -213,7 +213,7 @@ class DeploymentHostedTraversalRecordingTest {
             deployment.start(security()).toCompletableFuture().get(20, TimeUnit.SECONDS);
 
             assertEquals(IngressDisposition.ACCEPTED,
-                    deployment.ingress().offer(security(), IngressTarget.start(), "payload"));
+                    deployment.ingress().offer(security(), IngressTarget.node("start"), "payload"));
             assertTrue(completions.latch().await(20, TimeUnit.SECONDS));
 
             // The deployment is deliberately still READY here. A recorder closed at deployment stop
@@ -259,10 +259,10 @@ class DeploymentHostedTraversalRecordingTest {
             deployment.start(security()).toCompletableFuture().get(20, TimeUnit.SECONDS);
 
             assertEquals(IngressDisposition.REJECTED_INSTANCE_BUSY,
-                    deployment.ingress().offer(security(), IngressTarget.start(), "payload"));
+                    deployment.ingress().offer(security(), IngressTarget.node("start"), "payload"));
 
             IngressReceipt receipt = deployment.ingress()
-                    .offerDurably(security(), IngressTarget.start(), "payload", "src", "key-1");
+                    .offerDurably(security(), IngressTarget.node("start"), "payload", "src", "key-1");
             assertInstanceOf(IngressReceipt.Refused.class, receipt);
 
             assertFalse(completions.latch().await(2, TimeUnit.SECONDS),
@@ -282,8 +282,8 @@ class DeploymentHostedTraversalRecordingTest {
     private static DefaultGraphDeployment deployment(ai.ravenroot.api.execution.ExecutionEngine engine,
                                                      ExecutionStore store, ExecutionMonitor monitor) {
         return new DefaultGraphDeployment(DeploymentId.of("hosted-" + UUID.randomUUID()), engine,
-                BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults()), monitor,
-                ExecutionIdentitySource.randomUuids(), GRAPH.getBytes(StandardCharsets.UTF_8),
+                ManualSourceFixture.register(BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults())), monitor,
+                ExecutionIdentitySource.randomUuids(), ManualSourceFixture.graph(GRAPH).getBytes(StandardCharsets.UTF_8),
                 DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY, store,
                 DefaultGraphDeployment.DEFAULT_INBOX_RETENTION, "test-worker", TTL);
     }

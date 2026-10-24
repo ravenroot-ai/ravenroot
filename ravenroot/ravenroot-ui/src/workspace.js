@@ -24,6 +24,8 @@ import { retireExecutionOutcomeClaim } from './execution-reconciliation.js';
 export const PENDING_EXECUTION = 'pending';
 export const DOCUMENT_MODES = Object.freeze({ DRAFT: 'draft', TEST: 'test', DEPLOYED: 'deployed' });
 const SOURCE_PROCESS_OWNERSHIP_LIMIT = 256;
+// Opaque tokens preserve reference identity without retaining an old binding's graph/input bytes.
+const deploymentProcessBindingTokens = new WeakMap();
 const ACTIVE_SOURCE_SESSION_STATES = new Set([
   'STARTING', 'LISTENING', 'DEGRADED', 'STOPPING', 'UNKNOWN',
 ]);
@@ -222,6 +224,7 @@ export function createDocumentRecord({
     },
     // Optional read-only deployment attachment. The graph remains an allowlisted projection;
     // closing the document detaches observation without controlling the server-side deployment.
+    deploymentRun: null,
     deploymentView: null,
     humanTasks: {
       deploymentId: null,
@@ -403,7 +406,8 @@ export function documentForRuntimeEvent(workspace, event, streamScope) {
     // the snapshot the document submitted; for a session, the deployment id already does, and it
     // keeps proving it after the author edits the document the session is not running.
     const listening = streamTenant !== undefined ? workspace.documents.filter(
-      doc => sourceSessionOwnsDeployment(doc, deploymentId) && doc.tenantId === streamTenant,
+      doc => doc.tenantId === streamTenant && (sourceSessionOwnsDeployment(doc, deploymentId)
+        || doc.deploymentRun?.deploymentId === deploymentId && doc.deploymentRun?.graphVersion === event.graphVersion),
     ) : [];
     // A deployment claim is useful only while it is unique in this workspace. Two open documents
     // claiming the same deployment are an ambiguity, not a reason to choose whichever was opened
@@ -462,6 +466,12 @@ function trustedStreamTenant(streamScope) {
     ? streamScope.tenantId : undefined;
 }
 
+function deploymentProcessBindingToken(binding) {
+  if (!binding) return null;
+  if (!deploymentProcessBindingTokens.has(binding)) deploymentProcessBindingTokens.set(binding, Object.freeze({}));
+  return deploymentProcessBindingTokens.get(binding);
+}
+
 function rememberSourceProcessOwner(document_, event, streamTenant) {
   const processInstanceId = typeof event?.processInstanceId === 'string' && event.processInstanceId
     ? event.processInstanceId : null;
@@ -473,15 +483,20 @@ function rememberSourceProcessOwner(document_, event, streamTenant) {
   // verified session-only stream remains isolated in the null scope and can never match a tenant.
   if (!processInstanceId || !graphVersion || streamTenant === undefined
       || document_?.tenantId !== streamTenant
-      || !sourceSessionOwnsDeployment(document_, event.deploymentId)) return;
+      || !(sourceSessionOwnsDeployment(document_, event.deploymentId)
+        || document_.deploymentRun?.deploymentId === event.deploymentId
+          && document_.deploymentRun.graphVersion === graphVersion)) return;
   const owners = session.processOwners;
   session.retiredProcessOwners.delete(processInstanceId);
   owners.delete(processInstanceId);
   owners.set(processInstanceId, Object.freeze({
     tenantId: streamTenant,
     graphVersion,
+    originTraversalId: event.traversalId || event.executionId,
+    deploymentBindingToken: document_.deploymentRun?.deploymentId === event.deploymentId ? deploymentProcessBindingToken(document_.deploymentRun) : null,
+    runtimeIncarnationId: document_.deploymentRun?.incarnationId || null,
     documentIncarnation: document_.incarnation,
-    deploymentId: session.deploymentId,
+    deploymentId: event.deploymentId,
     sessionId: session.sessionId,
     sessionGeneration: session.generation,
   }));
@@ -520,9 +535,13 @@ function rememberedSourceProcessDecision(workspace, event, streamTenant) {
     hasSourceEvidence = true;
     const current = document_.incarnation === owner.documentIncarnation
       && document_.tenantId === owner.tenantId
-      && sourceSessionOwnsDeployment(document_, owner.deploymentId)
-      && session.sessionId === owner.sessionId
-      && session.generation === owner.sessionGeneration;
+      && (owner.deploymentBindingToken
+        ? deploymentProcessBindingToken(document_.deploymentRun) === owner.deploymentBindingToken
+          && document_.deploymentRun.deploymentId === owner.deploymentId
+          && document_.deploymentRun.graphVersion === owner.graphVersion
+          && document_.deploymentRun.incarnationId === owner.runtimeIncarnationId
+        : sourceSessionOwnsDeployment(document_, owner.deploymentId)
+          && session.sessionId === owner.sessionId && session.generation === owner.sessionGeneration);
     if (!current) {
       session.processOwners.delete(processInstanceId);
       rememberRetiredSourceProcessOwner(session, processInstanceId);

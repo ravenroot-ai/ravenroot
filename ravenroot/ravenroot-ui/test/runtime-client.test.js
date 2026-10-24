@@ -252,6 +252,25 @@ describe('versioned execution stream normalization', () => {
     });
   });
 
+  it.each([versionedRingEvent, versionedDurableEvent])('keeps explicit correlation projection availability distinct from legacy absence', event => {
+    const notProjected = event({ applicationCorrelationAvailability: 'NOT_PROJECTED', applicationCorrelationId: null,
+      contributionId: null, contributionKind: null, roundId: null, publicReference: null });
+    expect(normalizeRuntimeEvent(notProjected)).toMatchObject(notProjected);
+    expect(normalizeRuntimeEvent(event())).not.toHaveProperty('applicationCorrelationAvailability');
+    expect(normalizeRuntimeEvent(event({ applicationCorrelationAvailability: 'NOT_RECORDED' })))
+      .toHaveProperty('applicationCorrelationAvailability', 'NOT_RECORDED');
+    expect(normalizeRuntimeEvent(event({ applicationCorrelationAvailability: 'AVAILABLE',
+      applicationCorrelationId: 'original', roundId: 'round', publicReference: 'same.csv' })))
+      .toMatchObject({ applicationCorrelationId: 'original', publicReference: 'same.csv' });
+    for (const fields of [
+      { applicationCorrelationAvailability: 'UNKNOWN' },
+      { applicationCorrelationAvailability: 'NOT_PROJECTED', applicationCorrelationId: 'invented' },
+      { applicationCorrelationAvailability: 'NOT_RECORDED', roundId: 'invented' },
+      { applicationCorrelationAvailability: 'AVAILABLE', applicationCorrelationId: 'missing-round' },
+      { applicationCorrelationAvailability: 'AVAILABLE', applicationCorrelationId: 'x'.repeat(4097), roundId: 'round' },
+    ]) expect(() => normalizeRuntimeEvent(event(fields))).toThrow();
+  });
+
   it.each(['schemaVersion', 'source', 'id', 'eventType', 'occurredAt', 'processInstanceId', 'traversalId'])
   ('does not treat a partial declared version as legacy when %s is absent', field => {
     const event = versionedDurableEvent();
@@ -740,6 +759,7 @@ describe('process-local deployment client', () => {
 
     const result = await client.stopDeployment('deployment-1', {
       expectedGeneration: 7, idempotencyKey: 'intent-7', reason: 'maintenance',
+      binding: { incarnationId: 'runtime-1', graphVersion: 'a'.repeat(64), registrationIdentity: 'registry-1' },
     });
 
     expect(result).toEqual({ outcome: accepted, status: stopped });
@@ -747,8 +767,21 @@ describe('process-local deployment client', () => {
       'Idempotency-Key': 'intent-7',
       'X-Ravenroot-Expected-Generation': '7',
       'X-Ravenroot-Reason': 'maintenance',
+      'X-Ravenroot-Deployment-Incarnation': 'runtime-1', 'X-Ravenroot-Graph-Version': 'a'.repeat(64),
+      'X-Ravenroot-Registration-Identity': 'registry-1',
     }));
     expect(fetchImpl.mock.calls[1][0]).toBe('/v1/deployments/deployment-1');
+  });
+
+  it('refuses malformed conditional Stop bindings and binding on other commands before I/O', async () => {
+    const fetchImpl = vi.fn(), client = new RavenrootRuntimeClient('', { fetchImpl });
+    const valid = { incarnationId: 'runtime-1', graphVersion: 'a'.repeat(64), registrationIdentity: null };
+    for (const binding of [{ ...valid, incarnationId: '' }, { ...valid, graphVersion: 'wrong' },
+      { ...valid, registrationIdentity: 'x'.repeat(257) }, { ...valid, incarnationId: 'bad\nheader' }]) {
+      await expect(client.stopDeployment('deployment-1', { binding })).rejects.toThrow(/binding/);
+    }
+    await expect(client.restartDeployment('deployment-1', { binding: valid })).rejects.toThrow(/binding/);
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it('retries an ambiguous durable delivery once with identical intent metadata', async () => {

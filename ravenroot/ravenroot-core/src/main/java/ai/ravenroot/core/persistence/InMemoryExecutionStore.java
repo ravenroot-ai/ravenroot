@@ -124,6 +124,10 @@ import java.util.concurrent.atomic.AtomicLong;
 public final class InMemoryExecutionStore implements ExecutionStore {
 
     private final Object monitor = new Object();
+    private final InMemoryBusinessHistories businessHistories;
+    private final InMemoryDeploymentEntries deploymentEntries;
+    private final Map<List<String>, ai.ravenroot.api.persistence.InitialStartRecord> initialStarts =
+            new LinkedHashMap<>();
     private final Map<String, Map<String, ai.ravenroot.api.runner.GovernedRunnerResource>> runnerCatalog =
             new HashMap<>();
     private final Map<ExecutionKey, Entry> instances = new LinkedHashMap<>();
@@ -144,6 +148,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
      * cross-tenant structure here to accidentally read from, so an operation that forgot its tenant
      * cannot silently answer for another one.
      */
+    private final InMemoryTraversalSummaries traversalSummaries = new InMemoryTraversalSummaries();
     private final Map<String, TenantJournal> journals = new LinkedHashMap<>();
     private final Map<String, Map<UUID, ai.ravenroot.api.persistence.HumanTaskInteractionRevocation>>
             humanTaskInteractionRevocations = new LinkedHashMap<>();
@@ -261,6 +266,8 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                                   HumanTaskPolicy humanTaskPolicy) {
         this.clock = Objects.requireNonNull(clock, "clock");
         policy = Objects.requireNonNull(policy, "policy");
+        this.businessHistories = new InMemoryBusinessHistories(clock, policy.businessHistories());
+        this.deploymentEntries = new InMemoryDeploymentEntries(clock, businessHistories);
         this.maxLeaseTtl = policy.maximumLeaseTtl();
         this.maxPayloadBytes = policy.maximumPayloadBytes();
         this.maxClockSkew = policy.maximumClockSkew();
@@ -318,7 +325,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 // says and what this adapter still does not say.
                 StoreCapability.EXECUTION_RESULTS, StoreCapability.RUNNER_JOBS,
                 StoreCapability.DURABLE_SAGAS, StoreCapability.SELECTIVE_REPLAY_EVIDENCE,
-                StoreCapability.FLOW_INVOCATIONS);
+                StoreCapability.FLOW_INVOCATIONS, StoreCapability.INITIAL_START_ADMISSION, StoreCapability.DEPLOYMENT_ENTRY_CUSTODY, StoreCapability.BUSINESS_HISTORIES, StoreCapability.BUSINESS_CLOSURE_SIGNALS, StoreCapability.CORRELATED_JOINS, StoreCapability.EXECUTION_HISTORY);
     }
 
     @Override
@@ -606,10 +613,26 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                         createdAt, generation, origin, retainedUntil);
                 dropAcknowledgementsForRescheduledWork(next);
 
+                var projectedEntry = deploymentEntries.projected(batch, folded);
+                var preparedClosures = businessHistories.prepareClosureSignals(batch, folded);
+                InMemoryDeploymentEntries.AdmissionPlan preparedHandoff = null;
+                if (batch.derivedEntryHandoff().isPresent()) {
+                    var handoff = batch.derivedEntryHandoff().orElseThrow(); var proposed = handoff.intent();
+                    if (proposed.input().size() > maxPayloadBytes() || proposed.attributes().size() > maxPayloadBytes())
+                        throw failure(new ExecutionStoreFailure.PayloadTooLarge(Math.max(proposed.input().size(), proposed.attributes().size()), maxPayloadBytes()));
+                    handoff.requireAuthority(batch, folded, businessHistories.traversal(key.tenantId(), key.processInstanceId(),
+                            proposed.derivedFrom().traversalId()).orElse(null));
+                    preparedHandoff = deploymentEntries.prepareAdmission(proposed, handoff.mode(), businessHistoryPolicy());
+                }
                 var sagaReplacements = validateSagaWrites(key, batch, now);
                 var outboxInserts = validateSagaCommands(key, batch, now);
                 var outboxRearms = validateSagaCommandRearms(key, batch);
 
+                if (existing == null && initialStarts.values().stream().anyMatch(start ->
+                        start.identity().tenantId().equals(key.tenantId())
+                                && start.processInstanceId().equals(key.processInstanceId()) && start.executionCreated())) {
+                    throw failure(new ExecutionStoreFailure.AlreadyExists(key, 0));
+                }
                 batch.idempotency().ifPresent(write -> idempotency.put(new IdempotencyKey(key.tenantId(), write.key()),
                         new IdempotencyRecord(write.key(), write.requestFingerprint(), write.outcomeRef(),
                                 revision, now.plus(write.retentionWindow()))));
@@ -618,6 +641,19 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 // The journal write is inside this same block and under the same monitor, which is
                 // what makes the shared transactional boundary real rather than described: there is
                 // no instant at which the transition is visible and its events are not.
+                initialStarts.replaceAll((scope, start) -> start.identity().tenantId().equals(key.tenantId())
+                        && start.processInstanceId().equals(key.processInstanceId())
+                        ? new ai.ravenroot.api.persistence.InitialStartRecord(start.deploymentId(), start.graphVersion(),
+                                start.identity(), start.input(), start.acceptedAt(), true) : start);
+                if (preparedHandoff != null) deploymentEntries.publishAdmission(preparedHandoff);
+                businessHistories.publishClosureSignals(preparedClosures);
+                for (var traversal : folded.traversals().values()) {
+                    if (traversal.status().terminal()) businessHistories.settle(key.tenantId(),
+                            key.processInstanceId(), traversal.traversalId(), traversal.status(),
+                            traversal.terminationReason());
+                }
+                deploymentEntries.publish(key, projectedEntry);
+                traversalSummaries.publish(key, existing == null ? null : existing.state, folded, batch);
                 instances.put(key, next);
                 sagaReplacements.forEach(sagas::put);
                 outboxInserts.forEach(sagaOutbox::put);
@@ -1447,6 +1483,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 if (doomed.isEmpty()) {
                     return 0L;
                 }
+                doomed.forEach(traversalSummaries::purge);
                 doomed.forEach(instances::remove);
                 doomed.forEach(streamSequences::remove);
                 doomed.forEach(replayEvidence::remove);
@@ -2106,6 +2143,9 @@ public final class InMemoryExecutionStore implements ExecutionStore {
     @Override
     public void close() {
         synchronized (monitor) {
+            initialStarts.clear();
+            businessHistories.clear();
+            deploymentEntries.clear();
             instances.clear();
             idempotency.clear();
             forgottenBefore.clear();
@@ -3475,6 +3515,226 @@ public final class InMemoryExecutionStore implements ExecutionStore {
         });
     }
 
+    private ai.ravenroot.api.application.ProcessInstance historyState(ExecutionKey key) {
+        var entry = instances.get(key); return entry == null ? null : entry.state;
+    }
+    private <T> CompletionStage<T> completeHistory(java.util.function.Supplier<T> operation) {
+        try { synchronized (monitor) { return CompletableFuture.completedFuture(operation.get()); } }
+        catch (RuntimeException failed) { return CompletableFuture.failedFuture(failed); }
+    }
+    @Override public CompletionStage<ai.ravenroot.api.history.HistoryPage<ai.ravenroot.api.history.TraversalSummary>> uncorrelatedDeploymentTraversals(
+            ai.ravenroot.api.correlation.BusinessScope scope, Optional<String> cursor, int limit) {
+        return completeHistory(() -> {
+            if (limit < 1 || limit > businessHistoryPolicy().maxPageSize()) throw new IllegalArgumentException("invalid history page size");
+            String filter = "uncorrelated-traversals:" + limit;
+            var after = cursor.map(value -> ai.ravenroot.api.correlation.BusinessCursor.decode(scope, filter, value, 2));
+            String owner = after.map(value -> UUID.fromString(value.getFirst()).toString()).orElse("");
+            long position = after.map(value -> Long.parseLong(value.get(1))).orElse(-1L);
+            if (position < -1) throw new IllegalArgumentException("invalid traversal cursor");
+            var items = new ArrayList<ai.ravenroot.api.history.TraversalSummary>(); String lastOwner = null; long lastPosition = -1;
+            outer: for (var entry : instances.entrySet().stream().filter(value -> value.getKey().tenantId().equals(scope.tenantId())
+                    && value.getValue().origin.deploymentId().filter(scope.deploymentId()::equals).isPresent()
+                    && value.getValue().graphVersionPin.reference().equals(scope.graphVersion()))
+                    .sorted(java.util.Comparator.comparing(value -> value.getKey().processInstanceId().toString())).toList()) {
+                String process = entry.getKey().processInstanceId().toString(); long index = -1;
+                for (var traversal : entry.getValue().state.traversals().values()) {
+                    index++;
+                    if (process.compareTo(owner) < 0 || process.equals(owner) && index <= position
+                            || businessHistories.traversal(scope.tenantId(), entry.getKey().processInstanceId(), traversal.traversalId()).isPresent()) continue;
+                    items.add(new ai.ravenroot.api.history.TraversalSummary(entry.getKey().processInstanceId(), traversal.traversalId(),
+                            traversal.ingressNodeId(), traversal.status(), traversal.terminationReason(), traversal.invocations().size(), null, null));
+                    if (items.size() <= limit) { lastOwner = process; lastPosition = index; }
+                    if (items.size() > limit) break outer;
+                }
+            }
+            boolean more = items.size() > limit;
+            return new ai.ravenroot.api.history.HistoryPage<>(more ? items.subList(0, limit) : items,
+                    more ? Optional.of(ai.ravenroot.api.correlation.BusinessCursor.encode(scope, filter, List.of(lastOwner, Long.toString(lastPosition)))) : Optional.empty(),
+                    ai.ravenroot.api.history.HistoryPage.Availability.AVAILABLE);
+        });
+    }
+    @Override public CompletionStage<Boolean> executionSelectionExists(ExecutionKey key, UUID traversalId,
+            Optional<UUID> invocationId, Optional<UUID> attemptId) {
+        return completeHistory(() -> {
+            Objects.requireNonNull(traversalId); Objects.requireNonNull(invocationId); Objects.requireNonNull(attemptId);
+            if (attemptId.isPresent() && invocationId.isEmpty()) throw new IllegalArgumentException("attempt requires visit");
+            var state = historyState(key);
+            var traversal = state == null ? null : state.traversals().get(traversalId);
+            if (traversal == null) return false;
+            if (invocationId.isEmpty()) return true;
+            var visit = traversal.invocations().get(invocationId.orElseThrow());
+            return visit != null && (attemptId.isEmpty() || visit.attempts().stream().anyMatch(a -> a.attemptId().equals(attemptId.orElseThrow())));
+        });
+    }
+    @Override public CompletionStage<ai.ravenroot.api.history.HistoryPage<ai.ravenroot.api.history.TraversalSummary>> executionTraversals(
+            ExecutionKey key, Optional<String> cursor, int limit) {
+        return completeHistory(() -> InMemoryExecutionHistory.traversals(key, historyState(key),
+                traversal -> businessHistories.traversal(key.tenantId(), key.processInstanceId(), traversal).orElse(null),
+                cursor, limit, businessHistoryPolicy().maxPageSize()));
+    }
+    @Override public CompletionStage<ai.ravenroot.api.persistence.DeploymentEntryAdmission> acceptDeploymentEntry(
+            ai.ravenroot.api.persistence.DeploymentEntryIntent proposed, ai.ravenroot.api.correlation.CorrelationMapping.Mode mode,
+            Optional<LeaseHandle> derivingFence) {
+        return completeBusiness(() -> {
+            if (proposed.input().size() > maxPayloadBytes()) throw failure(new ExecutionStoreFailure.PayloadTooLarge(proposed.input().size(), maxPayloadBytes()));
+            if (proposed.attributes().size() > maxPayloadBytes()) throw failure(new ExecutionStoreFailure.PayloadTooLarge(proposed.attributes().size(), maxPayloadBytes()));
+            if (proposed.cause() == ai.ravenroot.api.correlation.CorrelatedTraversal.Cause.DERIVED_CONTEXT) {
+                var fence = derivingFence.orElseThrow(() -> new IllegalArgumentException("derived entry requires original lease"));
+                if (!fence.key().equals(new ExecutionKey(proposed.scope().tenantId(), proposed.derivedFrom().processInstanceId())))
+                    throw new ai.ravenroot.api.correlation.BusinessHistoryException(ai.ravenroot.api.correlation.BusinessHistoryException.Reason.CONTEXT_CONFLICT);
+                requireCurrentReplayLease(fence.key(), fence);
+                var original = historyState(fence.key());
+                var traversal = original == null ? null : original.traversals().get(proposed.derivedFrom().traversalId());
+                var invocation = traversal == null ? null : traversal.invocations().get(proposed.derivedFrom().invocationId());
+                if (invocation == null || invocation.attempts().stream().noneMatch(value -> value.attemptId().equals(proposed.derivedFrom().attemptId())))
+                    throw new ai.ravenroot.api.correlation.BusinessHistoryException(ai.ravenroot.api.correlation.BusinessHistoryException.Reason.CONTEXT_CONFLICT);
+            } else if (derivingFence.isPresent()) throw new IllegalArgumentException("source entry cannot present a derivation lease");
+            return deploymentEntries.admit(proposed, mode, businessHistoryPolicy());
+        });
+    }
+    @Override public CompletionStage<Optional<ai.ravenroot.api.persistence.DeploymentEntryIntent>> deploymentEntry(ExecutionKey key) {
+        return completeBusiness(() -> deploymentEntries.get(key));
+    }
+    @Override public CompletionStage<ai.ravenroot.api.history.HistoryPage<ai.ravenroot.api.persistence.DeploymentEntrySummary>> pendingDeploymentEntries(
+            ai.ravenroot.api.correlation.BusinessScope scope, Optional<String> cursor, int limit) {
+        return completeBusiness(() -> deploymentEntries.page(scope, cursor, limit, businessHistoryPolicy()));
+    }
+    @Override public CompletionStage<Map<UUID, String>> executionInvocationNodeIds(ExecutionKey key, Set<UUID> invocationIds) {
+        var requested = Set.copyOf(invocationIds);
+        if (requested.size() > 1000) throw new IllegalArgumentException("invocation binding limit is 1000");
+        return completeHistory(() -> {
+            var state = historyState(key);
+            if (state == null || requested.isEmpty()) return Map.of();
+            var bindings = new HashMap<UUID, String>();
+            for (var traversal : state.traversals().values()) for (var id : requested) {
+                var visit = traversal.invocations().get(id);
+                if (visit != null) bindings.put(id, visit.nodeId());
+            }
+            return Map.copyOf(bindings);
+        });
+    }
+    @Override public CompletionStage<Optional<ai.ravenroot.api.history.TraversalSummary>> executionTraversal(ExecutionKey key, UUID traversalId) {
+        return completeHistory(() -> InMemoryExecutionHistory.traversal(key, historyState(key), traversalId,
+                traversal -> businessHistories.traversal(key.tenantId(), key.processInstanceId(), traversal).orElse(null)));
+    }
+    @Override public CompletionStage<ai.ravenroot.api.history.HistoryPage<ai.ravenroot.api.history.TraversalNodeSummary>> executionNodeSummaries(
+            ExecutionKey key, UUID traversalId, Optional<String> cursor, int limit) {
+        return completeHistory(() -> InMemoryTraversalSummaries.nodes(key, historyState(key), traversalId, cursor, limit, businessHistoryPolicy().maxPageSize()));
+    }
+    @Override public CompletionStage<ai.ravenroot.api.history.HistoryPage<ai.ravenroot.api.history.TraversalEdgeSummary>> executionEdgeSummaries(
+            ExecutionKey key, UUID traversalId, Optional<String> cursor, int limit) {
+        return completeHistory(() -> traversalSummaries.edges(key, historyState(key), traversalId, cursor, limit, businessHistoryPolicy().maxPageSize()));
+    }
+    @Override public CompletionStage<ai.ravenroot.api.history.HistoryPage<ai.ravenroot.api.history.NodeVisitSummary>> executionVisits(
+            ExecutionKey key, UUID traversalId, Optional<String> nodeId, Optional<String> cursor, int limit) {
+        return completeHistory(() -> InMemoryExecutionHistory.visits(key, historyState(key), traversalId,
+                journalOf(key.tenantId()).records, nodeId, cursor, limit, businessHistoryPolicy().maxPageSize()));
+    }
+    @Override public CompletionStage<ai.ravenroot.api.history.HistoryPage<ai.ravenroot.api.history.NodeAttemptSummary>> executionVisitAttempts(
+            ExecutionKey key, UUID traversalId, UUID invocationId, Optional<String> cursor, int limit) {
+        return completeHistory(() -> InMemoryExecutionHistory.attempts(key, historyState(key), traversalId, invocationId,
+                journalOf(key.tenantId()).records, cursor, limit, businessHistoryPolicy().maxPageSize()));
+    }
+    @Override public CompletionStage<ai.ravenroot.api.history.HistoryPage<ai.ravenroot.api.history.VisitParent>> executionVisitParents(
+            ExecutionKey key, UUID traversalId, UUID invocationId, Optional<String> cursor, int limit) {
+        return completeHistory(() -> InMemoryExecutionHistory.parents(key, historyState(key), traversalId, invocationId,
+                cursor, limit, businessHistoryPolicy().maxPageSize()));
+    }
+    @Override public CompletionStage<ai.ravenroot.api.history.HistoryPage<ai.ravenroot.api.correlation.JoinMemberSummary>> correlatedJoinMembers(
+            ai.ravenroot.api.correlation.CorrelatedJoinKey key, ai.ravenroot.api.correlation.JoinMemberFilter filter, Optional<String> cursor, int limit) {
+        return completeBusiness(() -> businessHistories.members(key, filter, cursor, limit));
+    }
+    @Override public CompletionStage<Optional<ai.ravenroot.api.correlation.CorrelatedJoinRecord>> correlatedJoin(
+            ai.ravenroot.api.correlation.CorrelatedJoinKey key) { return completeBusiness(() -> businessHistories.join(key)); }
+    @Override public CompletionStage<ai.ravenroot.api.correlation.CorrelatedJoinRecord> compareAndSetCorrelatedJoin(
+            ai.ravenroot.api.correlation.CorrelatedJoinRecord desired) { return completeBusiness(() -> businessHistories.writeJoin(desired)); }
+    @Override public CompletionStage<ai.ravenroot.api.correlation.CorrelatedJoinRecord> compareAndSetCorrelatedJoin(
+            ai.ravenroot.api.correlation.CorrelatedJoinRecord desired, LeaseHandle admissionFence) {
+        return completeBusiness(() -> { synchronized (monitor) {
+            requireCurrentReplayLease(admissionFence.key(), admissionFence);
+            if (!desired.key().scope().tenantId().equals(admissionFence.key().tenantId()))
+                throw new ai.ravenroot.api.correlation.BusinessHistoryException(
+                        ai.ravenroot.api.correlation.BusinessHistoryException.Reason.CONTEXT_CONFLICT);
+            return businessHistories.writeJoin(desired);
+        }});
+    }
+    @Override public CompletionStage<ai.ravenroot.api.correlation.CorrelatedJoinPage> correlatedJoins(
+            ai.ravenroot.api.correlation.BusinessScope scope, String applicationId,
+            Set<ai.ravenroot.api.correlation.CorrelatedJoinRecord.Phase> phases, Optional<String> cursor, int limit) {
+        return completeBusiness(() -> businessHistories.joins(scope, applicationId, phases, cursor, limit));
+    }
+    @Override public ai.ravenroot.api.correlation.BusinessHistoryPolicy businessHistoryPolicy() { return businessHistories.policy(); }
+    @Override public CompletionStage<ai.ravenroot.api.correlation.BusinessHistory> recordCorrelatedTraversal(
+            ai.ravenroot.api.correlation.CorrelatedTraversal traversal, ai.ravenroot.api.correlation.CorrelationMapping.Mode mode) {
+        return completeBusiness(() -> businessHistories.admit(traversal, mode));
+    }
+    @Override public CompletionStage<Optional<ai.ravenroot.api.correlation.BusinessHistory>> businessHistory(
+            ai.ravenroot.api.correlation.BusinessScope scope, String id) { return completeBusiness(() -> businessHistories.history(scope, id)); }
+    @Override public CompletionStage<ai.ravenroot.api.correlation.BusinessHistoryPage> businessHistories(
+            ai.ravenroot.api.correlation.BusinessScope scope, ai.ravenroot.api.correlation.BusinessHistoryQuery query) {
+        return completeBusiness(() -> businessHistories.histories(scope, query));
+    }
+    @Override public CompletionStage<ai.ravenroot.api.correlation.CorrelatedTraversalPage> correlatedTraversals(
+            ai.ravenroot.api.correlation.BusinessScope scope, String id, Optional<String> cursor, int limit) {
+        return completeBusiness(() -> businessHistories.traversals(scope, id, cursor, limit));
+    }
+    @Override public CompletionStage<Optional<ai.ravenroot.api.correlation.CorrelatedTraversal>> correlatedTraversal(
+            String tenant, UUID process, UUID traversal) { return completeBusiness(() -> businessHistories.traversal(tenant, process, traversal)); }
+    @Override public CompletionStage<Void> settleCorrelatedTraversal(String tenant, UUID process, UUID traversal,
+            ai.ravenroot.api.application.TraversalStatus status, ai.ravenroot.api.application.ExecutionTerminationReason reason) {
+        return completeBusiness(() -> { businessHistories.settle(tenant, process, traversal, status, reason); return null; });
+    }
+    @Override public CompletionStage<ai.ravenroot.api.correlation.BusinessHistory> closeBusinessHistory(
+            ai.ravenroot.api.correlation.BusinessScope scope, String id, long revision,
+            ai.ravenroot.api.correlation.BusinessHistory.Lifecycle closure) {
+        return completeBusiness(() -> businessHistories.close(scope, id, revision, closure));
+    }
+
+    @Override
+    public CompletionStage<ai.ravenroot.api.persistence.InitialStartRecord> acceptInitialStart(
+            ai.ravenroot.api.persistence.InitialStartRecord proposed) {
+        synchronized (monitor) {
+            if (proposed.input().size() > maxPayloadBytes()) return CompletableFuture.failedFuture(
+                    new ExecutionStoreException(new ExecutionStoreFailure.PayloadTooLarge(
+                            proposed.input().size(), maxPayloadBytes())));
+            var key = List.of(proposed.identity().tenantId(), proposed.deploymentId());
+            return CompletableFuture.completedFuture(initialStarts.computeIfAbsent(key, ignored ->
+                    new ai.ravenroot.api.persistence.InitialStartRecord(proposed.deploymentId(),
+                            proposed.graphVersion(), proposed.identity(), proposed.input(), clock.instant())));
+        }
+    }
+
+    @Override public CompletionStage<ai.ravenroot.api.persistence.InitialStartRecord> acceptInitialStart(
+            ai.ravenroot.api.persistence.InitialStartRecord proposed,
+            ai.ravenroot.api.correlation.CorrelatedTraversal correlation,
+            ai.ravenroot.api.correlation.CorrelationMapping.Mode mode) {
+        return completeBusiness(() -> {
+            var key = List.of(proposed.identity().tenantId(), proposed.deploymentId());
+            var existing = initialStarts.get(key);
+            if (existing != null) return existing;
+            if (proposed.input().size() > maxPayloadBytes()) throw failure(new ExecutionStoreFailure.PayloadTooLarge(
+                    proposed.input().size(), maxPayloadBytes()));
+            if (!correlation.scope().equals(new ai.ravenroot.api.correlation.BusinessScope(proposed.identity().tenantId(),
+                    proposed.deploymentId(), proposed.graphVersion())) || !correlation.processInstanceId().equals(proposed.processInstanceId())
+                    || !correlation.traversalId().equals(proposed.traversalId())
+                    || correlation.cause() != ai.ravenroot.api.correlation.CorrelatedTraversal.Cause.INITIAL_START)
+                throw new ai.ravenroot.api.correlation.BusinessHistoryException(
+                        ai.ravenroot.api.correlation.BusinessHistoryException.Reason.CONTEXT_CONFLICT);
+            businessHistories.admit(correlation, mode);
+            var accepted = new ai.ravenroot.api.persistence.InitialStartRecord(proposed.deploymentId(), proposed.graphVersion(),
+                    proposed.identity(), proposed.input(), clock.instant());
+            initialStarts.put(key, accepted); return accepted;
+        });
+    }
+
+    @Override
+    public CompletionStage<Optional<ai.ravenroot.api.persistence.InitialStartRecord>> initialStart(
+            String tenantId, String deploymentId) {
+        synchronized (monitor) {
+            return CompletableFuture.completedFuture(Optional.ofNullable(initialStarts.get(List.of(tenantId, deploymentId))));
+        }
+    }
+
     @Override
     public CompletionStage<Boolean> recordInboxDelivery(String tenantId, String consumerId, UUID eventId,
                                                         Duration retention) {
@@ -3673,6 +3933,14 @@ public final class InMemoryExecutionStore implements ExecutionStore {
         try {
             return CompletableFuture.completedFuture(operation.get());
         } catch (ExecutionStoreException expected) {
+            return CompletableFuture.failedFuture(expected);
+        }
+    }
+
+    private <T> CompletionStage<T> completeBusiness(java.util.function.Supplier<T> operation) {
+        try {
+            return complete(() -> { synchronized (monitor) { return operation.get(); } });
+        } catch (ai.ravenroot.api.correlation.BusinessHistoryException expected) {
             return CompletableFuture.failedFuture(expected);
         }
     }

@@ -550,3 +550,36 @@ describe('what a node colour means when several traversals occupy the graph', ()
     expect(state.nodes.size).toBe(1);
   });
 });
+
+it('bridges a bound deployment continuation only from the exact known origin and current authority', () => {
+  const source = document_('origin'), other = document_('other');
+  source.deploymentRun = { deploymentId: 'session-a', graphVersion: 'graph-1', incarnationId: 'runtime-a' };
+  const workspace = workspaceWith(source, other);
+  const original = admission({ processInstanceId: 'original-process', executionId: 'original-traversal' });
+  expect(documentForRuntimeEvent(workspace, original)).toBe(source);
+  expect(source.sourceSession.processOwners.get('original-process')).not.toHaveProperty('deploymentBinding');
+  expect(source.sourceSession.processOwners.get('original-process')).toMatchObject({ originTraversalId: 'original-traversal', runtimeIncarnationId: 'runtime-a' });
+  const resumed = { ...original, executionId: 'new-causal-traversal', deploymentId: null };
+  expect(documentForRuntimeEvent(workspace, resumed)).toBe(source);
+  expect(documentForRuntimeEvent(workspace, { ...resumed, processInstanceId: 'unknown-process' })).toBeNull();
+  expect(documentForRuntimeEvent(workspace, { ...resumed, graphVersion: 'foreign-version' })).toBeNull();
+  expect(documentForRuntimeEvent(workspace, resumed, { tenantId: 'foreign-tenant' })).toBeNull();
+  expect(documentForRuntimeEvent(workspace, { ...resumed, deploymentId: 'foreign-deployment' })).toBeNull();
+  source.deploymentRun = { ...source.deploymentRun };
+  expect(documentForRuntimeEvent(workspace, resumed)).toBeNull();
+  expect(source.sourceSession.processOwners.size).toBe(0);
+});
+
+it('bounds learned deployment process ownership and refuses retired runtime evidence', () => {
+  const source = document_('origin');
+  source.deploymentRun = { deploymentId: 'session-a', graphVersion: 'graph-1', incarnationId: 'runtime-a' };
+  const workspace = workspaceWith(source);
+  const first = admission();
+  expect(documentForRuntimeEvent(workspace, first)).toBe(source);
+  for (let index = 0; index < 300; index++) expect(documentForRuntimeEvent(workspace, admission())).toBe(source);
+  expect(source.sourceSession.processOwners.size).toBeLessThanOrEqual(256);
+  expect(documentForRuntimeEvent(workspace, { ...first, deploymentId: null, executionId: 'evicted-resume' })).toBeNull();
+  const last = admission(); expect(documentForRuntimeEvent(workspace, last)).toBe(source);
+  source.deploymentRun.incarnationId = 'replacement-runtime';
+  expect(documentForRuntimeEvent(workspace, { ...last, deploymentId: null, executionId: 'retired-resume' })).toBeNull();
+});

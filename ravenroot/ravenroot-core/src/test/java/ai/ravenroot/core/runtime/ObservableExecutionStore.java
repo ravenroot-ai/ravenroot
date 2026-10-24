@@ -36,9 +36,11 @@ import java.util.function.Consumer;
  * than a timing window — a sleep-based approximation would make the coexistence assertion depend on
  * scheduling rather than on the guard under test.
  */
-final class ObservableExecutionStore implements ExecutionStore {
+final class ObservableExecutionStore implements ForwardingHistoryExecutionStore {
 
     private final ExecutionStore delegate;
+
+    @Override public ExecutionStore delegate() { return delegate; }
     private final List<ExecutionKey> fencedWrites = new CopyOnWriteArrayList<>();
     private final Consumer<ExecutionKey> onFirstFencedWrite;
     private final boolean refuseEveryClaim;

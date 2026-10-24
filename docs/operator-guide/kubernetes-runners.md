@@ -197,6 +197,20 @@ that correlation. Do not drive storage reclamation from a page gauge.
 | API operation refused/unconfirmed | Consult operator Kubernetes audit with bounded job/Pod correlation; do not paste raw credentials or assignment input into logs |
 | Unknown old-generation cleanup | Verify current generation/UID and prior retention; do not force deletion |
 
+An original fixed attester failure can include finite `command`, `diagnostic`, `phase` and
+`reason` labels alongside the existing error category and client exit code. These labels are
+unverified diagnostic context, never enforcement proof or permission to retry. A missing,
+malformed, duplicated or unexpected marker remains `UNKNOWN`; it does not establish a
+transport failure. `CLIENT_DEADLINE` records only an observed manager-side process deadline.
+No raw remote stderr, stdout, arguments, environment or credential data is published.
+
+Native CI retains only two sanitized JSON suite projections in `native-kubernetes-results`.
+They contain fixed case names, result counts and any available finite original failure context;
+missing or malformed reports explicitly remain unavailable. Raw test XML and its system
+properties are excluded. A later probe with another identity cannot explain the original
+failure. Preserve the uncertain intent and use report-only reconciliation; do not rerun an
+Agent or bypass positive attestation because a later probe succeeds.
+
 ## Upgrade, rollback and uninstall
 
 Drain admissions and prove existing workloads quiescent; preserve database, manager state, artifacts

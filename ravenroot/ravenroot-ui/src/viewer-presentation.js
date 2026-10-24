@@ -169,6 +169,8 @@ export function createViewerStylesheet(themeOrPalette = 'dark', mode = 'cyto',
     { selector: 'node[?bypassed], node[runtimeState="bypassed"]', style: {
       'border-style': 'dashed', 'border-color': node.system, 'border-width': 2.5,
     } },
+    { selector: 'node[?historyNotLoaded]', style: { 'border-style': 'dashed', 'border-width': 2, 'border-color': node.system } },
+    { selector: 'edge[?historyNotLoaded]', style: { 'line-style': 'dashed' } },
     { selector: 'node[runtimeState="active"]', style: {
       'border-color': palette.focus, 'border-width': 5,
       'underlay-color': palette.focus, 'underlay-opacity': 0.2, 'underlay-padding': 8,
@@ -211,6 +213,9 @@ export function createViewerStylesheet(themeOrPalette = 'dark', mode = 'cyto',
         ...(['ping', 'undefined'].includes(type) ? { 'line-style': 'dashed' } : {}),
         ...(type === 'ping' ? { 'line-dash-pattern': [4, 4] } : {}),
       } })),
+    { selector: 'edge[runtimeCount > 0]', style: {
+      'line-color': edge.completed, 'target-arrow-color': edge.completed, width: 3,
+    } },
     { selector: 'edge[?runtimeActive]', style: {
       width: 'mapData(runtimeRecent, 0, 8, 2, 8)',
       'line-color': palette.focus, 'target-arrow-color': palette.focus,

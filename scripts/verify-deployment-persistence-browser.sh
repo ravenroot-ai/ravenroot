@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# Real Chromium + JVM + SQLite proof for issue 464's durable Deployments workflow.
+# Real Chromium, JVM process restart and SQLite proof for deployment lifecycle and first Run.
 set -eu
 
 PROJECT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
@@ -13,7 +13,7 @@ echo "Running the real persisted deployment browser lifecycle..." >&2
 mvn -B -f "$REACTOR_DIR/pom.xml" \
   -pl ravenroot-server -am \
   -Dravenroot.deploymentPersistence.browserTest=true \
-  -Dtest=DeploymentLifecyclePersistenceBrowserTest \
+  -Dtest=DeploymentLifecyclePersistenceBrowserTest,FirstRunPersistenceBrowserTest,DeploymentHistoryBrowserTest \
   -Dsurefire.failIfNoSpecifiedTests=false \
   test
 

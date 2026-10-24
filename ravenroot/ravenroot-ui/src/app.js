@@ -1,3 +1,6 @@
+import { createDeploymentHistoryMonitor } from './embed-viewer-entry.js';
+import { mountCorrelationPreview } from './correlation-authoring.js';
+import { runOriginDeployment, persistedDeploymentRun, boundDeploymentNeedsCloseDecision, stopOriginDeployment, deploymentRunIsPending, observeOriginDeployment } from './deployment-run.js';
 import { sagaParticipant, sagaScopes, readSagaCatalogProperties } from './saga-authoring.js';
 import { chooseRepositoryDocument, managedRepositoryLaunch } from './repository-picker.js';
 import { uiMessage, uiComputed, isUiMessage, renderUiMessage, uiErrorMessage, uiMessageOf } from './ui-message.js';
@@ -835,6 +838,7 @@ let workspaceAuthority = Object.freeze({ state: 'unverified', client: null, scop
 const SESSION_ONLY_RUNTIME_EVENT_SCOPE = Object.freeze({ tenantId: null });
 
 function beginWorkspaceAuthority(client, state = 'pending') {
+  workspace.documents.forEach(retireDocumentHistory);
   startupImportController?.runtimePending();
   workspaceAuthority = Object.freeze({ state, client, scope: null,
     generation: workspaceAuthority.generation + 1 });
@@ -1023,7 +1027,7 @@ async function switchWorkspacePersistence(configuration, client) {
           name: stored.name, displayName: stored.displayName, graph: stored.graph,
           documentId: stored.documentId, tenantId: stored.tenantId, mode: stored.mode,
           provenance: stored.provenance, presentation: stored.presentation,
-          authoring: stored.authoring,
+          authoring: stored.authoring, deploymentRun: stored.deploymentRun,
         });
       }
       if (restored.activeDocumentId && workspace.activeId !== restored.activeDocumentId) {
@@ -1299,6 +1303,7 @@ function receiveHumanTaskProjection(state) {
   owner.humanTasks.attentionSignature = signature;
   owner.humanTasks.pageSignature = pageSignature;
   owner.humanTasks.projection = state;
+  refreshHistoryAttention(owner);
   if (changed) applyHumanTaskProjection(owner);
   if (pageChanged) renderSelectedHumanTasks(owner);
   if (changed && owner === workspace.active && state.kind === 'ready') {
@@ -3009,7 +3014,7 @@ function setGraphDocumentMaximized(document_, maximized) {
 }
 
 window.document.addEventListener('keydown', event => {
-  if (event.key !== 'Escape' || maximizedDocumentId === null) return;
+  if (event.key !== 'Escape' || maximizedDocumentId === null || event.target.closest?.('.doc-history-dialog')) return;
   const document_ = workspace.find(maximizedDocumentId);
   if (!document_) return;
   event.preventDefault();
@@ -3127,6 +3132,22 @@ function syncPaneHeaders() {
       lifecycle: deployment.state.lifecycle.toLowerCase(),
       continuity: deployment.state.continuity.toLowerCase(),
     }) : '';
+
+    let runBinding = header.querySelector('.doc-run-binding');
+    if (document_.deploymentRun) {
+      if (!runBinding) { runBinding = document.createElement('span'); runBinding.className = 'doc-run-binding'; runBinding.setAttribute('role', 'status'); runBinding.setAttribute('aria-live', 'polite'); header.append(runBinding); }
+      runBinding.textContent = uiText('workspace.run.attached', { deploymentId: document_.deploymentRun.deploymentId,
+        version: shortId(document_.deploymentRun.graphVersion) })
+        + (document_.deploymentRunStatus ? ` — ${uiText('workspace.run.runtimeState', { state: uiText(({ REGISTERED: 'workspace.run.state.REGISTERED', STARTING: 'workspace.run.state.STARTING', READY: 'workspace.run.state.READY', DEGRADED: 'workspace.run.state.DEGRADED', STOPPING: 'workspace.run.state.STOPPING', STOPPED: 'workspace.run.state.STOPPED', FAILED: 'workspace.run.state.FAILED', UNKNOWN: 'workspace.run.state.UNKNOWN' })[document_.deploymentRunStatus]) })}` : '');
+      runBinding.textContent += document_.deploymentRunStopPending ? ` — ${uiText('workspace.run.stopRequested')}` : '';
+      runBinding.textContent += document_.deploymentRunOperation === 'ACTIVATING' && !document_.deploymentRunStopPending ? ` — ${uiText('workspace.run.activating')}` : '';
+      runBinding.title = uiText('workspace.run.draftSeparate');
+      pane.dataset.deploymentId = document_.deploymentRun.deploymentId;
+      pane.dataset.deploymentVersion = document_.deploymentRun.graphVersion || '';
+      pane.dataset.deploymentRunPhase = document_.deploymentRun.phase;
+    } else {
+      runBinding?.remove(); delete pane.dataset.deploymentId; delete pane.dataset.deploymentVersion; delete pane.dataset.deploymentRunPhase;
+    }
 
     const label = header.querySelector('.doc-pane-name');
     label.textContent = name;
@@ -3673,12 +3694,13 @@ function initLoadedGraph(graph, currentStyle) {
 }
 
 function openDocument({ name = defaultDocumentName(), displayName, graph = null, documentId, tenantId,
-  mode = DOCUMENT_MODES.DRAFT, provenance = null, presentation = null, authoring = null } = {}) {
+  mode = DOCUMENT_MODES.DRAFT, provenance = null, presentation = null, authoring = null, deploymentRun = null } = {}) {
   const graphPresentation = graph && !presentation ? documentPresentationState({ graph }) : null;
   const document_ = addDocumentRecord(name, displayName || allocateDocumentDisplayName(name), {
     documentId, tenantId, mode, provenance,
     presentation: presentation || graphPresentation,
   });
+  document_.deploymentRun = persistedDeploymentRun(deploymentRun);
   if (authoring) Object.assign(document_.authoring, structuredClone(authoring));
   if (graph) {
     graphName = name;
@@ -3817,6 +3839,7 @@ function completeReplaceActiveDocument(target, graph, name) {
   destroyDocumentRenderer(target, 'replaced');
   detachExecution(target);
   target.incarnation = createDocumentIncarnation();
+  target.deploymentRun = null;
   target.visualGroupState = {};
   target.canvasState = null;
   target.viewStates = { design: null, monitoring: null };
@@ -3890,6 +3913,7 @@ function replaceActiveDocumentFromText(
 }
 
 function activateDocument(id) {
+  if (workspace.activeId !== id) retireDocumentHistory(workspace.active);
   finishVisualGroups(workspace.active);
   if (!workspace.find(id) || workspace.activeId === id) return workspace.activeId;
   if (maximizedDocumentId && maximizedDocumentId !== id) {
@@ -4783,6 +4807,7 @@ function registerCytoscapeRenderer(owner, target = owner?.cy) {
 }
 
 function destroyDocumentRenderer(owner, reason = 'destroyed') {
+  if (['closed', 'replaced', 'destroyed'].includes(reason)) retireDocumentHistory(owner);
   owner?.visualGroupsRenderer?.destroy();
   if (owner) owner.visualGroupsRenderer = null;
   if (edgeGestureSession?.owner === owner) cancelEdgeGesture({ clearMessage: true });
@@ -6079,6 +6104,7 @@ function setRenderMode(name, { skipDraftGuard = false } = {}) {
   const incoming = ensureModeViewStates(owner)[semanticMode];
   owner.visualGroupState = structuredClone(incoming?.visualGroupState || owner.visualGroupState || {});
   if (semanticMode === 'design') {
+    reconcileDocumentHistory(owner);
     stopElasticRendering(owner, 'mode-restored');
     target.nodes().unlock();
     layoutMode = incoming?.layoutMode && incoming.layoutMode !== 'elastic'
@@ -6095,7 +6121,7 @@ function setRenderMode(name, { skipDraftGuard = false } = {}) {
     owner.layoutMode = 'elastic';
     restoreMonitoringView(owner);
     target.nodes().lock();
-    startD3Elastic(owner, target, null, { startSimulation: false });
+    if (!reconcileDocumentHistory(owner)) startD3Elastic(owner, target, null, { startSimulation: false });
   }
   syncPaneLayout();
   syncLayoutChrome(owner);
@@ -6162,9 +6188,91 @@ function renderActiveMode({ skipDraftGuard = false } = {}) {
 // Normalizing the fields without reconciling that handle makes the radio truthful about state but
 // false about what is actually painted. This runs only after the target pane is visible, and only
 // when the semantic mode and renderer kind disagree; ordinary document switches do no work.
+function retireDocumentHistory(owner) {
+  owner?.historyMonitor?.destroy();
+  owner?.historyContainer?.remove(); owner?.historyDialog?.close(); owner?.historyDialog?.remove();
+  if (owner) { owner.historyMonitor = null; owner.historyContainer = null; owner.historyDialog = null; owner.historyBinding = null; }
+  owner?.pane?.classList.remove('doc-pane--history');
+}
+
+function refreshHistoryAttention(owner) {
+  const summary = owner.historyDialog?.querySelector('.doc-history-attention');
+  const button = owner.historyDialog?.querySelector('.doc-history-review-tasks');
+  if (!summary || !button) return;
+  const state = owner.humanTasks?.projection;
+  const total = state?.kind === 'ready' ? [...state.nodeCounts.values()].reduce((sum, row) => sum + row.pending, 0) : null;
+  const escalated = state?.kind === 'ready' ? [...state.nodeCounts.values()].reduce((sum, row) => sum + row.escalated, 0) : 0;
+  summary.textContent = total === null ? uiText('workspace.run.taskAttentionUnavailable') : uiText('workspace.run.taskAttention', { count: total, escalated });
+  button.hidden = !total;
+}
+
+function documentHistoryDraftNotice(owner) {
+  if (owner.mode !== DOCUMENT_MODES.DRAFT) return uiText('history.deployedOnly');
+  if (!owner.deploymentRun?.graphMl) return uiText('workspace.run.draftSeparate');
+  try {
+    const current = serializeGraphML(graphForAuthorizedExecution(owner, canonicalGraphSnapshot(owner.graph)));
+    return uiText(current === owner.deploymentRun.graphMl ? 'history.draftMatches' : 'history.draftChanged');
+  } catch { return uiText('workspace.run.draftSeparate'); }
+}
+
+function reconcileDocumentHistory(owner) {
+  if (owner !== workspace.active) return false;
+  const bound = owner?.deploymentRun || owner?.graph?.viewerBinding;
+  if (!bound?.deploymentId || !bound.graphVersion || !bound.incarnationId || owner.renderMode !== 'monitoring') {
+    retireDocumentHistory(owner); return false;
+  }
+  const client = runtimeClient, authority = workspaceAuthority, incarnation = owner.incarnation;
+  if (!client || !tenantAuthorityAllows(owner, client)) { retireDocumentHistory(owner); return true; }
+  const identity = `${bound.deploymentId}:${bound.incarnationId}:${bound.graphVersion}`;
+  if (owner.historyBinding !== identity) {
+    retireDocumentHistory(owner);
+    const dialog = window.document.createElement('dialog'); dialog.className = 'doc-history-dialog';
+    dialog.setAttribute('aria-label', uiText('history.title'));
+    const bar = window.document.createElement('nav'); bar.className = 'doc-history-bar';
+    const back = window.document.createElement('button'); back.type = 'button'; back.textContent = uiText('history.return');
+    const returnToGraph = () => { dialog.close(); if (workspace.active === owner) setRenderMode('design'); };
+    back.addEventListener('click', returnToGraph);
+    const notice = window.document.createElement('p'); notice.className = 'doc-history-draft'; notice.setAttribute('role', 'status');
+    const attention = window.document.createElement('p'); attention.className = 'doc-history-attention'; attention.setAttribute('role', 'status');
+    const reviewTasks = window.document.createElement('button'); reviewTasks.type = 'button'; reviewTasks.className = 'doc-history-review-tasks'; reviewTasks.textContent = uiText('workspace.run.reviewTasks');
+    reviewTasks.addEventListener('click', () => {
+      if (workspace.active !== owner || !tenantAuthorityAllows(owner)) return;
+      const nodeId = [...(owner.humanTasks?.projection?.nodeCounts || new Map())].find(([, count]) => count.pending > 0)?.[0];
+      returnToGraph();
+      const node = nodeId && owner.cy.getElementById(nodeId);
+      if (node?.length) { owner.cy.nodes().unselect(); node.select(); node.emit('tap'); }
+    });
+    bar.append(back, notice, attention, reviewTasks);
+    dialog.addEventListener('cancel', event => { event.preventDefault(); returnToGraph(); });
+    const container = window.document.createElement('section'); container.className = 'doc-history';
+    dialog.append(bar, container); window.document.body.append(dialog);
+    owner.historyDialog = dialog; owner.historyContainer = container; owner.historyBinding = identity;
+    const current = () => workspace.find(owner.id) === owner && owner.incarnation === incarnation
+      && owner.historyBinding === identity && runtimeClient === client && workspaceAuthority === authority && tenantAuthorityAllows(owner, client);
+    void client.deploymentView(bound.deploymentId).then(projection => {
+      if (!current()) return;
+      const source = projection.source;
+      if (source.deploymentId !== bound.deploymentId || source.incarnationId !== bound.incarnationId || source.graphVersion !== bound.graphVersion)
+        throw new Error('History source changed');
+      owner.historyMonitor = createDeploymentHistoryMonitor({ container, projection, isCurrent: current,
+        read: (query, options) => client.deploymentHistory(source, query, options), theme: applicationTheme, t: uiText });
+    }).catch(() => {
+      if (!current()) return;
+      const message = window.document.createElement('p'); message.textContent = uiText('history.failed');
+      const retry = window.document.createElement('button'); retry.type = 'button'; retry.textContent = uiText('history.retryView');
+      retry.addEventListener('click', () => { if (current()) { retireDocumentHistory(owner); reconcileDocumentHistory(owner); } });
+      container.replaceChildren(message, retry);
+    });
+  }
+  refreshHistoryAttention(owner);
+  owner.historyDialog.querySelector('.doc-history-draft').textContent = documentHistoryDraftNotice(owner);
+  owner.historyContainer.hidden = false; if (!owner.historyDialog.open) owner.historyDialog.showModal(); owner.pane.classList.add('doc-pane--history'); return true;
+}
+
 function reconcileActiveRenderModeRenderer() {
   const owner = workspace.active;
   if (!owner?.cy) return;
+  if (reconcileDocumentHistory(owner)) return;
   const kind = rendererFor(owner)?.kind;
   if (renderMode === 'monitoring' && kind !== 'elastic') {
     owner.layoutMode = 'elastic';
@@ -7164,12 +7272,24 @@ function runAfterInspectorDraft(action, {
   return deferredResult;
 }
 
+function startCorrelationDescriptor(kind) {
+  const shared = catalogDescriptor('correlation-derive');
+  return kind === 'START' && shared ? { ...shared, displayName: uiText('correlation.entry.title'),
+    properties: shared.properties.filter(property => property.name.startsWith('correlation.')) } : null;
+}
+
+function nodeEditorCatalogDescriptor(descriptor, kind) {
+  return kind === 'START' ? null : descriptor;
+}
+
 function renderNodeForm(model, creating) {
   contextualHelp.dismiss();
   const descriptor = catalogDescriptor(model.behavior);
-  const catalogEditorDescriptor = programCatalogEditorDescriptor(descriptor);
+  const catalogEditorDescriptor = programCatalogEditorDescriptor(nodeEditorCatalogDescriptor(descriptor, model.kind));
+  const startMapping = startCorrelationDescriptor(model.kind);
   const catalogFieldOwner = { documentId: workspace.activeId, nodeId: model.id };
   const catalogNames = new Set((descriptor?.properties || []).map(property => property.name));
+  for (const property of startMapping?.properties || []) catalogNames.add(property.name);
   // `runtime.nature` (or whatever `descriptor.natureProperty` names) is platform-owned, never a
   // behavior property (see NodeRuntimeNatureProperty's javadoc) — it has its own dedicated control
   // below and must never also surface as a free-form "additional property" row, which would give the
@@ -7221,11 +7341,13 @@ function renderNodeForm(model, creating) {
       <div id="node-nature-section">${natureFieldHtml(descriptor, model)}</div>
       <div id="node-max-concurrency-section">${maxConcurrencyFieldHtml(descriptor, model)}</div>
       <div id="node-join-section">${joinFieldHtml(graphData, model)}</div>
+      <div id="node-correlation-section">${catalogPropertyFieldsHtml(startMapping, model.properties || {}, catalogFieldOwner)}</div>
       <div id="catalog-properties">${catalogPropertyFieldsHtml(
         sagaOrdinaryDescriptor(catalogEditorDescriptor), model.properties || {}, catalogFieldOwner)}</div>
       <div id="node-saga-section">${sagaFieldsHtml(catalogEditorDescriptor, model, catalogFieldOwner)}</div>
       <div id="program-workspace">${programWorkspaceContentHtml(descriptor, model)}</div>
       <div id="additional-property-groups">${additionalPropertyGroupsHtml(additionalGroups.groups)}</div>
+      <section id="node-correlation-preview"></section>
       ${propertyEditorHtml('node-properties', extras)}
       <div class="editor-actions">
         ${creating ? '' : `<button class="btn danger" type="button" id="delete-node">${escapeHtml(uiText("workspace.app.delete.node"))}</button>`}
@@ -7233,10 +7355,22 @@ function renderNodeForm(model, creating) {
       </div>
     </form>`;
   const form = document.getElementById('node-editor');
+  let correlationPreview = { reconcile() {} };
   form._localeRender = () => renderNodeForm(model, creating);
+  const renderCorrelationCatalogControls = (selected, values) => {
+    const kind = form.elements.kind.value;
+    const effective = programCatalogEditorDescriptor(nodeEditorCatalogDescriptor(selected, kind));
+    document.getElementById('catalog-properties').innerHTML = catalogPropertyFieldsHtml(
+      sagaOrdinaryDescriptor(effective), values, catalogFieldOwner);
+    document.getElementById('node-saga-section').innerHTML = sagaFieldsHtml(effective, { properties: values }, catalogFieldOwner);
+    bindSagaFields(form);
+    document.getElementById('node-correlation-section').innerHTML = catalogPropertyFieldsHtml(startCorrelationDescriptor(kind), values, catalogFieldOwner);
+    correlationPreview.reconcile();
+  };
   form.elements.catalogBehavior.addEventListener('change', event => {
     const selected = catalogDescriptor(event.target.value);
     if (!selected) return;
+    const sharedMapping = Object.fromEntries(Object.entries(readCurrentCatalogPropertyValues(form)).filter(([name]) => name.startsWith('correlation.')));
     form.elements.kind.value = 'BEHAVIOR';
     form.elements.behavior.value = selected.behavior;
     if (Array.from(form.elements.nodeType.options).some(option => option.value === selected.visualType)) {
@@ -7256,10 +7390,7 @@ function renderNodeForm(model, creating) {
     // condition that decides whether the bypass control may exist at all. Rebuilt for the same reason
     // the nature control is, and against the CURRENT form state rather than the loaded model.
     renderBypassSection(form, model);
-    document.getElementById('catalog-properties').innerHTML = catalogPropertyFieldsHtml(
-      sagaOrdinaryDescriptor(programCatalogEditorDescriptor(selected)), {}, catalogFieldOwner);
-    document.getElementById('node-saga-section').innerHTML = sagaFieldsHtml(selected, { properties: {} }, catalogFieldOwner);
-    bindSagaFields(form);
+    renderCorrelationCatalogControls(selected, sharedMapping);
     document.getElementById('program-workspace').innerHTML = programWorkspaceContentHtml(selected, model);
     document.getElementById('additional-property-groups').innerHTML = additionalPropertyGroupsHtml(
       splitAdditionalPropertyGroups(selected, model.properties || {}, model.propertyTypes || {}).groups);
@@ -7268,7 +7399,11 @@ function renderNodeForm(model, creating) {
   // `NodeBypassValidator` refuses the key on every non-BEHAVIOR node, `false` included, so
   // changing Kind changes whether the control may be offered. Re-rendered rather than left stale: a
   // checkbox surviving a switch to END would let a save write a graph the runtime refuses to load.
-  form.elements.kind.addEventListener('change', () => renderBypassSection(form, model));
+  form.elements.kind.addEventListener('change', () => {
+    renderBypassSection(form, model);
+    const values = readCurrentCatalogPropertyValues(form);
+    renderCorrelationCatalogControls(catalogDescriptor(form.elements.behavior.value), values);
+  });
   bindBypassField();
   bindNatureField();
   bindMaxConcurrencyField();
@@ -7344,6 +7479,17 @@ function renderNodeForm(model, creating) {
   });
   bindProgramWorkspace(form, model);
   bindInspectorDraft(form, model, 'node', creating);
+  const previewOwner = workspace.active, previewIncarnation = previewOwner.incarnation;
+  correlationPreview = mountCorrelationPreview({ container: document.getElementById('node-correlation-preview'), form,
+    properties: () => readCatalogPropertyEditor(form).properties,
+    isCurrent: () => workspace.active === previewOwner && previewOwner.incarnation === previewIncarnation && form.isConnected,
+    preview: async (properties, sample, options) => {
+      const client = runtimeClient, authority = workspaceAuthority;
+      if (!client || !tenantAuthorityAllows(previewOwner, client)) throw new Error('No current authoring service');
+      const result = await client.previewCorrelation(properties, sample, options);
+      if (client !== runtimeClient || authority !== workspaceAuthority) throw new DOMException('Retired authoring authority', 'AbortError');
+      return result;
+    } });
 }
 
 function catalogDescriptor(behavior) {
@@ -12234,6 +12380,11 @@ function stopCurrentSourceSession() {
   if (!tenantAuthorityAllows(workspace.active)) {
     return showInspectorMessage(uiText("workspace.notice.wait.for.this.document.workspace.authority.to.be.verified"));
   }
+  if (boundDeploymentNeedsCloseDecision(workspace.active)) {
+    const owner = workspace.active;
+    void stopDocumentRuntime(owner).finally(() => { syncPaneHeaders(); refreshCommands(); });
+    syncPaneHeaders(); refreshCommands(); return true;
+  }
   if (!sourceSessionIsActive(activeSourceSession)) {
     return showInspectorMessage(uiText("workspace.notice.no.process.local.source.session.is.active.for.this"));
   }
@@ -12726,6 +12877,46 @@ async function presentRuntimeRefusal(owner, finding, title = uiMessage('workspac
   await focusRuntimeFinding(owner, finding);
 }
 
+async function runCapturedDocumentDeployment(owner, client, { graphMl, payload, displayName, attachment }) {
+  const authority = workspaceAuthority, scope = activeWorkspaceScope, persistenceGeneration = workspacePersistenceGeneration;
+  const incarnation = owner.incarnation;
+  const current = () => workspace.find(owner.id) === owner && owner.incarnation === incarnation
+    && workspaceAuthority === authority && tenantAuthorityAllows(owner, client)
+    && scope === activeWorkspaceScope && persistenceGeneration === workspacePersistenceGeneration;
+  const persist = async () => {
+    if (!current() || !scope || !workspacePersistenceWritable || workspacePersistenceSuspended
+        || owner.tenantId !== scope.tenantId) throw productError('workspace.run.persistenceRequired', new Error('RUN_STORAGE_UNAVAILABLE'));
+    scheduleWorkspacePersistence(); const requiredRevision = workspacePersistenceRevision;
+    await flushWorkspacePersistence();
+    if (!current() || !workspacePersistenceWritable || workspacePersistedRevision < requiredRevision)
+      throw productError('workspace.run.persistenceRequired', new Error('RUN_STORAGE_NOT_COMMITTED'));
+  };
+  if (owner === workspace.active) addActivityMessage(uiMessage('workspace.run.reconciling'), uiMessage('workspace.run.draftSeparate'));
+  let result;
+  try { result = await runOriginDeployment(owner, { client, serviceUrl: scope?.serviceUrl || normalizedWorkspaceServiceUrl(client),
+    tenantId: owner.tenantId, graphMl, inputJson: JSON.stringify(payload), attachment,
+    persist, isCurrent: current, onPhase: () => { syncPaneHeaders(); refreshCommands(); } }); }
+  catch (error) {
+    void observeOriginDeployment(owner, { client, isCurrent: current }).catch(() => {}).finally(() => {
+      if (current()) { syncPaneHeaders(); refreshCommands(); }
+    });
+    throw error;
+  }
+  if (!current()) return false;
+  if (result.stoppedBeforeInitial) { syncPaneHeaders(); refreshCommands(); return true; }
+  owner.humanTasks.deploymentId = result.intent.deploymentId; owner.humanTasks.graphVersion = result.intent.graphVersion;
+  owner.provenance.deploymentId = result.intent.deploymentId; owner.provenance.sourceGraphVersion = result.intent.graphVersion;
+  if (result.intent.traversalId && owner.execution.executionId !== result.intent.traversalId) {
+    setDocumentExecution(owner, result.intent.traversalId, result.intent.graphVersion, client, result.intent.processInstanceId);
+    void reconcileTestCompletion(owner, result.intent.traversalId, client);
+  }
+  void configureHumanTasks(owner); reconcileDocumentHistory(owner); owner.historyMonitor?.refresh?.();
+  syncPaneHeaders(); scheduleWorkspacePersistence();
+  if (owner === workspace.active) { refreshCommands(); addActivityMessage(uiMessage('workspace.run.ready'), uiMessage('workspace.run.attached', {
+    deploymentId: result.intent.deploymentId, version: shortId(result.intent.graphVersion) }), 'completed'); }
+  return true;
+}
+
 async function playGraph(mode = 'test') {
   const owner = workspace.active;
   const ownerGraph = graphData;
@@ -12733,8 +12924,20 @@ async function playGraph(mode = 'test') {
   if (!tenantAuthorityAllows(owner)) {
     return showInspectorMessage(uiText("workspace.notice.wait.for.this.document.workspace.authority.to.be.verified.3"));
   }
+  const originIncarnation = owner.incarnation;
+  if (workspace.active === owner && documentIsEditable(owner)) syncGraphPositions();
+  const submissionGraph = canonicalGraphSnapshot(ownerGraph);
+  const programSignature = programNodes(ownerGraph).length ? programBuildPlan(owner).signature : null;
+  let graphMl = ownerGraph.format === 'deployment' ? '' : serializeGraphML(graphForAuthorizedExecution(owner, submissionGraph));
+  const payload = document.getElementById('execution-payload').value;
+  const displayName = owner.displayName;
+  const ownerCy = owner.cy || cy;
+  const ownerLayoutMode = owner.layoutMode;
+  const ownerVisualStyle = owner.visualStyle;
+  const attachment = !owner.deploymentRun && owner.provenance?.deploymentId && owner.provenance?.sourceGraphVersion
+    ? { deploymentId: owner.provenance.deploymentId, graphVersion: owner.provenance.sourceGraphVersion } : null;
   owner.execution.intentGeneration += 1;
-  if (programNodes(ownerGraph).length) {
+  if (programNodes(ownerGraph).length && !(mode === 'run' && (owner.deploymentRun || attachment))) {
     const ready = await ensureProgramGraphReady(owner, { automatic: true });
     if (!ready) {
       const phases = programReadiness(owner).phases;
@@ -12748,6 +12951,9 @@ async function playGraph(mode = 'test') {
         'failed');
       return;
     }
+    if (workspace.find(owner.id) !== owner || owner.incarnation !== originIncarnation
+        || programBuildPlan(owner).signature !== programSignature) return;
+    graphMl = serializeGraphML(graphForAuthorizedExecution(owner, submissionGraph));
   }
   const flight = acquireExecutionCommand(owner.execution);
   if (!flight) {
@@ -12756,15 +12962,9 @@ async function playGraph(mode = 'test') {
     return;
   }
 
-  // Everything a later POST can consume is captured before the first await. The graph is serialized
-  // now, not read from whichever document may become active while a delayed terminal GET is pending.
-  syncGraphPositions();
-  const graphMl = serializeGraphML(graphForAuthorizedExecution(owner, ownerGraph));
-  const payload = document.getElementById('execution-payload').value;
-  const displayName = graphDisplayName;
-  const ownerCy = cy;
-  const ownerLayoutMode = layoutMode;
-  const ownerVisualStyle = visualStyle;
+  // The origin graph and input were captured before readiness. Only governed artifact references
+  // from the same unchanged program plan were overlaid after readiness.
+
   renderWorkflowValidationAdvisory(ownerGraph, owner);
   if (mode === 'run' && (!nodeCatalogLoaded || nodeCatalogFailure)) {
     releaseExecutionCommand(flight);
@@ -12776,8 +12976,8 @@ async function playGraph(mode = 'test') {
   if (!runtimeClient) connectRuntime();
   const executionClient = runtimeClient;
   try {
-    const inspection = await executionClient.inspectGraph(graphMl,
-      sourceCount > 0 ? 'SOURCE_SESSION' : 'EXECUTION');
+    const inspection = graphMl && !(mode === 'run' && (owner.deploymentRun || attachment))
+      ? await executionClient.inspectGraph(graphMl, mode === 'run' ? 'LOCAL_DEPLOYMENT' : 'EXECUTION') : { valid: true };
     if (!inspection.valid && inspection.findings[0]) {
       releaseExecutionCommand(flight);
       await presentRuntimeRefusal(owner, inspection.findings[0], uiMessage('workspace.refusal.graphAdmission'));
@@ -12794,14 +12994,7 @@ async function playGraph(mode = 'test') {
       return;
     }
   }
-  // Run has two meanings. A graph with an
-  // effective SOURCE starts a local listener session (unchanged below). Every other graph gets
-  // a real one-shot execution with effects (mode=run). The deployments panel lets that graph also be
-  // "registered and controlled as a local deployment" without
-  // hijacking this button. This is the Deployments-window contract.
-  const confirmation = sourceCount > 0
-    ? uiText("workspace.execution.localSession.confirm", { name: displayName, count: sourceCount })
-    : uiText("workspace.execution.run.confirm", { name: displayName });
+  const confirmation = uiText('workspace.run.confirmDeployment', { name: displayName });
   if (mode === 'run' && !globalThis.confirm(confirmation)) {
     releaseExecutionCommand(flight);
     return;
@@ -12810,37 +13003,22 @@ async function playGraph(mode = 'test') {
     releaseExecutionCommand(flight);
     return;
   }
-  const ownerStillActive = workspace.activeId === owner.id && workspace.find(owner.id) === owner
-    && tenantAuthorityAllows(owner, executionClient);
+  const ownerStillActive = (mode === 'run' || workspace.activeId === owner.id) && workspace.find(owner.id) === owner
+    && owner.incarnation === originIncarnation && tenantAuthorityAllows(owner, executionClient);
   if (!ownerStillActive || !executionCommandIsCurrent(flight)) {
     releaseExecutionCommand(flight);
     return;
   }
 
-  // Only a graph with an effective SOURCE
-  // starts a listener session here; a source-less Run falls through to the one-shot submission below,
-  // as required by the confirmation-text contract above.
-  if (sourceCount > 0) {
+  if (mode === 'run') {
     try {
-      // The canvas is cleared for a listener session exactly as it is for a run. Before this, a
-      // source start left the previous run's colours in place -- and once a session can actually
-      // paint, stale paint is no longer harmless decoration but a claim about traffic that is not
-      // this session's.
-      resetRuntimeState(owner, ownerCy, ownerGraph, ownerLayoutMode, ownerVisualStyle);
-      await startSourceSession(owner, executionClient, graphMl, sourceCount);
+      await runCapturedDocumentDeployment(owner, executionClient, { graphMl, payload, displayName, attachment });
     } catch (error) {
-      // startSourceSession normally converts request failures to an honest, fenced lifecycle state.
-      // Keep this guard for unexpected programming failures without mutating an unrelated binding.
-      if (workspace.find(owner.id) === owner && sourceSessionIsActive(owner.sourceSession)) {
-        const token = captureSourceSessionToken(owner.sourceSession);
-        updateSourceSession(owner, {
-          state: 'UNKNOWN', sourceCount: owner.sourceSession.sourceCount, diagnostic: '',
-        }, token, { observationUnavailable: true });
+      if (workspace.find(owner.id) === owner && owner === workspace.active) {
+        if (error?.finding) await presentRuntimeRefusal(owner, error.finding, uiMessage('workspace.app.execution.refused'));
+        else addActivityMessage(uiMessage('workspace.run.failed'), uiErrorMessage(error), 'failed');
       }
-    } finally {
-      releaseExecutionCommand(flight);
-      refreshCommands();
-    }
+    } finally { releaseExecutionCommand(flight); syncPaneHeaders(); refreshCommands(); }
     return;
   }
 
@@ -12944,6 +13122,11 @@ function handleRuntimeEvent(event, client = runtimeClient) {
     if (isActive && (binding === event.executionId || binding === PENDING_EXECUTION)) {
       refreshCommands();
     }
+  }
+
+  if (target.deploymentRun && (target.deploymentRun.deploymentId === event.deploymentId
+      || target.sourceSession.processOwners.get(event.processInstanceId)?.deploymentBindingToken)) {
+    target.historyMonitor?.notify?.(event); return;
   }
 
   // Past this point the event paints nodes, and it paints them on the document that owns the run —
@@ -14523,6 +14706,7 @@ const capturedDeleteShortcutEvents = new WeakSet();
 function executeGlobalShortcut(event, expectedCommandId = '') {
   const id = commandRegistry.matchShortcut(event, commandContext(), 'global');
   if (!id || (expectedCommandId && id !== expectedCommandId)) return false;
+  if (event.target.closest?.('.deployment-history') && /^(edit\.|insert\.|node\.|edge\.|layout\.)/.test(id)) return false;
   event.preventDefault();
   executeCommand(id, { event, control: event.target });
   return true;
@@ -15465,7 +15649,9 @@ function renderCloseAllList(documents, kind) {
     const item = document.createElement('li');
     if (kind === 'sessions') {
       const count = document_.sourceSession.sourceCount;
-      item.textContent = uiText(count === 1 ? 'closeAll.sessions.item.one' : 'closeAll.sessions.item.many', {
+      item.textContent = document_.deploymentRun
+        ? uiText('workspace.run.closeItem', { name: document_.displayName, deploymentId: document_.deploymentRun.deploymentId })
+        : uiText(count === 1 ? 'closeAll.sessions.item.one' : 'closeAll.sessions.item.many', {
         name: document_.displayName,
         count,
       });
@@ -15612,8 +15798,7 @@ async function commitCloseAllDocuments() {
       stage = 'stop';
       for (const owner of classified.activeSessions) {
         if (!resolveDocumentCloseSnapshot(workspace, pending.snapshot).includes(owner)) continue;
-        const stopped = sourceSessionIsActive(owner.sourceSession)
-          ? await stopActiveSourceSession(owner) : true;
+        const stopped = await stopDocumentRuntime(owner);
         if (pendingCloseAllDocuments !== pending || pending.cancelled) return false;
         if (!stopped) {
           throw productError("workspace.error.app.source.session.did.not.stop", new Error('Source session did not stop.'));
@@ -15676,26 +15861,11 @@ function handleCloseAllDocumentsAction(action) {
   return true;
 }
 
-/**
- * Closing is never Stop, and that difference has to reach the operator as a real
- * choice, not merely a code comment on {@link closeDocument}. A document with an active local
- * listener session started by Run gets an explicit dialog naming the distinction before the close
- * proceeds; a document with no active session closes immediately.
- * Reached both directly (no unsaved changes) and after the unsaved-changes dialog resolves
- * (save/discard), so the two axes -- persistence of edits, lifecycle of a server-side session -- are
- * asked about independently rather than folded into one dialog that could not state either clearly.
- *
- * This is strictly about `owner.sourceSession`, which exists only for a graph with an
- * effective SOURCE (Run's other branch is a one-shot execution with no ongoing session to ask about).
- * A deployment registered through the separate Deployments panel (see `deployment-panel.js`) has no
- * document tying it to this dialog at all -- it is tenant-scoped, not document-scoped, so closing any
- * document neither stops nor undeploys it. That is also why this dialog offers no Undeploy action:
- * undeploy exists only on that panel, next to the deployment it removes, never behind a document close.
- */
+/** Closing detaches observation. Only the explicit Stop choice controls a captured server binding. */
 function proceedToCloseDocument(id, origin) {
   const target = workspace.find(id);
   if (!target) return false;
-  if (!sourceSessionIsActive(target.sourceSession)) return completeCloseDocument(id);
+  if (!sourceSessionIsActive(target.sourceSession) && !boundDeploymentNeedsCloseDecision(target)) return completeCloseDocument(id);
   return openActiveDeploymentCloseDialog({ documentId: id, origin });
 }
 
@@ -16050,12 +16220,36 @@ async function publishedArtifacts() {
   } catch (error) { showInspectorMessage(uiErrorReason(error) || uiText("workspace.notice.the.published.version.could.not.be.deployed")); return false; }
 }
 
+async function stopDocumentRuntime(owner) {
+  if (boundDeploymentNeedsCloseDecision(owner)) {
+    const client = runtimeClient, authority = workspaceAuthority;
+    try {
+      const stopped = await stopOriginDeployment(owner, { client,
+        isCurrent: () => workspaceAuthority === authority
+          && tenantAuthorityAllows(owner, client)
+          && normalizedWorkspaceServiceUrl(client) === owner.deploymentRun?.serviceUrl,
+        reason: status => globalThis.prompt(uiText('workspace.deployment.panel.why.should', {
+          label: status.deploymentId, action: uiText('workspace.deployment.action.stop') })),
+      });
+      if (!stopped) return false;
+    } catch (error) {
+      owner.deploymentRunStatus = 'UNKNOWN';
+      void observeOriginDeployment(owner, { client, isCurrent: () => workspaceAuthority === authority && tenantAuthorityAllows(owner, client) })
+        .catch(() => {}).finally(() => { syncPaneHeaders(); refreshCommands(); });
+      if (owner === workspace.active) addActivityMessage(uiMessage('workspace.run.stopFailed'), uiErrorMessage(error), 'failed');
+      return false;
+    }
+  }
+  return sourceSessionIsActive(owner.sourceSession) ? stopActiveSourceSession(owner) : true;
+}
+
 function openActiveDeploymentCloseDialog({ documentId, origin }) {
   const target = workspace.find(documentId);
   if (!target) return false;
-  pendingActiveDeploymentClose = { documentId, origin };
+  pendingActiveDeploymentClose = { documentId, origin, target, incarnation: target.incarnation, binding: target.deploymentRun };
   const count = target.sourceSession.sourceCount;
   document.getElementById('active-deployment-description').textContent =
+    target.deploymentRun ? uiText('workspace.run.closeDescription', { name: target.displayName, deploymentId: target.deploymentRun.deploymentId }) :
     uiText("workspace.app.closing.value1.only.stops.watching.it.from", { displayName: target.displayName })
     + uiText("workspace.app.session.value1.inbound.source.node.value2.scope", { count })
     + uiText("workspace.app.running.in.this.server.process.until.you");
@@ -16076,14 +16270,16 @@ function closeActiveDeploymentDialog(outcome) {
     return;
   }
   const target = workspace.find(pending.documentId);
-  if (!target) return;
+  if (!target || target !== pending.target || target.incarnation !== pending.incarnation
+      || target.deploymentRun !== pending.binding) return;
   if (outcome === 'stop-and-close') {
     // Stop is claimed here, on the still-open document, and only then does the close proceed --
     // matching `stopActiveSourceSession`'s own token discipline: closing first would abort the poll
     // controller closeDocument itself owns, but the stop request it kicks off here is unaffected by
     // that abort (see `sourceSessionCleanupIsCurrent`, which does not depend on the pollController).
-    void stopActiveSourceSession(target).then(stopped => {
-      if (stopped) completeCloseDocument(pending.documentId);
+    void stopDocumentRuntime(target).then(stopped => {
+      if (stopped && workspace.find(target.id) === target && target.incarnation === pending.incarnation
+          && target.deploymentRun === pending.binding) completeCloseDocument(pending.documentId);
       else if (pending.origin?.isConnected) pending.origin.focus();
     });
     return;
@@ -16174,11 +16370,15 @@ const commandActions = {
 let commandRegistry = createCommandRegistry(createAppCommands(commandActions, { t: uiText }));
 
 function commandContext() {
+  const owner = workspace.active;
   const history = editHistory.state();
   const transientRunning = Boolean(activeExecutionId) && activeExecutionId !== PENDING_EXECUTION
     && !finishedExecutions.has(activeExecutionId);
   const sourceSessionActive = sourceSessionIsActive(activeSourceSession);
-  const running = transientRunning || sourceSessionActive;
+  const boundDeploymentActive = boundDeploymentNeedsCloseDecision(workspace.active)
+    && !['STOPPED', 'FAILED'].includes(owner.deploymentRunStatus);
+  const running = transientRunning || sourceSessionActive || deploymentRunIsPending(workspace.active)
+    || owner?.deploymentRunStopPending || owner?.deploymentRunStatus === 'UNKNOWN';
   const selectedNodes = cy?.nodes(':selected');
   const groupMetadata = readVisualGroups(graphData);
   const selectedReal = selectedRealNodeIds();
@@ -16235,8 +16435,8 @@ function commandContext() {
     transientRunning,
     executionPaused: activeExecutionPaused,
     executionCommandInFlight: activeExecutionCommandInFlight,
-    sourceSessionActive,
-    sourceSessionStopInFlight: Boolean(activeSourceSession?.stopPromise),
+    sourceSessionActive: sourceSessionActive || boundDeploymentActive,
+    sourceSessionStopInFlight: Boolean(activeSourceSession?.stopPromise || owner?.deploymentRunStopPending),
     executionUnknown: activeExecutionReconciliation === 'unknown',
     hasToken: hasRuntimeToken,
     leftCollapsed: Boolean(panelLayout.zones.left.collapsed),
@@ -16752,6 +16952,7 @@ document.addEventListener('input', event => {
 // The panes sit INSIDE this element, so a pane that holds focus still delivers those keys here:
 // the contract is untouched by the pane layer rather than reimplemented beside it.
 document.getElementById('cy-wrap').addEventListener('keydown', event => {
+  if (event.target.closest?.('.deployment-history')) return;
   if (layoutBusy
       && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter', 'e', 'E', 'r', 'R'].includes(event.key)) {
     event.preventDefault();
@@ -17255,7 +17456,12 @@ uiLocalization.subscribe(() => {
       ? uiErrorReason(invalidStartupImportError) : uiText("workspace.app.the.graph.url.is.invalid");
   }
   drawingModelController?.refreshLocale?.();
-  workspace.documents.forEach(owner => owner.visualGroupsRenderer?.refreshLocale?.());
+  workspace.documents.forEach(owner => { owner.visualGroupsRenderer?.refreshLocale?.(); owner.historyMonitor?.refreshLocale?.();
+    if (owner.historyDialog) { owner.historyDialog.setAttribute('aria-label', uiText('history.title'));
+      owner.historyDialog.querySelector('.doc-history-bar button').textContent = uiText('history.return');
+      owner.historyDialog.querySelector('.doc-history-draft').textContent = documentHistoryDraftNotice(owner);
+      owner.historyDialog.querySelector('.doc-history-review-tasks').textContent = uiText('workspace.run.reviewTasks'); refreshHistoryAttention(owner); }
+  });
   refreshCommands();
   renderShortcutHelp();
   refreshActivityLocale();

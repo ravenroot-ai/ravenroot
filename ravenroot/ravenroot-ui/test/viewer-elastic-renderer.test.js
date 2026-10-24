@@ -128,12 +128,12 @@ describe('shared D3 Elastic renderer', () => {
     expect(document.querySelector('[aria-label="Expand visual group One, 2 members"]')
       .getAttribute('data-member-edge-pulses')).toBe('0');
     for (const id of ['external', 'between']) {
-      expect(Number(projected(id).getAttribute('stroke-width'))).toBe(1.8);
+      expect(Number(projected(id).getAttribute('stroke-width'))).toBe(3);
       expect(projected(id).classList.contains('d3-edge--active')).toBe(false);
     }
     renderer.setVisualGroups({ groups, state: { g1: { collapsed: false }, g2: { collapsed: false } }, animate: false });
     renderer.setVisualGroups({ groups, state: {}, selectedGroupId: 'g1', animate: false });
-    expect(Number(projected('between').getAttribute('stroke-width'))).toBe(1.8);
+    expect(Number(projected('between').getAttribute('stroke-width'))).toBe(3);
     const selectedSummary = document.querySelector('[aria-label="Expand visual group One, 2 members"]');
     renderer.updateEdgeFlow('internal', { recent: 1, count: 2 }, { reducedMotion: true });
     expect(selectedSummary.getAttribute('data-selected')).toBe('true');

@@ -242,3 +242,18 @@ disposable RabbitMQ integration verifies competing Consumers, independent topic 
 filters, explicit cleanup, offline loss, fresh reconnect queues, missing-exchange failure and both
 Producer and Publisher wire paths. Operators should still verify their TLS, credentials, ACL, heartbeat,
 QoS and DLX policy against their broker environment.
+
+### Explicit application correlation headers
+
+The publisher exposes the optional `correlation.outgoing.*Header` controls described in
+[Business context operations](../../../docs/reference/business-correlation-operations.md).
+Use a dedicated approved header such as `X-Business-Operation`; AMQP `messageId`, `correlationId`
+and `replyTo` keep their transport meaning. The consumer operator policy must allow the same exact
+header name, and an authored `correlation.selector=/headers/X-Business-Operation` selects the business
+identity explicitly. No body or property is implicitly interpreted as an application ID.
+
+The official RabbitMQ adapter projects valid UTF-8 AMQP long-string header values as text.
+Earlier builds exposed those values as Base64 objects after erasing the wire text type.
+Binary AMQP byte-array headers and malformed UTF-8 or control-bearing long strings remain explicit Base64 objects;
+a text identity selector refuses them. Native header/body bounds and consumer custody rules remain
+in force. Outgoing mappings do not expand the operator allowlist or connector limits.

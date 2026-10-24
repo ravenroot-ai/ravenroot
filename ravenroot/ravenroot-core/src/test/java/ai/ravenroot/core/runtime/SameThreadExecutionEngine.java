@@ -34,6 +34,11 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 final class SameThreadExecutionEngine implements ExecutionEngine {
     private final Map<NodeRef, RavenNode> nodes = new ConcurrentHashMap<>();
+    private final Scheduler testScheduler;
+
+    SameThreadExecutionEngine() { this((delay, task) -> () -> true); }
+    SameThreadExecutionEngine(Scheduler testScheduler) { this.testScheduler = java.util.Objects.requireNonNull(testScheduler); }
+
 
     @Override
     public String id() {
@@ -47,7 +52,7 @@ final class SameThreadExecutionEngine implements ExecutionEngine {
 
     @Override
     public Scheduler scheduler() {
-        return (delay, task) -> () -> true;
+        return testScheduler;
     }
 
     @Override

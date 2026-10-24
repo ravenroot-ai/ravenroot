@@ -162,6 +162,31 @@ public interface CliBackend {
      * id are the identical nondisclosing failure on both transports -- neither this method nor its
      * caller can tell them apart, by construction.
      */
+    /** Exact-bound read-only deployment history; returns the shared public JSON page. */
+    /** Evaluates caller-supplied mapping controls and sample through the connected runtime policy. */
+    default String previewCorrelation(byte[] document) throws IOException {
+        throw new IOException("correlation preview requires a capable backend");
+    }
+    default String deploymentHistory(ai.ravenroot.api.history.DeploymentHistorySource source,
+            Map<String, String> query) throws IOException {
+        throw new IOException("deployment history requires a capable backend");
+    }
+    /** Admits or reconciles the permanent original START; request IDs never grant another START. */
+    default String initialStart(ai.ravenroot.api.history.DeploymentHistorySource source,
+            String requestId, byte[] input) throws IOException {
+        throw new IOException("initial START requires a capable backend");
+    }
+
+    /** Explicitly restores an exact existing durable registration without creating another one. */
+    default DeploymentView restoreDeployment(String deploymentId, String registrationIdentity, String graphVersion) throws IOException {
+        throw new IOException("durable restore requires a capable backend");
+    }
+    /** Reads the permanent original START identities without admitting another traversal. */
+    default String observeInitialStart(ai.ravenroot.api.history.DeploymentHistorySource source,
+            String requestId) throws IOException {
+        throw new IOException("initial START observation requires a capable backend");
+    }
+
     DeploymentView deployment(String deploymentId) throws IOException;
 
     /**
@@ -509,7 +534,11 @@ public interface CliBackend {
      */
     record DeploymentView(String deploymentId, String state, int sourceCount, String scope,
                           String diagnostic, Long deploymentGeneration, String commandOutcome,
-                          String commandDetail) {
+                          String commandDetail, String registrationIdentity) {
+        public DeploymentView(String deploymentId, String state, int sourceCount, String scope,
+                              String diagnostic, Long deploymentGeneration, String commandOutcome, String commandDetail) {
+            this(deploymentId, state, sourceCount, scope, diagnostic, deploymentGeneration, commandOutcome, commandDetail, null);
+        }
         public DeploymentView(String deploymentId, String state, int sourceCount, String scope,
                               String diagnostic) {
             this(deploymentId, state, sourceCount, scope, diagnostic, null, null, null);

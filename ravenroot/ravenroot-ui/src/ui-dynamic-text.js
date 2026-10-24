@@ -1151,11 +1151,6 @@ export const DYNAMIC_ENGLISH_MESSAGES = Object.freeze({
   "workspace.workflow.validation.failureRouteOutcome": "Edge {id} declares {property}={value} together with the explicit outcome '{outcome}'; an edge is a failure route or an outcome edge, never both",
   "workspace.execution.correctDeclaredReason": "Correct the source configuration or runtime authority named by this declared reason, then retry.",
   "workspace.execution.correctAdmission": "Correct the graph admission issue and retry.",
-  "workspace.execution.localSession.confirm": {
-    "one": "Start “{name}” as a local listener session?\n\nOne inbound source node will listen in this server process until you press Stop. No initial payload or traversal is sent; each later external event starts its own traversal.",
-    "other": "Start “{name}” as a local listener session?\n\n{count} inbound source nodes will listen in this server process until you press Stop. No initial payload or traversal is sent; each later external event starts its own traversal."
-  },
-  "workspace.execution.run.confirm": "Run “{name}” now?\n\nThis is a real operational execution: node behaviors may send messages, call external services, write data, or perform other configured effects.",
   "workspace.humanTask.actionable": { "one": "One actionable task for this node", "other": "{count} actionable tasks for this node" },
   "workspace.humanTask.escalatedSuffix": { "one": " · one escalated", "other": " · {count} escalated" },
   "workspace.humanTask.deploymentSuffix": " · deployment {deploymentId}",

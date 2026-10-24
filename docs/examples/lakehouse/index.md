@@ -1,5 +1,9 @@
 # Illustrated lakehouse ingestion scenario
 
+For an executed example with real managed callbacks, runtime, SQLite, six correlated results and
+browser screenshots, follow [Execute a file ingestion across six callbacks](../correlation/lakehouse.md).
+Its external processor is an explicit HTTP fixture; this broader process model remains illustrative.
+
 This scenario uses a Ravenroot graph to explain how a file-ingestion process can make acquisition,
 deduplication, quarantine, Bronze, Silver, Gold, lineage, and human review visible. It is an
 **illustrative process model**. The downloadable GraphML deliberately contains `PASSTHROUGH`

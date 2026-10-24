@@ -158,6 +158,7 @@ listings. `--help` and `help` print usage.
 | `status` | Service state, selected execution engine, and capabilities. |
 | `runtime` | Active executions and active arrivals by node. |
 | `node-types` | Effective running catalog; use it to verify enabled bundles. |
+| `correlation-preview REQUEST.json` | Evaluate an explicit mapping against bounded caller-supplied sample input; no admission or history lookup. Requires catalog-read authority. The strict request shape is in the [API reference](api-cli.md#correlation-sample-preview). |
 | `inspect FILE` | Read and inspect local GraphML without executing it. |
 | `validate [--register-machine] FILE` | Validate the local GraphML profile; the optional flag also runs the bounded static Register Machine Profile v1 linter with separate errors and warnings. Runs locally even with `--server`. |
 | `events decode` | Decode a captured execution SSE body from standard input into JSON lines; runs locally without a backend or credentials. |
@@ -178,6 +179,10 @@ listings. `--help` and `help` print usage.
 | `deployments register ID FILE` | Reserve an ID and validate its graph; does not start it. |
 | `deployments inspect ID` | Read one registration. |
 | `deployments start ID` | Start a registered deployment. A durable remote target sends its displayed generation and a unique intent key, then reconciles the authoritative state. |
+| `deployments run-initial ID --incarnation ID --graph-version VERSION --request-id KEY [--input-file FILE]` | Admit or reconcile the one initial START traversal in the exact deployment/version; JSON input is bounded. A different request key never grants another START. |
+| `deployments observe-initial ID --incarnation ID --graph-version VERSION --request-id KEY` | Read the existing initial marker without admitting work; use it to reconcile a lost response. |
+| `deployments history ID --incarnation ID --graph-version VERSION [--view VIEW] [--application-correlation-id ID] [--public-reference TEXT] [--limit COUNT] [--cursor CURSOR]` | Read one bounded server page in the exact deployment scope. Visits/attempts additionally select their actual process/traversal/invocation IDs. See the [API reference](api-cli.md) for view-specific filters and unavailable states. |
+| `deployments restore ID --registration-identity UUID --graph-version VERSION` | Explicitly restore an existing durable registration from its retained verified graph under current lifecycle authority. It neither creates a replacement registration nor admits initial START. |
 | `deployments stop ID [--reason TEXT]` | Stop it but keep it registered. `--reason` is required when the inspected target exposes a durable generation. |
 | `deployments restart ID` | Stop and start the registration. Durable Restart has no reason option. |
 | `deployments undeploy ID [--disposition DRAIN_FIRST\|CANCEL_IN_FLIGHT\|REFUSE_IF_BUSY --reason TEXT]` | Stop and remove the process-local registration. Both options are required for a durable target; disposition is never defaulted. A durable tombstoned ID cannot be reused. |

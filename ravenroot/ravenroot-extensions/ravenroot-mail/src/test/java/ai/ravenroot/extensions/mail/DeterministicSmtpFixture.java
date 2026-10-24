@@ -42,6 +42,7 @@ final class DeterministicSmtpFixture implements AutoCloseable {
     private final AtomicBoolean running = new AtomicBoolean(true);
     private final AtomicInteger connections = new AtomicInteger();
     private final AtomicInteger dataAccepted = new AtomicInteger();
+    private final java.util.List<String> messages = new java.util.concurrent.CopyOnWriteArrayList<>();
     private final AtomicInteger authenticationAttempts = new AtomicInteger();
     private final java.util.concurrent.atomic.AtomicLong firstConnectionNanos = new java.util.concurrent.atomic.AtomicLong();
     private final java.util.concurrent.atomic.AtomicLong secondConnectionNanos = new java.util.concurrent.atomic.AtomicLong();
@@ -91,6 +92,7 @@ final class DeterministicSmtpFixture implements AutoCloseable {
     int port() { return socket.getLocalPort(); }
     int connections() { return connections.get(); }
     int dataAccepted() { return dataAccepted.get(); }
+    java.util.List<String> messages() { return java.util.List.copyOf(messages); }
     int authenticationAttempts() { return authenticationAttempts.get(); }
     long retryGapMillis() { return java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(secondConnectionNanos.get() - firstConnectionNanos.get()); }
     void pauseBeforeFirstDisconnect() { pauseFirstDisconnect.set(true); }
@@ -165,7 +167,11 @@ final class DeterministicSmtpFixture implements AutoCloseable {
             } else if (command.equals("DATA")) {
                 if (!acceptedRecipient) { response(out, "554 no recipient accepted"); continue; }
                 response(out, "354 End data with <CR><LF>.<CR><LF>");
-                while ((line = in.readLine()) != null && !line.equals(".")) { }
+                var captured = new StringBuilder();
+                while ((line = in.readLine()) != null && !line.equals(".")) {
+                    if (captured.length() + line.length() < 262144) captured.append(line.startsWith("..") ? line.substring(1) : line).append("\r\n");
+                }
+                if (messages.size() < 16) messages.add(captured.toString());
                 dataAccepted.incrementAndGet();
                 if (dropAfterData) return;
                 response(out, "250 Message accepted");

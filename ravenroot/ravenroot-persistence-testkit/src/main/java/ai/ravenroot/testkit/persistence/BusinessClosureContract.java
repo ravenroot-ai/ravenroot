@@ -123,6 +123,31 @@ public abstract class BusinessClosureContract {
         }
     }
 
+    @Test void anUnsatisfiedRetainedManifestCannotMasqueradeAsCompleteAfterCancellation() throws Exception {
+        try (var store = createStore(id())) {
+            var expected = work(store, "retained-extra", "part-1"); var extra = work(store, "retained-extra", "unexpected");
+            var key = new CorrelatedJoinKey(SCOPE, "retained-extra", "join", "0");
+            var opened = CorrelatedJoinRecord.open(key, Set.of("part-1"), null, true, cause(expected), NOW, NOW.plusSeconds(100));
+            await(store.compareAndSetCorrelatedJoin(opened));
+            // The persistence port can retain an unsuccessful checkpoint; its exact published
+            // satisfied() rule, not received-count >= expected-count, governs completeness.
+            var retained = new CorrelatedJoinRecord(key, 2, CorrelatedJoinRecord.Phase.OPEN, opened.expectedIds(), null, true,
+                    Map.of("part-1", contribution(expected, "part-1"), "unexpected", contribution(extra, "unexpected")),
+                    opened.openedBy(), opened.openedAt(), opened.deadlineAt(), NOW);
+            await(store.compareAndSetCorrelatedJoin(retained)); assertFalse(retained.satisfied());
+            var requested = completeVisit(store, expected, signal(expected, BusinessHistory.Lifecycle.COMPLETED));
+            var extraCompleted = completeVisit(store, extra, null);
+            var cancelled = await(store.compareAndSetCorrelatedJoin(retained.terminate(CorrelatedJoinRecord.Phase.CANCELLED, NOW)));
+            terminal(store, expected, requested.revision(), TraversalStatus.COMPLETED);
+            terminal(store, extra, extraCompleted.revision(), TraversalStatus.COMPLETED);
+            var history = await(store.businessHistory(SCOPE, "retained-extra")).orElseThrow();
+            assertEquals(BusinessHistory.Lifecycle.FAILED, history.lifecycle()); assertTrue(history.incompleteHistory());
+            assertEquals(cancelled, await(store.correlatedJoin(key)).orElseThrow());
+            assertEquals(2, await(store.correlatedJoinMembers(key, JoinMemberFilter.RECEIVED, Optional.empty(), 10)).items().size());
+            assertTrue(await(store.correlatedJoinMembers(key, JoinMemberFilter.MISSING, Optional.empty(), 10)).items().isEmpty(), "no missing member may be invented");
+        }
+    }
+
     @Test void closureAuthorityAndConflictingRetriesRollBackWithTheVisit() throws Exception {
         try (var store = createStore(id())) {
             var work = work(store, "authority", "part"); var signal = signal(work, BusinessHistory.Lifecycle.COMPLETED);

@@ -43,8 +43,8 @@ A quiet history with such a pending continuation reports `CLOSING`. It settles o
 obligations settle. A requested successful close becomes `FAILED` when an original traversal failed
 or was cancelled, when an open join still lacks contributions, or when a known join failed,
 expired or was cancelled before its continuation was dispatched. A fully collected join that
-failed or was cancelled before release is unsuccessful without inventing missing members. Known missing or unsealed
-collection and expired data mark the history incomplete. Missing members, received members,
+failed or was cancelled before release is unsuccessful without inventing missing members. An unsatisfied manifest, including retained excess members, an unsealed collection or expired data
+marks the history incomplete; it does not invent missing-member rows. Missing members, received members,
 and the requested disposition remain available for inspection. Zero running traversals alone never
 establishes business success.
 

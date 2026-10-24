@@ -248,7 +248,7 @@ final class BusinessHistoryStorage {
         boolean missing, unsuccessful;
         try (var count = db.prepareStatement("SELECT SUM(CASE WHEN phase = 'READY' THEN 1 ELSE 0 END), "
                 + "SUM(CASE WHEN phase = 'OPEN' OR phase = 'EXPIRED' OR sealed = 0 OR snapshot IS NULL "
-                + "OR (expectation = 'COUNT' AND expected_count <> received_count) OR EXISTS "
+                + "OR expected_count <> received_count OR EXISTS "
                 + "(SELECT 1 FROM correlated_join_member m WHERE m.tenant_id = j.tenant_id AND m.deployment_id = j.deployment_id "
                 + "AND m.graph_version = j.graph_version AND m.application_id = j.application_id AND m.node_id = j.node_id "
                 + "AND m.round_id = j.round_id AND m.expected_member = 1 AND m.received_member = 0) THEN 1 ELSE 0 END), "

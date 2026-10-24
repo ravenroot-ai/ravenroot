@@ -100,7 +100,14 @@ class KubernetesWorkspaceGraphNativeTest {
                 var assignment = new RunnerAssignment(1, resource.invocationWorkspaceId(claimed.identity().runnerJobId(), entry.lifecycleCommand()), claimed, resource, entry.lifecycleCommand());
                 RunnerResult result;
                 try (var driver = driver(managerState, registration, settings, image, clock, modelConfig)) {
-                    result = driver.execute(assignment).toCompletableFuture().get(120, TimeUnit.SECONDS);
+                    try {
+                        result = driver.execute(assignment).toCompletableFuture().get(120, TimeUnit.SECONDS);
+                    } catch (ExecutionException failure) {
+                        // Only this synthetic test's finite lifecycle context, never assignment data.
+                        throw new ExecutionException("Native Kubernetes case scope=" + scope.name() + " lifecycle=" + lifecycle.name() + " index=" + index
+                                + " command=" + commands.get(index).toUpperCase(Locale.ROOT)
+                                + "; effect remains unconfirmed", failure.getCause());
+                    }
                     assertEquals(outcomes.get(index), result.outcome());
                     assertEquals(WorkspaceProfile.Driver.KUBERNETES, driver.observe(assignment).workspace().profile().driver());
                 }

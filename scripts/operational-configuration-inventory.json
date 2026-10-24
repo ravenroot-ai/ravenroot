@@ -1374068,6 +1374068,18 @@
       "mappings": [],
       "retirements": [],
       "additions": []
+    },
+    {
+      "id": "issue-590-attempt6-recovery-admission-reconciliation-v1",
+      "issue": "#590",
+      "sourceRevision": "7b804444141f72b8669a6b342c1cefa9457be9c8",
+      "targetRevision": "5bf21ac1d976ec94cf371b7c6456fa3cb5de65c4",
+      "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+      "sourceInventoryDigest": "04329ac2588a303e76f87498d4e071a7eb8445d36699a59609206a0361586f7f",
+      "targetCandidateDigest": "828efe423df954a2f72830d265652e42c93a0d33042b83292d9943d9a965652d",
+      "mappings": [],
+      "retirements": [],
+      "additions": []
     }
   ],
   "semanticReviewHistory": [
@@ -1445172,7 +1445184,7 @@
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultGraphDeployment.java",
-          "digest": "561b2338c2abf5d24cedf4c41bbfc160356c36965bbd1666808d26c481eb7af4"
+          "digest": "6bc77a9d73a6a1d15675ccf5c1e65e3dae693d5d5f5bf11e7abf021ab86df3b4"
         },
         {
           "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java",

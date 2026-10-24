@@ -17,7 +17,7 @@ public final class CorrelatedJoinCodec {
  */
     public static byte[] encode(CorrelatedJoinRecord value) {
         try {
-            var bytes = new ByteArrayOutputStream();
+            var bytes = new BoundedOutput();
             try (var out = new DataOutputStream(bytes)) {
                 out.writeInt(1); var key = value.key();
                 text(out, key.scope().tenantId()); text(out, key.scope().deploymentId()); text(out, key.scope().graphVersion());
@@ -41,7 +41,6 @@ public final class CorrelatedJoinCodec {
                     text(out, identity.subject()); text(out, identity.principalType().name()); text(out, identity.issuer());
                     text(out, c.payload().contentType()); var data = c.payload().bytes(); out.writeInt(data.length); out.write(data);
                     text(out, c.payloadDigest()); time(out, c.acceptedAt());
-                    if (bytes.size() > MAX_ENCODED_BYTES) throw new IllegalArgumentException("join encoding exceeds limit");
                 }
             }
             return bytes.toByteArray();
@@ -92,5 +91,22 @@ public final class CorrelatedJoinCodec {
     private static Instant time(DataInputStream in) throws IOException { return Instant.ofEpochSecond(in.readLong(), in.readInt()); }
     private static int count(DataInputStream in) throws IOException {
         int value = in.readInt(); if (value < 0 || value > 10000) throw new IllegalArgumentException("join count exceeds limit"); return value;
+    }
+
+    /** Bounds every encoded field, including manifests with no contributions, before buffer growth. */
+    private static final class BoundedOutput extends ByteArrayOutputStream {
+        private void reserve(int length) {
+            if (length > MAX_ENCODED_BYTES - count) throw new IllegalArgumentException("join encoding exceeds limit");
+            int required = count + length;
+            if (required > buf.length) buf = Arrays.copyOf(buf,
+                    Math.min(MAX_ENCODED_BYTES, Math.max(required, buf.length * 2)));
+        }
+        @Override public synchronized void write(int value) {
+            reserve(1); buf[count++] = (byte) value;
+        }
+        @Override public synchronized void write(byte[] values, int offset, int length) {
+            Objects.checkFromIndexSize(offset, length, values.length);
+            reserve(length); System.arraycopy(values, offset, buf, count, length); count += length;
+        }
     }
 }

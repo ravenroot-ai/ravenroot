@@ -121,6 +121,10 @@ outbox together. Original contribution process/traversal/visit/attempt IDs remai
 The operator's `joinDeadline` and retained-input limits are finite. An incomplete expired collection
 becomes `EXPIRED` with missing members visible and no Gold continuation. Cancellation, held
 admission and retired source generations cannot dispatch a continuation into a different lifecycle.
+Each encoded join checkpoint also has a 64 MiB implementation ceiling, including UTF-8 manifest
+identities, causal metadata and retained payloads. Individually valid announcements can reach this
+combined bound as an unsealed manifest grows. An update beyond it is refused atomically; the
+previous checkpoint and member projection remain available unchanged.
 Use history views `joins` and `join-members` to inspect expected, received and missing members,
 phase, round and deadline without loading captured payloads. Activity capture can remain disabled.
 

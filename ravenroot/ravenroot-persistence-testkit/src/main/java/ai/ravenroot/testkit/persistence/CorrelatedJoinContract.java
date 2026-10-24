@@ -17,7 +17,10 @@ public abstract class CorrelatedJoinContract {
     private static final Instant NOW = Instant.parse("2026-01-01T00:00:00Z");
     private static final BusinessScope SCOPE = new BusinessScope("tenant", "deployment", "version");
     private static final SecurityContext SECURITY = new SecurityContext("request", "tenant", "actor", PrincipalType.WORKLOAD, "test");
-    protected abstract ExecutionStore createStore(String id, Clock clock);
+    protected ExecutionStore createStore(String id, Clock clock) {
+        return createStore(id, clock, BusinessHistoryPolicy.DEFAULTS);
+    }
+    protected abstract ExecutionStore createStore(String id, Clock clock, BusinessHistoryPolicy policy);
     private static Clock clock() { return Clock.fixed(NOW, ZoneOffset.UTC); }
 
     @Test void sixPartitionsFromOneSourceReleaseOnceAndRetainOriginalCausality() throws Exception {
@@ -249,6 +252,45 @@ public abstract class CorrelatedJoinContract {
                     await(store.correlatedJoin(saved.key())).orElseThrow().contributions().get("part-1").traversalId());
         }
     }
+    @Test void oversizedManifestEncodingRollsBackBothCreationAndRevision() throws Exception {
+        var defaults = BusinessHistoryPolicy.DEFAULTS;
+        var policy = new BusinessHistoryPolicy(defaults.maxHistoriesPerScope(), defaults.maxOpenJoinsPerHistory(),
+                defaults.maxRetainedJoinsPerHistory(), 10000, defaults.maxJoinPayloadBytes(), defaults.maxPageSize(),
+                defaults.historyRetention(), defaults.joinDeadline(), new CorrelationLimits(4096, 1024, 32, 10000,
+                ai.ravenroot.api.payload.PayloadLimits.DEFAULTS));
+        String storeId = id();
+        try (var store = createStore(storeId, clock(), policy)) {
+            var event = contributions(store, "encoding-bound", "round", 1).getFirst();
+            var key = new CorrelatedJoinKey(SCOPE, "encoding-bound", "combine", "round");
+            var originalHistory = await(store.businessHistory(SCOPE, "encoding-bound"));
+            var ids = new TreeSet<String>(); var prefix = "\u20ac".repeat(4090);
+            for (int i = 0; i < 5500; i++) ids.add(prefix + "-" + i);
+            var oversized = CorrelatedJoinRecord.open(key, ids, null, false, JoinCause.of(event), NOW, NOW.plusSeconds(60));
+            var refused = assertThrows(Exception.class, () -> await(store.compareAndSetCorrelatedJoin(oversized)));
+            var reason = refused instanceof ExecutionException ? refused.getCause() : refused;
+            assertInstanceOf(IllegalArgumentException.class, reason);
+            assertEquals("join encoding exceeds limit", reason.getMessage());
+            assertTrue(await(store.correlatedJoin(key)).isEmpty());
+            assertTrue(await(store.correlatedJoins(SCOPE, "encoding-bound", Set.of(), Optional.empty(), 1)).items().isEmpty());
+            assertEquals(originalHistory, await(store.businessHistory(SCOPE, "encoding-bound")));
+
+            var valid = CorrelatedJoinRecord.open(key, Set.of("part-1"), null, false, JoinCause.of(event), NOW, NOW.plusSeconds(60));
+            await(store.compareAndSetCorrelatedJoin(valid));
+            var originalMembers = await(store.correlatedJoinMembers(key, JoinMemberFilter.ALL, Optional.empty(), 10));
+            var revision = valid.contribute(null, ids, null, false, NOW, policy);
+            refused = assertThrows(Exception.class, () -> await(store.compareAndSetCorrelatedJoin(revision)));
+            reason = refused instanceof ExecutionException ? refused.getCause() : refused;
+            assertInstanceOf(IllegalArgumentException.class, reason);
+            assertEquals("join encoding exceeds limit", reason.getMessage());
+            assertEquals(valid, await(store.correlatedJoin(key)).orElseThrow());
+            assertEquals(originalMembers, await(store.correlatedJoinMembers(key, JoinMemberFilter.ALL, Optional.empty(), 10)));
+            assertEquals(originalHistory, await(store.businessHistory(SCOPE, "encoding-bound")));
+            var ready = valid.contribute(event, Set.of(), null, true, NOW, policy);
+            assertEquals(CorrelatedJoinRecord.Phase.READY, await(store.compareAndSetCorrelatedJoin(ready)).phase());
+            assertEquals(ready, await(store.correlatedJoin(key)).orElseThrow());
+        }
+    }
+
     private static List<JoinContribution> contributions(ExecutionStore store, String operation, String round, int count) throws Exception {
         var result = new ArrayList<JoinContribution>();
         for (int i = 1; i <= count; i++) {

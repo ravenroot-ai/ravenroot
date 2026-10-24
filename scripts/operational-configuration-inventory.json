@@ -1374056,6 +1374056,18 @@
       "mappings": [],
       "retirements": [],
       "additions": []
+    },
+    {
+      "id": "issue-590-attempt5-publication-count-fixture-reconciliation-v1",
+      "issue": "#590",
+      "sourceRevision": "3811bfda2929fafef01d410c6ac78a761559daf8",
+      "targetRevision": "fca33278c451ac76b1a10cfe91942f6fbc898cdc",
+      "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+      "sourceInventoryDigest": "7b74dcf3df7845bc95d386475697a6f8712c3a3dbc28865a5fb74b4f256876f9",
+      "targetCandidateDigest": "828efe423df954a2f72830d265652e42c93a0d33042b83292d9943d9a965652d",
+      "mappings": [],
+      "retirements": [],
+      "additions": []
     }
   ],
   "semanticReviewHistory": [

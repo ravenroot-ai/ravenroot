@@ -93738,9 +93738,39 @@
       "rationale": "Bounded personal provider/state decoding safety envelope Reviewed source atom: 4096."
     },
     {
+      "id": "oc-afaba249b895f70ca8ae",
+      "path": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ai/OpenAiResponses.java",
+      "line": 10,
+      "symbol": "OpenAiResponses",
+      "kind": "fixed-declaration",
+      "role": "REPLAY",
+      "expression": "\"ravenroot.responses.output\"",
+      "expressionDigest": "a2fde75d2efd6720914b5c2175199e5eb01e6406dafa23948b989bf411c21aca",
+      "evidenceDigest": "092e1900eb2a479257088b4e8c545d6af53e54a57fb3be50cd2ccb3f1ca15d1a",
+      "surface": "java",
+      "status": "retained",
+      "classification": "protocol-or-format-invariant",
+      "rationale": "Internal bounded provider-output replay carrier used only in the executing owner conversation/checkpoint; not a system property or operator setting and never a connection/tenant/tool authority. Reviewed source atom: \"ravenroot.responses.output\"."
+    },
+    {
+      "id": "oc-82abbc7d71ce191a4288",
+      "path": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ai/OpenAiResponses.java",
+      "line": 10,
+      "symbol": "OpenAiResponses",
+      "kind": "property-binding",
+      "role": "ravenroot.responses.output",
+      "expression": "ravenroot.responses.output",
+      "expressionDigest": "a2f007a56d2a4aea3a74008c4c3d9add8e59d69bba23e740ddd152c8b380184f",
+      "evidenceDigest": "092e1900eb2a479257088b4e8c545d6af53e54a57fb3be50cd2ccb3f1ca15d1a",
+      "surface": "java",
+      "status": "retained",
+      "classification": "protocol-or-format-invariant",
+      "rationale": "Internal bounded provider-output replay carrier used only in the executing owner conversation/checkpoint; not a system property or operator setting and never a connection/tenant/tool authority. Reviewed source atom: ravenroot.responses.output."
+    },
+    {
       "id": "oc-98546a83a944a5c41a10",
       "path": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ai/OpenAiResponses.java",
-      "line": 21,
+      "line": 22,
       "symbol": "for",
       "kind": "operational-declaration",
       "role": "message",
@@ -93753,24 +93783,43 @@
       "rationale": "Responses document schema vocabulary Reviewed source atom: \"messages\"."
     },
     {
-      "id": "oc-5967c1d5816086a9ec5c",
+      "id": "oc-135b7a27393e2944d78b",
       "path": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ai/OpenAiResponses.java",
-      "line": 78,
+      "line": 90,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "usage",
       "expression": "\"usage\"",
       "expressionDigest": "593e93fc4f6e1640ccc0120e16efa22ac880d85c93ddadbc42c04887e7b5c49e",
-      "evidenceDigest": "bcbefbcb4f510117170ba6f3fa17da920bf2c3d7eda296ff7e669867647341ec",
+      "evidenceDigest": "b6be59409ea8a95930420d57489e94a6c720b3add62b96795f39184e826848bf",
       "surface": "java",
       "status": "retained",
       "classification": "protocol-or-format-invariant",
-      "rationale": "Responses document schema vocabulary Reviewed source atom: \"usage\"."
+      "rationale": "Responses document schema vocabulary Reviewed source atom: \"usage\".",
+      "identityMigration": {
+        "history": "issue-599-stateless-provider-history-v1",
+        "fromId": "oc-5967c1d5816086a9ec5c"
+      }
+    },
+    {
+      "id": "oc-9ca47f2bce34229a444d",
+      "path": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ai/OpenAiResponses.java",
+      "line": 112,
+      "symbol": "assistantHistory",
+      "kind": "operational-declaration",
+      "role": "message",
+      "expression": "\"message\"",
+      "expressionDigest": "fd3830a0864dd9dfe2cf351f669ec8a152d4065b8b08d51c2ccf7d780e130543",
+      "evidenceDigest": "f001f9d07575da3878cd878ef5d4c5788e856d80858cb02f05d9b5ab6730006e",
+      "surface": "java",
+      "status": "retained",
+      "classification": "protocol-or-format-invariant",
+      "rationale": "Chat-compatible assistant message wire key used to extract bounded provider history after usage and output-type validation. Reviewed source atom: \"message\"."
     },
     {
       "id": "oc-71cfe40f5c86195aa09b",
       "path": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ai/OpenAiResponses.java",
-      "line": 100,
+      "line": 134,
       "symbol": "toChat",
       "kind": "operational-declaration",
       "role": "reported",
@@ -93785,7 +93834,7 @@
     {
       "id": "oc-21364b2fdc53027ab51a",
       "path": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ai/OpenAiResponses.java",
-      "line": 100,
+      "line": 134,
       "symbol": "toChat",
       "kind": "operational-declaration",
       "role": "reported",
@@ -93800,7 +93849,7 @@
     {
       "id": "oc-0743dcdfe6294295f06f",
       "path": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ai/OpenAiResponses.java",
-      "line": 126,
+      "line": 160,
       "symbol": "textFromChat",
       "kind": "operational-declaration",
       "role": "message",
@@ -143942,7 +143991,7 @@
     {
       "id": "oc-fcdf94d82a7d222bf0a7",
       "path": "ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/AgentNodeBehavior.java",
-      "line": 1457,
+      "line": 1461,
       "symbol": "AgentApprovalSuspension",
       "kind": "fixed-declaration",
       "role": "serialVersionUID",
@@ -143960,7 +144009,7 @@
     {
       "id": "oc-3aba38cfe203f9b3f49e",
       "path": "ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/AgentNodeBehavior.java",
-      "line": 1487,
+      "line": 1491,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "new-PayloadLimits",
@@ -143980,7 +144029,7 @@
     {
       "id": "oc-63a0108d73246ff05f46",
       "path": "ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/AgentNodeBehavior.java",
-      "line": 1487,
+      "line": 1491,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "new-PayloadLimits",
@@ -144000,7 +144049,7 @@
     {
       "id": "oc-87688d017e988172d961",
       "path": "ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/AgentNodeBehavior.java",
-      "line": 1487,
+      "line": 1491,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "new-PayloadLimits",
@@ -144020,7 +144069,7 @@
     {
       "id": "oc-b8cdf3dc00eb521149ee",
       "path": "ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/AgentNodeBehavior.java",
-      "line": 1487,
+      "line": 1491,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "new-PayloadLimits",
@@ -144040,7 +144089,7 @@
     {
       "id": "oc-0779bd2d8c1eb3f5991c",
       "path": "ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/AgentNodeBehavior.java",
-      "line": 1488,
+      "line": 1492,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "new-PayloadLimits",
@@ -144058,7 +144107,7 @@
     {
       "id": "oc-cea5464489829af400f5",
       "path": "ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/AgentNodeBehavior.java",
-      "line": 1489,
+      "line": 1493,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "new-PayloadLimits",
@@ -657812,6 +657861,7 @@
     "0924dd621210865c490650273e7d0a173d5448a90a10d067297d34abe6022579": "private static final String SELECT_ALL_COLUMNS = \"SELECT registration_id, revision, state, tenant_id, workload_issuer, workload_subject, \" + \"parent_origin, capabilities, theme_override, resource_id, deployment_id, \" + \"deployment_version, graph_id, graph_version_id, canonical_digest, policy_revision, \" + \"snapshot_lifecycle, eligibility_gates, projection_json, provisioned_at \" + \", source_version, source_kind, source_deployment_id, source_show_start_execution \" + \"FROM embed_registration WHERE registration_id = ?\";",
     "09272958b04f4c56b91bfd764117e6592578ee968b7d78899e5a1b006a385281": "\"coverage\": \"synthetic test owner only\",",
     "092a39c63ff5908f8632cb2db3fc202b6d2799863de50f85dd60c9f4550cfd29": "long headerBytes = 0;",
+    "092e1900eb2a479257088b4e8c545d6af53e54a57fb3be50cd2ccb3f1ca15d1a": "private static final String REPLAY = \"ravenroot.responses.output\";",
     "09317793ee5c06c6f5393863d16ba1b25642e31dc15220a3794359d29715de38": "test_source = test_path.read_text(encoding=\"utf-8\")",
     "0931ff8ded3249b6e4dfd3cbfd4bcf020ae3e2d620df6f1e0280b0112e65db72": "try { java.util.concurrent.CompletableFuture .allOf(calls.toArray(java.util.concurrent.CompletableFuture[]::new)) .get(60, java.util.concurrent.TimeUnit.SECONDS);",
     "093753776b432d1b3c26a9a16f28d6197f05b995c3a2dd4e53e9d88c9b9d313d": "self.assertIn(\"does not imply a GitHub package-to-repository association\", readme)",
@@ -665511,6 +665561,7 @@
     "b6b6a6d78ef0d428f8a07197b0cd927f92cd2f6316cb41c99682e6a040a90f2b": "\"statusCounts\": {},",
     "b6ba4e55f456188e468b8f2964941d5c7ea8efafc0c5d7dd342e4ca1a318fa96": "mv \"$WORKDIR/target.tmp\" \"$WORKDIR/scripts/tests/test_execution_store_platform.sh\"",
     "b6bdc0020007992f3dda80463ed917a9340f87636463d7c1b11f7daac16a24cf": "const capabilities = advertisedCommands(entry, 'DEPLOYMENT');",
+    "b6be59409ea8a95930420d57489e94a6c720b3add62b96795f39184e826848bf": "} Map<String, Object> usage = map(completed.get(\"usage\"));",
     "b6c13582d9cc3b0f645ec47db6cd9818797c096b7c457f974cb924d522cdc7a0": "const command = event.target.closest('[data-command-id]');",
     "b6c8711379636778cb9a7535989423c54d72ba8ad41911589975dabbc58b6d5a": "RAVENROOT_HUMAN_TASK_RESPONSE_MAX_KEY_LENGTH",
     "b6cb5e784484a2e1fba141e0c1e2a4ee163048394af54bdf2d5b4b74ddaecfd4": "private static final int MAX_ERROR_NODES = 1;",
@@ -665765,7 +665816,6 @@
     "bcb40dee7315f5e92d1ef3334181c1a5d4f30ed1df4d09169c21da6da9bb8462": "SERVER_RUN_DIR=${RAVENROOT_SELECTION_SERVER_RUN_DIR:-\"$PROJECT_DIR/ravenroot/target/selection-delete-server\"}",
     "bcb544aee1b30c03acda1c252e70fdd5f22cf0cb1d75abaa3e9014d378ebff09": "(\"ai\", \"agentic\"). Separate from validate on purpose --",
     "bcbe83618cbbe5a0e77ba42b51092351dd7723ee26ffafba2428df89d4d5d78c": "meter.gaugeBuilder(\"ravenroot.runner.worker.available\").ofLongs() .setDescription(\"Currently available local worker job slots.\") .buildWithCallback(measurement -> measurement.record(runnerAvailable.get()));",
-    "bcbefbcb4f510117170ba6f3fa17da920bf2c3d7eda296ff7e669867647341ec": "Map<String, Object> usage = map(completed.get(\"usage\"));",
     "bcc0acfb171c49743aed48e40c1fe0db659600a591309c751f2772e53ea5f0e3": "const steps = Array.isArray(saga.steps) ? saga.steps.map(step => `${step.stepId}: ${step.status}`).join(' · ') : '';",
     "bcc1f5c85de3e7e70b301c47e97d46f479887f58271fc0990b5b79ba8707dd0d": "const headers = { Accept: 'text/event-stream', 'X-Ravenroot-Deployment-Incarnation': source.incarnationId, };",
     "bcc2ddec87dc421877bf5a2f4d1a917d104efcf348106a32a84441b164495779": "self.directory = self.parent / \"ravenroot-runner-quota-fixture\"",
@@ -1200291,6 +1200341,55 @@
           }
         }
       ]
+    },
+    {
+      "id": "issue-599-stateless-provider-history-v1",
+      "issue": "#599",
+      "sourceRevision": "9360cb1aa30d5677fe801018cb303cbd5e5197e6",
+      "targetRevision": "8f9146f3bf1e6364fa86bd97827ba8701bd60224",
+      "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+      "sourceInventoryDigest": "130afb49a2fc495f5b6a6ab3cdd2b5b453a4fa534088503d229c0dc6e80ba112",
+      "targetCandidateDigest": "dad5d665dab686f3a5382987c7f56db23ea694c5e818fbe66cf90ffdab5e0cb0",
+      "mappings": [
+        {
+          "fromId": "oc-5967c1d5816086a9ec5c",
+          "toId": "oc-135b7a27393e2944d78b",
+          "approved": true,
+          "rationale": "Unchanged usage wire-key lookup; containing branch evidence changes only to retain the supported stateless provider output for later tool turns.",
+          "equivalence": {
+            "kind": "same-atom-v1",
+            "beforeEvidenceDigest": "bcbefbcb4f510117170ba6f3fa17da920bf2c3d7eda296ff7e669867647341ec",
+            "afterEvidenceDigest": "b6be59409ea8a95930420d57489e94a6c720b3add62b96795f39184e826848bf"
+          }
+        }
+      ],
+      "retirements": [],
+      "additions": [
+        {
+          "id": "oc-82abbc7d71ce191a4288",
+          "metadata": {
+            "status": "retained",
+            "classification": "protocol-or-format-invariant",
+            "rationale": "Internal bounded provider-output replay carrier used only in the executing owner conversation/checkpoint; not a system property or operator setting and never a connection/tenant/tool authority. Reviewed source atom: ravenroot.responses.output."
+          }
+        },
+        {
+          "id": "oc-9ca47f2bce34229a444d",
+          "metadata": {
+            "status": "retained",
+            "classification": "protocol-or-format-invariant",
+            "rationale": "Chat-compatible assistant message wire key used to extract bounded provider history after usage and output-type validation. Reviewed source atom: \"message\"."
+          }
+        },
+        {
+          "id": "oc-afaba249b895f70ca8ae",
+          "metadata": {
+            "status": "retained",
+            "classification": "protocol-or-format-invariant",
+            "rationale": "Internal bounded provider-output replay carrier used only in the executing owner conversation/checkpoint; not a system property or operator setting and never a connection/tenant/tool authority. Reviewed source atom: \"ravenroot.responses.output\"."
+          }
+        }
+      ]
     }
   ],
   "semanticReviewHistory": [
@@ -1279009,7 +1279108,7 @@
         },
         {
           "path": "ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/AgentNodeBehavior.java",
-          "digest": "e0b82cbecf974536b383b3ac0daf2e6605e5aeae9a3dee17dc19d7b01fbc019f"
+          "digest": "204edb18c688cdfe62b2b07be9c3b07965d6dcec6e23f03c6c10c903b81d52cb"
         },
         {
           "path": "ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/AgentSkill.java",

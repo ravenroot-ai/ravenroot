@@ -36,18 +36,18 @@ semantic review and focused source inventories remain required for those boundar
 
 | Measure | Count |
 |---|---:|
-| Atomic operational candidates discovered | 32148 |
+| Atomic operational candidates discovered | 32151 |
 | Source-proven Helm operator fields | 39 |
 | Helm operator fields represented by lexical inventory rows | 31 |
 | Source-proven Helm fields outside lexical candidate patterns | 8 |
-| Reviewed | 32148 |
+| Reviewed | 32151 |
 | Pending review | 0 |
 | Confirmed hard-coded candidates awaiting remediation | 0 |
 | Unique confirmed operator-configurable parameters | 358 |
 | Unique parameters converted to centralized configuration | 16 |
 | Duplicate authorities removed | 27 |
 | Retained security ceilings or defaults | 2435 |
-| Retained protocol or format invariants | 13795 |
+| Retained protocol or format invariants | 13798 |
 | Retained published contract descriptions | 624 |
 | Retained presentation text | 2976 |
 | Retained derived values | 1157 |
@@ -62,10 +62,10 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 184.
+Checked source reconciliations: 185.
 
 The following tables are exhaustive projections of the same active inventory; each includes
-zero-count or unclassified rows as needed and sums to 32148 candidates.
+zero-count or unclassified rows as needed and sums to 32151 candidates.
 
 ### Status counts
 
@@ -77,7 +77,7 @@ zero-count or unclassified rows as needed and sums to 32148 candidates.
 | deferred | 0 |
 | duplicate-removed | 0 |
 | pending-review | 0 |
-| retained | 30214 |
+| retained | 30217 |
 
 ### Classification counts
 
@@ -86,7 +86,7 @@ zero-count or unclassified rows as needed and sums to 32148 candidates.
 | derived | 1157 |
 | operator-configurable | 1934 |
 | presentation-text | 2976 |
-| protocol-or-format-invariant | 13795 |
+| protocol-or-format-invariant | 13798 |
 | published-contract-description | 624 |
 | security-ceiling-or-default | 2435 |
 | test-fixture | 9227 |
@@ -98,7 +98,7 @@ zero-count or unclassified rows as needed and sums to 32148 candidates.
 |---|---:|
 | deployment | 3215 |
 | deployment-example | 20 |
-| java | 8338 |
+| java | 8341 |
 | script | 2891 |
 | test-fixture | 9227 |
 | ui | 8457 |
@@ -118,7 +118,7 @@ assigned to an issue retroactively.
 | #319 | 334 |
 | #320 | 1466 |
 | #321 | 8112 |
-| Retained; no remediation required | 21964 |
+| Retained; no remediation required | 21967 |
 
 ## Latest reconciliation
 
@@ -127,12 +127,12 @@ identity and retirement has its own approved record in the machine-readable inve
 
 | Partition | Count |
 |---|---:|
-| Source inventory candidates | 32146 |
-| Unchanged identities | 31078 |
-| Approved identity migrations | 1065 |
-| Approved retirements | 3 |
-| Semantically classified additions | 5 |
-| Current candidates | 32148 |
+| Source inventory candidates | 32148 |
+| Unchanged identities | 32147 |
+| Approved identity migrations | 1 |
+| Approved retirements | 0 |
+| Semantically classified additions | 3 |
+| Current candidates | 32151 |
 
 ## Final semantic review
 
@@ -4743,11 +4743,14 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-b501f68cfef30c683c09` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ai/OpenAiResponses.java:9` `OpenAiResponses` | java | retained | security-ceiling-or-default | Bounded personal provider/state decoding safety envelope Reviewed source atom: 100_000. |
 | `oc-b92b17a1ab8479f585a8` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ai/OpenAiResponses.java:9` `OpenAiResponses` | java | retained | security-ceiling-or-default | Bounded personal provider/state decoding safety envelope Reviewed source atom: 32. |
 | `oc-d376f44f169da2176373` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ai/OpenAiResponses.java:9` `OpenAiResponses` | java | retained | security-ceiling-or-default | Bounded personal provider/state decoding safety envelope Reviewed source atom: 1024. |
-| `oc-98546a83a944a5c41a10` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ai/OpenAiResponses.java:21` `for` | java | retained | protocol-or-format-invariant | Responses document schema vocabulary Reviewed source atom: "messages". |
-| `oc-5967c1d5816086a9ec5c` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ai/OpenAiResponses.java:78` `if` | java | retained | protocol-or-format-invariant | Responses document schema vocabulary Reviewed source atom: "usage". |
-| `oc-21364b2fdc53027ab51a` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ai/OpenAiResponses.java:100` `toChat` | java | retained | protocol-or-format-invariant | Reported usage/completion_tokens wire keys used to refuse missing or excess locally accepted output before returning text or invoking a tool; not a provider-side billing cap. Reviewed source atom: "usage". |
-| `oc-71cfe40f5c86195aa09b` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ai/OpenAiResponses.java:100` `toChat` | java | retained | protocol-or-format-invariant | Reported usage/completion_tokens wire keys used to refuse missing or excess locally accepted output before returning text or invoking a tool; not a provider-side billing cap. Reviewed source atom: "completion_tokens". |
-| `oc-0743dcdfe6294295f06f` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ai/OpenAiResponses.java:126` `textFromChat` | java | retained | protocol-or-format-invariant | Responses document schema vocabulary Reviewed source atom: "message". |
+| `oc-82abbc7d71ce191a4288` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ai/OpenAiResponses.java:10` `OpenAiResponses` | java | retained | protocol-or-format-invariant | Internal bounded provider-output replay carrier used only in the executing owner conversation/checkpoint; not a system property or operator setting and never a connection/tenant/tool authority. Reviewed source atom: ravenroot.responses.output. |
+| `oc-afaba249b895f70ca8ae` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ai/OpenAiResponses.java:10` `OpenAiResponses` | java | retained | protocol-or-format-invariant | Internal bounded provider-output replay carrier used only in the executing owner conversation/checkpoint; not a system property or operator setting and never a connection/tenant/tool authority. Reviewed source atom: "ravenroot.responses.output". |
+| `oc-98546a83a944a5c41a10` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ai/OpenAiResponses.java:22` `for` | java | retained | protocol-or-format-invariant | Responses document schema vocabulary Reviewed source atom: "messages". |
+| `oc-135b7a27393e2944d78b` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ai/OpenAiResponses.java:90` `if` | java | retained | protocol-or-format-invariant | Responses document schema vocabulary Reviewed source atom: "usage". |
+| `oc-9ca47f2bce34229a444d` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ai/OpenAiResponses.java:112` `assistantHistory` | java | retained | protocol-or-format-invariant | Chat-compatible assistant message wire key used to extract bounded provider history after usage and output-type validation. Reviewed source atom: "message". |
+| `oc-21364b2fdc53027ab51a` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ai/OpenAiResponses.java:134` `toChat` | java | retained | protocol-or-format-invariant | Reported usage/completion_tokens wire keys used to refuse missing or excess locally accepted output before returning text or invoking a tool; not a provider-side billing cap. Reviewed source atom: "usage". |
+| `oc-71cfe40f5c86195aa09b` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ai/OpenAiResponses.java:134` `toChat` | java | retained | protocol-or-format-invariant | Reported usage/completion_tokens wire keys used to refuse missing or excess locally accepted output before returning text or invoking a tool; not a provider-side billing cap. Reviewed source atom: "completion_tokens". |
+| `oc-0743dcdfe6294295f06f` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ai/OpenAiResponses.java:160` `textFromChat` | java | retained | protocol-or-format-invariant | Responses document schema vocabulary Reviewed source atom: "message". |
 | `oc-4153c27b64d1e93dda9a` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/AuthorizedRavenrootApplication.java:35` `AuthorizedRavenrootApplication` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-f533b011ef581f3fe4ea` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/AuthorizedRavenrootApplication.java:35` `AuthorizedRavenrootApplication` | java | retained | protocol-or-format-invariant | These literals are exact Java property keys; values and defaults are reviewed at their typed consumers. |
 | `oc-25e46b7ce1231e7ed550` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/AuthorizedRavenrootApplication.java:37` `AuthorizedRavenrootApplication` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
@@ -6789,13 +6792,13 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-648c4c27c5151edc7e4a` | `ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/AgentNodeBehavior.java:1197` `catch` | java | retained | protocol-or-format-invariant | #396 introduces or revises this structural schema, bounded parser, deployment carrier, or published contract atom; operator values and defaults are owned by AgentOperationalConfiguration. |
 | `oc-44e6a5fbbbc9249d73c8` | `ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/AgentNodeBehavior.java:1204` `catch` | java | retained | protocol-or-format-invariant | #396 introduces or revises this structural schema, bounded parser, deployment carrier, or published contract atom; operator values and defaults are owned by AgentOperationalConfiguration. |
 | `oc-48a31b0680b7fa9bde76` | `ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/AgentNodeBehavior.java:1204` `catch` | java | retained | protocol-or-format-invariant | Official personal Responses event-stream representation accepted alongside existing system JSON representation Reviewed source atom: "text/event-stream". |
-| `oc-fcdf94d82a7d222bf0a7` | `ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/AgentNodeBehavior.java:1457` `AgentApprovalSuspension` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-3aba38cfe203f9b3f49e` | `ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/AgentNodeBehavior.java:1487` `if` | java | retained | security-ceiling-or-default | Fixed post-decode projection limits bound object depth, collection/value fan-out and key length after untrusted model text has already passed the operator-configurable byte ceiling; widening these structural invariants would enlarge in-memory amplification rather than enable more response bytes. |
-| `oc-63a0108d73246ff05f46` | `ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/AgentNodeBehavior.java:1487` `if` | java | retained | security-ceiling-or-default | Fixed post-decode projection limits bound object depth, collection/value fan-out and key length after untrusted model text has already passed the operator-configurable byte ceiling; widening these structural invariants would enlarge in-memory amplification rather than enable more response bytes. |
-| `oc-87688d017e988172d961` | `ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/AgentNodeBehavior.java:1487` `if` | java | retained | security-ceiling-or-default | Fixed post-decode projection limits bound object depth, collection/value fan-out and key length after untrusted model text has already passed the operator-configurable byte ceiling; widening these structural invariants would enlarge in-memory amplification rather than enable more response bytes. |
-| `oc-b8cdf3dc00eb521149ee` | `ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/AgentNodeBehavior.java:1487` `if` | java | retained | security-ceiling-or-default | Fixed post-decode projection limits bound object depth, collection/value fan-out and key length after untrusted model text has already passed the operator-configurable byte ceiling; widening these structural invariants would enlarge in-memory amplification rather than enable more response bytes. |
-| `oc-0779bd2d8c1eb3f5991c` | `ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/AgentNodeBehavior.java:1488` `if` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
-| `oc-cea5464489829af400f5` | `ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/AgentNodeBehavior.java:1489` `if` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-fcdf94d82a7d222bf0a7` | `ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/AgentNodeBehavior.java:1461` `AgentApprovalSuspension` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-3aba38cfe203f9b3f49e` | `ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/AgentNodeBehavior.java:1491` `if` | java | retained | security-ceiling-or-default | Fixed post-decode projection limits bound object depth, collection/value fan-out and key length after untrusted model text has already passed the operator-configurable byte ceiling; widening these structural invariants would enlarge in-memory amplification rather than enable more response bytes. |
+| `oc-63a0108d73246ff05f46` | `ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/AgentNodeBehavior.java:1491` `if` | java | retained | security-ceiling-or-default | Fixed post-decode projection limits bound object depth, collection/value fan-out and key length after untrusted model text has already passed the operator-configurable byte ceiling; widening these structural invariants would enlarge in-memory amplification rather than enable more response bytes. |
+| `oc-87688d017e988172d961` | `ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/AgentNodeBehavior.java:1491` `if` | java | retained | security-ceiling-or-default | Fixed post-decode projection limits bound object depth, collection/value fan-out and key length after untrusted model text has already passed the operator-configurable byte ceiling; widening these structural invariants would enlarge in-memory amplification rather than enable more response bytes. |
+| `oc-b8cdf3dc00eb521149ee` | `ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/AgentNodeBehavior.java:1491` `if` | java | retained | security-ceiling-or-default | Fixed post-decode projection limits bound object depth, collection/value fan-out and key length after untrusted model text has already passed the operator-configurable byte ceiling; widening these structural invariants would enlarge in-memory amplification rather than enable more response bytes. |
+| `oc-0779bd2d8c1eb3f5991c` | `ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/AgentNodeBehavior.java:1492` `if` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
+| `oc-cea5464489829af400f5` | `ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/AgentNodeBehavior.java:1493` `if` | java | retained | protocol-or-format-invariant | These atoms are exact wire, parser, schema, storage, authorization, command, or domain vocabulary consumed by code; changing them changes compatibility rather than operating policy. |
 | `oc-a1df99021950b8921a6d` | `ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/AgentOperationalConfiguration.java:44` `AgentOperationalConfiguration` | java | retained | protocol-or-format-invariant | #396 introduces or revises this structural schema, bounded parser, deployment carrier, or published contract atom; operator values and defaults are owned by AgentOperationalConfiguration. |
 | `oc-4b8846f4786935218339` | `ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/AgentOperationalConfiguration.java:45` `AgentOperationalConfiguration` | java | retained | protocol-or-format-invariant | #396 introduces or revises this structural schema, bounded parser, deployment carrier, or published contract atom; operator values and defaults are owned by AgentOperationalConfiguration. |
 | `oc-2f2f5e65e4bf0fbc4b13` | `ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/AgentOperationalConfiguration.java:46` `AgentOperationalConfiguration` | java | retained | protocol-or-format-invariant | #396 introduces or revises this structural schema, bounded parser, deployment carrier, or published contract atom; operator values and defaults are owned by AgentOperationalConfiguration. |

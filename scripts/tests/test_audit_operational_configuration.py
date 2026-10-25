@@ -198,6 +198,14 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                     path.write_text(original.replace(before, after, 1), encoding="utf-8")
                     errors = audit.inventory_errors(root, fixture, audit.discover(root))
                     self.assertTrue(any("unclassified operational candidate" in error for error in errors), errors)
+            # Removing the disabled-mode guard leaves the same lexical settings, but changes
+            # startup behavior. Current candidate metadata must not bless that body drift.
+            guard = 'if (mode.equals("disabled")) return null;'
+            self.assertEqual(1, original.count(guard))
+            path.write_text(original.replace(guard, "", 1), encoding="utf-8")
+            errors = audit.inventory_errors(root, fixture, audit.discover(root))
+            self.assertTrue(any("personal OAuth typed configuration source proof has drifted" in error
+                                for error in errors), errors)
 
     def test_topological_history_selects_the_current_dev_ordinary_source_after_a_main_merge(self) -> None:
         with tempfile.TemporaryDirectory() as location:

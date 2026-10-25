@@ -13676,6 +13676,84 @@ def manifest_pin_attempt_authority_errors(root: Path, setting: str,
     return errors
 
 
+PERSONAL_OAUTH_CONFIGURATION_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthConfiguration.java")
+PERSONAL_OAUTH_CONFIGURATION_DIGEST = "e29c4ee6d6143d897c9e8fc85687fbad0630b681e6e89e997349ede26fb986f9"
+PERSONAL_OAUTH_SETTINGS = (
+    ("mode", "RAVENROOT_PERSONAL_OPENAI_MODE", '"disabled"', "disabled"),
+    ("callback", "RAVENROOT_PERSONAL_CALLBACK", '"http://127.0.0.1:8080/auth/callback"',
+     "http://127.0.0.1:8080/auth/callback"),
+    ("clientId", "RAVENROOT_PERSONAL_OPENAI_CLIENT_ID", '""',
+     "empty; required provisioned registration in registered mode"),
+    ("clientSecret", "RAVENROOT_PERSONAL_OPENAI_CLIENT_SECRET", '""', "empty (public client)"),
+    ("directory", "RAVENROOT_PERSONAL_STORE_DIR", '"/opt/ravenroot/data/personal"',
+     "/opt/ravenroot/data/personal"),
+    ("keyFile", "RAVENROOT_PERSONAL_KEY_FILE", 'directory.resolve("storage.key").toString()',
+     "storage.key under the configured state directory"),
+    ("allowedHosts", "RAVENROOT_PERSONAL_ALLOWED_HOSTS", '""',
+     "empty; provider network access unavailable"),
+    ("assistantModel", "RAVENROOT_PERSONAL_ASSISTANT_MODEL", '""',
+     "empty (select from visible account models)"),
+)
+
+
+def personal_oauth_configuration_authority_errors(
+        root: Path, entries: dict[str, dict[str, object]],
+        discovered: dict[str, Candidate]) -> list[str]:
+    """Close the heterogeneous OAuth record without pretending its fields are integer settings."""
+    path = PERSONAL_OAUTH_CONFIGURATION_PATH
+    owner = path.as_posix() + "#PersonalOAuthConfiguration"
+    if not (root / path).exists():
+        return (["personal OAuth settings exist without their typed source"]
+                if any(entry.get("owner") == owner for entry in entries.values()) else [])
+    source = (root / path).read_text(encoding="utf-8")
+    if current_source_owner(root, owner) is None \
+            or _source_digest(source) != PERSONAL_OAUTH_CONFIGURATION_DIGEST \
+            or java_record_components(source, "PersonalOAuthConfiguration") != tuple(
+                field for field, _binding, _fallback, _default in PERSONAL_OAUTH_SETTINGS):
+        return ["personal OAuth typed configuration source proof has drifted"]
+    factory = java_method_span(source, "PersonalOAuthConfiguration", "fromEnvironment")
+    if factory is None:
+        return ["personal OAuth configuration has no exact environment factory"]
+    errors: list[str] = []
+    assigned: set[str] = set()
+    for field, binding, fallback, default in PERSONAL_OAUTH_SETTINGS:
+        call = f'env.getOrDefault("{binding}", {fallback})'
+        if source.count(call) != 1:
+            errors.append(f"personal.{field}: exact environment fallback call has drifted")
+            continue
+        start = source.index(call)
+        end = start + len(call)
+        if not factory[0] <= start < end <= factory[1]:
+            errors.append(f"personal.{field}: fallback is outside the typed factory")
+            continue
+        ids = set(all_candidate_ids_in_source_span(path, source, start, end, discovered))
+        fallback_atom = '"storage.key"' if field == "keyFile" else fallback
+        defaults = sorted(identifier for identifier in ids
+                          if discovered[identifier].kind != "environment-binding"
+                          and discovered[identifier].expression == fallback_atom)
+        selected = {identifier for identifier, entry in entries.items()
+                    if entry.get("setting") == "personal." + field}
+        if not ids or selected != ids or len(defaults) != 1:
+            errors.append(f"personal.{field}: environment/default candidate partition has drifted")
+        assigned.update(ids)
+        for identifier in ids:
+            entry = entries.get(identifier, {})
+            if entry.get("status") != "already-centralized" \
+                    or entry.get("classification") != "operator-configurable" \
+                    or entry.get("owner") != owner or entry.get("field") != field \
+                    or entry.get("bindings") != [binding] or entry.get("default") != default \
+                    or entry.get("defaultEvidence") != defaults:
+                errors.append(f"personal.{field}: reviewed typed owner, binding or default has drifted")
+    remaining = {identifier for identifier, candidate in discovered.items()
+                 if candidate.path == path.as_posix()} - assigned
+    if len(remaining) != 1 or any(discovered[identifier].expression != '\",\"'
+                                 or entries.get(identifier, {}).get("classification")
+                                 != "protocol-or-format-invariant" for identifier in remaining):
+        errors.append("personal OAuth host delimiter is not the exact remaining protocol atom")
+    return errors
+
+
 def environment_binding_authority_errors(root: Path, setting: str, contract: dict[str, object],
                                          setting_entries: list[dict[str, object]],
                                          entries: dict[str, dict[str, object]],
@@ -17343,6 +17421,7 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
     errors.extend(ai_operational_authority_errors(
         root, document.get("aiOperationalAuthorities"), entries, discovered,
     ))
+    errors.extend(personal_oauth_configuration_authority_errors(root, entries, discovered))
 
     tracked_paths = set(tracked_files(root))
     representatives: dict[str, dict[str, object]] = {}
@@ -17379,6 +17458,10 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
         if representative.get("graphAuthoringAuthority") == GRAPH_AUTHORING_AUTHORITY_ID:
             continue
         if representative.get("aiOperationalAuthority") == AI_OPERATIONAL_AUTHORITY_ID:
+            continue
+        if setting in {"personal." + spec[0] for spec in PERSONAL_OAUTH_SETTINGS}:
+            # The mandatory source-derived family above proves every field, environment call,
+            # default and remaining lexical atom; no integer-only resolver is claimed here.
             continue
         if representative.get("finalReviewAuthority") == FINAL_REVIEW_AUTHORITY_ID \
                 and representative.get("finalReviewGroup") == "embed-enabled-operator-setting":

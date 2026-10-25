@@ -219,7 +219,8 @@ activity in the elastic graph. Test preserves its pass-through semantics: bypass
 identified as bypassed, and traversed edges still show the route taken.
 
 A durable deployment removed with Undeploy cannot be restored under its retired identity. If the
-saved association is unavailable, verify the selected service. **Run → Run as new deployment…**
+saved association is unavailable, verify the selected service. **Run** offers to start a new deployment
+directly; declining keeps the saved association unchanged. The separate **Run → Run as new deployment…** command
 opens a separate draft from the current graph and submits a new Run through the usual confirmation.
 The original document keeps its previous deployment and initial traversal identity; ordinary Run
 continues to reconcile that original association.

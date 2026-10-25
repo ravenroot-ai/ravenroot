@@ -1043,6 +1043,10 @@ async function switchWorkspacePersistence(configuration, client) {
       if (restored.activeDocumentId && workspace.activeId !== restored.activeDocumentId) {
         activateDocument(restored.activeDocumentId);
       }
+      clearActivity();
+      addActivityMessage(uiMessage('workspace.notice.editor.6'), uiMessage('workspace.notice.workspaceRestored', {
+        count: restored.documents.length, name: workspace.active?.displayName || '',
+      }));
       if (restored.recoveredStaleSelection) workspacePersistenceReason += uiText("workspace.app.the.stale.selection.was.repaired");
     } else {
       openDocument({ tenantId: nextScope.tenantId });
@@ -10449,7 +10453,7 @@ mmCanvas.addEventListener('blur', () => scheduleMinimap());
 // WORKFLOW EDITING & RUNTIME
 // ═══════════════════════════════════════════════════════════════
 
-function newWorkflow() {
+function newWorkflow({ announce = true } = {}) {
   if (!workspace.active) return openDocument();
   if (!confirmDiscardChanges()) return;
   setModifyMode(false);
@@ -10468,7 +10472,7 @@ function newWorkflow() {
   clearActivity();
   // The message must describe the START -> Do something -> {End, Error} shape that
   // createWorkflowDocument() actually builds.
-  addActivityMessage(uiMessage("workspace.notice.editor.6"), uiMessage("workspace.notice.minimal.start.do.something.end.error.workflow.created"), 'completed');
+  if (announce) addActivityMessage(uiMessage("workspace.notice.editor.6"), uiMessage("workspace.notice.minimal.start.do.something.end.error.workflow.created"), 'completed');
 }
 
 function createStartupImportPlaceholder() {
@@ -13065,9 +13069,8 @@ async function runCapturedDocumentDeployment(owner, client, { graphMl, payload, 
   return true;
 }
 
-async function runAsNewDeployment() {
-  const owner = workspace.active;
-  if (!owner?.deploymentRun || !documentIsEditable(owner) || !tenantAuthorityAllows(owner)
+async function runAsNewDeployment({ owner = workspace.active, confirmed = false } = {}) {
+  if (owner !== workspace.active || !owner?.deploymentRun || !documentIsEditable(owner) || !tenantAuthorityAllows(owner)
       || deploymentRunIsPending(owner) || owner.deploymentRunStopPending) return false;
   captureActiveDocument();
   // Keep the original document and its immutable association available for inspection.
@@ -13078,10 +13081,10 @@ async function runAsNewDeployment() {
     presentation: { ...visualGroupPresentation(owner), renderMode: owner.renderMode,
       layoutMode: owner.layoutMode, visualStyle: owner.visualStyle,
       designArrangement: owner.designArrangement, fontSize: owner.fontSize } });
-  return playGraph('run');
+  return playGraph('run', { confirmed });
 }
 
-async function playGraph(mode = 'test') {
+async function playGraph(mode = 'test', { confirmed = false } = {}) {
   const owner = workspace.active;
   const ownerGraph = graphData;
   if (!owner || !ownerGraph) return showInspectorMessage(uiText("workspace.notice.create.or.load.a.workflow.first.3"));
@@ -13159,7 +13162,7 @@ async function playGraph(mode = 'test') {
     }
   }
   const confirmation = uiText('workspace.run.confirmDeployment', { name: displayName });
-  if (mode === 'run' && !globalThis.confirm(confirmation)) {
+  if (mode === 'run' && !confirmed && !globalThis.confirm(confirmation)) {
     releaseExecutionCommand(flight);
     return;
   }
@@ -13175,14 +13178,24 @@ async function playGraph(mode = 'test') {
   }
 
   if (mode === 'run') {
+    let recoverMissingDeployment = false;
     try {
       await runCapturedDocumentDeployment(owner, executionClient, { graphMl, payload, displayName, attachment });
     } catch (error) {
       if (workspace.find(owner.id) === owner && owner === workspace.active) {
-        if (error?.finding) await presentRuntimeRefusal(owner, error.finding, uiMessage('workspace.app.execution.refused'));
+        if (error?.uiMessageKey === 'workspace.run.restoreUnavailable' && documentIsEditable(owner)
+            && tenantAuthorityAllows(owner, executionClient)) {
+          const binding = owner.deploymentRun;
+          recoverMissingDeployment = globalThis.confirm(uiText('workspace.run.recoverUnavailable', {
+            name: owner.displayName, deploymentId: binding.deploymentId,
+          })) && workspace.active === owner && owner.incarnation === originIncarnation
+            && owner.deploymentRun === binding && tenantAuthorityAllows(owner, executionClient);
+          if (!recoverMissingDeployment) addActivityMessage(uiMessage('workspace.run.failed'), uiErrorMessage(error), 'failed');
+        } else if (error?.finding) await presentRuntimeRefusal(owner, error.finding, uiMessage('workspace.app.execution.refused'));
         else addActivityMessage(uiMessage('workspace.run.failed'), uiErrorMessage(error), 'failed');
       }
     } finally { releaseExecutionCommand(flight); syncPaneHeaders(); refreshCommands(); }
+    if (recoverMissingDeployment) return runAsNewDeployment({ owner, confirmed: true });
     return;
   }
 
@@ -17740,7 +17753,7 @@ function bootApplication() {
   // presentation, repository identity or runtime activity added while waiting makes the import open
   // as a separate document instead.
   if (fileParam) createStartupImportPlaceholder();
-  else newWorkflow();
+  else newWorkflow({ announce: false });
   // Import from ?file= after validated configuration and workspace restoration. Supports .graphml,
   // .xml and Graphify .json without acquiring repository authoring identity.
   // Examples:

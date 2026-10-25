@@ -141,6 +141,8 @@ test('hosted traversal activity uses the deployment stream while the one-shot st
 
 test('missing saved registration explains recovery and starts a separate document only on explicit command', async ({ page }) => {
   const backend = await deploymentService(page); await boot(page);
+  page.removeAllListeners('dialog');
+  page.on('dialog', dialog => dialog.message().startsWith('The previous deployment') ? dialog.dismiss() : dialog.accept());
   const original = await page.evaluate(async () => {
     const owner = window.ravenroot.activeDocument();
     owner.deploymentRun.registrationIdentity = 'retained-registration';
@@ -161,5 +163,41 @@ test('missing saved registration explains recovery and starts a separate documen
   const retained = await page.evaluate(id => window.ravenroot.workspace.documents.find(doc => doc.id === id)?.deploymentRun, original.id);
   expect(retained.deploymentId).toBe(original.binding.deploymentId);
   expect(retained.traversalId).toBe(original.binding.traversalId);
+  expect(backend.calls.filter(call => call.method === 'POST' && !call.action)).toHaveLength(2);
+});
+
+
+test('reload of a removed deployment restores truthful context and Run offers recovery directly', async ({ page }) => {
+  const backend = await deploymentService(page); await boot(page);
+  let recover = false; const prompts = [];
+  page.removeAllListeners('dialog');
+  page.on('dialog', dialog => {
+    prompts.push(dialog.message());
+    return dialog.message().startsWith('The previous deployment') && !recover ? dialog.dismiss() : dialog.accept();
+  });
+  const original = await page.evaluate(() => {
+    const owner = window.ravenroot.activeDocument();
+    owner.deploymentRun.registrationIdentity = 'retained-registration';
+    return { id: owner.id, binding: { ...owner.deploymentRun } };
+  });
+  backend.held.clear();
+  await page.locator('#btn-run').click();
+  await expect(page.locator('#activity-log')).toContainText('The saved deployment is unavailable');
+  await page.evaluate(() => window.ravenroot.flushWorkspacePersistence());
+  const writes = backend.calls.filter(call => call.method === 'POST').length;
+  await page.reload();
+  await expect(page.locator('#activity-log')).toContainText('Restored 2 saved documents');
+  await expect(page.locator('#activity-log')).not.toContainText('Minimal Start');
+  expect(backend.calls.filter(call => call.method === 'POST')).toHaveLength(writes);
+  prompts.length = 0; recover = true;
+  await page.locator('#btn-run').click();
+  await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().deploymentRun?.deploymentId)).not.toBe(original.binding.deploymentId);
+  await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().deploymentRun?.processInstanceId)).toBe(PID);
+  const current = await page.evaluate(() => window.ravenroot.activeDocument().deploymentRun);
+  expect(current.deploymentId).not.toBe(original.binding.deploymentId);
+  expect(current.initialStartRequestId).not.toBe(original.binding.initialStartRequestId);
+  expect(prompts).toHaveLength(2); // Normal Run and explicit recovery, no third approval.
+  expect(prompts[1]).toContain(original.binding.deploymentId);
+  expect(await page.evaluate(id => window.ravenroot.workspace.find(id).deploymentRun.traversalId, original.id)).toBe(original.binding.traversalId);
   expect(backend.calls.filter(call => call.method === 'POST' && !call.action)).toHaveLength(2);
 });

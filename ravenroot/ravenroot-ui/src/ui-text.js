@@ -78,6 +78,8 @@ export const ENGLISH_MESSAGES = Object.freeze({
   'history.unavailable': 'Availability: {availability}',
 
   'workspace.run.persistenceRequired': 'Run needs a saved workspace association before creating a deployment. Restore workspace storage, then retry.',
+  'workspace.notice.workspaceRestored': 'Restored {count} saved documents. Active document: {name}.',
+  'workspace.run.recoverUnavailable': 'The previous deployment for “{name}” is unavailable in this service and cannot be resumed.\n\nStart a new deployment from the current graph? This starts its real behavior and sources with a new initial traversal. The original document and its previous deployment association will be kept.\n\nPrevious deployment: {deploymentId}',
   'workspace.run.confirmDeployment': 'Run “{name}” as one pinned deployment? Its sources start listening and its initial START runs once. Later Run actions reconcile this same deployment.',
   'workspace.run.attached': 'Deployment {deploymentId} · Pinned {version}',
   'workspace.run.draftSeparate': 'Monitoring uses the pinned deployment. Local draft edits remain separate.',

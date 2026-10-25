@@ -165,6 +165,40 @@ def external_io_reviewed_entries(
 
 
 class OperationalConfigurationAuditTest(unittest.TestCase):
+    def test_personal_configuration_settings_and_changed_defaults_remain_source_bound(self) -> None:
+        relative = Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthConfiguration.java")
+        document = audit.load_inventory(audit.INVENTORY)
+        entries = [entry for entry in document["entries"] if entry["path"] == relative.as_posix()]
+        bindings = [entry for entry in entries if entry["kind"] == "environment-binding"]
+        self.assertEqual({"mode", "callback", "clientId", "clientSecret", "directory", "keyFile",
+                          "allowedHosts", "assistantModel"}, {entry["field"] for entry in bindings})
+        self.assertEqual(8, len(bindings))
+        for entry in bindings:
+            self.assertEqual("operator-configurable", entry["classification"])
+            self.assertEqual(relative.as_posix() + "#PersonalOAuthConfiguration", entry["owner"])
+            self.assertIn(entry["expression"], entry["bindings"])
+        mode = next(entry for entry in bindings if entry["field"] == "mode")
+        self.assertEqual("disabled", mode["default"])
+        with tempfile.TemporaryDirectory() as location:
+            root = Path(location)
+            path = root / relative
+            path.parent.mkdir(parents=True)
+            original = (ROOT / relative).read_text(encoding="utf-8")
+            path.write_text(original, encoding="utf-8")
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(["git", "add", relative.as_posix()], cwd=root, check=True)
+            candidates = audit.discover(root)
+            fixture = {"entries": entries, "retiredEntries": [], "migrationHistory": [],
+                       "evidenceRecords": {candidate.evidence_digest: candidate.evidence
+                                           for candidate in candidates}}
+            self.assertEqual([], audit.inventory_errors(root, fixture, candidates))
+            for before, after in (("\"disabled\"", "\"loopback\""),
+                                  ("RAVENROOT_PERSONAL_OPENAI_MODE", "RAVENROOT_OTHER_MODE")):
+                with self.subTest(before=before):
+                    path.write_text(original.replace(before, after, 1), encoding="utf-8")
+                    errors = audit.inventory_errors(root, fixture, audit.discover(root))
+                    self.assertTrue(any("unclassified operational candidate" in error for error in errors), errors)
+
     def test_topological_history_selects_the_current_dev_ordinary_source_after_a_main_merge(self) -> None:
         with tempfile.TemporaryDirectory() as location:
             root = Path(location)
@@ -1565,6 +1599,13 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             rejects(audit.EXTERNAL_IO_APPLICATION_PATH,
                     "policyForNodeAdmission(behaviorNodes)",
                     "policyForNodes(behaviorNodes)")
+            rejects(audit.EXTERNAL_IO_MANAGED_SERVICES_PATH,
+                    "response = pending.get(effectiveDeadline.toNanos(), TimeUnit.NANOSECONDS);\n"
+                    "                        credentials.requireHttpActive(packageId, identity.identity(), destination, binding.reference());",
+                    "response = pending.get(effectiveDeadline.toNanos(), TimeUnit.NANOSECONDS);")
+            rejects(audit.EXTERNAL_IO_DEPLOYMENT_PATH,
+                    'throw new SecurityException("Personal connections require an explicit browser execution");',
+                    'if (false) throw new SecurityException("Personal connections require an explicit browser execution");')
             rejects(audit.EXTERNAL_IO_WS_ADMISSION_PATH,
                     "if (active >= maximum) return false;",
                     "if (active > maximum) return false;")
@@ -2250,16 +2291,16 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             root, {audit.ROUTE_TABLE_AUTHORITY_ID: authority}, entries, candidates,
         )
 
-    def test_route_table_authority_proves_all_789_positions_consumers_and_bounds(self) -> None:
+    def test_route_table_authority_proves_all_885_positions_consumers_and_bounds(self) -> None:
         with tempfile.TemporaryDirectory() as location:
             root = Path(location)
             authority, entries, candidates, details = self.route_table_authority_fixture(root)
-            self.assertEqual(120, len(details))
+            self.assertEqual(132, len(details))
             self.assertEqual(
-                {"methods": 133, "path": 120, "summary": 461, "successStatuses": 123},
+                {"methods": 145, "path": 132, "summary": 473, "successStatuses": 135},
                 {role: len(ids) for role, ids in authority["candidateIdsByRole"].items()},
             )
-            self.assertEqual(837, len(entries))
+            self.assertEqual(885, len(entries))
             self.assertEqual([], self.route_table_errors(root, authority, entries, candidates))
             self.assertEqual({
                 "StableEdgeId.MAX_UTF8_BYTES": 8192,
@@ -4672,7 +4713,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             document = {"entries": list(entries.values()), "retiredEntries": [],
                         "migrationHistory": []}
             self.assertIn(
-                "| Retained published contract descriptions | 461 |",
+                "| Retained published contract descriptions | 473 |",
                 audit.render_report(document),
             )
             deferred = copy.deepcopy(document)
@@ -4680,7 +4721,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                              if entry["classification"] == "published-contract-description")
             published.update(status="deferred", followUp="#225")
             self.assertIn(
-                "| Retained published contract descriptions | 460 |",
+                "| Retained published contract descriptions | 472 |",
                 audit.render_report(deferred),
             )
         self.assertIn(
@@ -7496,6 +7537,12 @@ class AgentBudgetPolicyAuditTest(unittest.TestCase):
              "                                .fromEnvironment(System.getenv())",
              "ai.ravenroot.server.agent.AgentAuthorityBudgetConfiguration\n"
              "                                .fromEnvironment(Map.of())"),
+            (audit.AGENT_BUDGET_COMPOSITION_PATH,
+             "behaviors.withPersonalConnectionAuthority(personalOAuth::requireExecutionAuthority)",
+             "behaviors.withPersonalConnectionAuthority(ignored -> {})"),
+            (audit.AGENT_BUDGET_COMPOSITION_PATH,
+             ".withPersonalDefinitionTenant(personalOAuth::definitionTenant)",
+             ".withPersonalDefinitionTenant(identity -> identity.tenantId())"),
             (audit.AGENT_BUDGET_CONSUMER_PATH,
              "long input = policy.maximumInputTokensPerTurn();", "long input = 128_000;"),
         )

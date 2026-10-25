@@ -73,11 +73,11 @@ AGENT_BUDGET_METHOD_DIGESTS = {
 AGENT_BUDGET_POLICY_CONSTRUCTOR_DIGEST = \
     "78e872f0c6350db3eaefcab90a2cb0ee4dbc4ada692b869b11dc6b3b39a1331f"
 AGENT_BUDGET_COMPOSITION_DIGEST = \
-    "48304fd3f668a7d542c055c452f1ac814695507e03bb8401adfb4f0b667723cb"
+    "ef04df48d52dceb9be8cdbe889520b84d52dfd7ec92e0dbbdaf897e050ec5ebe"
 AGENT_BUDGET_CONSUMER_DIGEST = \
     "5ba0f6548598db034990a2307684c25656f61426d7a5e9101dc360c964b70c64"
 AGENT_BUDGET_COMPOSITION_SOURCE_DIGEST = \
-    "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260"
+    "a6a9bb21af76d640d2b8140a2a555cafcaae09461d640d520213b8f1955d4b70"
 AGENT_BUDGET_CONSUMER_SOURCE_DIGEST = \
     "c830574e0a2c9b683d689fa7d437a206772d8043ce40f2ecaa21cf3345f83979"
 AGENT_BUDGET_VECTOR_SOURCE_DIGEST = \
@@ -199,7 +199,7 @@ EMBED_CENTRALIZATION_AFTER_REVISION = "9a77081bbac6133709685b6706fa0d400922160d"
 EMBED_SOURCE_DIGESTS = {
     EMBED_CONFIGURATION_PATH: "b7ae127c44b5f8c7068a83f07bd55856e9f9f2d0b07d80be0ec1777120a99e24",
     EMBED_STARTUP_CHECK_PATH: "4716ec286b5ae31d4284ca5b2bbf2c4eed5c53904021def303f8dd1dd9d78539",
-    EMBED_MAIN_PATH: "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260",
+    EMBED_MAIN_PATH: "a6a9bb21af76d640d2b8140a2a555cafcaae09461d640d520213b8f1955d4b70",
     EMBED_REPLICA_CHECK_PATH: "6a04a33061e6c2a1db2774877362722ee3af6339967585875d90b33afe311d19",
     EMBED_CONFIGURATION_TEST_PATH: "efc54784cd75dfa0cca6c0208d40add34f53aa0d62c40565f74716a03c1995ea",
     EMBED_MAIN_TEST_PATH: "f2699ce39d55985b13421068f812f50705be5c82050cf6769a621e3f49df37d3",
@@ -215,7 +215,7 @@ EMBED_METHOD_DIGESTS = {
     "EmbedStartupCheck.evaluate":
         "6edd7cf7715886c573f696bc865a76a3f951da2632bd199b241b144edc1b35df",
     "RavenrootServerMain.run":
-        "48304fd3f668a7d542c055c452f1ac814695507e03bb8401adfb4f0b667723cb",
+        "ef04df48d52dceb9be8cdbe889520b84d52dfd7ec92e0dbbdaf897e050ec5ebe",
     "RavenrootServerMain.refuseUnsupportablePackagedEmbed":
         "f7538d127b1848e9836bd69c9b43512154295f5221ec282c8cd7242f3acb7be7",
     "ReplicaTopologyStartupCheck.replicaLocalAuthorities":
@@ -6395,7 +6395,7 @@ def persistence_policy_authority_from_source(
         (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "ExecutionOwnershipConfiguration", "requireCompatible",
          "7dc8e183ddde66ccda77fff516efba5704ef5ab3dfe5518579685cea98844070"),
         (PERSISTENCE_SERVER_MAIN_PATH, "RavenrootServerMain", "run",
-         "48304fd3f668a7d542c055c452f1ac814695507e03bb8401adfb4f0b667723cb"),
+         "ef04df48d52dceb9be8cdbe889520b84d52dfd7ec92e0dbbdaf897e050ec5ebe"),
         (PERSISTENCE_AUDIT_DIRECTORY_PATH, "AuditTrailDirectory", "resolve",
          "fabf6b48115874f29c018fb61e71bc358a3f977634dfc1723a1bf3aa335fb227"),
         (PERSISTENCE_AUDIT_CONFIGURATION_PATH, "AuditTrailConfiguration", "fromEnvironment",
@@ -7621,15 +7621,15 @@ def external_io_policy_authority_from_source(
         (EXTERNAL_IO_BEHAVIOR_REGISTRY_PATH, "BehaviorRegistry", "registerSourceAuthority",
          "d64b7a830280e60898cb293447e518665e948780a6bdcd1dab0b5425c5070c22"),
         (EXTERNAL_IO_DEPLOYMENT_PATH, "DefaultGraphDeployment", "startSources",
-         "71cfdbff190e3bca09f37e9b14de0b849af9434bd6e1f11d036c105c5c5f1f33"),
+         "dd4a35b4ad3ad42af9d1fa54883a0933e0bb003c6143571fe09946630e3055b3"),
         (EXTERNAL_IO_DEPLOYMENT_PATH, "DefaultGraphDeployment", "rollbackSources",
          "cb3b6fa4e95c27de0dc2c576d6ef118fd2528e3645a7eb53e0216afac1934558"),
         (EXTERNAL_IO_DEPLOYMENT_PATH, "DefaultGraphDeployment", "doStop",
          "84243f4cef7a99d221dbb7453b3753297daf4feee9d0060d836b538b15860a5d"),
         (EXTERNAL_IO_MANAGED_SERVICES_PATH, "ManagedNodePackageServices", "executeHttp",
-         "f8baedda556637f780f48d6619ef5cfdd5aba613c710a38f0a5aa586055baf2f"),
+         "f3dfd226dbce5c109b98b5d208c25b24832852828733956a34c534d608ee1bde"),
         (EXTERNAL_IO_MANAGED_SERVICES_PATH, "ManagedNodePackageServices", "openWebSocket",
-         "31f5c92efaa99d3fd68aa6c7e1008baf5fe3d443de400183517a5b29437fb593"),
+         "f919633ae0a0306cf8af442e6d5c94e790860194d42334892c56006519357a8c"),
         (EXTERNAL_IO_WS_RESOLVER_PATH, "EnvironmentWebSocketProfileResolver", "resolve",
          "e8af4a34ce24e201d041dae3198c81eeca626f2032a9d5ff7714be76a51b9af0"),
         (EXTERNAL_IO_WS_SEND_PATH, "WebSocketSendNodeBehavior", "resolveExecutionIoCapacity",
@@ -8038,7 +8038,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'java',
   'RavenrootServer',
   'RavenrootServer',
-  '3da9dcec77fd23ed8906261c49dfe509e86215015d09ff2584bb73278e0239b2',
+  'bfc5f92b49e422d7a56e0696c8d55892800f034664f57320ada6c9c4017d8534',
   20),
  ('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java',
   'java',
@@ -8062,7 +8062,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'java',
   'RavenrootServerMain',
   'run',
-  '48304fd3f668a7d542c055c452f1ac814695507e03bb8401adfb4f0b667723cb',
+  'ef04df48d52dceb9be8cdbe889520b84d52dfd7ec92e0dbbdaf897e050ec5ebe',
   1),
  ('ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/manifest/ExecutionManifestResolver.java',
   'java',
@@ -8405,7 +8405,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'file',
   '',
   '',
-  '616f66c6c74cb0bc8444180d63de21e62feb98233854ff9a994f15cd88aea0d0',
+  'ee8e3de23f5d1b8ea8cdabfa62a2cebf1d3a29fc820aab9a4ca4bf6b6fae531c',
   1),
  ('scripts/tests/test_program_authoring_platform_configuration.sh',
   'file',
@@ -12917,7 +12917,7 @@ INTERACTION_WEBSOCKET_PUBLISHER_TEST_PATH = 'scripts/tests/test_publish_environm
 INTERACTION_WEBSOCKET_FILE_PROOFS = {'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionWebSocketConfiguration.java': 'a49ee156e9490deaa52ff71ecb6878b3d799a4aa387dbc75399f3dd1aa4528ce',
  'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionWebSocketServer.java': 'a5a4d9c8f5ece7bb562e83e3a20ce792ef96c0d6794d9676eb9a544cc5a51886',
  'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionProtocol.java': '4f719d5bf41335dd52dca43e444c18ccd03e730e48a4b0350a9d6108e317a2d2',
- 'scripts/publish_environment_reference.py': '33c990d111d4ab8182dbf3786e307c4531aca7bf6bf67f7e8819788bf2fc616b',
+ 'scripts/publish_environment_reference.py': '5b46b57a45737b39f7dd2cd2aeddf7de2306ebfc6323f54d92f14bfa47eedbb9',
  'scripts/tests/test_publish_environment_reference.py': '38e51901e3903ee3b4edae4cf3aab9084cf31e7583e29700df51d49d81a2f525',
  'ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/interaction/InteractionWebSocketConfigurationTest.java': '7563c54e2cbab0dcaca696fbc7457fbe712ab78c9bf5112750ebf93d4d9d71de',
  'ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/RavenrootServerInteractionLifecycleTest.java': '7073eb7ae8dc4a0b5da058ed74dfaf31698e10f1eb261ef8a6ad448f6a542e3f'}
@@ -12925,7 +12925,7 @@ INTERACTION_WEBSOCKET_FILE_PROOFS = {'ravenroot/ravenroot-server/src/main/java/a
 INTERACTION_WEBSOCKET_METHOD_PROOFS = [('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java',
  'RavenrootServerMain',
  'run',
-  '48304fd3f668a7d542c055c452f1ac814695507e03bb8401adfb4f0b667723cb'),
+  'ef04df48d52dceb9be8cdbe889520b84d52dfd7ec92e0dbbdaf897e050ec5ebe'),
  ('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java',
   'RavenrootServer',
   'installInteractionWebSockets',
@@ -14534,22 +14534,22 @@ STABLE_EDGE_TEST_PATH = Path(
 STABLE_EDGE_WIRE_TEST_PATH = Path(
     "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/StableEdgeIdWireContractTest.java")
 ROUTE_BOUND_CANDIDATES = {
-    "oc-ea00b99bbe41ad4b06c3": ("StableEdgeId.MAX_UTF8_BYTES",),
-    "oc-135e67fc3370f38d8b75":
+    "oc-ad25321b7b3c5d7122fd": ("StableEdgeId.MAX_UTF8_BYTES",),
+    "oc-fadbbac4ece0d70ac33e":
         ("EdgeTraversalWireBudget.MAX_AUXILIARY_ESCAPED_VALUE_BYTES",),
-    "oc-ec005816961871c98610": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
-    "oc-0bf6a519fab1c305c2c6": (
+    "oc-98fd33da64ede9df1194": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
+    "oc-e1ea91bd4dfec2eab53d": (
         "StableEdgeId.MAX_UTF8_BYTES",
         "EdgeTraversalWireBudget.MAX_AUXILIARY_ESCAPED_VALUE_BYTES",
     ),
-    "oc-14f0fd6f72463e865d79": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
+    "oc-0fb6a06b2b784d7eb689": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
 }
 ROUTE_BOUND_PATHS = {
-    "oc-ea00b99bbe41ad4b06c3": "/v1/events",
-    "oc-135e67fc3370f38d8b75": "/v1/events",
-    "oc-ec005816961871c98610": "/v1/events",
-    "oc-0bf6a519fab1c305c2c6": "/v1/events/recent",
-    "oc-14f0fd6f72463e865d79": "/v1/events/recent",
+    "oc-ad25321b7b3c5d7122fd": "/v1/events",
+    "oc-fadbbac4ece0d70ac33e": "/v1/events",
+    "oc-98fd33da64ede9df1194": "/v1/events",
+    "oc-e1ea91bd4dfec2eab53d": "/v1/events/recent",
+    "oc-0fb6a06b2b784d7eb689": "/v1/events/recent",
 }
 
 
@@ -14792,9 +14792,9 @@ GRAPH_AUTHORING_FILE_PROOFS = {
 GRAPH_AUTHORING_SUPPORT_FILE_PROOFS = {
     Path("ravenroot/ravenroot-ui/src/credential-request.js"): "240501ee73c4068eabbd52540de39d4813b59f7a7c6d2a44bed297c33eb91c90",
     Path("ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/RavenrootApplication.java"):
-        "adf1b3bcee37848577c343c78f8e1ae3fe4c4efe3fe9ab62aaef92ca5b0a0333",
+        "487cbe90d537f318c72f0c38a1df892a2fe22bbca0ce0a45adaed67e285cf7f5",
     Path("ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/AuthorizedRavenrootApplication.java"):
-        "753cf2cb56afd581e1ed341ca518cd88ed103aa3c764f835a6902a0839ab1f06",
+        "3f0d49566c3d2c49d2e23bd58cfdeb4af7edc0b84128569e2c6d49b2ab8e892f",
     Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/WireErrorCodes.java"):
         "71b0aa2cdfdbbd0964c1e4a4aae9c29e6736ad1be2ee9f4d27f868b61d5e7299",
 }
@@ -14843,7 +14843,7 @@ GRAPH_AUTHORING_JAVA_METHOD_PROOFS = {
      "requireCredentialAvailable"):
         "a68b4baa15f401f8d904680e0429c934d5628d46f58a6c496bab91fa7efb1bda",
     (GRAPH_AUTHORING_MAIN_PATH, "RavenrootServerMain", "run"):
-        "48304fd3f668a7d542c055c452f1ac814695507e03bb8401adfb4f0b667723cb",
+        "ef04df48d52dceb9be8cdbe889520b84d52dfd7ec92e0dbbdaf897e050ec5ebe",
     (GRAPH_AUTHORING_SERVER_PATH, "RavenrootServer", "configureGraphAuthoring"):
         "88408f397407131e0898ee913cf595d12c1766203b8d09ce31a31ce267e8cd00",
     (GRAPH_AUTHORING_SERVER_PATH, "RavenrootServer", "start"):
@@ -14904,7 +14904,7 @@ GRAPH_AUTHORING_UI_METHOD_PROOFS = {
     "repositoryDelete": "9536467e9e5975d388388ecac8fdcce7df2f03fb69647ba17a582dbb1acd800f",
     "repositoryRelease": "6769678ca585cfb40e137f6ff24b986bc89e8fac92e2db5b4f053f51a4559bda",
     "publishedArtifacts": "21ce0b20bfb0f6bb3bab951cc5662dd2d416788bf67684ca0bc749578b1a0637",
-    "connectRuntime": "4ba61ed61c46924c6802d3fa2899c91f8d195d67e6416306738c06bdded5125d",
+    "connectRuntime": "74b7a0a8f8185aea11c545c13c80d0af458666dfd70dc0d9e0fd09ec3896da88",
     "createStartupImportPlaceholder": "9b194ed16409f284ecdbe713a9be041d8cc60982f90a84b5d6f016c886e6feef",
 
     "startupImportBinding": "d6eb1a9106def1e00965ade2a2c485b422e51be0fd13641e5a2caee60a454952",
@@ -16147,9 +16147,9 @@ def route_table_authority_errors(root: Path, authorities: object,
         return ["RouteTable.ALL is not the supported direct RouteDescriptor table"]
     partitions, details, source_candidates = parsed
     errors: list[str] = []
-    expected_counts = {"methods": 133, "path": 120, "summary": 461, "successStatuses": 123}
-    if len(details) != 120 or {role: len(ids) for role, ids in partitions.items()} != expected_counts:
-        errors.append("RouteTable authority no longer has the reviewed 120/837 positional shape")
+    expected_counts = {"methods": 145, "path": 132, "summary": 473, "successStatuses": 135}
+    if len(details) != 132 or {role: len(ids) for role, ids in partitions.items()} != expected_counts:
+        errors.append("RouteTable authority no longer has the reviewed 132/885 positional shape")
     recorded = authority["candidateIdsByRole"]
     if not isinstance(recorded, dict) or set(recorded) != set(expected_counts) \
             or any(recorded.get(role) != partitions[role] for role in expected_counts):

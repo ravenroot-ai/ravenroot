@@ -328,6 +328,8 @@ public final class LlmPromptNodeBehavior implements NodeBehavior {
         }
         OpenAiCompatibleChat.Completion completion =
                 OpenAiCompatibleChat.readCompletion(settings.profile().personal() ? ai.ravenroot.api.ai.OpenAiResponses.toChat(response.body(), settings.tuning().maxTokens().orElse(Long.MAX_VALUE)) : response.body(), settings.profile().maxResponseBytes());
+        if (settings.profile().personal() && "tool_calls".equals(completion.finishReason()))
+            throw new LlmPromptException(LlmPromptException.Code.RESPONSE_INCOMPLETE);
         var attributes = new LinkedHashMap<String, Object>(message.attributes());
         // The model this bundle ASKED for, never the one the response reports: an endpoint resolves a
         // name to whatever tag it currently has installed and reports that back, so echoing it would

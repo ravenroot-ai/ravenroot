@@ -80,6 +80,17 @@ class PersonalResponsesNodeTest {
             assertEquals(1, agentService.calls()); assertEquals(0, agentService.toolAuthorizations.get());
         }
     }
+    @Test void personalPromptRefusesToolRequestsEvenWithPartialProviderText() {
+        var response = stream(Map.of("status", "completed", "usage", Map.of("input_tokens", 1, "output_tokens", 1), "output", List.of(
+                Map.of("type", "message", "role", "assistant", "content", List.of(Map.of("type", "output_text", "text", "unaccepted partial answer"))),
+                Map.of("type", "function_call", "call_id", "call-1", "name", "unapproved_tool", "arguments", "{}"))));
+        var services = new AiTestSupport.ScriptedHttp().then(response);
+        var prompt = new LlmPromptNodeBehavior(AiTestSupport.resolving(profile())).create(AiTestSupport.configuration(
+                Map.of("provider", "openai", "prompt", "hello", "credentialMode", "personal")), services);
+        var failure = assertThrows(CompletionException.class, () -> prompt.handle(AiTestSupport.message("hello")).toCompletableFuture().join());
+        assertEquals(LlmPromptException.Code.RESPONSE_INCOMPLETE, ((LlmPromptException) failure.getCause()).code());
+        assertEquals(1, services.calls()); assertEquals(0, services.toolAuthorizations.get());
+    }
     @Test void unsupportedOrUnreplayableProviderContextRefusesBeforeAnyTool() {
         for (var context : List.of(Map.<String, Object>of("type", "web_search_call", "id", "unapproved"),
                 Map.<String, Object>of("type", "reasoning", "id", "missing-encrypted-context", "summary", List.of()),

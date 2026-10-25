@@ -402,7 +402,7 @@ public final class PersonalOAuthService implements TenantCredentialResolver {
         if (model.isBlank() && !available.isEmpty()) model = available.getFirst();
         if (!available.contains(model)) throw refused("model-unavailable");
         var response = request(URI.create(RESOURCE + "/responses"), "POST", Map.of("Authorization", "Bearer " + token, "Content-Type", "application/json"),
-                ProtectedConnectionStore.json(Map.of("model", model, "input", List.of(Map.of("role", "user", "content", prompt)), "stream", true, "store", false)), 4 * 1024 * 1024,
+                ProtectedConnectionStore.json(Map.of("model", model, "input", List.of(Map.of("role", "user", "content", prompt)), "stream", true, "store", false, "max_output_tokens", 4096)), 4 * 1024 * 1024,
                 () -> {
                     if (!ownsSession(headers, context) || !assistantAuthorized(browser, session)) throw refused("assistant-authorization-expired");
                     store.transaction(data -> {

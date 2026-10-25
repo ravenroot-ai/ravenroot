@@ -78,6 +78,7 @@ public class PersonalOAuthServiceTest {
         assertEquals("completed-answer", service.assistant(headers(a), context, "hello", "account-model"));
         assertThrows(PersonalConnectionException.class, () -> service.assistant(headers(second), personalContext(second, "other"), "hello", "account-model"));
         assertEquals("access-A", provider.inferenceBearer);
+        assertEquals(4096L, provider.lastInference.get("max_output_tokens"));
         call("/sign-out", a, Map.of());
         assertThrows(PersonalConnectionException.class, () -> service.assistant(headers(a), context, "hello", "account-model"));
     }
@@ -303,6 +304,7 @@ public class PersonalOAuthServiceTest {
         int initialExpiry = 3600; String inferenceBearer;
         String refreshScope; String refreshedSubject; String refreshError;
         public String responseText = "completed-answer";
+        Map<String, Object> lastInference = Map.of();
         @Override @SuppressWarnings("unchecked") public <T> HttpResponse<T> send(HttpRequest request, HttpResponse.BodyHandler<T> handler) {
             byte[] result;
             String path = request.uri().getPath();
@@ -317,6 +319,7 @@ public class PersonalOAuthServiceTest {
                 inferences.incrementAndGet(); inferenceBearer = request.headers().firstValue("Authorization").orElse("").replace("Bearer ", "");
                 inferenceBearers.add(inferenceBearer);
                 Map<String, Object> body = cast(PayloadJson.read(requestBody(request).getBytes(StandardCharsets.UTF_8), ProtectedConnectionStore.LIMITS).toJava());
+                lastInference = body;
                 assertEquals(false, body.get("store")); assertEquals(true, body.get("stream"));
                 var output = Map.of("type", "message", "content", List.of(Map.of("type", "output_text", "text", responseText)));
                 var completed = Map.of("status", "completed", "output", List.of(output), "usage", Map.of("input_tokens", 2, "output_tokens", 2));

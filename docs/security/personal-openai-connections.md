@@ -21,7 +21,8 @@ It cannot silently use a system account or delegate a browser token to a runner.
 
 A graph may mix the two. Personal graph submission preflights its connection before any node effect, including earlier non-AI nodes. Anonymous, missing-account, locked, revoked, or expired authority is refused; it never changes billing accounts or falls back to a system key.
 
-Open **Personal connections** in the assistant panel. **Continue with ChatGPT** starts browser OAuth. Select a linked account, review its health and plan-use permission, and select system or personal assistant mode. **Authorize this browser's personal assistant** grants at most 15 minutes. Each browser needs its own sign-in and authorization, including another browser signed in to the same account. Identity-only sign-in does not grant model use. Reconnect explicitly to request missing ChatGPT plan permission.
+Open **Personal connections** in the assistant panel. **Continue with ChatGPT** starts browser OAuth. Select a linked account, review its health and plan-use permission, and select system or personal assistant mode. **Authorize this browser's personal assistant** grants at most 15 minutes. Each personal assistant turn is bounded to 4,096 output tokens, a 90-second total request deadline,
+and a 4 MiB stream. Each browser needs its own sign-in and authorization, including another browser signed in to the same account. Identity-only sign-in does not grant model use. Reconnect explicitly to request missing ChatGPT plan permission.
 
 The account catalog is fetched using the selected account's credential. The assistant shows its available model names; its requests use the corresponding model slug. Node profiles retain the operator's model default and the inspector's model override. Select a model available to the connected account. An unavailable model is a provider refusal, never a reason to use another account.
 

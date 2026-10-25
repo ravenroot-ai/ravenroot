@@ -1,3 +1,4 @@
+import { deploymentGraphSignature } from './deployment-graph-match.js';
 import { createDeploymentHistoryMonitor } from './embed-viewer-entry.js';
 import { mountCorrelationPreview } from './correlation-authoring.js';
 import { runOriginDeployment, persistedDeploymentRun, boundDeploymentNeedsCloseDecision, stopOriginDeployment, deploymentRunIsPending, observeOriginDeployment } from './deployment-run.js';
@@ -288,6 +289,7 @@ import {
   documentIsEditable,
   detachExecution,
   documentForRuntimeEvent,
+  deploymentRunOwnsEvent,
   forkDocumentRecord,
   hasUnsavedWork,
   retireSourceSessionProcessBindings,
@@ -3717,9 +3719,26 @@ function openDocument({ name = defaultDocumentName(), displayName, graph = null,
   }
   syncActiveDocumentChrome();
   scheduleProgramGraphReadiness(document_);
+  observeDocumentDeployment(document_);
   if (presentation?.renderMode === 'monitoring') reconcileActiveRenderModeRenderer();
   scheduleWorkspacePersistence();
   return document_.id;
+}
+
+function paintDocumentDeploymentView(owner, state) {
+  const cleared = owner.cy.nodes().some(node => node.data('runtimeObserved') && !state.nodeStates.has(node.id()));
+  applyDeploymentViewStateToRenderer(owner.cy, state);
+  owner.execution.monitoringFlow = state.runtime;
+  if (cleared) applyVisualStyle(owner.visualStyle, owner.cy, owner, { preserveEdgeGeometry: true });
+  owner.cy.nodes().forEach(node => {
+    const view = state.nodeStates.get(node.id());
+    node.data('instances', view?.instances || 0);
+    node.data('arrivals', view?.arrivals || 0);
+    if (view) applyRuntimeVisual(node, owner);
+    updateD3RuntimeNode(owner, node.id(), view?.instances || 0, view?.state || 'idle', view?.arrivals || 0);
+  });
+  owner.cy.edges().forEach(edge => updateD3RuntimeEdge(owner, edge.id()));
+  if (owner === workspace.active) drawingModelController?.scheduleRefresh(owner.id);
 }
 
 async function openDeploymentDocument(deploymentId, client = runtimeClient) {
@@ -3748,7 +3767,7 @@ async function openDeploymentDocument(deploymentId, client = runtimeClient) {
   const state = createDeploymentViewState({ ...graph.viewerBinding, lifecycle: envelope.lifecycle });
   const repaint = frame => {
     const result = applyDeploymentViewFrame(state, frame);
-    if (owner.cy) applyDeploymentViewStateToRenderer(owner.cy, state);
+    if (owner.cy) paintDocumentDeploymentView(owner, state);
     syncPaneHeaders();
     if (workspace.active === owner) {
       addActivityMessage(uiMessage("workspace.notice.deployment"), result.reason === 'execution' ? uiMessage("workspace.notice.observed.on", { type: frame.event.type, deploymentId: deploymentId }) : uiMessage("workspace.notice.deployment.2", { deploymentId: deploymentId, detail2: state.continuity.toLowerCase() }),
@@ -3764,13 +3783,13 @@ async function openDeploymentDocument(deploymentId, client = runtimeClient) {
       state.continuity = connectionState === 'connected' ? 'LIVE'
         : connectionState === 'reconnecting' ? 'RECONNECTING' : connectionState.toUpperCase();
     }
-    if (owner.cy) applyDeploymentViewStateToRenderer(owner.cy, state);
+    if (owner.cy) paintDocumentDeploymentView(owner, state);
     syncPaneHeaders();
     if (workspace.active === owner) addActivityMessage(uiMessage("workspace.notice.deployment.3"), renderMessage ? uiComputed(renderMessage) : message,
       ['error', 'revoked'].includes(connectionState) ? 'failed' : 'completed');
   });
   owner.deploymentView = { envelope, state, disconnect };
-  applyDeploymentViewStateToRenderer(owner.cy, state);
+  paintDocumentDeploymentView(owner, state);
   syncPaneHeaders();
   setModifyMode(false);
   syncActiveDocumentChrome();
@@ -6104,7 +6123,7 @@ function setRenderMode(name, { skipDraftGuard = false } = {}) {
   const incoming = ensureModeViewStates(owner)[semanticMode];
   owner.visualGroupState = structuredClone(incoming?.visualGroupState || owner.visualGroupState || {});
   if (semanticMode === 'design') {
-    reconcileDocumentHistory(owner);
+    retireDocumentHistory(owner);
     stopElasticRendering(owner, 'mode-restored');
     target.nodes().unlock();
     layoutMode = incoming?.layoutMode && incoming.layoutMode !== 'elastic'
@@ -6121,7 +6140,7 @@ function setRenderMode(name, { skipDraftGuard = false } = {}) {
     owner.layoutMode = 'elastic';
     restoreMonitoringView(owner);
     target.nodes().lock();
-    if (!reconcileDocumentHistory(owner)) startD3Elastic(owner, target, null, { startSimulation: false });
+    startD3Elastic(owner, target, null, { startSimulation: false });
   }
   syncPaneLayout();
   syncLayoutChrome(owner);
@@ -6215,10 +6234,11 @@ function documentHistoryDraftNotice(owner) {
   } catch { return uiText('workspace.run.draftSeparate'); }
 }
 
-function reconcileDocumentHistory(owner) {
+function reconcileDocumentHistory(owner, { open = false } = {}) {
   if (owner !== workspace.active) return false;
-  const bound = owner?.deploymentRun || owner?.graph?.viewerBinding;
-  if (!bound?.deploymentId || !bound.graphVersion || !bound.incarnationId || owner.renderMode !== 'monitoring') {
+  if (!open && !owner.historyDialog?.open) return false;
+  const bound = owner?.deploymentRunObservedSource || owner?.deploymentRun || owner?.graph?.viewerBinding;
+  if (!bound?.deploymentId || !bound.graphVersion || !bound.incarnationId) {
     retireDocumentHistory(owner); return false;
   }
   const client = runtimeClient, authority = workspaceAuthority, incarnation = owner.incarnation;
@@ -6230,7 +6250,7 @@ function reconcileDocumentHistory(owner) {
     dialog.setAttribute('aria-label', uiText('history.title'));
     const bar = window.document.createElement('nav'); bar.className = 'doc-history-bar';
     const back = window.document.createElement('button'); back.type = 'button'; back.textContent = uiText('history.return');
-    const returnToGraph = () => { dialog.close(); if (workspace.active === owner) setRenderMode('design'); };
+    const returnToGraph = () => retireDocumentHistory(owner);
     back.addEventListener('click', returnToGraph);
     const notice = window.document.createElement('p'); notice.className = 'doc-history-draft'; notice.setAttribute('role', 'status');
     const attention = window.document.createElement('p'); attention.className = 'doc-history-attention'; attention.setAttribute('role', 'status');
@@ -6260,7 +6280,7 @@ function reconcileDocumentHistory(owner) {
       if (!current()) return;
       const message = window.document.createElement('p'); message.textContent = uiText('history.failed');
       const retry = window.document.createElement('button'); retry.type = 'button'; retry.textContent = uiText('history.retryView');
-      retry.addEventListener('click', () => { if (current()) { retireDocumentHistory(owner); reconcileDocumentHistory(owner); } });
+      retry.addEventListener('click', () => { if (current()) { retireDocumentHistory(owner); reconcileDocumentHistory(owner, { open: true }); } });
       container.replaceChildren(message, retry);
     });
   }
@@ -6272,7 +6292,6 @@ function reconcileDocumentHistory(owner) {
 function reconcileActiveRenderModeRenderer() {
   const owner = workspace.active;
   if (!owner?.cy) return;
-  if (reconcileDocumentHistory(owner)) return;
   const kind = rendererFor(owner)?.kind;
   if (renderMode === 'monitoring' && kind !== 'elastic') {
     owner.layoutMode = 'elastic';
@@ -10732,6 +10751,11 @@ function confirmDiscardChanges() {
 }
 
 function updateHistoryUi() {
+  const owner = workspace.active;
+  if (owner?.deploymentRun?.graphMl && !owner.execution.executionId && owner.cy?.nodes().some(node => node.data('runtimeObserved'))
+      && !documentMatchesDeployment(owner)) {
+    resetRuntimeState(owner, owner.cy, owner.graph, owner.layoutMode, owner.visualStyle);
+  }
   const state = editHistory.state();
   const presentationDirty = visualGroupPresentationIsDirty(workspace.active);
   const dirty = state.dirty || Boolean(activeAuthoring?.localChanges)
@@ -12162,6 +12186,7 @@ async function connectRuntime(atBoot = false) {
         runnerWindow?.setClient(connectedClient);
         void configureHumanTasks();
         workspace.documents.forEach(scheduleProgramGraphReadiness);
+        workspace.documents.forEach(observeDocumentDeployment);
         void loadPersonalPalettes(connectedClient);
       } else if (scope?.failed) {
         failWorkspaceAuthority(connectedClient, authorityGeneration, workspacePersistenceReason);
@@ -12877,6 +12902,46 @@ async function presentRuntimeRefusal(owner, finding, title = uiMessage('workspac
   await focusRuntimeFinding(owner, finding);
 }
 
+const deploymentGraphMatches = new WeakMap();
+function documentMatchesDeployment(owner) {
+  const revision = owner.history.revision(), graphMl = owner.deploymentRun.graphMl;
+  const artifacts = programNodes(owner.graph).map(node => programReadiness(owner).phases.get(node.id)?.artifactId).join(':');
+  const cached = deploymentGraphMatches.get(owner);
+  if (cached?.graph === owner.graph && cached.revision === revision && cached.graphMl === graphMl && cached.artifacts === artifacts) return cached.matches;
+  try {
+    const pinned = cached?.graphMl === graphMl ? cached.pinned : deploymentGraphSignature(graphMl);
+    const matches = deploymentGraphSignature(serializeGraphML(graphForAuthorizedExecution(owner, canonicalGraphSnapshot(owner.graph)))) === pinned;
+    deploymentGraphMatches.set(owner, { graph: owner.graph, revision, graphMl, artifacts, pinned, matches });
+    return matches;
+  } catch { return false; }
+}
+
+const deploymentObservations = new WeakMap();
+function observeDocumentDeployment(owner) {
+  const client = runtimeClient, authority = workspaceAuthority, binding = owner?.deploymentRun;
+  if (!binding || !client || !tenantAuthorityAllows(owner, client)) return;
+  const previous = deploymentObservations.get(owner);
+  if (previous?.client === client && previous.binding === binding) return;
+  clearTimeout(previous?.timer);
+  const observation = { client, binding, timer: null };
+  deploymentObservations.set(owner, observation);
+  const current = () => workspace.find(owner.id) === owner && owner.deploymentRun === binding
+    && runtimeClient === client && workspaceAuthority === authority && tenantAuthorityAllows(owner, client)
+    && deploymentObservations.get(owner) === observation;
+  const read = async () => {
+    if (!current()) return;
+    if (!deploymentRunIsPending(owner) && !owner.deploymentRunStopPending) {
+      try { await observeOriginDeployment(owner, { client, isCurrent: () => current()
+        && !deploymentRunIsPending(owner) && !owner.deploymentRunStopPending }); }
+      catch { if (current() && !deploymentRunIsPending(owner) && !owner.deploymentRunStopPending) owner.deploymentRunStatus = 'UNKNOWN'; }
+    }
+    if (!current()) return;
+    syncPaneHeaders(); refreshCommands();
+    observation.timer = setTimeout(read, 5000);
+  };
+  void read();
+}
+
 async function runCapturedDocumentDeployment(owner, client, { graphMl, payload, displayName, attachment }) {
   const authority = workspaceAuthority, scope = activeWorkspaceScope, persistenceGeneration = workspacePersistenceGeneration;
   const incarnation = owner.incarnation;
@@ -12906,10 +12971,10 @@ async function runCapturedDocumentDeployment(owner, client, { graphMl, payload, 
   if (result.stoppedBeforeInitial) { syncPaneHeaders(); refreshCommands(); return true; }
   owner.humanTasks.deploymentId = result.intent.deploymentId; owner.humanTasks.graphVersion = result.intent.graphVersion;
   owner.provenance.deploymentId = result.intent.deploymentId; owner.provenance.sourceGraphVersion = result.intent.graphVersion;
-  if (result.intent.traversalId && owner.execution.executionId !== result.intent.traversalId) {
-    setDocumentExecution(owner, result.intent.traversalId, result.intent.graphVersion, client, result.intent.processInstanceId);
-    void reconcileTestCompletion(owner, result.intent.traversalId, client);
-  }
+  // Hosted initial START belongs to the deployment journal, not the one-shot result registry.
+  // Its permanent identity must never become an unresolved Test execution after a restart.
+  if (owner.execution.executionId === result.intent.traversalId) setDocumentExecution(owner, null, null);
+  observeDocumentDeployment(owner);
   void configureHumanTasks(owner); reconcileDocumentHistory(owner); owner.historyMonitor?.refresh?.();
   syncPaneHeaders(); scheduleWorkspacePersistence();
   if (owner === workspace.active) { refreshCommands(); addActivityMessage(uiMessage('workspace.run.ready'), uiMessage('workspace.run.attached', {
@@ -13104,7 +13169,8 @@ function handleRuntimeEvent(event, client = runtimeClient) {
   if (event.type === 'EXECUTION_PAUSED') setExecutionPaused(target, true);
   if (event.type === 'EXECUTION_RESUMED') setExecutionPaused(target, false);
 
-  if (isTerminal) {
+  if (isTerminal && (target.execution.executionId === event.executionId
+      || target.execution.executionId === PENDING_EXECUTION)) {
     setExecutionPaused(target, false);
     const recoveredFromUnknown = target.execution.reconciliationState === 'unknown';
     settleReconciledExecution(target, event.executionId, target.execution.reconciliationClient,
@@ -13124,10 +13190,12 @@ function handleRuntimeEvent(event, client = runtimeClient) {
     }
   }
 
-  if (target.deploymentRun && (target.deploymentRun.deploymentId === event.deploymentId
-      || target.sourceSession.processOwners.get(event.processInstanceId)?.deploymentBindingToken)) {
-    target.historyMonitor?.notify?.(event); return;
-  }
+  const deploymentEvent = deploymentRunOwnsEvent(target, event)
+    || !event.deploymentId && Boolean(target.sourceSession.processOwners.get(event.processInstanceId)?.deploymentBindingToken);
+  if (deploymentEvent) target.historyMonitor?.notify?.(event);
+  // Never paint a pinned deployment onto a different edited draft. The deployed view remains
+  // available independently of the authoring document.
+  if (deploymentEvent && target.deploymentRun?.graphMl && !documentMatchesDeployment(target)) return;
 
   // Past this point the event paints nodes, and it paints them on the document that owns the run —
   // which is not necessarily the one on screen.
@@ -16349,6 +16417,7 @@ const commandActions = {
   setWorkspaceLayout: mode => setWorkspaceLayoutMode(mode),
   resetWorkspaceLayout: () => resetWorkspaceLayout(),
   setRenderMode: name => setRenderMode(name),
+  openHistory: () => reconcileDocumentHistory(workspace.active, { open: true }),
   render: () => renderActiveMode(),
   arrange: name => arrangeDesign(name),
   play: () => playGraph(),
@@ -16375,8 +16444,10 @@ function commandContext() {
   const transientRunning = Boolean(activeExecutionId) && activeExecutionId !== PENDING_EXECUTION
     && !finishedExecutions.has(activeExecutionId);
   const sourceSessionActive = sourceSessionIsActive(activeSourceSession);
-  const boundDeploymentActive = boundDeploymentNeedsCloseDecision(workspace.active)
-    && !['STOPPED', 'FAILED'].includes(owner.deploymentRunStatus);
+  const boundDeploymentActive = deploymentRunIsPending(owner) || Boolean(owner?.deploymentRun
+    && (['STARTING', 'READY', 'DEGRADED', 'STOPPING'].includes(owner.deploymentRunStatus)
+      || owner.deploymentRunStatus === 'UNKNOWN'
+        && ['REGISTERED', 'STARTING', 'READY', 'DEGRADED', 'STOPPING'].includes(owner.deploymentRunLastObservedState)));
   const running = transientRunning || sourceSessionActive || deploymentRunIsPending(workspace.active)
     || owner?.deploymentRunStopPending || owner?.deploymentRunStatus === 'UNKNOWN';
   const selectedNodes = cy?.nodes(':selected');
@@ -16390,6 +16461,7 @@ function commandContext() {
     canGroupSelection: selectedReal.length >= 2 && ['none', 'valid'].includes(groupMetadata.status)
       && !selectedReal.some(id => groupedIds.has(id)),
     invalidGroupMetadata: ['invalid', 'future'].includes(groupMetadata.status),
+    hasDeploymentHistory: Boolean((owner?.deploymentRun || owner?.graph?.viewerBinding)?.graphVersion),
     hasDocument: Boolean(workspace.active && graphData),
     authoringCapability: primaryPersistenceTarget(graphAuthoringCapability),
     gitAuthoring: graphAuthoringCapability.state === AUTHORING_CAPABILITY_STATE.GIT,

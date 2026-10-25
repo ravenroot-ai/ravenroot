@@ -190,14 +190,7 @@ const nativeCardSnapshot = (page, renderer) => page.evaluate(selectedRenderer =>
 }, renderer);
 
 async function openNativeElasticFixture(page) {
-  // #590 deployment Monitoring is the bounded history dialog. Keep this legacy renderer contract
-  // on an independent, read-only synthetic graph fixture with the identical authored topology.
-  // This is test data, not a product conversion or an assertion that safe deployment views can fork.
-  await page.evaluate(() => {
-    const graph = structuredClone(window.ravenroot.activeDocument().graph);
-    graph.format = 'graphml'; delete graph.viewerBinding;
-    window.ravenroot.openDocument({ name: 'elastic-renderer-contract.graphml', graph, mode: 'test' });
-  });
+  // Exercise the actual read-only deployment document, including its live renderer binding.
   await page.locator('#btn-monitoring').click();
 }
 

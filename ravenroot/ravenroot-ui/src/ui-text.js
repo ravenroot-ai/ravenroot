@@ -465,6 +465,8 @@ export const ENGLISH_MESSAGES = Object.freeze({
   'commands.workspace.reset.help': 'Reset workspace layout and pane sizes',
   'commands.layout.design.label': 'Design',
   'commands.layout.design.help': 'Restore the saved Design view without arranging it',
+  'commands.view.deploymentHistory.label': 'Deployment history',
+  'commands.view.deploymentHistory.help': 'Inspect business histories and traversal graphs for the pinned deployment',
   'commands.layout.monitoring.label': 'Monitoring',
   'commands.layout.monitoring.help': 'Restore the saved Monitoring view without reheating it',
   'commands.layout.render.label': 'Render',

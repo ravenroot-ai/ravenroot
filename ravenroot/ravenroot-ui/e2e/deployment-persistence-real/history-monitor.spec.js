@@ -64,7 +64,7 @@ test('native monitor reads bounded real persistent histories, visits and retry a
     if (lostView) { lostView = false; return route.fulfill({ status: 503, json: { error: 'TEMPORARILY_UNAVAILABLE' } }); }
     return route.continue();
   });
-  await page.locator('[data-menu="layout"]').click(); await page.getByRole('menuitemradio', { name: 'Monitoring', exact: true }).click();
+  await page.locator('#btn-history').click();
   if (CAP === 10) await page.getByRole('button', { name: 'Retry deployment view', exact: true }).click();
   const monitor = page.locator('.doc-history'); await expect(monitor).toBeVisible();
   const histories = monitor.locator('.history-page').filter({ has: page.getByRole('heading', { name: 'Business histories', exact: true }) });
@@ -166,12 +166,12 @@ test('native monitor reads bounded real persistent histories, visits and retry a
     await page.locator('#btn-run').click(); await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument()?.deploymentRun?.traversalId)).toBeTruthy();
     const original = await page.evaluate(() => window.ravenroot.activeDocument().deploymentRun);
     const mutations = []; page.on('request', request => { if (request.method() === 'POST' && request.url().includes('/v1/deployments')) mutations.push(request.url()); });
-    await page.locator('[data-menu="layout"]').click(); await page.getByRole('menuitemradio', { name: 'Monitoring', exact: true }).click();
+    await page.locator('#btn-history').click();
     await expect(page.locator('.doc-history-draft').filter({ visible: true })).toContainText('Monitoring shows the pinned deployment');
     await page.getByRole('button', { name: 'Return to graph', exact: true }).click();
     await page.locator('#btn-modify').click(); await page.evaluate(() => { window.cy.getElementById('end').select(); });
     const name = page.locator('#node-editor input[name="name"]'); await name.fill('Draft only end'); await name.press('Tab');
-    await page.locator('[data-menu="layout"]').click(); await page.getByRole('menuitemradio', { name: 'Monitoring', exact: true }).click();
+    await page.locator('#btn-history').click();
     await expect(page.locator('.doc-history-draft').filter({ visible: true })).toContainText('Your draft differs from this deployment');
     const current = page.locator('.doc-history-dialog[open] .doc-history');
     const business = current.locator('.history-page').filter({ has: page.getByRole('heading', { name: 'Business histories', exact: true }) });

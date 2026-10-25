@@ -57,7 +57,7 @@ export function runOriginDeployment(owner, { client, serviceUrl, tenantId, graph
   owner.deploymentRun = intent;
   const control = { intent, status: null, stopRequested: false, task: null };
   flights.set(owner, control);
-  const publishStatus = status => { control.status = status; owner.deploymentRunStatus = status.state; onPhase(owner, intent); };
+  const publishStatus = status => { control.status = status; owner.deploymentRunStatus = status.state; owner.deploymentRunLastObservedState = status.state; onPhase(owner, intent); };
   const interrupted = status => ({ intent, status, view: null, initial: null, stoppedBeforeInitial: true });
   const current = () => owner.incarnation === incarnation && owner.deploymentRun === intent && isCurrent(owner, client)
     && intent.serviceUrl === serviceUrl && intent.tenantId === tenantId;
@@ -206,7 +206,7 @@ export function stopOriginDeployment(owner, { client, isCurrent, reason }) {
     try { status = verify(await client.deployment(binding.deploymentId)); }
     catch (error) {
       if (error?.status !== 404) throw error;
-      check(); owner.deploymentRunStatus = 'STOPPED'; return true;
+      check(); owner.deploymentRunStatus = 'STOPPED'; owner.deploymentRunLastObservedState = 'STOPPED'; return true;
     }
     // The finite status identity exists before a definition/view is opened. A cold registration
     // must be stoppable without activating it merely to obtain a viewer projection.
@@ -234,12 +234,12 @@ export function stopOriginDeployment(owner, { client, isCurrent, reason }) {
       try { await client.stopDeployment(binding.deploymentId, command); }
       catch (error) {
         if (error?.status !== 404) throw error;
-        check(); owner.deploymentRunStatus = 'STOPPED'; return true;
+        check(); owner.deploymentRunStatus = 'STOPPED'; owner.deploymentRunLastObservedState = 'STOPPED'; return true;
       }
       check();
     }
     const observed = verify(await client.deployment(binding.deploymentId));
-    owner.deploymentRunStatus = observed.state;
+    owner.deploymentRunStatus = observed.state; owner.deploymentRunLastObservedState = observed.state;
     if (observed.state !== 'STOPPED') return false;
     return true;
   })();
@@ -257,12 +257,15 @@ export async function observeOriginDeployment(owner, { client, isCurrent }) {
   try { status = await client.deployment(binding.deploymentId); }
   catch (error) {
     if (error?.status !== 404 || !current() || !binding.incarnationId) throw error;
-    owner.deploymentRunStatus = 'STOPPED'; return true;
+    owner.deploymentRunStatus = 'STOPPED'; owner.deploymentRunLastObservedState = 'STOPPED'; owner.deploymentRunObservedSource = null; return true;
   }
   if (!current() || status.deploymentId !== binding.deploymentId || status.tenantId !== binding.tenantId
       || status.graphVersion !== binding.graphVersion
       || binding.registrationIdentity && status.registrationIdentity !== binding.registrationIdentity
       || !binding.registrationIdentity && binding.incarnationId && status.runtimeIncarnationId !== binding.incarnationId)
     throw failure('OBSERVATION_BINDING_CHANGED');
-  owner.deploymentRunStatus = status.state; return true;
+  owner.deploymentRunStatus = status.state; owner.deploymentRunLastObservedState = status.state;
+  owner.deploymentRunObservedSource = { deploymentId: binding.deploymentId, graphVersion: binding.graphVersion,
+    incarnationId: status.runtimeIncarnationId || binding.incarnationId };
+  return true;
 }

@@ -108,7 +108,7 @@ export class RuntimeRequestError extends Error {
     const where = status == null ? `${method} ${route}` : `HTTP ${status} ${method} ${route}`;
     const hint = status == null
       ? ' -- check the runtime service address, its network reachability, or whether it allows this origin'
-      : status === 404
+      : status === 404 && !code
         ? ' -- check the runtime service address: the request reached a server but not an API route'
         : '';
     super(`${reason} (${where})${hint}`);
@@ -116,11 +116,11 @@ export class RuntimeRequestError extends Error {
     Object.defineProperty(this, 'uiMessageKey', { value: 'workspace.runtime.request.failure', enumerable: false });
     Object.defineProperty(this, 'uiMessageParams', { get: () => ({ reason: uiReasonKey ? uiText(uiReasonKey) : reason, where,
       hint: status == null ? uiText('workspace.runtime.request.networkHint')
-        : status === 404 ? uiText('workspace.runtime.request.routeHint') : '' }) });
+        : status === 404 && !code ? uiText('workspace.runtime.request.routeHint') : '' }) });
     withUiMessage(this, uiMessage('workspace.runtime.request.failure', {
       reason: uiReasonKey ? uiMessage(uiReasonKey) : reason, where,
       hint: status == null ? uiMessage('workspace.runtime.request.networkHint')
-        : status === 404 ? uiMessage('workspace.runtime.request.routeHint') : '',
+        : status === 404 && !code ? uiMessage('workspace.runtime.request.routeHint') : '',
     }));
     this.status = status;
     this.method = method;

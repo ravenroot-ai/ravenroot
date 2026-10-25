@@ -2508,3 +2508,10 @@ describe('deployment viewer client', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 });
+
+it('does not misdiagnose a structured missing execution as a missing API route', () => {
+  const missing = new RuntimeRequestError('unknown execution', { status: 404, method: 'GET', path: '/v1/executions/old', code: 'UNKNOWN_EXECUTION' });
+  expect(missing.message).not.toContain('not an API route');
+  expect(missing.uiMessageParams.hint).toBe('');
+  expect(new RuntimeRequestError('not found', { status: 404, method: 'GET', path: '/wrong-prefix' }).message).toContain('not an API route');
+});

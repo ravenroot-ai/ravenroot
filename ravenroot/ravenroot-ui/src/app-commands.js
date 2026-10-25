@@ -185,6 +185,9 @@ export function createAppCommands(actions, { t = uiText } = {}) {
       isEnabled: context => authoring(context) && context.editable && !context.hasJoinSemanticsMarker,
     },
 
+    { id: 'view.deploymentHistory', group: 'graph-view', order: 5,
+      placements: ['menu.view', 'toolbar.view'], execute: actions.openHistory,
+      isEnabled: context => context.tenantAuthority && context.hasDeploymentHistory },
     { id: 'view.fit', group: 'graph-view', order: 10,
       placements: ['menu.view', 'toolbar.view', 'toolbar.canvas', 'help'], execute: actions.fit,
       isEnabled: viewportIdle, shortcuts: [global({ key: 'f' })] },

@@ -34,7 +34,15 @@ lifecycle capabilities. A disabled command is evidence that a precondition is no
 
 ## Read Monitoring mode
 
-For a bound deployment, Monitoring opens **Deployment history** for its exact deployed version.
+**Monitoring** restores the elastic graph. Node and edge highlights follow live events from the
+pinned deployment, in both the originating document and **Open read-only view**. Switching between
+Design and Monitoring keeps the saved layout for each mode. A local draft whose executable content
+has changed does not receive the deployment's highlights; open the pinned read-only view to monitor it.
+
+**History**, beside Monitoring (also **View → Deployment history**), opens the separate history
+browser for the exact deployed version. Returning to the graph preserves the selected rendering mode.
+Reloading a saved association only checks deployment status; it does not activate the deployment or
+submit another initial traversal. Stop becomes available after the runtime confirms an active state.
 Search **Exact application ID** or **Exact public reference** (for example a filename), or provide
 both. Submit **Search histories** to run the scoped server query. The resulting list remains paginated;
 it does not download and filter every retained history. **Clear search** restores the first bounded

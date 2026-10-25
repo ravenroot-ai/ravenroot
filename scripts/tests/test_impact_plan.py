@@ -202,3 +202,13 @@ class PromotionTreeTest(unittest.TestCase):
         for replies, expected in [([BASE+' '+HEAD,'tree','tree'],HEAD),([BASE+' '+HEAD,'source','combined'],''),([BASE],'')]:
             with patch('scripts.classify_main_change.subprocess.check_output',side_effect=replies):
                 self.assertEqual(equivalent_merge_source(),expected)
+
+
+class ConfiguratorPlanTest(unittest.TestCase):
+    plan = ImpactPlanTest.plan
+    def test_configurator_and_extension_carriers_select_independent_consumer(self):
+        for path in ['ravenroot-configurator/src/App.tsx',MAIL+'/src/main/java/MailProfile.java']:
+            plan=self.plan([path])
+            self.assertFalse(plan['full'])
+            self.assertIn('full-configurator',plan['jobs'])
+            self.assertIn('full-configurator',plan['independent_build_scopes'])

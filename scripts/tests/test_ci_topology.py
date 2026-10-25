@@ -215,6 +215,16 @@ class ContinuousIntegrationTopologyTest(unittest.TestCase):
         self.assertIn("PLAN: ${{ needs.release-classification.outputs.plan }}", backend)
         self.assertIn("ci_artifacts.py verify", backend)
 
+    def test_provenance_is_verified_before_runtime_manifests_are_removed(self):
+        job=self.jobs['full-runtime-container-smoke']
+        verify=job.index('ci_artifacts.py verify ci-artifacts/backend/plugins')
+        remove=job.index('rm ci-artifacts/backend/plugins/provenance.json')
+        build=job.index('docker build --file Dockerfile.ci')
+        self.assertLess(verify,remove)
+        self.assertLess(remove,build)
+        self.assertIn('full-configurator', self.jobs)
+        self.assertIn('uses: ./.github/workflows/configurator.yml',self.jobs['full-configurator'])
+
 
 class ConfiguratorWorkflowTopologyTest(unittest.TestCase):
     def test_supported_java_is_selected_before_node_and_maven_work(self) -> None:

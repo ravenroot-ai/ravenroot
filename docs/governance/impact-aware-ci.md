@@ -47,6 +47,11 @@ for documentation and the browser harness. The plan gates compilation, packaging
 checks, docs, API docs, plugin boundary and runtime smoke checks. Policy validation always
 remains selected. `ci-required` reconstructs the plan from Git, checks it is bound to this candidate,
 and refuses a missing selected job, a selected job that skipped/failed, or an unexplained job.
+Configurator resolver/core-carrier contracts use the reusable Configurator workflow, including its
+real AMQP/Compose exercise; complete fallback includes that job and its independent builds.
+The advisory feature-push `ci-fast` workflow retains its compile/build feedback because a branch
+push has no trusted issue-lane selection. It publishes only `ci-fast` and can never stand in for
+`ci-required`; this remaining repeated compilation is explicit.
 Dev retains its complete verification policy. A queue candidate reports its own native check;
 no first-PR or single-entry-queue exception exists.
 

@@ -279,6 +279,14 @@ jobs:
             --base "$(git rev-parse HEAD^1)" --head "$(git rev-parse HEAD)" --labels "$PR_LABELS" \
             --prior-prs-json "$RUNNER_TEMP/prior-promotion-prs.json"
 
+  full-configurator:
+    name: full-configurator
+    needs: [release-classification, full-preflight]
+    if: always() && needs.release-classification.outputs.tier == 'full' && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-configurator')
+    uses: ./.github/workflows/configurator.yml
+    permissions:
+      contents: read
+
   full-docs-policy:
     name: full-docs-policy
     needs: [release-classification]
@@ -1136,6 +1144,7 @@ jobs:
     name: full-regression
     needs:
       - release-classification
+      - full-configurator
       - full-python-contracts
       - full-shell-contracts
       - full-ui-e2e
@@ -1189,8 +1198,11 @@ jobs:
         with:
           name: ravenroot-plugins
           path: ci-artifacts/backend/plugins
-      - name: Verify validated plugin provenance
-        run: python3 scripts/ci_artifacts.py verify ci-artifacts/backend/plugins
+      - name: Verify validated plugin provenance and preserve empty-plugin image semantics
+        run: |
+          python3 scripts/ci_artifacts.py verify ci-artifacts/backend/plugins
+          rm ci-artifacts/backend/plugins/provenance.json
+          rm ci-artifacts/ui/provenance.json
       - name: Build the OCI image without publishing it
         shell: bash
         run: |
@@ -1230,6 +1242,7 @@ jobs:
       - release-classification
       - docs-site
       - full-docs-policy
+      - full-configurator
       - full-python-contracts
       - full-shell-contracts
       - full-source-policy

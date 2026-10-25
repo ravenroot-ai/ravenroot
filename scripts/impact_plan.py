@@ -22,8 +22,8 @@ SUPPORT = {'ravenroot-adapter-anthropic', 'ravenroot-adapter-openai-compatible',
 CONTRACTS = {
     'ravenroot/ravenroot-persistence-sqlite': ['ravenroot/ravenroot-server'],
     'ravenroot/ravenroot-persistence-postgresql': ['ravenroot/ravenroot-server'],
-    'ravenroot/ravenroot-application-api': ['@ui', '@runtime', '@node-docs', '@api-docs', '@support'],
-    'ravenroot/ravenroot-server': ['@ui', '@runtime'],
+    'ravenroot/ravenroot-application-api': ['@ui', '@runtime', '@node-docs', '@api-docs', '@support', '@configurator'],
+    'ravenroot/ravenroot-server': ['@ui', '@runtime', '@configurator'],
     'ravenroot/ravenroot-core': ['@runtime', '@support'],
     'ravenroot/ravenroot-pekko': ['@runtime', '@support'],
     'ravenroot/ravenroot-akka': ['@runtime', '@support'],
@@ -102,6 +102,13 @@ def make_plan(base: str, candidate: str, event: str, lane: str, force: bool = Fa
             fallback = True
             reasons.append('module addition/deletion/rename requires complete topology validation')
         for p in changed:
+            if (p.startswith(('ravenroot-configurator/', 'docs/reference/bundles/'))
+                    or p in {'docs/reference/node-descriptor-contracts.tsv', 'docs/reference/governed-node-descriptor-contracts.tsv', 'docs/reference/environment-variables.md'}
+                    or p.startswith('ravenroot/ravenroot-extensions/') and p.endswith(('Configuration.java', 'Profile.java', 'Policy.java', 'Resolver.java', 'Values.java', 'ravenroot-plugin.json'))):
+                flags.add('@configurator')
+            if p.startswith('ravenroot-configurator/'):
+                reasons.append(f'{p}: configurator UI/resolver/AMQP integration contract')
+                continue
             owners = sorted((m for m in graph if p.startswith(m + '/')), key=len, reverse=True)
             if p.startswith(('ravenroot/ravenroot-ui/', 'ui-server/')) or p == 'Dockerfile.ui':
                 flags.add('@ui')
@@ -154,6 +161,8 @@ def make_plan(base: str, candidate: str, event: str, lane: str, force: bool = Fa
         jobs |= {'full-runtime-auth-smoke', 'full-runtime-jar-smoke', 'full-runtime-container-smoke', 'full-plugin-boundary', 'full-shell-contracts'}
     if '@support' in flags:
         jobs.add('backend-test')
+    if '@configurator' in flags:
+        jobs.add('full-configurator')
     if fallback or any('ravenroot-object-storage' in m for m in builds):
         jobs.add('minio-fixture-preflight')
     if fallback:
@@ -168,16 +177,18 @@ def make_plan(base: str, candidate: str, event: str, lane: str, force: bool = Fa
                     'always-required source/CI policy or phase barrier' if j in {'full-source-policy', 'full-python-contracts', 'full-preflight', 'full-regression'} else
                     'Maven downstream tests and current-candidate prerequisite closure' if j in {'backend-build', 'full-backend-tests', 'minio-fixture-preflight'} else
                     'runtime node descriptors consumed by documentation' if j == 'docs-site' and '@node-docs' in flags else
+                    'independent configurator/Java resolver/core carrier/real AMQP Compose contract' if j == 'full-configurator' else
                     'independent API Javadoc/DocLint contract' if j == 'full-api-documentation' else
                     'changed documentation content' if j in {'docs-site', 'full-docs-policy'} else
                     'current-candidate UI packaging prerequisite of OCI smoke' if j == 'full-ui-build' and '@ui' not in flags else
                     'UI implementation or declared server/API wire-contract consumer' if j.startswith('full-ui-') else
                     'out-of-reactor transitive consumer' if j == 'backend-test' else
                     'declared service-loading/runtime composition and packaging contract') for j in sorted(jobs)},
-                independent_build_scopes={j: ('complete reactor' if j == 'full-api-documentation' else
+                independent_build_scopes={j: ('extension resolver fixtures, server config-carrier tests and real OCI/AMQP validation' if j == 'full-configurator' else
+                    'complete reactor' if j == 'full-api-documentation' else
                     sorted(closure({'ravenroot/ravenroot-server'} if j == 'full-ui-e2e-harness' else {'ravenroot/ravenroot-extensions/ravenroot-extensions-all'}, graph) & new.keys()))
-                    for j in sorted(jobs & {'docs-site', 'full-api-documentation', 'full-ui-e2e-harness'})} if not fallback else
-                    {'docs-site': 'extension pack prerequisites', 'full-api-documentation': 'complete reactor', 'full-ui-e2e-harness': 'server prerequisites'},
+                    for j in sorted(jobs & {'docs-site', 'full-api-documentation', 'full-ui-e2e-harness', 'full-configurator'})} if not fallback else
+                    {'full-configurator': 'extension resolver fixtures, server carrier and OCI/AMQP scopes', 'docs-site': 'extension pack prerequisites', 'full-api-documentation': 'complete reactor', 'full-ui-e2e-harness': 'server prerequisites'},
                 omitted={j: 'no changed component or transitive integration consumer maps to this job' for j in sorted(all_jobs-jobs)},
                 provenance={'model': 'union of base/candidate POM parent/dependency/plugin graph plus CONTRACTS',
                             'toolchain': 'ubuntu-24.04; temurin-21; .nvmrc; Maven repository workflow configuration',

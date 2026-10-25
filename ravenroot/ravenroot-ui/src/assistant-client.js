@@ -1,5 +1,6 @@
 import { uiText } from './ui-text.js';
 import { productError } from './product-error.js';
+import { browserSessionCredentials } from './browser-credentials.js';
 import { requestCredential, invalidateRejectedCredential } from './credential-request.js';
 // The panel's only way out of the browser — and it goes to this product's own service, never to a
 // model provider (the per-author credential contract and the design record's §1).
@@ -378,7 +379,7 @@ export class RavenrootAssistantClient {
     } };
     const response = await this.fetchImpl(assistantUrl(this.baseUrl, path), {
       ...options,
-      credentials: this.personalMode ? 'same-origin' : 'omit',
+      credentials: browserSessionCredentials(this.baseUrl, this.personalMode),
       cache: 'no-store',
       headers: token
         ? { ...options.headers, Authorization: `Bearer ${token}` }

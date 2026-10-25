@@ -1,6 +1,7 @@
 import { uiMessage, withUiMessage, uiErrorMessage, renderUiMessage } from './ui-message.js';
 import { uiErrorReason, uiText } from './ui-text.js';
 import { productError } from './product-error.js';
+import { browserSessionCredentials } from './browser-credentials.js';
 
 const runtimeClientValidationError = message => productError('runtimeClient.validation.failed', message);
 
@@ -509,7 +510,7 @@ export class RavenrootRuntimeClient {
         const response = await this.fetchImpl(`${this.baseUrl}/v1/events?include=diagnostics`, {
           method: 'GET',
           headers: this.#headers(headers, credential.accessToken),
-          credentials: this.browserSessions ? 'same-origin' : 'omit',
+          credentials: browserSessionCredentials(this.baseUrl, this.browserSessions),
           cache: 'no-store',
           signal,
         });
@@ -760,7 +761,8 @@ export class RavenrootRuntimeClient {
         };
         if (cursor) headers['Last-Event-ID'] = cursor;
         const response = await this.fetchImpl(`${this.baseUrl}${path}`, {
-          method: 'GET', headers: this.#headers(headers, credential.accessToken), credentials: this.browserSessions ? 'same-origin' : 'omit',
+          method: 'GET', headers: this.#headers(headers, credential.accessToken),
+          credentials: browserSessionCredentials(this.baseUrl, this.browserSessions),
           cache: 'no-store', signal,
         });
         if (response.status === 401 || response.status === 403) {
@@ -1284,7 +1286,7 @@ export class RavenrootRuntimeClient {
       responseMessage = await this.fetchImpl(`${this.baseUrl}${path}`, {
         method: 'POST', headers: { Accept: 'application/json',
           'Content-Type': 'application/json; charset=utf-8' },
-        credentials: this.browserSessions ? 'same-origin' : 'omit', cache: 'no-store', body: JSON.stringify(document), signal,
+        credentials: 'omit', cache: 'no-store', body: JSON.stringify(document), signal,
       });
     } catch (failure) {
       throw new RuntimeRequestError(failure?.message || 'Human Task interaction request failed',
@@ -1588,7 +1590,7 @@ export class RavenrootRuntimeClient {
     try {
       response = await this.fetchImpl(`${this.baseUrl}${path}`, {
         ...options,
-        credentials: this.browserSessions ? 'same-origin' : 'omit',
+        credentials: browserSessionCredentials(this.baseUrl, this.browserSessions),
         cache: 'no-store',
         headers: this.#headers(options.headers, credential.accessToken),
       });

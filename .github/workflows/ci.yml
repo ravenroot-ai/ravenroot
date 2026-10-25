@@ -952,6 +952,8 @@ jobs:
             "$HOME/.m2/repository/ai/ravenroot/"
       - name: Verify out-of-reactor adapters, harness, and sample
         run: |
+          # impact-plan independent_build_scopes.backend-test records all four projects;
+          # its build closure includes every reactor prerequisite restored above.
           # The harness consumes the OpenAI-compatible adapter. Install both
           # unpublished adapters into this job's local repository first so the
           # verification result never depends on a warm Maven cache.

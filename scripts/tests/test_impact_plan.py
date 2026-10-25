@@ -232,3 +232,59 @@ class UnknownModelFallbackTest(unittest.TestCase):
             self.assertTrue(plan['full'])
             self.assertEqual(plan['build'],['@complete-reactor-unresolved-model'])
             self.assertEqual(plan['test'],['@complete-reactor-unresolved-model'])
+
+
+class RealModelConsumerPlanTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.head = impact.git('rev-parse', 'HEAD')
+        cls.graph, cls.files = impact.model(cls.head)
+
+    def real_plan(self, path, event='merge_group'):
+        # Only the one-file event range is synthetic; immutable real POM graph is unchanged.
+        with patch.object(impact, 'model', return_value=(self.graph, self.files)), patch.object(impact, 'paths_between', return_value=[path]):
+            return impact.make_plan(self.head, self.head, event, 'release/0.8')
+
+    def test_adapter_and_sample_cannot_omit_executed_support_prerequisites(self):
+        for owner in ('ravenroot-adapter-anthropic', 'ravenroot-sample'):
+            for event in ('pull_request', 'merge_group'):
+                with self.subTest(owner=owner, event=event):
+                    plan = self.real_plan(owner + '/src/main/java/Changed.java', event)
+                    self.assertFalse(plan['full'])
+                    self.assertIn('backend-test', plan['jobs'])
+                    actual = impact.closure(impact.SUPPORT, self.graph)
+                    self.assertEqual(plan['independent_build_scopes']['backend-test'], sorted(impact.SUPPORT))
+                    self.assertTrue(actual.issubset(plan['build']), sorted(actual - set(plan['build'])))
+                    execution = plan['support_execution']
+                    self.assertEqual(set(execution['install_and_test'] + execution['verify']), impact.SUPPORT)
+                    self.assertEqual(set(execution['current_candidate_prerequisites']), actual)
+                    self.assertEqual(execution['sample_exec'], {'project': 'ravenroot-sample', 'engine': 'pekko', 'args': 'hello ravenroot'})
+                    self.assertEqual(plan['main_reactor_tests'], [m for m in plan['test'] if m.startswith('ravenroot/')])
+                    self.assertIn('ravenroot/ravenroot-server', plan['build'])
+                    self.assertIn('ravenroot/ravenroot-pekko', plan['build'])
+                    self.assertNotIn('full-configurator', plan['jobs'])
+                    # Unrelated mail is not a prerequisite of these support commands.
+                    self.assertNotIn(MAIL, plan['build'])
+
+    def test_every_explicit_configurator_carrier_has_candidate_and_queue_evidence(self):
+        source = (impact.ROOT / '.github/workflows/configurator.yml').read_text()
+        paths = [line.strip().removeprefix('- ') for line in source.splitlines()
+                 if line.strip().startswith('- ravenroot/') and line.strip().endswith('.java') and '*' not in line]
+        self.assertTrue(impact.CONFIGURATOR_CARRIERS.issubset(paths))
+        self.assertGreater(len(paths), 30)
+        for path in paths:
+            self.assertIn(path, self.files)
+            for event in ('pull_request', 'merge_group'):
+                with self.subTest(path=path, event=event):
+                    plan = self.real_plan(path, event)
+                    self.assertFalse(plan['full'])
+                    self.assertIn('full-configurator', plan['jobs'])
+                    self.assertNotIn('full-configurator', plan['omitted'])
+
+    def test_unrelated_mail_leaf_does_not_inherit_configurator_or_support(self):
+        for event in ('pull_request', 'merge_group'):
+            plan = self.real_plan(MAIL + '/src/main/java/Mail.java', event)
+            self.assertFalse(plan['full'])
+            self.assertNotIn('backend-test', plan['jobs'])
+            self.assertNotIn('full-configurator', plan['jobs'])
+            self.assertNotIn('backend-test', plan['independent_build_scopes'])

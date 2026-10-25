@@ -2,7 +2,7 @@
 """Fail-closed maintenance verification plans, derived from immutable Git trees.
 
 The conservative Maven model unions dependency, parent and plugin relationships from both trees.
-It includes test dependencies and dependencyManagement on purpose: over-selection is safe. Unknown
+It includes test dependencies; dependencyManagement supplies versions, not build edges. Unknown
 property-based internal coordinates and topology deletion select a complete regression.
 """
 from __future__ import annotations
@@ -18,6 +18,12 @@ NS = {'m': 'http://maven.apache.org/POM/4.0.0'}
 ROOT = Path(__file__).resolve().parents[1]
 LANES = {'dev', 'release/0.8'}
 SUPPORT = {'ravenroot-adapter-anthropic', 'ravenroot-adapter-openai-compatible', 'ravenroot-dev-harness', 'ravenroot-sample'}
+# Explicit helpers consumed by Configurator resolver fixtures; suffix rules cannot name these.
+CONFIGURATOR_CARRIERS = {
+    'ravenroot/ravenroot-extensions/ravenroot-jdbc/src/main/java/ai/ravenroot/extensions/jdbc/JdbcDriverArtifactName.java',
+    'ravenroot/ravenroot-extensions/ravenroot-jdbc/src/main/java/ai/ravenroot/extensions/jdbc/NamedSql.java',
+    'ravenroot/ravenroot-extensions/ravenroot-object-storage/src/main/java/ai/ravenroot/extensions/storage/StorageUri.java',
+}
 # Maven cannot describe service loading, persistence composition or browser wire contracts.
 CONTRACTS = {
     'ravenroot/ravenroot-persistence-sqlite': ['ravenroot/ravenroot-server'],
@@ -62,7 +68,7 @@ def model(commit: str) -> tuple[dict[str, set[str]], set[str]]:
         modules[module] = set()
         trees[module] = node
     for module, node in trees.items():
-        # Includes inherited parent, build/plugin dependencies, managed and profile dependencies.
+        # Includes inherited parent, direct/test dependencies and active build/plugin dependencies.
         for dep in [*node.findall('m:dependencies/m:dependency', NS),
                     *node.findall('m:build/m:plugins/m:plugin', NS),
                     *node.findall('m:build/m:plugins/m:plugin/m:dependencies/m:dependency', NS),
@@ -112,7 +118,7 @@ def make_plan(base: str, candidate: str, event: str, lane: str, force: bool = Fa
             fallback = True
             reasons.append('module addition/deletion/rename requires complete topology validation')
         for p in changed:
-            if (p.startswith(('ravenroot-configurator/', 'docs/reference/bundles/'))
+            if (p in CONFIGURATOR_CARRIERS or p.startswith(('ravenroot-configurator/', 'docs/reference/bundles/'))
                     or p in {'docs/reference/node-descriptor-contracts.tsv', 'docs/reference/governed-node-descriptor-contracts.tsv', 'docs/reference/environment-variables.md'}
                     or p.startswith('ravenroot/ravenroot-extensions/') and p.endswith(('Configuration.java', 'Profile.java', 'Policy.java', 'Resolver.java', 'Values.java', 'ravenroot-plugin.json'))):
                 flags.add('@configurator')
@@ -149,7 +155,11 @@ def make_plan(base: str, candidate: str, event: str, lane: str, force: bool = Fa
         if flags & {'@docs', '@node-docs'}:
             # Runtime-backed node reference validation consumes every plugin by design.
             selected.add('ravenroot/ravenroot-extensions/ravenroot-extensions-all')
-        builds = sorted(closure(set(tests) | selected, graph) & new.keys())
+        # backend-test deliberately executes both adapters, harness and embedded sample in order.
+        # Its current-candidate reactor prerequisites must exist after the artifact-cache purge,
+        # even when only one support owner was impacted. The independent scope is reported below.
+        support_builds = SUPPORT if '@support' in flags else set()
+        builds = sorted(closure(set(tests) | selected | support_builds, graph) & new.keys())
     except (ValueError, ET.ParseError, subprocess.CalledProcessError) as exc:
         fallback = True
         reasons.append(f'incomplete baseline/model: {type(exc).__name__}: {exc}')
@@ -197,7 +207,7 @@ def make_plan(base: str, candidate: str, event: str, lane: str, force: bool = Fa
                     'changed documentation content' if j in {'docs-site', 'full-docs-policy'} else
                     'current-candidate UI packaging prerequisite of OCI smoke' if j == 'full-ui-build' and '@ui' not in flags else
                     'UI implementation or declared server/API wire-contract consumer' if j.startswith('full-ui-') else
-                    'out-of-reactor transitive consumer' if j == 'backend-test' else
+                    'ordered adapters, harness and sample consumer contract with complete current-candidate prerequisite closure' if j == 'backend-test' else
                     'declared service-loading/runtime composition and packaging contract') for j in sorted(jobs)},
                 independent_build_scopes={j: ('extension resolver fixtures, server config-carrier tests and real OCI/AMQP validation' if j == 'full-configurator' else
                     'complete reactor' if j == 'full-api-documentation' else
@@ -209,6 +219,18 @@ def make_plan(base: str, candidate: str, event: str, lane: str, force: bool = Fa
                             'excluded_profiles': {'akka': 'optional licensed engine; not active in secretless default reactor; changes require explicit authorized validation'},
                             'toolchain': 'ubuntu-24.04; temurin-21; .nvmrc; Maven repository workflow configuration',
                             'cross_event_reuse': 'disabled: exact source/base/toolchain/fresh trusted evidence not established; execute plan'})
+    if 'backend-test' in jobs:
+        plan['independent_build_scopes']['backend-test'] = sorted(SUPPORT)
+        plan['support_execution'] = {
+            'install_and_test': ['ravenroot-adapter-anthropic', 'ravenroot-adapter-openai-compatible'],
+            'verify': ['ravenroot-dev-harness', 'ravenroot-sample'],
+            'sample_exec': {'project': 'ravenroot-sample', 'engine': 'pekko', 'args': 'hello ravenroot'},
+            'current_candidate_prerequisites': sorted(closure(SUPPORT, graph) & new.keys()) if 'graph' in locals() else ['@complete-reactor-unresolved-model'],
+        }
+    else:
+        plan['support_execution'] = None
+    plan['main_reactor_tests'] = [m for m in tests if m.startswith('ravenroot/')]
+
     plan['fingerprint'] = hashlib.sha256(json.dumps(plan, sort_keys=True).encode()).hexdigest()
     return plan
 

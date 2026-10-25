@@ -46,6 +46,15 @@ integration contracts before expecting a narrow plan.
 
 ## Execution and provenance
 
+The support job retains an ordered four-project contract: both adapters run `install` (including
+unit tests), then the development harness and sample run `verify`, followed by the sample with
+Pekko. Whenever this job is selected, the build plan includes the complete current-candidate
+prerequisite closure for all four projects, even for a single-adapter change. The structured
+`support_execution` records those phases, sample arguments and prerequisite owners;
+`main_reactor_tests` separately records selected main-reactor tests. An impacted-owner count
+is therefore not the total number of projects verified by all jobs. Configurator carrier coverage
+checks every explicitly named Java path in its workflow against candidate and queue plans.
+
 The plan records a concrete reason for every retained job, plus independent compilation scopes
 for documentation and the browser harness. The plan gates compilation, packaging, backend tests, support modules, UI audit/unit/build/browser
 checks, docs, API docs, plugin boundary and runtime smoke checks. Policy validation always

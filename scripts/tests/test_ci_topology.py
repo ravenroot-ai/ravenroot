@@ -250,3 +250,17 @@ class ConfiguratorWorkflowTopologyTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SupportScopeTopologyTest(unittest.TestCase):
+    def test_actual_ordered_commands_match_declared_support_scope(self):
+        from scripts.impact_plan import SUPPORT
+        job = job_blocks(WORKFLOW.read_text())['backend-test']
+        loops = re.findall(r'for project in ([^;]+); do', job)
+        self.assertEqual(loops, ['ravenroot-adapter-anthropic ravenroot-adapter-openai-compatible',
+                                 'ravenroot-dev-harness ravenroot-sample'])
+        self.assertEqual(set(' '.join(loops).split()), SUPPORT)
+        self.assertIn('python3 scripts/ci_artifacts.py verify ci-artifacts/backend', job)
+        self.assertLess(job.index('rm -rf "$HOME/.m2/repository/ai/ravenroot"'), job.index('cp -R ci-artifacts/backend/maven-repository'))
+        self.assertIn('RAVENROOT_ENGINE: pekko', job)
+        self.assertIn('exec:java -Dexec.args="hello ravenroot"', job)

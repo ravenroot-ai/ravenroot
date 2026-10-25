@@ -249,7 +249,8 @@ class RealModelConsumerPlanTest(unittest.TestCase):
         for owner in ('ravenroot-adapter-anthropic', 'ravenroot-sample'):
             for event in ('pull_request', 'merge_group'):
                 with self.subTest(owner=owner, event=event):
-                    plan = self.real_plan(owner + '/src/main/java/Changed.java', event)
+                    path = next(path for path in sorted(self.files) if path.startswith(owner + '/src/main/java/') and path.endswith('.java'))
+                    plan = self.real_plan(path, event)
                     self.assertFalse(plan['full'])
                     self.assertIn('backend-test', plan['jobs'])
                     actual = impact.closure(impact.SUPPORT, self.graph)

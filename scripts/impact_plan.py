@@ -44,9 +44,14 @@ def model(commit: str) -> tuple[dict[str, set[str]], set[str]]:
     files = git('ls-tree', '-r', '--name-only', commit).splitlines()
     poms = [p for p in files if p.endswith('/pom.xml') and (p.startswith('ravenroot/') or p.split('/')[0] in SUPPORT)]
     modules, trees, coordinates = {}, {}, {}
+    inactive = {'ravenroot/ravenroot-akka'}
     for pom in poms:
         node = ET.fromstring(git('show', f'{commit}:{pom}'))
         module = pom.removesuffix('/pom.xml')
+        if module in inactive:
+            continue
+        if node.findall('m:profiles/m:profile/m:activation', NS):
+            raise ValueError(f'conditional Maven profile requires complete effective reactor verification: {pom}')
         artifact = node.findtext('m:artifactId', namespaces=NS)
         group = node.findtext('m:groupId', namespaces=NS) or node.findtext('m:parent/m:groupId', namespaces=NS)
         if not artifact or not group or '${' in artifact or '${' in group:
@@ -58,7 +63,10 @@ def model(commit: str) -> tuple[dict[str, set[str]], set[str]]:
         trees[module] = node
     for module, node in trees.items():
         # Includes inherited parent, build/plugin dependencies, managed and profile dependencies.
-        for dep in [*node.findall('.//m:dependency', NS), *node.findall('.//m:plugin', NS), *node.findall('m:parent', NS)]:
+        for dep in [*node.findall('m:dependencies/m:dependency', NS),
+                    *node.findall('m:build/m:plugins/m:plugin', NS),
+                    *node.findall('m:build/m:plugins/m:plugin/m:dependencies/m:dependency', NS),
+                    *node.findall('m:parent', NS)]:
             group = dep.findtext('m:groupId', namespaces=NS) or ''
             artifact = dep.findtext('m:artifactId', namespaces=NS) or ''
             if '${' in group or (group == 'ai.ravenroot' and '${' in artifact):
@@ -91,9 +99,11 @@ def make_plan(base: str, candidate: str, event: str, lane: str, force: bool = Fa
         candidate = git('rev-parse', '--verify', f'{candidate}^{{commit}}')
         base = git('rev-parse', '--verify', f'{base}^{{commit}}')
         git('merge-base', base, candidate)  # unrelated histories must never become an empty plan
+        changed = paths_between(base, candidate)
+        if any(p.startswith('ravenroot/ravenroot-akka/') for p in changed):
+            raise RuntimeError('licensed optional Akka profile needs an explicitly authorized validation runner; default CI cannot prove this change')
         old, _ = model(base)
         new, _ = model(candidate)
-        changed = paths_between(base, candidate)
         graph = {m: old.get(m, set()) | new.get(m, set()) for m in old.keys() | new.keys()}
         if not changed:
             fallback = True
@@ -166,7 +176,12 @@ def make_plan(base: str, candidate: str, event: str, lane: str, force: bool = Fa
     if fallback or any('ravenroot-object-storage' in m for m in builds):
         jobs.add('minio-fixture-preflight')
     if fallback:
-        jobs, tests, builds = all_jobs, [], []
+        jobs = all_jobs
+        if 'new' in locals():
+            builds = sorted(new)
+            tests = sorted(m for m in new if m not in {'ravenroot', 'ravenroot/ravenroot-extensions'})
+        else:
+            tests, builds = ['@complete-reactor-unresolved-model'], ['@complete-reactor-unresolved-model']
     plan = dict(schema=1, lane=lane, event=event, baseline=base, candidate=candidate,
                 tree=git('rev-parse', f'{candidate}^{{tree}}'), changed=changed, components=sorted(selected),
                 build=builds, test=tests, integrations=sorted(flags), full=fallback,
@@ -191,6 +206,7 @@ def make_plan(base: str, candidate: str, event: str, lane: str, force: bool = Fa
                     {'full-configurator': 'extension resolver fixtures, server carrier and OCI/AMQP scopes', 'docs-site': 'extension pack prerequisites', 'full-api-documentation': 'complete reactor', 'full-ui-e2e-harness': 'server prerequisites'},
                 omitted={j: 'no changed component or transitive integration consumer maps to this job' for j in sorted(all_jobs-jobs)},
                 provenance={'model': 'union of base/candidate POM parent/dependency/plugin graph plus CONTRACTS',
+                            'excluded_profiles': {'akka': 'optional licensed engine; not active in secretless default reactor; changes require explicit authorized validation'},
                             'toolchain': 'ubuntu-24.04; temurin-21; .nvmrc; Maven repository workflow configuration',
                             'cross_event_reuse': 'disabled: exact source/base/toolchain/fresh trusted evidence not established; execute plan'})
     plan['fingerprint'] = hashlib.sha256(json.dumps(plan, sort_keys=True).encode()).hexdigest()

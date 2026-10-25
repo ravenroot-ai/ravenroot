@@ -11,7 +11,8 @@ protected pull requests, trusted `ci-required`, and merge-queue verification.
 `ci.yml` archives `impact-plan-<run>-<attempt>` and writes the readable plan to the run summary.
 The JSON records immutable baseline, candidate and tree IDs, paths, ownership, downstream
 test closure, build prerequisites, integration contracts, selected jobs and positive omission
-reasons. `full` records conservative fallback. Review compilation and test selections separately.
+reasons. `full` records conservative fallback and enumerates all applicable module owners when the model
+is available; an explicit complete-reactor sentinel records an unavailable model. Review compilation and test selections separately.
 
 ```sh
 python3 scripts/impact_plan.py --event pull_request --lane release/0.8 \
@@ -24,14 +25,17 @@ merge base of the explicitly allowlisted `integration_ref`; missing history, an 
 unknown ownership or unsupported Maven relationships select the complete suite. Deletions and
 both sides of renames are included. Removed/renamed Maven modules require complete verification.
 
-Maven relationships are derived from both Git trees: project coordinates, parents, dependencies
-(including test, managed and profile dependencies) and plugin dependencies. A parent relationship
+Maven relationships are derived from both Git trees: project coordinates, parents, direct
+dependencies (including test dependencies) and active build/plugin relationships. Managed
+coordinates supply versions to actual dependencies; dependencyManagement alone is not a build
+edge. Inactive profiles are not silently activated. The optional licensed Akka engine is
+explicitly excluded from secretless default CI; a change within that module refuses planning
+until an authorized licensed validation runner can prove it. A parent relationship
 carries inherited dependency/build changes to its descendants. Dynamic internal coordinates fail
 closed. Version-managed dependencies are selected by group/artifact identity regardless of the
 managed version; external dependency or plugin changes inside a module select that module and
-its transitive consumers. Shared root build changes select everything. This deliberately
-conservative model over-selects profile/managed relationships rather than guessing an active
-profile or downloading a mutable effective model.
+its transitive consumers. Shared root build changes select everything. This conservative model resolves ownership
+without downloading a mutable effective model or borrowing artifacts from another candidate.
 
 `CONTRACTS` in `scripts/impact_plan.py` supplements Maven with persistence/server composition,
 service-loaded extensions, runtime packaging, UI/backend interfaces, native runner acceptance and

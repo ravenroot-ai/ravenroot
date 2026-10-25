@@ -175,7 +175,7 @@ class MavenModelTest(unittest.TestCase):
             graph,_=impact.model(HEAD)
             self.assertIn('ravenroot/api',graph['ravenroot/consumer'])
             self.assertIn('ravenroot',graph['ravenroot/consumer'])
-            self.assertIn('ravenroot/api',graph['ravenroot'])
+            self.assertNotIn('ravenroot/api',graph['ravenroot'], 'dependencyManagement supplies versions, not build edges')
             poms['ravenroot/consumer/pom.xml']=poms['ravenroot/consumer/pom.xml'].replace('<artifactId>api</artifactId>','<artifactId>${dynamic}</artifactId>')
             with self.assertRaises(ValueError): impact.model(HEAD)
 
@@ -212,3 +212,23 @@ class ConfiguratorPlanTest(unittest.TestCase):
             self.assertFalse(plan['full'])
             self.assertIn('full-configurator',plan['jobs'])
             self.assertIn('full-configurator',plan['independent_build_scopes'])
+
+
+class FullPlanEnumerationTest(unittest.TestCase):
+    plan = ImpactPlanTest.plan
+    def test_complete_records_all_applicable_build_and_test_owners(self):
+        p=self.plan(['scripts/impact_plan.py'],force=True)
+        self.assertTrue(p['full'])
+        self.assertEqual(set(p['build']),set(GRAPH))
+        self.assertEqual(set(p['test']),set(GRAPH))
+    def test_licensed_profile_change_cannot_silently_pass_default_full(self):
+        with self.assertRaises(RuntimeError): self.plan(['ravenroot/ravenroot-akka/src/main/X.java'])
+
+
+class UnknownModelFallbackTest(unittest.TestCase):
+    def test_unresolved_conditional_profile_records_explicit_complete_scope(self):
+        with patch.object(impact,'model',side_effect=ValueError('conditional profile')),patch.object(impact,'paths_between',return_value=[MAIL+'/pom.xml']),patch.object(impact,'git',return_value=HEAD):
+            plan=impact.make_plan(BASE,HEAD,'pull_request','release/0.8')
+            self.assertTrue(plan['full'])
+            self.assertEqual(plan['build'],['@complete-reactor-unresolved-model'])
+            self.assertEqual(plan['test'],['@complete-reactor-unresolved-model'])

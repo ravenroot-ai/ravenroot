@@ -1,5 +1,9 @@
-<!-- Ordinary pull requests, including those from forks, must target dev. -->
-<!-- Pull requests to main are reserved for the internal dev branch or a protected internal hotfix/*. -->
+<!-- Ordinary pull requests, including those from forks, target dev by default. -->
+<!-- Topics explicitly selected for 0.8 maintenance start from and target exactly release/0.8. -->
+<!-- Never merge dev into release/0.8. Arbitrary release/* destinations are not supported. -->
+<!-- Main sources are exactly internal dev or release/0.8, or protected internal hotfix/*; never fork heads. -->
+<!-- A release/0.8 promotion to main additionally requires prior trusted main source-policy activation -->
+<!-- through the separately reviewed, owner-authorized path in docs/governance/impact-aware-ci.md. -->
 
 ## Summary
 
@@ -23,7 +27,7 @@
 
 ## Main-branch intent (maintainers)
 
-<!-- Ignore this section when the pull request targets dev. -->
+<!-- Ignore this section unless the pull request targets main. -->
 <!-- A pull request to main requires exactly one repository label: -->
 <!-- release:none, release:patch, release:minor, or release:major. -->
 <!-- release:none is accepted only when every changed path is documentation or public content. -->
@@ -42,8 +46,10 @@
 
 ## Public repository boundary
 
-- [ ] The pull request targets `dev`, unless it is an internal release, content-promotion, or protected
-  hotfix pull request.
+- [ ] The pull request targets `dev` by default, or exactly `release/0.8` for an explicitly selected
+  maintenance topic. A pull request to `main` uses only an authorized exact internal `dev` or
+  `release/0.8` source, or a protected internal `hotfix/*` source; maintenance promotion also meets
+  the trusted source-policy activation prerequisite.
 - [ ] All public text and commit messages are in English.
 - [ ] The change contains no credentials, private paths, private repository references, personal data,
   or private project-management and operational material.

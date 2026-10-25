@@ -149430,7 +149430,7 @@
     {
       "id": "oc-a15232f6cf9188a6c271",
       "path": "ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/LlmPromptNodeBehavior.java",
-      "line": 351,
+      "line": 353,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "new-PayloadLimits",
@@ -149450,7 +149450,7 @@
     {
       "id": "oc-479da44f4ca2e22dc41d",
       "path": "ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/LlmPromptNodeBehavior.java",
-      "line": 351,
+      "line": 353,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "new-PayloadLimits",
@@ -149470,7 +149470,7 @@
     {
       "id": "oc-d61dcb75ce909feb893f",
       "path": "ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/LlmPromptNodeBehavior.java",
-      "line": 351,
+      "line": 353,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "new-PayloadLimits",
@@ -149490,7 +149490,7 @@
     {
       "id": "oc-91a0b04901ac3e122a2d",
       "path": "ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/LlmPromptNodeBehavior.java",
-      "line": 351,
+      "line": 353,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "new-PayloadLimits",
@@ -149510,7 +149510,7 @@
     {
       "id": "oc-851faf3debd7b2864a74",
       "path": "ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/LlmPromptNodeBehavior.java",
-      "line": 352,
+      "line": 354,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "new-PayloadLimits",
@@ -149528,7 +149528,7 @@
     {
       "id": "oc-03a1c6e30bae4082b997",
       "path": "ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/LlmPromptNodeBehavior.java",
-      "line": 352,
+      "line": 354,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "new-PayloadLimits",
@@ -1200390,6 +1200390,18 @@
           }
         }
       ]
+    },
+    {
+      "id": "issue-599-text-only-refusal-line-evidence-v1",
+      "issue": "#599",
+      "sourceRevision": "74fb4fbe7a45cbedecb0f68160b15dbed8d26c68",
+      "targetRevision": "65ff81954f903da0ee457340bbda0a226c4f0784",
+      "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+      "sourceInventoryDigest": "af780bbebd5282af50527af1308f6adbcc56f35886ecc7b6a17b058202964ebe",
+      "targetCandidateDigest": "dad5d665dab686f3a5382987c7f56db23ea694c5e818fbe66cf90ffdab5e0cb0",
+      "mappings": [],
+      "retirements": [],
+      "additions": []
     }
   ],
   "semanticReviewHistory": [
@@ -1279124,7 +1279136,7 @@
         },
         {
           "path": "ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/LlmPromptNodeBehavior.java",
-          "digest": "ca691a485bf38de127110aafba9e3d2c6683333fd8e3636326ad14383f2a25d6"
+          "digest": "c8da972ac96dee36d9d254d01068d2c12420132f0e9450490ee3af42f68a419d"
         },
         {
           "path": "ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/McpProtocol.java",

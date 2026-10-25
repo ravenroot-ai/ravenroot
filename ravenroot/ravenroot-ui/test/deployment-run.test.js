@@ -202,3 +202,13 @@ describe('read-only origin deployment observation', () => {
     expect(f.owner.deploymentRun).toEqual(original); expect(f.owner.deploymentRunStatus).toBe('REGISTERED');
   });
 });
+
+it('attaches the deployment observation before admitting its first traversal', async () => {
+  const f = fixture(), connected = deferred();
+  f.options.onView = vi.fn(async view => { expect(view.source.graphVersion).toBe(version); await connected.promise; });
+  const run = runOriginDeployment(f.owner, f.options);
+  await vi.waitFor(() => expect(f.options.onView).toHaveBeenCalledTimes(1));
+  expect(f.client.initialStartDeployment).not.toHaveBeenCalled();
+  connected.resolve(); await run;
+  expect(f.client.initialStartDeployment).toHaveBeenCalledTimes(1);
+});

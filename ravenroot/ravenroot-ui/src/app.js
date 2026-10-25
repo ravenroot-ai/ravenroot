@@ -841,6 +841,7 @@ const SESSION_ONLY_RUNTIME_EVENT_SCOPE = Object.freeze({ tenantId: null });
 
 function beginWorkspaceAuthority(client, state = 'pending') {
   workspace.documents.forEach(retireDocumentHistory);
+  workspace.documents.forEach(retireOriginDeploymentView);
   startupImportController?.runtimePending();
   workspaceAuthority = Object.freeze({ state, client, scope: null,
     generation: workspaceAuthority.generation + 1 });
@@ -3973,6 +3974,7 @@ function teardownDocument(target) {
   target.sourceSession.pollController = null;
   retireSourceSessionProcessBindings(target);
   target.deploymentView?.disconnect?.();
+  retireOriginDeploymentView(target);
   target.deploymentView = null;
   // Renderer ownership is per document: close retires this target's callbacks and host without
   // touching any visible sibling, whether or not the target owns the shared chrome.
@@ -4826,7 +4828,7 @@ function registerCytoscapeRenderer(owner, target = owner?.cy) {
 }
 
 function destroyDocumentRenderer(owner, reason = 'destroyed') {
-  if (['closed', 'replaced', 'destroyed'].includes(reason)) retireDocumentHistory(owner);
+  if (['closed', 'replaced', 'destroyed'].includes(reason)) { retireDocumentHistory(owner); retireOriginDeploymentView(owner); }
   owner?.visualGroupsRenderer?.destroy();
   if (owner) owner.visualGroupsRenderer = null;
   if (edgeGestureSession?.owner === owner) cancelEdgeGesture({ clearMessage: true });
@@ -6229,8 +6231,7 @@ function documentHistoryDraftNotice(owner) {
   if (owner.mode !== DOCUMENT_MODES.DRAFT) return uiText('history.deployedOnly');
   if (!owner.deploymentRun?.graphMl) return uiText('workspace.run.draftSeparate');
   try {
-    const current = serializeGraphML(graphForAuthorizedExecution(owner, canonicalGraphSnapshot(owner.graph)));
-    return uiText(current === owner.deploymentRun.graphMl ? 'history.draftMatches' : 'history.draftChanged');
+    return uiText(documentMatchesDeployment(owner) ? 'history.draftMatches' : 'history.draftChanged');
   } catch { return uiText('workspace.run.draftSeparate'); }
 }
 
@@ -12916,6 +12917,62 @@ function documentMatchesDeployment(owner) {
   } catch { return false; }
 }
 
+function retireOriginDeploymentView(owner) {
+  owner?.originDeploymentView?.disconnect?.();
+  if (owner) owner.originDeploymentView = null;
+}
+
+function connectOriginDeploymentView(owner, client, envelope) {
+  const source = envelope.source, binding = owner.deploymentRun, authority = workspaceAuthority;
+  if (!binding || source.deploymentId !== binding.deploymentId || source.graphVersion !== binding.graphVersion
+      || !tenantAuthorityAllows(owner, client)) return Promise.resolve();
+  const old = owner.originDeploymentView;
+  if (old?.client === client && old.binding === binding && old.source.incarnationId === source.incarnationId) return old.ready;
+  retireOriginDeploymentView(owner);
+  const state = createDeploymentViewState({ ...source, lifecycle: envelope.lifecycle });
+  let connected;
+  const ready = new Promise(resolve => { connected = resolve; });
+  const timer = setTimeout(connected, 3000);
+  const observation = { client, binding, source, state, ready, live: false, disconnect: null };
+  owner.originDeploymentView = observation;
+  const current = () => workspace.find(owner.id) === owner && owner.originDeploymentView === observation
+    && owner.deploymentRun === binding && runtimeClient === client && workspaceAuthority === authority && tenantAuthorityAllows(owner, client);
+  let paintQueued = false;
+  const paint = () => {
+    if (paintQueued) return;
+    paintQueued = true;
+    scheduleFrame(() => {
+      paintQueued = false;
+      const testing = owner.execution.executionId && !owner.execution.finished.has(owner.execution.executionId);
+      if (current() && !testing && owner.cy && documentMatchesDeployment(owner)) paintDocumentDeploymentView(owner, state);
+    });
+  };
+  observation.disconnect = client.connectDeploymentView(envelope, frame => {
+    if (!current()) return;
+    const result = applyDeploymentViewFrame(state, frame);
+    if (!result.accepted) return;
+    observation.live = !result.terminal;
+    if (frame.type === 'execution') {
+      const event = frame.event;
+      owner.execution.events.push(runtimeEventProjection(event));
+      if (owner.execution.events.length > RUNTIME_EVENT_TAIL) owner.execution.events.shift();
+      owner.historyMonitor?.notify?.(event);
+      if (owner === workspace.active) { appendActivityEvent(event); refreshAssistantContext(); }
+    }
+    paint();
+  }, connection => {
+    if (!current()) return;
+    clearTimeout(timer); connected();
+    if (['error', 'revoked'].includes(connection)) {
+      observation.live = false;
+      resetDeploymentViewRuntime(state, connection === 'revoked' ? 'DETACHED' : 'UNAVAILABLE'); paint();
+    }
+  });
+  const disconnect = observation.disconnect;
+  observation.disconnect = () => { clearTimeout(timer); connected(); disconnect(); };
+  return ready;
+}
+
 const deploymentObservations = new WeakMap();
 function observeDocumentDeployment(owner) {
   const client = runtimeClient, authority = workspaceAuthority, binding = owner?.deploymentRun;
@@ -12931,8 +12988,18 @@ function observeDocumentDeployment(owner) {
   const read = async () => {
     if (!current()) return;
     if (!deploymentRunIsPending(owner) && !owner.deploymentRunStopPending) {
-      try { await observeOriginDeployment(owner, { client, isCurrent: () => current()
-        && !deploymentRunIsPending(owner) && !owner.deploymentRunStopPending }); }
+      try {
+        await observeOriginDeployment(owner, { client, isCurrent: () => current()
+          && !deploymentRunIsPending(owner) && !owner.deploymentRunStopPending });
+        if (current() && !deploymentRunIsPending(owner) && !owner.deploymentRunStopPending) {
+          const source = owner.deploymentRunObservedSource;
+          if (source && ['READY', 'DEGRADED'].includes(owner.deploymentRunStatus)
+              && owner.originDeploymentView?.source.incarnationId !== source.incarnationId) {
+            const view = await client.deploymentView(binding.deploymentId);
+            if (current()) await connectOriginDeploymentView(owner, client, view);
+          } else if (owner.deploymentRunStatus === 'STOPPED') retireOriginDeploymentView(owner);
+        }
+      }
       catch { if (current() && !deploymentRunIsPending(owner) && !owner.deploymentRunStopPending) owner.deploymentRunStatus = 'UNKNOWN'; }
     }
     if (!current()) return;
@@ -12960,7 +13027,8 @@ async function runCapturedDocumentDeployment(owner, client, { graphMl, payload, 
   let result;
   try { result = await runOriginDeployment(owner, { client, serviceUrl: scope?.serviceUrl || normalizedWorkspaceServiceUrl(client),
     tenantId: owner.tenantId, graphMl, inputJson: JSON.stringify(payload), attachment,
-    persist, isCurrent: current, onPhase: () => { syncPaneHeaders(); refreshCommands(); } }); }
+    persist, isCurrent: current, onView: view => connectOriginDeploymentView(owner, client, view),
+    onPhase: () => { syncPaneHeaders(); refreshCommands(); } }); }
   catch (error) {
     void observeOriginDeployment(owner, { client, isCurrent: current }).catch(() => {}).finally(() => {
       if (current()) { syncPaneHeaders(); refreshCommands(); }
@@ -13139,6 +13207,8 @@ function handleRuntimeEvent(event, client = runtimeClient) {
   if (!streamScope) return;
   const target = documentForRuntimeEvent(workspace, event, streamScope);
   if (!target || !tenantAuthorityAllows(target, client)) return;
+  if (target.originDeploymentView?.live && (deploymentRunOwnsEvent(target, event)
+      || !event.deploymentId && target.sourceSession.processOwners.get(event.processInstanceId)?.deploymentBindingToken)) return;
   const isTerminal = event.type === 'EXECUTION_COMPLETED' || event.type === 'EXECUTION_FAILED'
     || event.type === 'EXECUTION_CANCELLED';
   const isActive = target === workspace.active;

@@ -111,3 +111,25 @@ test('Test still paints an edited draft that also has an older deployment bindin
   traffic.resolve();
   await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().cy.getElementById('source').data('runtimeState'))).toBe('completed');
 });
+
+test('hosted traversal activity uses the deployment stream while the one-shot stream is silent', async ({ page }) => {
+  const backend = await deploymentService(page), order = [];
+  page.on('request', request => {
+    if (request.url().includes('/events?graphVersion=')) order.push('observe');
+    if (request.url().endsWith('/initial-start')) order.push('start');
+  });
+  await page.route('**/v1/deployments/*/events?**', route => {
+    const status = [...backend.held.values()][0];
+    const source = { deploymentId: status.deploymentId, graphVersion: status.graphVersion, incarnationId: status.runtimeIncarnationId };
+    const frames = [
+      `event: lifecycle\ndata: ${JSON.stringify({ ...source, lifecycle: 'READY' })}\n\n`,
+      `id: hosted-1\nevent: execution\ndata: ${JSON.stringify({ ...source, event: { type: 'NODE_COMPLETED', executionId: 'hosted-traversal', nodeId: 'source', activeInstances: 0, inFlightArrivals: 0 } })}\n\n`,
+    ];
+    return route.fulfill({ contentType: 'text/event-stream', body: frames.join('') });
+  });
+  await boot(page);
+  expect(order.indexOf('observe')).toBeLessThan(order.indexOf('start'));
+  await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().cy.getElementById('source').data('runtimeState'))).toBe('completed');
+  await page.locator('#btn-monitoring').click();
+  await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().renderer.nodes.find(node => node.id === 'source').runtimeState)).toBe('completed');
+});

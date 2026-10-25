@@ -49,7 +49,7 @@ export async function graphVersionOf(graphMl) {
  * Restoration calls no mutation here: only an explicit Run enters this function.
  */
 export function runOriginDeployment(owner, { client, serviceUrl, tenantId, graphMl, inputJson,
-  persist, isCurrent, pin = graphVersionOf, onPhase = () => {}, randomId, attachment = null }) {
+  persist, isCurrent, pin = graphVersionOf, onPhase = () => {}, onView = async () => {}, randomId, attachment = null }) {
   const existing = flights.get(owner);
   if (existing) return existing.task;
   const incarnation = owner.incarnation;
@@ -131,6 +131,10 @@ export function runOriginDeployment(owner, { client, serviceUrl, tenantId, graph
         throw failure('DEPLOYMENT_INCARNATION_CHANGED');
       if (!rebound) intent.incarnationId = view.source.incarnationId;
       intent.phase = rebound ? 'RECONCILE' : 'READY'; await save();
+      if (control.stopRequested) return interrupted(status);
+      // Establish the deployment stream before START: hosted executions do not publish to
+      // the one-shot execution stream, and a fresh deployment subscription starts at now.
+      await onView(view); check();
       if (control.stopRequested) return interrupted(status);
       if (intent.processInstanceId && !rebound) return { intent, status, view, initial: null };
       // Saved admission identities require read-only marker reconciliation. An intent that never

@@ -70,7 +70,7 @@ POLICY_JOBS = {
 }
 
 PRODUCT_JOBS = {
-    "full-configurator": "full-configurator",
+    "full-configurator": "full-configurator / configurator",
     "full-preflight": "full-preflight",
     "full-ui-audit": "full-ui-audit",
     "full-ui-unit-tests": "full-ui-unit-tests",

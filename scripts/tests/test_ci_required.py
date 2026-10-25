@@ -309,6 +309,12 @@ class VerifyWorkflowTest(unittest.TestCase):
         self.assertEqual(set(GATED_JOBS), set(POLICY_JOBS) | set(PRODUCT_JOBS))
         self.assertEqual(set(GATED_JOBS), FULL_FUNCTIONAL_JOBS)
 
+    def test_reusable_configurator_reports_its_actual_nested_context(self) -> None:
+        contexts = required_contexts('full')
+        self.assertIn('full-configurator / configurator', contexts)
+        self.assertNotIn('full-configurator', contexts)
+        self.assertIn('full-configurator', GATED_JOBS)
+
     def test_the_declared_check_contexts_are_distinct(self) -> None:
         for tier in REQUIRED_BY_TIER:
             with self.subTest(tier=tier):

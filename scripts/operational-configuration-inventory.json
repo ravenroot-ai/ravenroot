@@ -461729,9 +461729,24 @@
       "rationale": "scripts/impact_plan.py::module atom \"'ravenroot-sample'\" is fixed CI evidence/schema, exact branch/job/module routing, source graph ownership, or serialization vocabulary. Its source context is reviewed as part of the maintenance CI contract; it is not an operator-configurable value."
     },
     {
-      "id": "oc-82e60552d6317b1330cc",
+      "id": "oc-a7d128184d52de0f66ba",
       "path": "scripts/impact_plan.py",
       "line": 25,
+      "symbol": "module",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "'ravenroot/ravenroot-extensions/ravenroot-object-storage/src/main/java/ai/ravenroot/extensions/storage/StorageUri.java'",
+      "expressionDigest": "4c048f2f7731bcbbd00f3d355122f5a3232a240b7739d5320a6ad93203b261a3",
+      "evidenceDigest": "83a9fc755c0633014103453fb95443f828ca87c24e78d2a1603445a0019c9c63",
+      "surface": "script",
+      "status": "retained",
+      "classification": "protocol-or-format-invariant",
+      "rationale": "scripts/impact_plan.py::module atom \"'ravenroot/ravenroot-extensions/ravenroot-object-storage/src/main/java/ai/ravenroot/extensions/storage/StorageUri.java'\" is fixed CI evidence/schema, exact branch/job/module routing, source graph ownership, or serialization vocabulary. Its source context is reviewed as part of the maintenance CI contract; it is not an operator-configurable value."
+    },
+    {
+      "id": "oc-82e60552d6317b1330cc",
+      "path": "scripts/impact_plan.py",
+      "line": 31,
       "symbol": "module",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -461746,7 +461761,7 @@
     {
       "id": "oc-09739d6f93d3651e03b3",
       "path": "scripts/impact_plan.py",
-      "line": 25,
+      "line": 31,
       "symbol": "module",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -461761,7 +461776,7 @@
     {
       "id": "oc-92580feed10eaab4ad16",
       "path": "scripts/impact_plan.py",
-      "line": 25,
+      "line": 31,
       "symbol": "module",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -461776,7 +461791,7 @@
     {
       "id": "oc-7ae6c5869a27d519174d",
       "path": "scripts/impact_plan.py",
-      "line": 25,
+      "line": 31,
       "symbol": "module",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -461791,7 +461806,7 @@
     {
       "id": "oc-837151ebaa60ed9773a1",
       "path": "scripts/impact_plan.py",
-      "line": 25,
+      "line": 31,
       "symbol": "module",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -461806,7 +461821,7 @@
     {
       "id": "oc-2884a3f48673412b0bda",
       "path": "scripts/impact_plan.py",
-      "line": 25,
+      "line": 31,
       "symbol": "module",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -461821,7 +461836,7 @@
     {
       "id": "oc-5f318dd67c432d3505cb",
       "path": "scripts/impact_plan.py",
-      "line": 25,
+      "line": 31,
       "symbol": "module",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -461836,7 +461851,7 @@
     {
       "id": "oc-7487876245456a858160",
       "path": "scripts/impact_plan.py",
-      "line": 27,
+      "line": 33,
       "symbol": "module",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -461851,7 +461866,7 @@
     {
       "id": "oc-1198f419633b865595c6",
       "path": "scripts/impact_plan.py",
-      "line": 27,
+      "line": 33,
       "symbol": "module",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -461866,7 +461881,7 @@
     {
       "id": "oc-87ecc196fd29765f5aa5",
       "path": "scripts/impact_plan.py",
-      "line": 27,
+      "line": 33,
       "symbol": "module",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -461881,7 +461896,7 @@
     {
       "id": "oc-4725becc11b6b8bf1e88",
       "path": "scripts/impact_plan.py",
-      "line": 28,
+      "line": 34,
       "symbol": "module",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -461896,7 +461911,7 @@
     {
       "id": "oc-26d0f5707f67880be57a",
       "path": "scripts/impact_plan.py",
-      "line": 28,
+      "line": 34,
       "symbol": "module",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -461911,7 +461926,7 @@
     {
       "id": "oc-035b3eb66574fe67302c",
       "path": "scripts/impact_plan.py",
-      "line": 28,
+      "line": 34,
       "symbol": "module",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -461926,7 +461941,7 @@
     {
       "id": "oc-f51bf27170453dab0394",
       "path": "scripts/impact_plan.py",
-      "line": 29,
+      "line": 35,
       "symbol": "module",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -461941,7 +461956,7 @@
     {
       "id": "oc-ee834a7e2866fa3f9abb",
       "path": "scripts/impact_plan.py",
-      "line": 29,
+      "line": 35,
       "symbol": "module",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -461956,7 +461971,7 @@
     {
       "id": "oc-3f49856a715400995308",
       "path": "scripts/impact_plan.py",
-      "line": 29,
+      "line": 35,
       "symbol": "module",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -461971,7 +461986,7 @@
     {
       "id": "oc-6eb45ba72900330a28fe",
       "path": "scripts/impact_plan.py",
-      "line": 32,
+      "line": 38,
       "symbol": "module",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -461986,7 +462001,7 @@
     {
       "id": "oc-6388786ad2a41e78679a",
       "path": "scripts/impact_plan.py",
-      "line": 32,
+      "line": 38,
       "symbol": "module",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -462001,7 +462016,7 @@
     {
       "id": "oc-0ae9276cd29ca8394535",
       "path": "scripts/impact_plan.py",
-      "line": 32,
+      "line": 38,
       "symbol": "module",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -462016,7 +462031,7 @@
     {
       "id": "oc-533b12e93c90ffb8e06b",
       "path": "scripts/impact_plan.py",
-      "line": 45,
+      "line": 51,
       "symbol": "model",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -462031,7 +462046,7 @@
     {
       "id": "oc-84a526b3dc879dda04bc",
       "path": "scripts/impact_plan.py",
-      "line": 45,
+      "line": 51,
       "symbol": "model",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -462046,7 +462061,7 @@
     {
       "id": "oc-eb37a13f7e4bf7e05c0b",
       "path": "scripts/impact_plan.py",
-      "line": 45,
+      "line": 51,
       "symbol": "model",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -462061,7 +462076,7 @@
     {
       "id": "oc-2358706b4dcf6caad5e9",
       "path": "scripts/impact_plan.py",
-      "line": 45,
+      "line": 51,
       "symbol": "model",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -462076,7 +462091,7 @@
     {
       "id": "oc-742532165b909a9d5c96",
       "path": "scripts/impact_plan.py",
-      "line": 93,
+      "line": 99,
       "symbol": "make_plan",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -462091,7 +462106,7 @@
     {
       "id": "oc-a458b8fb31f3f314cbe8",
       "path": "scripts/impact_plan.py",
-      "line": 93,
+      "line": 99,
       "symbol": "make_plan",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -462106,7 +462121,7 @@
     {
       "id": "oc-f83f6b208d79edd3e72f",
       "path": "scripts/impact_plan.py",
-      "line": 128,
+      "line": 134,
       "symbol": "make_plan",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -462121,7 +462136,7 @@
     {
       "id": "oc-b1c36049b4da01c15463",
       "path": "scripts/impact_plan.py",
-      "line": 128,
+      "line": 134,
       "symbol": "make_plan",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -462136,7 +462151,7 @@
     {
       "id": "oc-8d869e1c6233c5d80d3b",
       "path": "scripts/impact_plan.py",
-      "line": 128,
+      "line": 134,
       "symbol": "make_plan",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -462151,7 +462166,7 @@
     {
       "id": "oc-0e50bec9d96dbd72e4b7",
       "path": "scripts/impact_plan.py",
-      "line": 128,
+      "line": 134,
       "symbol": "make_plan",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -462166,7 +462181,7 @@
     {
       "id": "oc-58808e30c4d0aaa6f91a",
       "path": "scripts/impact_plan.py",
-      "line": 128,
+      "line": 134,
       "symbol": "make_plan",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -462181,7 +462196,7 @@
     {
       "id": "oc-6b9b946cb4cf4a5cc0b2",
       "path": "scripts/impact_plan.py",
-      "line": 128,
+      "line": 134,
       "symbol": "make_plan",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -462196,7 +462211,7 @@
     {
       "id": "oc-fdabacb673cb98151501",
       "path": "scripts/impact_plan.py",
-      "line": 128,
+      "line": 134,
       "symbol": "make_plan",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -462211,7 +462226,7 @@
     {
       "id": "oc-f731f0768a18825f01ab",
       "path": "scripts/impact_plan.py",
-      "line": 128,
+      "line": 134,
       "symbol": "make_plan",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -462226,7 +462241,7 @@
     {
       "id": "oc-f567bc64de4e3531bc62",
       "path": "scripts/impact_plan.py",
-      "line": 128,
+      "line": 134,
       "symbol": "make_plan",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -462241,7 +462256,7 @@
     {
       "id": "oc-f075e7a06358eb1d9ba0",
       "path": "scripts/impact_plan.py",
-      "line": 128,
+      "line": 134,
       "symbol": "make_plan",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -462256,7 +462271,7 @@
     {
       "id": "oc-71b53f968fc4cdaca29a",
       "path": "scripts/impact_plan.py",
-      "line": 128,
+      "line": 134,
       "symbol": "make_plan",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -462271,7 +462286,7 @@
     {
       "id": "oc-175c8ff7ebbcb9aef6cf",
       "path": "scripts/impact_plan.py",
-      "line": 128,
+      "line": 134,
       "symbol": "make_plan",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -462286,7 +462301,7 @@
     {
       "id": "oc-96be135d3d8ac01372b2",
       "path": "scripts/impact_plan.py",
-      "line": 145,
+      "line": 151,
       "symbol": "make_plan",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -462301,7 +462316,7 @@
     {
       "id": "oc-e724b883da2fc89523be",
       "path": "scripts/impact_plan.py",
-      "line": 145,
+      "line": 151,
       "symbol": "make_plan",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -462316,7 +462331,7 @@
     {
       "id": "oc-cde6e002da6ec0757338",
       "path": "scripts/impact_plan.py",
-      "line": 146,
+      "line": 152,
       "symbol": "make_plan",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -462329,9 +462344,24 @@
       "rationale": "scripts/impact_plan.py::make_plan atom \"'@support'\" is fixed CI evidence/schema, exact branch/job/module routing, source graph ownership, or serialization vocabulary. Its source context is reviewed as part of the maintenance CI contract; it is not an operator-configurable value."
     },
     {
+      "id": "oc-e381d5ba5236e249e683",
+      "path": "scripts/impact_plan.py",
+      "line": 161,
+      "symbol": "make_plan",
+      "kind": "script-default",
+      "role": "support_builds",
+      "expression": "'@support'",
+      "expressionDigest": "44b6ec68b7906d7b0ad829680c61ad062af549bc58ac08d937dc56a038fb485e",
+      "evidenceDigest": "0e9234d394a289b2a4dd3a4944c6984c031cf17fb3a094e98e9beb86ec756290",
+      "surface": "script",
+      "status": "retained",
+      "classification": "protocol-or-format-invariant",
+      "rationale": "scripts/impact_plan.py::make_plan atom \"'@support'\" is fixed CI evidence/schema, exact branch/job/module routing, source graph ownership, or serialization vocabulary. Its source context is reviewed as part of the maintenance CI contract; it is not an operator-configurable value."
+    },
+    {
       "id": "oc-55b77a26a64bcbe44bae",
       "path": "scripts/impact_plan.py",
-      "line": 165,
+      "line": 175,
       "symbol": "make_plan",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -462346,7 +462376,7 @@
     {
       "id": "oc-093301f318d529f20a66",
       "path": "scripts/impact_plan.py",
-      "line": 172,
+      "line": 182,
       "symbol": "make_plan",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -462361,7 +462391,7 @@
     {
       "id": "oc-f48f154ca1a72860df37",
       "path": "scripts/impact_plan.py",
-      "line": 176,
+      "line": 186,
       "symbol": "make_plan",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -462376,7 +462406,7 @@
     {
       "id": "oc-7c6920ce27701c76915e",
       "path": "scripts/impact_plan.py",
-      "line": 177,
+      "line": 187,
       "symbol": "make_plan",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -462391,7 +462421,7 @@
     {
       "id": "oc-a01ebe26341d9b77e95a",
       "path": "scripts/impact_plan.py",
-      "line": 193,
+      "line": 203,
       "symbol": "make_plan",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -462406,7 +462436,7 @@
     {
       "id": "oc-b24cae676e9c23745c91",
       "path": "scripts/impact_plan.py",
-      "line": 193,
+      "line": 203,
       "symbol": "make_plan",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -462421,7 +462451,7 @@
     {
       "id": "oc-4350306a2998db1191cc",
       "path": "scripts/impact_plan.py",
-      "line": 193,
+      "line": 203,
       "symbol": "make_plan",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -462436,7 +462466,7 @@
     {
       "id": "oc-744052f201ab674a8dfa",
       "path": "scripts/impact_plan.py",
-      "line": 193,
+      "line": 203,
       "symbol": "make_plan",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -462449,9 +462479,114 @@
       "rationale": "scripts/impact_plan.py::make_plan atom \"'minio-fixture-preflight'\" is fixed CI evidence/schema, exact branch/job/module routing, source graph ownership, or serialization vocabulary. Its source context is reviewed as part of the maintenance CI contract; it is not an operator-configurable value."
     },
     {
-      "id": "oc-18657565cf8d5a286e69",
+      "id": "oc-31ad85e086a6a0df9203",
+      "path": "scripts/impact_plan.py",
+      "line": 223,
+      "symbol": "make_plan",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "'backend-test'",
+      "expressionDigest": "997fd41ef83a58fddfd0c820f4d3daf0457f59ff89fe25e5b3fbfd3c8b78c2d7",
+      "evidenceDigest": "47d511640448b91a7ab213dae03ac5217016d1aa30dc7efd1f0c7ff40dfb8318",
+      "surface": "script",
+      "status": "retained",
+      "classification": "protocol-or-format-invariant",
+      "rationale": "scripts/impact_plan.py::make_plan atom \"'backend-test'\" is fixed CI evidence/schema, exact branch/job/module routing, source graph ownership, or serialization vocabulary. Its source context is reviewed as part of the maintenance CI contract; it is not an operator-configurable value."
+    },
+    {
+      "id": "oc-3df1f9daecfd45caf03f",
+      "path": "scripts/impact_plan.py",
+      "line": 223,
+      "symbol": "make_plan",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "'independent_build_scopes'",
+      "expressionDigest": "c1a64558f2d911ac39ef8f4ead5c773f7d99c9037cbb80e5dce5379fff2f06b1",
+      "evidenceDigest": "47d511640448b91a7ab213dae03ac5217016d1aa30dc7efd1f0c7ff40dfb8318",
+      "surface": "script",
+      "status": "retained",
+      "classification": "protocol-or-format-invariant",
+      "rationale": "scripts/impact_plan.py::make_plan atom \"'independent_build_scopes'\" is fixed CI evidence/schema, exact branch/job/module routing, source graph ownership, or serialization vocabulary. Its source context is reviewed as part of the maintenance CI contract; it is not an operator-configurable value."
+    },
+    {
+      "id": "oc-b5d3219d298907373b99",
+      "path": "scripts/impact_plan.py",
+      "line": 224,
+      "symbol": "make_plan",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "'support_execution'",
+      "expressionDigest": "20a4263c2d6fc7a0ff98193781703883b3633aa2f37a691dfa0fe9612eac6934",
+      "evidenceDigest": "b7f315fec2830d8b0c84b983b4016d6350eb5564f0469c3946f83a3e2e3fc78c",
+      "surface": "script",
+      "status": "retained",
+      "classification": "protocol-or-format-invariant",
+      "rationale": "scripts/impact_plan.py::make_plan atom \"'support_execution'\" is fixed CI evidence/schema, exact branch/job/module routing, source graph ownership, or serialization vocabulary. Its source context is reviewed as part of the maintenance CI contract; it is not an operator-configurable value."
+    },
+    {
+      "id": "oc-a9b6be705ce2dcd263aa",
+      "path": "scripts/impact_plan.py",
+      "line": 228,
+      "symbol": "make_plan",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "'@complete-reactor-unresolved-model'",
+      "expressionDigest": "99f2220bc5707022ad67e5a209deef734cdd6bd81ca2819bbda350f8ff1dde9b",
+      "evidenceDigest": "98dc16c678c7f00d4870a303397c93bfa1ba1e174f7ff940a16b64c5960a65cf",
+      "surface": "script",
+      "status": "retained",
+      "classification": "protocol-or-format-invariant",
+      "rationale": "scripts/impact_plan.py::make_plan atom \"'@complete-reactor-unresolved-model'\" is fixed CI evidence/schema, exact branch/job/module routing, source graph ownership, or serialization vocabulary. Its source context is reviewed as part of the maintenance CI contract; it is not an operator-configurable value."
+    },
+    {
+      "id": "oc-68b05fabdf093c51aa31",
+      "path": "scripts/impact_plan.py",
+      "line": 228,
+      "symbol": "make_plan",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "'current_candidate_prerequisites'",
+      "expressionDigest": "44b41981fa3dda9c7039a1fc7724bed0c90895a25b698e6d3527ff0d00b8efc6",
+      "evidenceDigest": "98dc16c678c7f00d4870a303397c93bfa1ba1e174f7ff940a16b64c5960a65cf",
+      "surface": "script",
+      "status": "retained",
+      "classification": "protocol-or-format-invariant",
+      "rationale": "scripts/impact_plan.py::make_plan atom \"'current_candidate_prerequisites'\" is fixed CI evidence/schema, exact branch/job/module routing, source graph ownership, or serialization vocabulary. Its source context is reviewed as part of the maintenance CI contract; it is not an operator-configurable value."
+    },
+    {
+      "id": "oc-8de144674e98d5eb5e2b",
+      "path": "scripts/impact_plan.py",
+      "line": 228,
+      "symbol": "make_plan",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "'graph'",
+      "expressionDigest": "f5406c836f847af52b137dee9195c601b28aa80ca18ac878a0e49949517408b0",
+      "evidenceDigest": "98dc16c678c7f00d4870a303397c93bfa1ba1e174f7ff940a16b64c5960a65cf",
+      "surface": "script",
+      "status": "retained",
+      "classification": "protocol-or-format-invariant",
+      "rationale": "scripts/impact_plan.py::make_plan atom \"'graph'\" is fixed CI evidence/schema, exact branch/job/module routing, source graph ownership, or serialization vocabulary. Its source context is reviewed as part of the maintenance CI contract; it is not an operator-configurable value."
+    },
+    {
+      "id": "oc-f1f70588d860125e80ff",
       "path": "scripts/impact_plan.py",
       "line": 231,
+      "symbol": "make_plan",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "'support_execution'",
+      "expressionDigest": "20a4263c2d6fc7a0ff98193781703883b3633aa2f37a691dfa0fe9612eac6934",
+      "evidenceDigest": "84a648c3bb84824c553b8761e38c9f321b174b0ecd3ac1a92ece38b2dfb552ad",
+      "surface": "script",
+      "status": "retained",
+      "classification": "protocol-or-format-invariant",
+      "rationale": "scripts/impact_plan.py::make_plan atom \"'support_execution'\" is fixed CI evidence/schema, exact branch/job/module routing, source graph ownership, or serialization vocabulary. Its source context is reviewed as part of the maintenance CI contract; it is not an operator-configurable value."
+    },
+    {
+      "id": "oc-18657565cf8d5a286e69",
+      "path": "scripts/impact_plan.py",
+      "line": 253,
       "symbol": "main",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -462466,7 +462601,7 @@
     {
       "id": "oc-d383f0f855eecff4df26",
       "path": "scripts/impact_plan.py",
-      "line": 231,
+      "line": 253,
       "symbol": "main",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -462481,7 +462616,7 @@
     {
       "id": "oc-0200d165d27a54df8774",
       "path": "scripts/impact_plan.py",
-      "line": 245,
+      "line": 267,
       "symbol": "main",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -532066,6 +532201,51 @@
       "rationale": "scripts/tests/test_ci_topology.py::test_push_consumers_use_the_exact_push_base atom '\"PLAN: ${{ needs.release-classification.outputs.plan }}\"' is scanner-recognized test-only input, expected evidence, or assertion vocabulary; it configures no production runtime setting."
     },
     {
+      "id": "oc-9ef14f17f25fdf2a3654",
+      "path": "scripts/tests/test_ci_topology.py",
+      "line": 262,
+      "symbol": "test_actual_ordered_commands_match_declared_support_scope",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "' '",
+      "expressionDigest": "730d16ce9c80b921af2bbe0b94074f549bd0ead2fd9a21fa85847e3e9ac9744a",
+      "evidenceDigest": "3895f066f7ce64ce6ed38aa3c4f2b98556b1600c02cb961a9ae3afbbe192c940",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "scripts/tests/test_ci_topology.py::test_actual_ordered_commands_match_declared_support_scope atom \"' '\" is scanner-recognized test-only input, expected evidence, or assertion vocabulary; it configures no production runtime setting."
+    },
+    {
+      "id": "oc-1a3d169d685d1a00216c",
+      "path": "scripts/tests/test_ci_topology.py",
+      "line": 265,
+      "symbol": "test_actual_ordered_commands_match_declared_support_scope",
+      "kind": "binding-default",
+      "role": "binding-value",
+      "expression": "'RAVENROOT_ENGINE: pekko'",
+      "expressionDigest": "e94b89be9656532b797ab27bf72a6adf97d4c1340ccbc15c2af22cab70180b41",
+      "evidenceDigest": "3bf6bc0ea67612d67a88e0c2958c6ca93b9155fec12efaea35c0a8a743d523e0",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "scripts/tests/test_ci_topology.py::test_actual_ordered_commands_match_declared_support_scope atom \"'RAVENROOT_ENGINE: pekko'\" is scanner-recognized test-only input, expected evidence, or assertion vocabulary; it configures no production runtime setting."
+    },
+    {
+      "id": "oc-09cd412271d69ea7c299",
+      "path": "scripts/tests/test_ci_topology.py",
+      "line": 265,
+      "symbol": "test_actual_ordered_commands_match_declared_support_scope",
+      "kind": "environment-binding",
+      "role": "RAVENROOT_ENGINE",
+      "expression": "RAVENROOT_ENGINE",
+      "expressionDigest": "765a4fef16948c23cce6d1983e23d8d6210e50347e742df87130f5a729b9793e",
+      "evidenceDigest": "3bf6bc0ea67612d67a88e0c2958c6ca93b9155fec12efaea35c0a8a743d523e0",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "scripts/tests/test_ci_topology.py::test_actual_ordered_commands_match_declared_support_scope atom 'RAVENROOT_ENGINE' is scanner-recognized test-only input, expected evidence, or assertion vocabulary; it configures no production runtime setting."
+    },
+    {
       "id": "oc-e14099d44dad2f32e33a",
       "path": "scripts/tests/test_classify_main_change.py",
       "line": 32,
@@ -554021,6 +554201,201 @@
       "status": "retained",
       "classification": "test-fixture",
       "rationale": "scripts/tests/test_impact_plan.py::test_unresolved_conditional_profile_records_explicit_complete_scope atom \"'release/0.8'\" is scanner-recognized test-only input, expected evidence, or assertion vocabulary; it configures no production runtime setting."
+    },
+    {
+      "id": "oc-2aba301d1ccc2df0f8ec",
+      "path": "scripts/tests/test_impact_plan.py",
+      "line": 243,
+      "symbol": "real_plan",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "'merge_group'",
+      "expressionDigest": "07cc5a9eeaf8b6e6905b70d57393a50930f4692bbe2d61d4ecebead5a03b17ea",
+      "evidenceDigest": "602b7cf570660093537457c5a2f5fb0f4fee2eb7505e72fed0946aa6a3b6e716",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "scripts/tests/test_impact_plan.py::real_plan atom \"'merge_group'\" is scanner-recognized test-only input, expected evidence, or assertion vocabulary; it configures no production runtime setting."
+    },
+    {
+      "id": "oc-0d9e648bdbff0bd26295",
+      "path": "scripts/tests/test_impact_plan.py",
+      "line": 245,
+      "symbol": "real_plan",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "'model'",
+      "expressionDigest": "8bd2e950f86ebd7128e5880392f3757707e6885f62f0fb12e2232d9d5a7861ee",
+      "evidenceDigest": "40983f26c4a8c1460c52b078442ae86526b703f5d561b5f3de43eb22ffac4d6e",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "scripts/tests/test_impact_plan.py::real_plan atom \"'model'\" is scanner-recognized test-only input, expected evidence, or assertion vocabulary; it configures no production runtime setting."
+    },
+    {
+      "id": "oc-0f05421adfd5b2f89101",
+      "path": "scripts/tests/test_impact_plan.py",
+      "line": 245,
+      "symbol": "real_plan",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "'paths_between'",
+      "expressionDigest": "cbbbfcc8f7ab2bb67222e2dd71e808504f5bb6aa25047969dd4d71df66f46288",
+      "evidenceDigest": "40983f26c4a8c1460c52b078442ae86526b703f5d561b5f3de43eb22ffac4d6e",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "scripts/tests/test_impact_plan.py::real_plan atom \"'paths_between'\" is scanner-recognized test-only input, expected evidence, or assertion vocabulary; it configures no production runtime setting."
+    },
+    {
+      "id": "oc-2f857f3bf4bb03b030d5",
+      "path": "scripts/tests/test_impact_plan.py",
+      "line": 246,
+      "symbol": "real_plan",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "'release/0.8'",
+      "expressionDigest": "12937ad353ab6f5f93cd72e7f04e79231d352fdefc7c3122e5c49b899df76475",
+      "evidenceDigest": "4aacab0fb5c6f721bfedd742ecbf3be35cb790e1d69f2f5180be592e7bb084fc",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "scripts/tests/test_impact_plan.py::real_plan atom \"'release/0.8'\" is scanner-recognized test-only input, expected evidence, or assertion vocabulary; it configures no production runtime setting."
+    },
+    {
+      "id": "oc-00842558dde0fe05a7f4",
+      "path": "scripts/tests/test_impact_plan.py",
+      "line": 252,
+      "symbol": "test_adapter_and_sample_cannot_omit_executed_support_prerequisites",
+      "kind": "script-default",
+      "role": "path",
+      "expression": "'.java'",
+      "expressionDigest": "b9e2f6f1c9d1d4a41671fcd3d8d1d757bf2f5f828b2b95b48d175760a61d6f9f",
+      "evidenceDigest": "0b6ff46b885e74b945ba134812eb38ea9eebccd934a7a8f9265da21a92441f96",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "scripts/tests/test_impact_plan.py::test_adapter_and_sample_cannot_omit_executed_support_prerequisites atom \"'.java'\" is scanner-recognized test-only input, expected evidence, or assertion vocabulary; it configures no production runtime setting."
+    },
+    {
+      "id": "oc-3262bbf5dcd2e4a230ba",
+      "path": "scripts/tests/test_impact_plan.py",
+      "line": 252,
+      "symbol": "test_adapter_and_sample_cannot_omit_executed_support_prerequisites",
+      "kind": "script-default",
+      "role": "path",
+      "expression": "'/src/main/java/'",
+      "expressionDigest": "f6165f0c1865024a274d4b2811e2c03729cb6b85168ef7435c2e6e06ba616b6f",
+      "evidenceDigest": "0b6ff46b885e74b945ba134812eb38ea9eebccd934a7a8f9265da21a92441f96",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "scripts/tests/test_impact_plan.py::test_adapter_and_sample_cannot_omit_executed_support_prerequisites atom \"'/src/main/java/'\" is scanner-recognized test-only input, expected evidence, or assertion vocabulary; it configures no production runtime setting."
+    },
+    {
+      "id": "oc-a34ee7db0225e0a9eaf2",
+      "path": "scripts/tests/test_impact_plan.py",
+      "line": 257,
+      "symbol": "test_adapter_and_sample_cannot_omit_executed_support_prerequisites",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "'backend-test'",
+      "expressionDigest": "997fd41ef83a58fddfd0c820f4d3daf0457f59ff89fe25e5b3fbfd3c8b78c2d7",
+      "evidenceDigest": "acc82db9e5fef453aca4f84ec4ea46a675b8411012edb52a7830fd5bc216e447",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "scripts/tests/test_impact_plan.py::test_adapter_and_sample_cannot_omit_executed_support_prerequisites atom \"'backend-test'\" is scanner-recognized test-only input, expected evidence, or assertion vocabulary; it configures no production runtime setting."
+    },
+    {
+      "id": "oc-bce0782bb257b4c9fcd9",
+      "path": "scripts/tests/test_impact_plan.py",
+      "line": 257,
+      "symbol": "test_adapter_and_sample_cannot_omit_executed_support_prerequisites",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "'independent_build_scopes'",
+      "expressionDigest": "c1a64558f2d911ac39ef8f4ead5c773f7d99c9037cbb80e5dce5379fff2f06b1",
+      "evidenceDigest": "acc82db9e5fef453aca4f84ec4ea46a675b8411012edb52a7830fd5bc216e447",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "scripts/tests/test_impact_plan.py::test_adapter_and_sample_cannot_omit_executed_support_prerequisites atom \"'independent_build_scopes'\" is scanner-recognized test-only input, expected evidence, or assertion vocabulary; it configures no production runtime setting."
+    },
+    {
+      "id": "oc-8cb40824ec3d0d3ed2be",
+      "path": "scripts/tests/test_impact_plan.py",
+      "line": 259,
+      "symbol": "test_adapter_and_sample_cannot_omit_executed_support_prerequisites",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "'support_execution'",
+      "expressionDigest": "20a4263c2d6fc7a0ff98193781703883b3633aa2f37a691dfa0fe9612eac6934",
+      "evidenceDigest": "906e1c50a2272a71e1a8840247bf93405ab8009ed076e354200dada11c089507",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "scripts/tests/test_impact_plan.py::test_adapter_and_sample_cannot_omit_executed_support_prerequisites atom \"'support_execution'\" is scanner-recognized test-only input, expected evidence, or assertion vocabulary; it configures no production runtime setting."
+    },
+    {
+      "id": "oc-ad1331647689160ac75c",
+      "path": "scripts/tests/test_impact_plan.py",
+      "line": 260,
+      "symbol": "test_adapter_and_sample_cannot_omit_executed_support_prerequisites",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "'install_and_test'",
+      "expressionDigest": "bc11f274bba9b972f70c4601a99829c2d1f99839672d00a4f5c7d5abf785192c",
+      "evidenceDigest": "064fe8c319242ec08552cc3b93a406774c78c5b1ded1ed895eb09dbe0947826e",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "scripts/tests/test_impact_plan.py::test_adapter_and_sample_cannot_omit_executed_support_prerequisites atom \"'install_and_test'\" is scanner-recognized test-only input, expected evidence, or assertion vocabulary; it configures no production runtime setting."
+    },
+    {
+      "id": "oc-a0f08f9c3fd6a4144973",
+      "path": "scripts/tests/test_impact_plan.py",
+      "line": 260,
+      "symbol": "test_adapter_and_sample_cannot_omit_executed_support_prerequisites",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "'verify'",
+      "expressionDigest": "e2907c607a082d105eb162e4c76a522dbcfd01791fc7d5c945a17fefffda7006",
+      "evidenceDigest": "064fe8c319242ec08552cc3b93a406774c78c5b1ded1ed895eb09dbe0947826e",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "scripts/tests/test_impact_plan.py::test_adapter_and_sample_cannot_omit_executed_support_prerequisites atom \"'verify'\" is scanner-recognized test-only input, expected evidence, or assertion vocabulary; it configures no production runtime setting."
+    },
+    {
+      "id": "oc-0d571508b5219ad7cb37",
+      "path": "scripts/tests/test_impact_plan.py",
+      "line": 272,
+      "symbol": "test_every_explicit_configurator_carrier_has_candidate_and_queue_evidence",
+      "kind": "script-default",
+      "role": "paths",
+      "expression": "'- '",
+      "expressionDigest": "00d67786894e1f30ccfdf23e64e34a85423ec83186de709d664bfb213d8b56cf",
+      "evidenceDigest": "5739ecba1928b79decc864dca3bff5715edf66ab5afaa68e3eeb9795206b2175",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "scripts/tests/test_impact_plan.py::test_every_explicit_configurator_carrier_has_candidate_and_queue_evidence atom \"'- '\" is scanner-recognized test-only input, expected evidence, or assertion vocabulary; it configures no production runtime setting."
+    },
+    {
+      "id": "oc-89eaf4f5d76ab92aca13",
+      "path": "scripts/tests/test_impact_plan.py",
+      "line": 275,
+      "symbol": "test_every_explicit_configurator_carrier_has_candidate_and_queue_evidence",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "30",
+      "expressionDigest": "624b60c58c9d8bfb6ff1886c2fd605d2adeb6ea4da576068201b6c6958ce93f4",
+      "evidenceDigest": "83ebaaa0d76fc580d7c3051ee0cd2464e1db6ee46752b68216bad34b2f7a2f30",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "scripts/tests/test_impact_plan.py::test_every_explicit_configurator_carrier_has_candidate_and_queue_evidence atom '30' is scanner-recognized test-only input, expected evidence, or assertion vocabulary; it configures no production runtime setting."
     },
     {
       "id": "oc-36544c8df7e829fbeba6",
@@ -657364,6 +657739,7 @@
     "064472bf6bf6952ed233710bbc0613b569a02fe5c71d89dd92e71cce458523ee": "const LAYER_TOLERANCE = 2;",
     "0645e9d52b83f0f59e61cb4032024d5a5d775d2ba7ac618fbdd45da01e944605": "public record PublicationCandidate(String contract, PublicationDestination destination, List<PublicationResource> resources, PublicationProvenance provenance) { public static final String CONTRACT = \"ravenroot.publication-candidate/1\";",
     "06486866da6c5b77992dcc51377badd7fd6bb2be50f06b5427ffd73723a245b8": "const close = surface.querySelector('[data-contextual-help-close]');",
+    "064fe8c319242ec08552cc3b93a406774c78c5b1ded1ed895eb09dbe0947826e": "self.assertEqual(set(execution['install_and_test'] + execution['verify']), impact.SUPPORT)",
     "0657ab880a5bfd3f32131f09073714ad2c1bf55f59abc95034d8b675e9e3d94c": "} Path sourceDir = Path.of(args[0]);",
     "06598f5d242aaf61273cce5814d9c9d06ad9fb5e4fb771324b2e9577011d3836": "const renderer = { kind: 'elastic', owner, cy: target, layoutToken, token: null, ...elements, restLengths: {}, baseWidths: {}, simulation: null, nodeLabelSelection: null, edgeLabelSelection: null, nodeSelection: null, edgeSelection: null, nodes: null, links: null, zoom: null, zoomGroup: null, };",
     "065a8b3d041efdae72c670c20d2996d760ce54bec1c26b7533d197f0d9b99542": "} DefaultGraphDeployment(DeploymentId id, ExecutionEngine engine, BehaviorRegistry behaviors, ExecutionMonitor monitor, ExecutionIdentitySource identitySource, byte[] graphMl, int ingressBufferCapacity, GraphExecutionLimits graphExecutionLimits) { this(id, engine, behaviors, monitor, identitySource, graphMl, ingressBufferCapacity, null, DEFAULT_INBOX_RETENTION, \"ravenroot-\" + UUID.randomUUID(), Duration.ofSeconds(30), RequestReplyLimits.defaults(ingressBufferCapacity), Clock.systemUTC(), null, graphExecutionLimits, null);",
@@ -657599,6 +657975,7 @@
     "0b676824d2c09a6243b04b5e63aabafd5f59b557af5005ed168f216f880e3b36": "uiFrameAncestors: \"\"",
     "0b6973d5ce3855ada71ceb6c736854dc7d208a387022cb8b76492402fc8ae079": "positive(\"RAVENROOT_AI_MAX_MCP_TOOLS_PER_SERVER\", maxMcpToolsPerServer);",
     "0b6ae2b1b893c6a54149c23c0e9a62da7e96dea14025626063d418b0cd5883b6": "for relative in (\"ravenroot/ravenroot-ui/package.json\", \"ravenroot/ravenroot-ui/package-lock.json\"):",
+    "0b6ff46b885e74b945ba134812eb38ea9eebccd934a7a8f9265da21a92441f96": "path = next(path for path in sorted(self.files) if path.startswith(owner + '/src/main/java/') and path.endswith('.java'))",
     "0b709d0ccacb884b181a411d21de98337b71febbb5cadd3a68305cc54bc3596d": "self.assertEqual(\"b\" * 40, release[\"sourceCommit\"])",
     "0b97aed5d4d8488badd435bb38223b9dad3c4a8f53c80018b24b92f98afeeef2": "} private static byte[] hexToBytes(String hex) { byte[] bytes = new byte[hex.length() / 2];",
     "0ba3f6d35ac0eaa5aa5eea3d339a6c25e68c180e2de616c4a344d680c5760771": "PID_FILE=\"$RUNTIME_DIR/ravenroot.pid\"",
@@ -657717,6 +658094,7 @@
     "0e84d3546bdd8a9d66eaf907e81c0d3267c3f2d8007901ceecbb9533fdb6d726": "return \"RAVENROOT_AMQP091_CREDENTIAL_\" + EnvironmentKeyCodec.hex(reference);",
     "0e8ae8ee491876322b60ef98b6a2cbbe1bc87d43041f987790946753e7c56837": "\"config.setMaximumPoolSize(10);\")",
     "0e8c7d0e3725b807d586a1cab17747728dbb084bf22ad1a252f026b9b001bdf9": "public record GraphArtifactDependencies(List<PinnedNodePackage> nodePackages, List<GraphProgramDependency> programs) { public static final String CONTRACT = \"ravenroot-graph-dependencies-v1\";",
+    "0e9234d394a289b2a4dd3a4944c6984c031cf17fb3a094e98e9beb86ec756290": "support_builds = SUPPORT if '@support' in flags else set()",
     "0e9c45ec231f533ddc4d75ad3c2b58bd1d3e2cf8c1ad29630b5f2d2fb423321f": "const edgeLayer = layer.append('g').attr('class', 'd3-visual-edges').attr('pointer-events', 'none');",
     "0ea12dade59638993728d5818fedb28768d1275ff392cc675e78e3816630fae7": "sha, email, message = record.split(\"\\x1f\", 2)",
     "0ea3fb7aa5b23c1df79aeb47561380e2ed772613b4d4d6d015744d615d01a161": "value: {{ include \"ravenroot.aiLimitValue\" .Values.ai.defaultMcpTimeoutMs }}",
@@ -659534,6 +659912,7 @@
     "38925ae4b8187f98d726b67f5aecf6f33b84f4e566e4636e833dedba05e4257f": "+ \"\\n\\n public int maxNodes() {\\n return 1;\\n }\\n}\\n\",",
     "38929caa8ad489643cab75268c2523f31645ecfca6a79e08f35df9ff6fd90af1": "f\" url: /releases/v{PREVIOUS}.html\\n\"",
     "3895c74996564a5f64577a0f495c9a156e2f4e8b80ff4c152f3c60969661f67a": "private static final Pattern DECIMAL = Pattern.compile(\"0|-?[1-9][0-9]*\");",
+    "3895f066f7ce64ce6ed38aa3c4f2b98556b1600c02cb961a9ae3afbbe192c940": "self.assertEqual(set(' '.join(loops).split()), SUPPORT)",
     "3897a5f1c6481104ab6531b360fa4d34a151746ab75199c1aaf765964b9d5be1": "\"DEFAULT_MAX_TOOL_ITERATIONS;\",",
     "38a075f12f907c27aa9d6c3fc7f7624a3201ae2e91826bbc3b8005500f8e8291": "compose_config \"$TEMP_DIR/compose-custom.json\" \"$@\"",
     "38a49c5477d4c0af88c0615476a3a771490a3f03f09ae341b551d7a7c4b686ab": "raise AssertionError(\"release notes must be added by the preparation\")",
@@ -659686,6 +660065,7 @@
     "3bf52e39cc53be5ba3c58c868443e1f79e1d515139eb5396e009658d302c14c9": "const current = zone === 'bottom' ? moveEvent.clientY : moveEvent.clientX;",
     "3bf560c2e5ee92109e1e69a97c476255bb352c09df865520e0410d0a077f2cba": "\"pinned < config.maxPayloadBytes()\")",
     "3bf5e5ba200f44afea2672800277fd166e4c838015308250d59429a37e5a86be": "\"execution.store.password\", \"execution.store.pool-size\",",
+    "3bf6bc0ea67612d67a88e0c2958c6ca93b9155fec12efaea35c0a8a743d523e0": "self.assertIn('RAVENROOT_ENGINE: pekko', job)",
     "3c023d17bb138f9fa204331f05a66c415851dff7c39324784193cab34d0eef13": "\"RAVENROOT_GRAPH_AUTHORING_PROVIDER\",",
     "3c025c72e6acf08c046d2c40aeafa38b3ff9888635614bc704ce2fdcf2e07dd5": "id=\"ui-port\", path=audit.ENVIRONMENT_REFERENCE_PATH.as_posix(),",
     "3c051a993c393cfb9bc6d67b569bf4043e5ddc02b8ad1139db9a0a8a25470d58": "self.assertTrue(impact.make_plan(BASE, HEAD, 'pull_request', 'release/0.8')['full'])",
@@ -659881,6 +660261,7 @@
     "408fa0ab2b949644782dc9389c508d14fdc3e0666e9f08fdcafe0b02c6b8ec90": "String timestamp = request.headers().getOrDefault(\"x-signature-timestamp\", \"\");",
     "4095896d247c8d958a895fe581e1872c5d50004b495ec1a0c4765a78677bb632": "} catch (IllegalArgumentException invalid) { LOGGER.log(System.Logger.Level.WARNING, \"ravenroot_graph_semantic_violation_uncategorized: an IllegalArgumentException not \" + \"classified as a document rule was caught while computing semantic \" + \"violations; reported to the caller as a fixed message instead of this one \" + \"-- caught.message=\" + sanitizeForLog(invalid.getMessage()), invalid);",
     "40964b8e2ade5a3d98299f773b29ab0eb5b40ee4ec466834263c489d15f33971": "private static final String CREATE_TABLE = \"\"\" CREATE TABLE program_artifact ( tenant TEXT NOT NULL, id TEXT NOT NULL PRIMARY KEY, language TEXT NOT NULL, source_utf8 BLOB NOT NULL, source_digest BLOB NOT NULL CHECK(length(source_digest)=32), digest_format INTEGER NOT NULL, state TEXT NOT NULL, revision INTEGER NOT NULL CHECK(revision > 0), compatibility_fingerprint TEXT NOT NULL, payload_digest BLOB CHECK(payload_digest IS NULL OR length(payload_digest)=32), created_at TEXT NOT NULL, updated_at TEXT NOT NULL, creator_identity TEXT NOT NULL, approver_identity TEXT NOT NULL, validation_evidence TEXT NOT NULL, smoke_evidence TEXT NOT NULL, approval_evidence TEXT NOT NULL, activation_evidence TEXT NOT NULL, retirement_evidence TEXT NOT NULL, metadata TEXT NOT NULL, UNIQUE(tenant, source_digest) ) WITHOUT ROWID \"\"\";",
+    "40983f26c4a8c1460c52b078442ae86526b703f5d561b5f3de43eb22ffac4d6e": "with patch.object(impact, 'model', return_value=(self.graph, self.files)), patch.object(impact, 'paths_between', return_value=[path]):",
     "40a0b69cd4e7dcf94fb99cc42e0ea657fa02b660fb715d8d571f37856a32fedc": "inline) printf ' read_only: true # %s\\n' \"$significant_line\" >>\"$WORKDIR/compose.yaml\" ;;",
     "40aec3c148e64a0979896a3d07e2ddadbec03021e755f0f46d9381dff9004ede": "mutant, \"RuntimeLimitsTest\", \"asciiTrim\",",
     "40b176b72a0d16c24a090f93afcd3d00c32f01a3ab705a42014c3f4b158f2b7a": "PLUGINS_DIR=\"$WORKDIR/plugins\"",
@@ -660216,6 +660597,7 @@
     "47c55e9118a1b733c99d451120416b5cf309bd80478cc5a467c531aaee4f4a76": "raise ReleaseContractError(\"the merged pull request is not from dev, release/0.8 or a protected hotfix branch\")",
     "47c77ee23dba17f4aaae0e08343ac7d3c14c4ab80961f537cf56e462cec3d4d2": "echo \"Querying /v1/node-types on 127.0.0.1:$HOST_PORT ...\" >&2",
     "47d00e885f0c3ded8fbadaaafca056dc66caa3e33aac2b42c6b550a70fa40f1d": "RAVENROOT_SSE_QUEUE_CAPACITY streamQueueCapacity rateLimit.streamQueueCapacity 2147483647",
+    "47d511640448b91a7ab213dae03ac5217016d1aa30dc7efd1f0c7ff40dfb8318": "plan['independent_build_scopes']['backend-test'] = sorted(SUPPORT)",
     "47d6c14ef232c624418f9ad0acf00d5770a8c38aee8804cde83039400faf2304": "\"public static final int HARD_MAX_NODES = 1_000_000;\",",
     "47d82de73f1daf6490af949b485c13d1a4992e4b4e368476866389b9f8b1c602": "rm -rf \"$output_dir\"",
     "47f7ca94db3657544ffb27f94349cc28f8049d2044b656c662fe1e91568467e6": "fixture = Path(temporary) / \"ravenroot\"",
@@ -660347,6 +660729,7 @@
     "4a9bc49cad2b730a1ba0a10dade57ee4a92eb14b59ed6318ec5fb7b5f52ee367": "RAVENROOT_COMPOSE_FILE Compose file (default: ./compose.yaml)",
     "4aa1d4225692f60a7767747d019d39cc0395ff063528d2af7e406f8a788c4693": "const fieldName = name.slice(second + 1);",
     "4aa711777e9ab3c3b77f2eadaab30be5a0ea4ec922633c11e0f7d33297dfd7b1": "LAST_ERR=$(cat \"$TEMP_DIR/err\")",
+    "4aacab0fb5c6f721bfedd742ecbf3be35cb790e1d69f2f5180be592e7bb084fc": "return impact.make_plan(self.head, self.head, event, 'release/0.8')",
     "4aacf26d0c26eace83720c77dcfa326b7547476bbbc885942c2e0fb3d47ea0dd": "run_plugin install --all --skip-tests --dir \"$UNSAFE_DIR\"",
     "4ab36e68a67c468974d8bda7c88ececf729c3b60e55334886e43796c71d5dda9": "probe_home=$1",
     "4ab48dd0e3406b64802939c232f1979ca7bb8d82c1d09ed66733d9b2d31c1163": "\"the toolchains measured, a raw NUL makes `grep` report \\\"Binary file ... \"",
@@ -660925,6 +661308,7 @@
     "57330549c11012c3620198ee97cdc351281f68c6842c9a5406b991ffe6865e6e": "positive(\"RAVENROOT_AI_MAX_SKILL_NAME_CHARS\", maxSkillNameChars);",
     "57334602042210cfef6dc18e08f1b3256ffa34bf9efbd0bfd7ff32efe1249f5b": "private static final String RESOURCE_CACHE_PROPERTY = \"polyglot.engine.userResourceCache\";",
     "57366e27fc50412342109c30593e50a2ed72d99f27c5be53546d3ba3c1e96933": "RAVENROOT_HUMAN_TASK_MAX_ATTENTION_PAGE_SIZE: ${RAVENROOT_HUMAN_TASK_MAX_ATTENTION_PAGE_SIZE:-}",
+    "5739ecba1928b79decc864dca3bff5715edf66ab5afaa68e3eeb9795206b2175": "paths = [line.strip().removeprefix('- ') for line in source.splitlines()",
     "573afbcbb81a518d10954f960fd1b310650af57d7f5a1def9f9b53bc5abe441f": "IN_TOTO_STATEMENT_TYPE = \"https://in-toto.io/Statement/v1\"",
     "573bc26368945da6c66a453f6d078fc01f21f7d58e9dbfc5b35fb3ee04e350f2": "} int maxInFlight = tighten(c, \"maxInFlight\", profile.maxInFlight(), 1);",
     "573bc4b085e06e415b70b6fa9cb1c6ff6064dec6ac5119011ab933d758e86877": "} else { keyBytes = decodePem(pem, \"PRIVATE KEY\");",
@@ -661318,6 +661702,7 @@
     "6019d07334676b8414844a391f239adb418782efb9a70cdb0d63b86ad080929a": "('integer(properties, environment, \"max-connections\", 256)', 'integer(properties, environment, dynamicName, 256)'),",
     "60253955ea6da8b18403d3b11f757c2e2e40fc371d32d5b980acd29913571dd2": "mkdir -p \"$MOCK_BIN\"",
     "6026221b0f64298c19e0aee71ece8eebdf6d675ff3a1a23fe03be5ab69fa4f2c": "const roots = [ ...cytoQuadraticBoundaryRoots(start.x, control.x, end.x, box.left), ...cytoQuadraticBoundaryRoots(start.x, control.x, end.x, box.right), ...cytoQuadraticBoundaryRoots(start.y, control.y, end.y, box.top), ...cytoQuadraticBoundaryRoots(start.y, control.y, end.y, box.bottom), ].filter(value => value >= -CYTO_ROOT_EPSILON && value <= 1 + CYTO_ROOT_EPSILON) .map(value => clamp(value, 0, 1));",
+    "602b7cf570660093537457c5a2f5fb0f4fee2eb7505e72fed0946aa6a3b6e716": "def real_plan(self, path, event='merge_group'):",
     "6038cb383e5b1aa82578b6b1b0cbe52739258965cf8494d827c85e361bd454fc": "integer(properties, environment, \"max-connections\", 256)",
     "604c633664517de3ca9ebcc2bbfa98a6ca044535bf088169b1b37aa21e0ef218": "\"Error parsing image name: reading manifest release in \"",
     "604d352339c04f8ecaaaecbdfffe9de9a8416ec1243be54554c9a31d2b3d2447": "foreign[\"agentBudgetAuthority\"] = audit.AGENT_BUDGET_AUTHORITY_ID",
@@ -662901,6 +663286,7 @@
     "839fed7740d8becb38806a81559da5ed6e82432e3db6e0868e5dcebbc1aacf7e": "run_plugin install --all --skip-tests --dir \"$CONFLICT_DIR\"",
     "83a3acf11bf82fb21511475831e9e0ca9b51ac4fc8073091b3a22ffe5252c624": "\"defaultEvidence\": [terminal.id], \"defaultAuthority\": authority,",
     "83a80c7a6bc6433231261f3e253e6a9ecfb4e71e019fb61ee6d2031b09e063e2": "int aggregateBytes = 0;",
+    "83a9fc755c0633014103453fb95443f828ca87c24e78d2a1603445a0019c9c63": "'ravenroot/ravenroot-extensions/ravenroot-object-storage/src/main/java/ai/ravenroot/extensions/storage/StorageUri.java',",
     "83b314473af001a52107f4e82f737d4216acdc0cf3093c8e13da7fa740652359": "RAVENROOT_EGRESS_TRUSTED_NETWORK_POLICY: ${RAVENROOT_EGRESS_TRUSTED_NETWORK_POLICY:-}",
     "83bd04f463e7313475f4e4c9c82fb4bac714742f5f777438cb96accc4914a2a7": "test_path = root / \"ravenroot/example/src/test/java/dev/example/RuntimeLimitsTest.java\"",
     "83be37966f0154ea009498232603c87e2eb881f5dfb8d04e9a014ede60f7c2d5": "if (asset == null && isApplicationRoute(relativePath)) { relativePath = \"index.html\";",
@@ -662913,6 +663299,7 @@
     "83e4d0033451a54d43aef50195f9fc6a8e41988676930be7f219b4a0ac929022": "\"labels\": [{\"name\": \"release:minor\"}],",
     "83e7ec32eec61b5816418be58b93b23e2c72ea5e057d081e2f2ffe492cf37924": "self.assertIn(\"RAVENROOT_FIXTURE_REGISTRY_USER: ${{ github.actor }}\", validate)",
     "83e89bff669a51217aa0467a2d837f204b3db649ce587569258b5124c754a624": "<a href=\"../reference/page.html?source=guide#section%20one\">Reference</a>",
+    "83ebaaa0d76fc580d7c3051ee0cd2464e1db6ee46752b68216bad34b2f7a2f30": "self.assertGreater(len(paths), 30)",
     "83f0a112352b32740173f45af278f3557580ec501bf8ab78a5140eb048edf2f6": "public static final int HARD_MAX_COMMENT_UTF8_BYTES = 16 * 1024;",
     "83f2e6804c0aa17e52f648d4ffe8b38818fd9ae653f58092b15d6efe5cdc3909": "\"defaultMcpConcurrency\": { \"x-ravenroot-environment\": \"RAVENROOT_AI_DEFAULT_MCP_CONCURRENCY\", \"$ref\": \"#/definitions/aiPositive\" },",
     "8401921c99e7fd045d522bd8cfe2acf8296f4c68067232e3017562a4a1bd0b7d": "command.add(\"--git-dir=\" + store.repository());",
@@ -662950,6 +663337,7 @@
     "849fb7c306c5fdca0613ca2daa5c7f1630bb2892a5c4a1e45a9510afdd71b42a": "function scheduleFrame(callback) { return typeof globalThis.requestAnimationFrame === 'function' ? globalThis.requestAnimationFrame(callback) : setTimeout(callback, 16);",
     "84a3d1bbc71cdfacfdd36fcb4389f57f253a1373596c29441d9ee13e66b66c8e": "int maximum = authoredInteger(configuration, \"maxRetryBackoffMs\", AmqpConsumerPolicy.MIN_MAX_RETRY_BACKOFF_MS, 60_000, AmqpSourceStartFailure.INVALID_MAX_RETRY_BACKOFF);",
     "84a5a84531d60376074a78143ce3ae40644829ad63c0e8ed8171d595b60e53f2": "(size = input.read(buffer)) != -1;",
+    "84a648c3bb84824c553b8761e38c9f321b174b0ecd3ac1a92ece38b2dfb552ad": "plan['support_execution'] = None",
     "84a660816691b7b16a4c7a1acecaef2127d7bd0d32f030fcd8c33551dd32cef0": "- name: RAVENROOT_GRAPH_MAX_PROPERTIES",
     "84a9ad0ba7407e1b6f559120dc6615cbf7f30a3068c15b6ba7c3dd3603604420": "\"$source_dir\" \"$plan_dir/manifest-id.$candidate_index\" \"$extension_id\"; then",
     "84adc83d14639f9c52f74f6c39d355f0fa605f45b2280a90c146bca7b34c3d5c": "self.assertGreaterEqual(workflow.count(\"packages: read\"), 2)",
@@ -663478,6 +663866,7 @@
     "9056cc3a94c35c2a0a193fdb26357f51250895210a8b76aed5f3ed7a3f6407a3": "static final long MAX_SQLITE_BYTES = 1024L * 1024 * 1024;",
     "905a7ecbf176378d5a69900cd74bc38add53364f0815c91c34bef80c352ccf3d": "\"RAVENROOT_OPENAPI_CLIENT_GRANT\": encoded,",
     "9060bc87b74c9734b82c6b6ec61f777e02e97989e8ab0ec9a78f8deb96aeb42c": "\"defaultAuthority\", \"validation\", \"scope\", \"pinning\", \"coverage\"):",
+    "906e1c50a2272a71e1a8840247bf93405ab8009ed076e354200dada11c089507": "execution = plan['support_execution']",
     "907f496c332645f932720031c92d13924af1cd055e4decffbe6b63291f9527b3": "raise ReleaseContractError(f\"{path.relative_to(root)}: unknown fragment kind {kind!r}\")",
     "90800561f0497a2de7f7d3e5a958e54a1eae70a35b2d76231edb3d94d210b7c9": "} private static String optional(Map<String, String> form, String name, int maximum) { String value = form.getOrDefault(name, \"\");",
     "9081214aefb99b154139623ea8df2f68a8a9c0c9907239bd83ec18c625a1df92": "daemon.poll.return_value = 23",
@@ -663870,6 +664259,7 @@
     "98d77c3c7a85d3cec96f9c69eaa63c64f60ae48d91ad2f6d9d0146291db323f3": "self.assertIsNone(audit.java_static_final_initializer(duplicated, \"Shared\", \"MAX_DEPTH\"))",
     "98d854917973b3cb750b97c9774009f5863dbf62bc06f916e739564732557981": "conversion[\"beforeArgument\"] = \"DEFAULT_MAX_TOOL_ITERATIONS\"",
     "98db07ab021ad1ccc19d0895c5fbf7ca3f405b533610f48be253d3cac82e3ac3": "pass \"GREEN — after the same interrupt the harness left ${PORT} free\"",
+    "98dc16c678c7f00d4870a303397c93bfa1ba1e174f7ff940a16b64c5960a65cf": "'current_candidate_prerequisites': sorted(closure(SUPPORT, graph) & new.keys()) if 'graph' in locals() else ['@complete-reactor-unresolved-model'],",
     "98e196e2f3f46621f12dda681d1654b703f59400f3b7756bff21289a43d7956c": "def resources(node, count=16):",
     "98e8f7d2a287bcf1e987c1286258d34b66a8f589ee6896fa6428fdd664e2c0b0": "Path(\"ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/persistence/InMemoryExecutionStorePolicyTest.java\"),",
     "98eae4e47b08fa3e1e337d686264fac8d36c711db6018d8b2620d9c67325091d": "raise ValueError(f\"independent UI release contract is missing: {required}\")",
@@ -664762,6 +665152,7 @@
     "acbc16a0ec64d960ac7cc1b0e350a3d75addb3c86be68e3a61de8f84a5a58e9c": "self.assertEqual({\"oc-new\": [\"StableEdgeId.MAX_UTF8_BYTES\"]},",
     "acc3ca3cf43aaff32c35285ac5e1d113b6db1e949af9ad249cb4a47f5fc8dff7": "RAVENROOT_HUMAN_TASK_MAX_DECISION_BODY_BYTES=131072",
     "acc5698165ebe89a7bf11082164c1b75781043bdf44855c73673c9693e1f4edd": "\"positive connect, request, and complete response-body deadline; unset defaults to `15000`; \"",
+    "acc82db9e5fef453aca4f84ec4ea46a675b8411012edb52a7830fd5bc216e447": "self.assertEqual(plan['independent_build_scopes']['backend-test'], sorted(impact.SUPPORT))",
     "acc9ea63130a2e3c675bc14cff671e41408882899920f4100560fb69c970641b": ">\"$TEMP_DIR/helm-graph-invalid-$label.out\" 2>&1; then",
     "acd328e2226ac41eaa60040d28b4e65111b4bea483e7b32191c819dce7a0cd2f": "run_browser_check 'service start' \"http://127.0.0.1:$COMPOSE_PORT\"",
     "acf40ae222edcf1f2bf8359e4c1669fc3b03c1e1725f220c36297abf164881f5": "(audit.HELM_VALUES_PATH, \"allowPrivilegeEscalation: false\", \"allowPrivilegeEscalation: true\"),",
@@ -665243,6 +665634,7 @@
     "b7efa6d0d260050406a8964f767d92a303dad6e9cb7e29c804cdd2749061aee4": "test -f \"$FORCE_DIR/ai.ravenroot.extensions.alpha/ravenroot-plugin.json\"",
     "b7f24a27a35ace76ae10b70f01a39f315dfa8973b4f0c5ee952b6e7f5e643dc1": "OutboundHttpRequest request = new OutboundHttpRequest(profile.endpoint(path.toString()), \"GET\", Map.of(\"accept\", List.of(\"application/json\"), \"user-agent\", List.of(\"ravenroot-matrix/1\")), null, Duration.ofMillis(profile.requestTimeoutMs()), profile.credential(), null, ExternalIoLimits.compressedHttp(profile.maxRequestBytes(), profile.maxResponseBytes(), profile.maxResponseBytes(), profile.maxResponseBytes(), 100, Duration.ofMillis(profile.requestTimeoutMs()), Set.of(\"application/json\")), OutboundHttpRepresentationPolicy.ALL_STATUSES);",
     "b7f2d7248ca5ca412c32c0e7a567b598b49bb6b87e2fee85cf4be557955bd5d4": "final class StoredUuid { private static final UUID UNKNOWN_INSTANCE = new UUID(0L, 0L);",
+    "b7f315fec2830d8b0c84b983b4016d6350eb5564f0469c3946f83a3e2e3fc78c": "plan['support_execution'] = {",
     "b7fa4ed7bbe2271c2434ccdee84267ce423be7a657ef7dc927dd8204edcbc68a": "const existing = new Map([...host.querySelectorAll(':scope > .panel-splitter')]",
     "b7ffb2f46a9d409297f5ed441c5371eec5328b3abc8b023b35fd5969b8b413c3": "const DEFAULT_RADIUS = 36;",
     "b816a04d912726a4bff971baa846f31bbfae2d786c08ac60a0875e18fcbbd12c": "rejects(audit.EXTERNAL_IO_MATTERMOST_PROFILE_PATH, \"MAX_ACK_TIMEOUT_MS = 2_800\",",
@@ -1166214,6 +1166606,219 @@
             "status": "retained",
             "classification": "test-fixture",
             "rationale": "scripts/tests/test_impact_plan.py::test_unresolved_conditional_profile_records_explicit_complete_scope atom \"'release/0.8'\" is scanner-recognized test-only input, expected evidence, or assertion vocabulary; it configures no production runtime setting."
+          }
+        }
+      ]
+    },
+    {
+      "id": "issue-598-attempt2-support-carrier-source-anchored-inventory",
+      "issue": "#598",
+      "sourceRevision": "d016c8fd8e2e3b91bda7af0545822fa11572ca6b",
+      "targetRevision": "d016c8fd8e2e3b91bda7af0545822fa11572ca6b",
+      "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+      "sourceInventoryDigest": "c25ed5818fb7d30728919af04e30b2434a52ca2a465a98cee42fbe3cc7100a24",
+      "targetCandidateDigest": "c0189d4bce2f13d304451296ebaaa1789827508b80f7cedc09d35a3270210d16",
+      "mappings": [],
+      "retirements": [],
+      "additions": [
+        {
+          "id": "oc-a7d128184d52de0f66ba",
+          "metadata": {
+            "status": "retained",
+            "classification": "protocol-or-format-invariant",
+            "rationale": "scripts/impact_plan.py::module atom \"'ravenroot/ravenroot-extensions/ravenroot-object-storage/src/main/java/ai/ravenroot/extensions/storage/StorageUri.java'\" is fixed CI evidence/schema, exact branch/job/module routing, source graph ownership, or serialization vocabulary. Its source context is reviewed as part of the maintenance CI contract; it is not an operator-configurable value."
+          }
+        },
+        {
+          "id": "oc-e381d5ba5236e249e683",
+          "metadata": {
+            "status": "retained",
+            "classification": "protocol-or-format-invariant",
+            "rationale": "scripts/impact_plan.py::make_plan atom \"'@support'\" is fixed CI evidence/schema, exact branch/job/module routing, source graph ownership, or serialization vocabulary. Its source context is reviewed as part of the maintenance CI contract; it is not an operator-configurable value."
+          }
+        },
+        {
+          "id": "oc-31ad85e086a6a0df9203",
+          "metadata": {
+            "status": "retained",
+            "classification": "protocol-or-format-invariant",
+            "rationale": "scripts/impact_plan.py::make_plan atom \"'backend-test'\" is fixed CI evidence/schema, exact branch/job/module routing, source graph ownership, or serialization vocabulary. Its source context is reviewed as part of the maintenance CI contract; it is not an operator-configurable value."
+          }
+        },
+        {
+          "id": "oc-3df1f9daecfd45caf03f",
+          "metadata": {
+            "status": "retained",
+            "classification": "protocol-or-format-invariant",
+            "rationale": "scripts/impact_plan.py::make_plan atom \"'independent_build_scopes'\" is fixed CI evidence/schema, exact branch/job/module routing, source graph ownership, or serialization vocabulary. Its source context is reviewed as part of the maintenance CI contract; it is not an operator-configurable value."
+          }
+        },
+        {
+          "id": "oc-b5d3219d298907373b99",
+          "metadata": {
+            "status": "retained",
+            "classification": "protocol-or-format-invariant",
+            "rationale": "scripts/impact_plan.py::make_plan atom \"'support_execution'\" is fixed CI evidence/schema, exact branch/job/module routing, source graph ownership, or serialization vocabulary. Its source context is reviewed as part of the maintenance CI contract; it is not an operator-configurable value."
+          }
+        },
+        {
+          "id": "oc-a9b6be705ce2dcd263aa",
+          "metadata": {
+            "status": "retained",
+            "classification": "protocol-or-format-invariant",
+            "rationale": "scripts/impact_plan.py::make_plan atom \"'@complete-reactor-unresolved-model'\" is fixed CI evidence/schema, exact branch/job/module routing, source graph ownership, or serialization vocabulary. Its source context is reviewed as part of the maintenance CI contract; it is not an operator-configurable value."
+          }
+        },
+        {
+          "id": "oc-68b05fabdf093c51aa31",
+          "metadata": {
+            "status": "retained",
+            "classification": "protocol-or-format-invariant",
+            "rationale": "scripts/impact_plan.py::make_plan atom \"'current_candidate_prerequisites'\" is fixed CI evidence/schema, exact branch/job/module routing, source graph ownership, or serialization vocabulary. Its source context is reviewed as part of the maintenance CI contract; it is not an operator-configurable value."
+          }
+        },
+        {
+          "id": "oc-8de144674e98d5eb5e2b",
+          "metadata": {
+            "status": "retained",
+            "classification": "protocol-or-format-invariant",
+            "rationale": "scripts/impact_plan.py::make_plan atom \"'graph'\" is fixed CI evidence/schema, exact branch/job/module routing, source graph ownership, or serialization vocabulary. Its source context is reviewed as part of the maintenance CI contract; it is not an operator-configurable value."
+          }
+        },
+        {
+          "id": "oc-f1f70588d860125e80ff",
+          "metadata": {
+            "status": "retained",
+            "classification": "protocol-or-format-invariant",
+            "rationale": "scripts/impact_plan.py::make_plan atom \"'support_execution'\" is fixed CI evidence/schema, exact branch/job/module routing, source graph ownership, or serialization vocabulary. Its source context is reviewed as part of the maintenance CI contract; it is not an operator-configurable value."
+          }
+        },
+        {
+          "id": "oc-9ef14f17f25fdf2a3654",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "scripts/tests/test_ci_topology.py::test_actual_ordered_commands_match_declared_support_scope atom \"' '\" is scanner-recognized test-only input, expected evidence, or assertion vocabulary; it configures no production runtime setting."
+          }
+        },
+        {
+          "id": "oc-1a3d169d685d1a00216c",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "scripts/tests/test_ci_topology.py::test_actual_ordered_commands_match_declared_support_scope atom \"'RAVENROOT_ENGINE: pekko'\" is scanner-recognized test-only input, expected evidence, or assertion vocabulary; it configures no production runtime setting."
+          }
+        },
+        {
+          "id": "oc-09cd412271d69ea7c299",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "scripts/tests/test_ci_topology.py::test_actual_ordered_commands_match_declared_support_scope atom 'RAVENROOT_ENGINE' is scanner-recognized test-only input, expected evidence, or assertion vocabulary; it configures no production runtime setting."
+          }
+        },
+        {
+          "id": "oc-2aba301d1ccc2df0f8ec",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "scripts/tests/test_impact_plan.py::real_plan atom \"'merge_group'\" is scanner-recognized test-only input, expected evidence, or assertion vocabulary; it configures no production runtime setting."
+          }
+        },
+        {
+          "id": "oc-0d9e648bdbff0bd26295",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "scripts/tests/test_impact_plan.py::real_plan atom \"'model'\" is scanner-recognized test-only input, expected evidence, or assertion vocabulary; it configures no production runtime setting."
+          }
+        },
+        {
+          "id": "oc-0f05421adfd5b2f89101",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "scripts/tests/test_impact_plan.py::real_plan atom \"'paths_between'\" is scanner-recognized test-only input, expected evidence, or assertion vocabulary; it configures no production runtime setting."
+          }
+        },
+        {
+          "id": "oc-2f857f3bf4bb03b030d5",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "scripts/tests/test_impact_plan.py::real_plan atom \"'release/0.8'\" is scanner-recognized test-only input, expected evidence, or assertion vocabulary; it configures no production runtime setting."
+          }
+        },
+        {
+          "id": "oc-00842558dde0fe05a7f4",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "scripts/tests/test_impact_plan.py::test_adapter_and_sample_cannot_omit_executed_support_prerequisites atom \"'.java'\" is scanner-recognized test-only input, expected evidence, or assertion vocabulary; it configures no production runtime setting."
+          }
+        },
+        {
+          "id": "oc-3262bbf5dcd2e4a230ba",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "scripts/tests/test_impact_plan.py::test_adapter_and_sample_cannot_omit_executed_support_prerequisites atom \"'/src/main/java/'\" is scanner-recognized test-only input, expected evidence, or assertion vocabulary; it configures no production runtime setting."
+          }
+        },
+        {
+          "id": "oc-a34ee7db0225e0a9eaf2",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "scripts/tests/test_impact_plan.py::test_adapter_and_sample_cannot_omit_executed_support_prerequisites atom \"'backend-test'\" is scanner-recognized test-only input, expected evidence, or assertion vocabulary; it configures no production runtime setting."
+          }
+        },
+        {
+          "id": "oc-bce0782bb257b4c9fcd9",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "scripts/tests/test_impact_plan.py::test_adapter_and_sample_cannot_omit_executed_support_prerequisites atom \"'independent_build_scopes'\" is scanner-recognized test-only input, expected evidence, or assertion vocabulary; it configures no production runtime setting."
+          }
+        },
+        {
+          "id": "oc-8cb40824ec3d0d3ed2be",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "scripts/tests/test_impact_plan.py::test_adapter_and_sample_cannot_omit_executed_support_prerequisites atom \"'support_execution'\" is scanner-recognized test-only input, expected evidence, or assertion vocabulary; it configures no production runtime setting."
+          }
+        },
+        {
+          "id": "oc-ad1331647689160ac75c",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "scripts/tests/test_impact_plan.py::test_adapter_and_sample_cannot_omit_executed_support_prerequisites atom \"'install_and_test'\" is scanner-recognized test-only input, expected evidence, or assertion vocabulary; it configures no production runtime setting."
+          }
+        },
+        {
+          "id": "oc-a0f08f9c3fd6a4144973",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "scripts/tests/test_impact_plan.py::test_adapter_and_sample_cannot_omit_executed_support_prerequisites atom \"'verify'\" is scanner-recognized test-only input, expected evidence, or assertion vocabulary; it configures no production runtime setting."
+          }
+        },
+        {
+          "id": "oc-0d571508b5219ad7cb37",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "scripts/tests/test_impact_plan.py::test_every_explicit_configurator_carrier_has_candidate_and_queue_evidence atom \"'- '\" is scanner-recognized test-only input, expected evidence, or assertion vocabulary; it configures no production runtime setting."
+          }
+        },
+        {
+          "id": "oc-89eaf4f5d76ab92aca13",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "scripts/tests/test_impact_plan.py::test_every_explicit_configurator_carrier_has_candidate_and_queue_evidence atom '30' is scanner-recognized test-only input, expected evidence, or assertion vocabulary; it configures no production runtime setting."
           }
         }
       ]

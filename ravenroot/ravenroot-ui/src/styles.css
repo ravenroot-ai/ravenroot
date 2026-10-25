@@ -273,6 +273,7 @@
       font-size: 12px; cursor: pointer; transition: all .15s;
       white-space: nowrap; user-select: none;
     }
+    .btn[hidden] { display: none; }
     .btn:hover { background: var(--bg-h); border-color: var(--acc); }
     .btn.active { background: var(--accent-soft); border-color: var(--acc); color: var(--acc); }
     .btn.primary { background: var(--acc); border-color: var(--acc); color: var(--surface-canvas); font-weight: 600; }
@@ -321,6 +322,11 @@
     .runtime-controls {
       min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 10px; flex: 0 0 auto;
     }
+    .program-readiness-controls {
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+      flex: 1 1 100%; padding: 6px 0; font-size: 12px; color: var(--tx-2);
+    }
+    .program-readiness-controls[hidden] { display: none; }
     #btn-program-approve {
       flex: 0 0 auto; min-width: min(11rem, 100%); max-width: 11rem;
       white-space: normal; overflow-wrap: anywhere;

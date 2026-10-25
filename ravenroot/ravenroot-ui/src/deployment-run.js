@@ -73,8 +73,15 @@ export function runOriginDeployment(owner, { client, serviceUrl, tenantId, graph
       catch (error) {
         if (error?.status !== 404) throw error;
         check();
-        if (intent.registrationIdentity) status = await client.restoreDeployment(intent.deploymentId, { registrationIdentity: intent.registrationIdentity, graphVersion: intent.graphVersion });
-        else {
+        if (intent.registrationIdentity) {
+          try {
+            status = await client.restoreDeployment(intent.deploymentId, {
+              registrationIdentity: intent.registrationIdentity, graphVersion: intent.graphVersion });
+          } catch (restoreError) {
+            if (restoreError?.status === 404) throw productError('workspace.run.restoreUnavailable', new Error('Saved deployment could not be restored', { cause: restoreError }));
+            throw restoreError;
+          }
+        } else {
           if (!intent.registrationAllowed || intent.incarnationId || intent.processInstanceId) throw failure('ATTACHED_DEPLOYMENT_NOT_FOUND');
           status = await client.registerDeployment(intent.deploymentId, intent.graphMl);
         }

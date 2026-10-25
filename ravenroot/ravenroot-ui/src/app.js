@@ -757,6 +757,13 @@ function createStylesheet(palette = rendererPalette) {
     'line-color': edge.callback, 'target-arrow-color': edge.callback,
     width: 2, color: edge.callback,
   }},
+  { selector: 'edge[runtimeCount > 0]', style: {
+    'line-color': edge.completed, 'target-arrow-color': edge.completed, width: 3,
+  }},
+  { selector: 'edge[?runtimeActive]', style: {
+    'line-color': palette.selection, 'target-arrow-color': palette.selection,
+    'underlay-color': palette.selection, 'underlay-opacity': .16, 'underlay-padding': 4,
+  }},
   // Preserve the edge's own width, colour and dash semantics and project selection around them.
   // The padded underlay is deliberately not colour-only: its extra silhouette remains legible on
   // dense graphs, at different zoom levels and for `continueP`, whose normal line is already wide.
@@ -3738,7 +3745,7 @@ function paintDocumentDeploymentView(owner, state) {
     if (view) applyRuntimeVisual(node, owner);
     updateD3RuntimeNode(owner, node.id(), view?.instances || 0, view?.state || 'idle', view?.arrivals || 0);
   });
-  owner.cy.edges().forEach(edge => updateD3RuntimeEdge(owner, edge.id()));
+  owner.cy.edges().forEach(edge => updateRuntimeEdge(owner, edge.id()));
   if (owner === workspace.active) drawingModelController?.scheduleRefresh(owner.id);
 }
 
@@ -8676,8 +8683,15 @@ function renderWorkflowValidationAdvisory(ownerGraph, owner = workspace.active) 
 function ensureProgramReadinessChrome() {
   let button = document.getElementById('btn-program-approve');
   if (button) return;
-  const controls = document.querySelector('.runtime-controls');
-  if (!controls) return;
+  const bar = document.getElementById('workflowbar');
+  if (!bar) return;
+  const controls = document.createElement('div');
+  controls.className = 'program-readiness-controls';
+  controls.id = 'program-readiness-controls';
+  controls.setAttribute('role', 'group');
+  controls.setAttribute('aria-label', uiText('workspace.app.program.readiness.2'));
+  controls.hidden = true;
+  bar.append(controls);
   button = document.createElement('button');
   button.className = 'btn';
   button.id = 'btn-program-approve';
@@ -8692,7 +8706,7 @@ function ensureProgramReadinessChrome() {
   summary.setAttribute('role', 'status');
   summary.setAttribute('aria-live', 'polite');
   summary.hidden = true;
-  controls.append(button, summary);
+  controls.append(summary, button);
 }
 
 function syncProgramReadinessChrome(owner = workspace.active) {
@@ -8701,6 +8715,7 @@ function syncProgramReadinessChrome(owner = workspace.active) {
   const summary = document.getElementById('program-readiness-summary');
   if (!button || !summary) return;
   const nodes = programNodes(programGraph(owner));
+  document.getElementById('program-readiness-controls').hidden = !owner || !nodes.length;
   if (!owner || !nodes.length) {
     button.hidden = true;
     summary.hidden = true;
@@ -13050,6 +13065,22 @@ async function runCapturedDocumentDeployment(owner, client, { graphMl, payload, 
   return true;
 }
 
+async function runAsNewDeployment() {
+  const owner = workspace.active;
+  if (!owner?.deploymentRun || !documentIsEditable(owner) || !tenantAuthorityAllows(owner)
+      || deploymentRunIsPending(owner) || owner.deploymentRunStopPending) return false;
+  captureActiveDocument();
+  // Keep the original document and its immutable association available for inspection.
+  // A separate draft is the explicit boundary for a new registration and initial START.
+  const graph = canonicalGraphSnapshot(owner.graph);
+  graph.nodeMap = Object.fromEntries(graph.nodes.map(node => [node.id, node]));
+  openDocument({ name: owner.name, graph, tenantId: owner.tenantId,
+    presentation: { ...visualGroupPresentation(owner), renderMode: owner.renderMode,
+      layoutMode: owner.layoutMode, visualStyle: owner.visualStyle,
+      designArrangement: owner.designArrangement, fontSize: owner.fontSize } });
+  return playGraph('run');
+}
+
 async function playGraph(mode = 'test') {
   const owner = workspace.active;
   const ownerGraph = graphData;
@@ -13276,7 +13307,7 @@ function handleRuntimeEvent(event, client = runtimeClient) {
     const knownEdgeIds = new Set((targetGraph?.edges || []).map(edge => edge.id));
     const observation = observeEdgeTraversal(target.execution.monitoringFlow, event, { knownEdgeIds });
     if (observation.changed) {
-      updateD3RuntimeEdge(target, observation.edgeId);
+      updateRuntimeEdge(target, observation.edgeId);
       if (isActive) {
         drawingModelController?.scheduleRefresh(target.id);
         const generation = target.execution.generation;
@@ -13439,6 +13470,9 @@ function resetRuntimeState(owner, targetCy, targetGraph, targetLayoutMode, targe
     if (owner === workspace.active) drawingModelController?.scheduleRefresh(owner.id);
     return;
   }
+  targetCy.edges().forEach(edge => {
+    edge.data({ runtimeActive: false, runtimeRecent: 0, runtimeCount: 0 });
+  });
   targetCy.nodes().forEach(node => {
     node.removeStyle('border-color border-width underlay-color underlay-opacity underlay-padding label');
     node.data('instances', 0);
@@ -13572,41 +13606,45 @@ function updateD3RuntimeNode(owner, nodeId, activeInstances, state, inFlightArri
   renderer.updateNode?.(nodeId, datum);
 }
 
-function updateD3RuntimeEdge(owner, edgeId) {
+// The Design canvas owns runtime paint even when no elastic renderer is mounted.
+const runtimeEdgeTimers = new WeakMap();
+function updateRuntimeEdge(owner, edgeId) {
+  if (!owner?.cy || workspace.find(owner.id) !== owner) return;
+  const flow = edgeFlowSnapshot(owner.execution.monitoringFlow, edgeId);
+  const projection = groupProjection(owner);
+  const projected = projection?.edges.find(edge => edge.originalEdgeIds.includes(edgeId));
+  const visible = owner.cy.getElementById(projected?.id || edgeId);
+  visible.data('runtimeActive', flow.recent > 0);
+  visible.data('runtimeRecent', flow.recent);
+  visible.data('runtimeCount', flow.count);
   const renderer = elasticRendererFor(owner);
-  if (!renderer?.updateEdgeFlow || !rendererSessions.isLive(renderer.token)) return;
-  const paint = () => {
-    if (!rendererSessions.isLive(renderer.token)) return;
-    const flow = edgeFlowSnapshot(owner.execution.monitoringFlow, edgeId);
-    const remainingPulseMs = flow.expiresAt == null ? 0 : Math.max(0, flow.expiresAt - Date.now());
+  if (renderer?.updateEdgeFlow && rendererSessions.isLive(renderer.token)) {
     renderer.updateEdgeFlow(edgeId, flow, {
       reducedMotion: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true,
-      decayMs: remainingPulseMs || FLOW_PULSE_MS,
-      onDecay: flow.recent > 0 ? paint : null,
     });
-    const projection = groupProjection(owner);
-    const graphEdge = owner.graph?.edges?.find(edge => edge.id === edgeId);
-    const sourceGroup = graphEdge ? projection?.groupByNodeId.get(graphEdge.source) : null;
-    const targetGroup = graphEdge ? projection?.groupByNodeId.get(graphEdge.target) : null;
-    if (sourceGroup) paintVisibleGroupRuntime(owner, sourceGroup);
-    if (targetGroup && targetGroup !== sourceGroup) paintVisibleGroupRuntime(owner, targetGroup);
-    const projected = projection?.edges.find(edge => edge.originalEdgeIds.includes(edgeId));
-    if (projected && !elasticRendererFor(owner)?.elasticMount) {
-      const visible = owner.cy?.getElementById(projected.id);
-      visible?.data('runtimeActive', flow.recent > 0);
-      visible?.data('runtimeRecent', flow.recent);
-      visible?.data('runtimeCount', flow.count);
-    }
-    scheduleMinimap(owner);
-    if (owner === workspace.active) drawingModelController?.scheduleRefresh(owner.id);
-  };
-  paint();
+  }
+  let timers = runtimeEdgeTimers.get(owner);
+  if (!timers) { timers = new Map(); runtimeEdgeTimers.set(owner, timers); }
+  clearTimeout(timers.get(edgeId)); timers.delete(edgeId);
+  if (flow.recent > 0) {
+    timers.set(edgeId, setTimeout(() => {
+      timers.delete(edgeId);
+      updateRuntimeEdge(owner, edgeId);
+    }, Math.max(1, (flow.expiresAt || Date.now() + FLOW_PULSE_MS) - Date.now() + 1)));
+  }
+  const graphEdge = owner.graph?.edges?.find(edge => edge.id === edgeId);
+  const sourceGroup = graphEdge ? projection?.groupByNodeId.get(graphEdge.source) : null;
+  const targetGroup = graphEdge ? projection?.groupByNodeId.get(graphEdge.target) : null;
+  if (sourceGroup) paintVisibleGroupRuntime(owner, sourceGroup);
+  if (targetGroup && targetGroup !== sourceGroup) paintVisibleGroupRuntime(owner, targetGroup);
+  scheduleMinimap(owner);
+  if (owner === workspace.active) drawingModelController?.scheduleRefresh(owner.id);
 }
 
 function rehydrateD3RuntimeEdges(owner) {
   const renderer = elasticRendererFor(owner);
   if (!renderer?.links || !rendererSessions.isLive(renderer.token)) return;
-  renderer.links.forEach(link => updateD3RuntimeEdge(owner, link.id));
+  renderer.links.forEach(link => updateRuntimeEdge(owner, link.id));
 }
 
 // Process, traversal and invocation are not synonyms — a process is the long-lived instance,
@@ -16492,6 +16530,7 @@ const commandActions = {
   arrange: name => arrangeDesign(name),
   play: () => playGraph(),
   run: () => playGraph('run'),
+  runNewDeployment: runAsNewDeployment,
   pause: () => executionLifecycleCommand('pause'),
   resume: () => executionLifecycleCommand('resume'),
   cancel: () => executionLifecycleCommand('cancel'),
@@ -16531,6 +16570,7 @@ function commandContext() {
     canGroupSelection: selectedReal.length >= 2 && ['none', 'valid'].includes(groupMetadata.status)
       && !selectedReal.some(id => groupedIds.has(id)),
     invalidGroupMetadata: ['invalid', 'future'].includes(groupMetadata.status),
+    hasOriginDeployment: Boolean(owner?.deploymentRun),
     hasDeploymentHistory: Boolean((owner?.deploymentRun || owner?.graph?.viewerBinding)?.graphVersion),
     hasDocument: Boolean(workspace.active && graphData),
     authoringCapability: primaryPersistenceTarget(graphAuthoringCapability),
@@ -17582,6 +17622,7 @@ uiLocalization.subscribe(() => {
   renderNodeCatalog();
   renderPersonalPalettes();
   refreshLocalizedProgramPanels();
+  document.getElementById('program-readiness-controls')?.setAttribute('aria-label', uiText('workspace.app.program.readiness.2'));
   const programApproveButton = document.getElementById('btn-program-approve');
   if (programApproveButton) programApproveButton.textContent = uiText('workspace.app.approve.program.batch');
   renderSelectedHumanTasks();

@@ -210,3 +210,19 @@ The authenticated deployment status includes optional `runtimeIncarnationId`, th
 Stop requested during a pending Run waits for the captured registration or activation to resolve. It prevents an initial START request that has not yet been issued, then stops the exact runtime. Closing the originating document after requesting Stop does not cancel that cleanup; changing authentication or tenant authority does. A successful Stop closes admission, so a delayed initial START request is refused. A later explicit Run can activate the same deployment again and reconcile its permanent initial marker: an already admitted initial traversal keeps its original process and traversal IDs.
 
 The native history monitor shows current Human Task attention separately from visit history. **Review tasks in graph** returns to the originating graph and selects a node with actionable tasks. Task decisions retain their existing confirmation, exact-generation, and current-authorization checks. Unknown or unavailable attention is displayed explicitly.
+
+### Traversal highlights and a removed deployment
+
+Design highlights live traversal activity directly on the authoring canvas: completed nodes and
+traversed paths remain green, while recent edge traffic pulses briefly. Monitoring shows the same
+activity in the elastic graph. Test preserves its pass-through semantics: bypassed nodes remain
+identified as bypassed, and traversed edges still show the route taken.
+
+A durable deployment removed with Undeploy cannot be restored under its retired identity. If the
+saved association is unavailable, verify the selected service. **Run → Run as new deployment…**
+opens a separate draft from the current graph and submits a new Run through the usual confirmation.
+The original document keeps its previous deployment and initial traversal identity; ordinary Run
+continues to reconcile that original association.
+
+Program approval appears only when a program build requires approval. Its control and readiness
+summary are grouped separately from the service connection fields.

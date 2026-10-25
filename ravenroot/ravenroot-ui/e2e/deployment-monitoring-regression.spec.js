@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { keepAuthenticationInMemory } from './memory-only-auth.mjs';
 import { PID, deferred, deploymentService } from './deployment-run-fixture.mjs';
-const graph = `<graphml xmlns="http://graphml.graphdrawing.org/xmlns"><key id="kind" for="node" attr.name="kind" attr.type="string"/><key id="b" for="node" attr.name="behavior" attr.type="string"/><graph id="mixed" edgedefault="directed"><node id="start"><data key="kind">START</data></node><node id="source"><data key="kind">BEHAVIOR</data><data key="b">external.consume</data></node><node id="end"><data key="kind">END</data></node><node id="error"><data key="kind">ERROR</data></node><edge source="start" target="source"/><edge source="source" target="end"/></graph></graphml>`;
+const graph = `<graphml xmlns="http://graphml.graphdrawing.org/xmlns"><key id="kind" for="node" attr.name="kind" attr.type="string"/><key id="b" for="node" attr.name="behavior" attr.type="string"/><graph id="mixed" edgedefault="directed"><node id="start"><data key="kind">START</data></node><node id="source"><data key="kind">BEHAVIOR</data><data key="b">external.consume</data></node><node id="end"><data key="kind">END</data></node><node id="error"><data key="kind">ERROR</data></node><edge id="first" source="start" target="source"/><edge id="second" source="source" target="end"/></graph></graphml>`;
 async function boot(page) {
   await keepAuthenticationInMemory(page);
   page.on('dialog', dialog => dialog.accept());
@@ -21,7 +21,8 @@ for (const mode of ['design', 'monitoring']) test(`Run paints durable events in 
       fallback: false, publicReason: null, message: null, messageRedacted: false, messageTruncated: false, processingDuration: null,
       graphVersion: status.graphVersion, deploymentId: 'persistent-registration', executionId: '30000000-0000-4000-8000-000000000001', traversalId: '30000000-0000-4000-8000-000000000001',
       processInstanceId: '40000000-0000-4000-8000-000000000001', nodeId: 'source', activeInstances: 0, inFlightArrivals: 0, occurredAt: '2026-10-25T12:00:00Z' };
-    await route.fulfill({ contentType: 'text/event-stream', body: `id: 1\nevent: execution\ndata: ${JSON.stringify(event)}\n\n` });
+    const edge = { ...event, type: 'EDGE_TRAVERSED', eventType: 'EDGE_TRAVERSED', sequence: 2, id: '2', nodeId: null, edgeId: 'first' };
+    await route.fulfill({ contentType: 'text/event-stream', body: `id: 1\nevent: execution\ndata: ${JSON.stringify(event)}\n\nid: 2\nevent: execution\ndata: ${JSON.stringify(edge)}\n\n` });
   });
   await boot(page);
   await page.evaluate(() => { window.ravenroot.activeDocument().deploymentRun.registrationIdentity = 'persistent-registration'; });
@@ -30,6 +31,9 @@ for (const mode of ['design', 'monitoring']) test(`Run paints durable events in 
   traffic.resolve();
   await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().execution.events.length)).toBeGreaterThan(0);
   await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().cy.getElementById('source').data('runtimeState'))).toBe('completed');
+  await expect.poll(() => page.evaluate(() => window.cy.getElementById('source').style('border-color'))).toBe('rgb(35,134,54)');
+  await expect.poll(() => page.evaluate(() => window.cy.getElementById('first').style('line-color'))).toBe('rgb(35,134,54)');
+  await expect(page.locator('#btn-program-approve')).toBeHidden();
   expect(await page.evaluate(() => window.ravenroot.activeDocument().execution.executionId)).toBeNull();
   expect(resultReads).toEqual([]);
   await expect(page.locator('.doc-history-dialog[open]')).toHaveCount(0);
@@ -132,4 +136,30 @@ test('hosted traversal activity uses the deployment stream while the one-shot st
   await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().cy.getElementById('source').data('runtimeState'))).toBe('completed');
   await page.locator('#btn-monitoring').click();
   await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().renderer.nodes.find(node => node.id === 'source').runtimeState)).toBe('completed');
+});
+
+
+test('missing saved registration explains recovery and starts a separate document only on explicit command', async ({ page }) => {
+  const backend = await deploymentService(page); await boot(page);
+  const original = await page.evaluate(async () => {
+    const owner = window.ravenroot.activeDocument();
+    owner.deploymentRun.registrationIdentity = 'retained-registration';
+    await window.ravenroot.flushWorkspacePersistence();
+    return { id: owner.id, binding: { ...owner.deploymentRun } };
+  });
+  backend.held.clear();
+  await page.locator('#btn-run').click();
+  await expect(page.locator('#activity-log')).toContainText('The saved deployment is unavailable');
+  expect(backend.calls.filter(call => call.method === 'POST' && !call.action)).toHaveLength(1);
+  await page.locator('#menu-run').click();
+  await page.getByRole('menuitem', { name: 'Run as new deployment…', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().deploymentRun?.processInstanceId)).toBe(PID);
+  const current = await page.evaluate(() => ({ id: window.ravenroot.activeDocument().id, binding: window.ravenroot.activeDocument().deploymentRun }));
+  expect(current.id).not.toBe(original.id);
+  expect(current.binding.deploymentId).not.toBe(original.binding.deploymentId);
+  expect(current.binding.initialStartRequestId).not.toBe(original.binding.initialStartRequestId);
+  const retained = await page.evaluate(id => window.ravenroot.workspace.documents.find(doc => doc.id === id)?.deploymentRun, original.id);
+  expect(retained.deploymentId).toBe(original.binding.deploymentId);
+  expect(retained.traversalId).toBe(original.binding.traversalId);
+  expect(backend.calls.filter(call => call.method === 'POST' && !call.action)).toHaveLength(2);
 });

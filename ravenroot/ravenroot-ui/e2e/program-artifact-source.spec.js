@@ -825,8 +825,10 @@ test('dual control pauses new content and uses one independently authenticated g
   });
 
   await expect(page.locator('#program-readiness-summary')).toContainText('2 awaiting approval', { timeout: 10_000 });
+  await expect(page.locator('#btn-program-approve')).toBeVisible();
   await page.locator('#btn-program-approve').click();
   await expect(page.locator('#program-readiness-summary')).toContainText('2 programs ready');
+  await expect(page.locator('#btn-program-approve')).toBeHidden();
   expect(approvalRequests).toHaveLength(1);
   expect(approvalRequests[0].artifactIds).toHaveLength(2);
   expect(approvalRequests[0].reason).toContain('Graph-level approval');

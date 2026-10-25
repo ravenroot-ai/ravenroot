@@ -147,6 +147,22 @@ describe('origin document deployment Run', () => {
     expect(f.owner.deploymentRun).toMatchObject({ incarnationId: 'rehydrated', processInstanceId: process, traversalId: traversal });
   });
 
+  it('explains a missing retained deployment without registering or admitting another START', async () => {
+    const f = fixture(); await runOriginDeployment(f.owner, f.options);
+    f.owner.deploymentRun.registrationIdentity = 'retired-registration';
+    const original = structuredClone(f.owner.deploymentRun);
+    const missing = Object.assign(new Error('unknown resource'), { status: 404 });
+    Object.defineProperty(missing, 'uiMessageKey', { value: 'workspace.runtime.request.failure' });
+    f.client.restoreDeployment = vi.fn(async () => { throw missing; });
+    await expect(runOriginDeployment(f.owner, f.options)).rejects.toMatchObject({
+      uiMessageKey: 'workspace.run.restoreUnavailable', cause: missing,
+    });
+    expect(f.owner.deploymentRun).toMatchObject({ deploymentId: original.deploymentId,
+      registrationIdentity: original.registrationIdentity, initialStartRequestId: original.initialStartRequestId,
+      processInstanceId: original.processInstanceId, traversalId: original.traversalId });
+    expect(f.client.registerDeployment).toHaveBeenCalledTimes(1);
+    expect(f.client.initialStartDeployment).toHaveBeenCalledTimes(1);
+  });
   it('restores only a saved exact durable registration after a normal server restart loses its hosted projection', async () => {
     const f = fixture(), registrationIdentity = 'retained-registry-identity';
     f.client.registerDeployment.mockResolvedValue({ tenantId: 'tenant', graphVersion: version, state: 'REGISTERED', continuity: 'DURABLE', registrationIdentity });

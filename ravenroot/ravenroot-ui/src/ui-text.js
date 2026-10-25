@@ -510,6 +510,8 @@ export const ENGLISH_MESSAGES = Object.freeze({
   // `Replace Active…`, `Graphs…` and `Panels…`.
   'commands.run.credentials.label': 'Credentials…',
   'commands.run.runners.label': 'Agents and runners…',
+  'commands.run.newDeployment.label': 'Run as new deployment…',
+  'workspace.run.restoreUnavailable': 'The saved deployment is unavailable in this service. It may have been removed or belong to a different retained store. To start a separate deployment from this graph, choose Run → Run as new deployment…. The original document and deployment association are kept.',
   'commands.run.deployments.label': 'Deployments…',
   'commands.canvas.cursor.label': 'Move graph cursor',
   'commands.canvas.cursor.help': 'Move the graph cursor between nodes',

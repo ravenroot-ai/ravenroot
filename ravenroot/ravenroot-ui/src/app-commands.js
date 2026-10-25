@@ -268,6 +268,11 @@ export function createAppCommands(actions, { t = uiText } = {}) {
       isEnabled: context => context.editable && context.tenantAuthority
         && (!context.running || context.executionUnknown === true),
     },
+    { id: 'run.newDeployment', group: 'execution', order: 25,
+      placements: ['menu.run'], execute: actions.runNewDeployment,
+      isEnabled: context => Boolean(context.editable && context.tenantAuthority
+        && context.hasOriginDeployment && !context.running),
+    },
     { id: 'run.pause', group: 'execution', order: 30,
       placements: ['menu.run', 'toolbar.primary', 'help'], execute: actions.pause,
       isEnabled: context => Boolean(context.tenantAuthority

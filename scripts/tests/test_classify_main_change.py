@@ -55,6 +55,13 @@ class ClassifyTest(unittest.TestCase):
             "full",
         )
 
+    def test_maintained_release_pull_request_keeps_full_tier(self):
+        for paths in ([], ["README.md"], ["ravenroot/ravenroot-server/src/main/java/Example.java"]):
+            result = classify(event_name="pull_request", base_ref="release/0.8", ref_name="feature/issue_599",
+                              labels=set(), paths=paths)
+            self.assertEqual(result["tier"], "full")
+            self.assertEqual(result["release_intent"], "integration")
+
     def test_main_requires_exactly_one_release_label(self):
         for labels in (set(), {"release:none", "release:patch"}):
             with self.assertRaises(ClassificationError):

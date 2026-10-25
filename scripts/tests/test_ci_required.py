@@ -510,15 +510,15 @@ class TriggerTest(unittest.TestCase):
         self.assertTrue(any("tier" in problem for problem in verify_workflow(broken)))
 
     def test_the_full_tier_on_work_branch_pushes_is_refused(self) -> None:
-        broken = self.contents.replace("  push:\n    branches: [dev, main]\n",
-                                       "  push:\n    branches: [dev, main, 'feature/**']\n", 1)
+        broken = self.contents.replace("  push:\n    branches: [dev, main, release/0.8]\n",
+                                       "  push:\n    branches: [dev, main, release/0.8, 'feature/**']\n", 1)
         self.assertNotEqual(broken, self.contents)
         self.assertTrue(any("push" in problem for problem in verify_workflow(broken)))
 
     def test_the_committed_pull_request_trigger_names_dev_and_main(self) -> None:
         """Point 4's proof: a pull request's own event must publish ci-required for it."""
         self.assertEqual(verify_workflow(self.contents), [])
-        self.assertIn("  pull_request:\n    branches: [dev, main]\n", self.contents)
+        self.assertIn("  pull_request:\n    branches: [dev, main, release/0.8]\n", self.contents)
 
     def test_a_pull_request_trigger_missing_dev_is_refused(self) -> None:
         """The exact regression point 4's proof exists to close: `dev` dropped from the trigger.
@@ -528,7 +528,7 @@ class TriggerTest(unittest.TestCase):
         request could never be queued. Losing `dev` here again must be refused.
         """
         broken = self.contents.replace(
-            "  pull_request:\n    branches: [dev, main]\n",
+            "  pull_request:\n    branches: [dev, main, release/0.8]\n",
             "  pull_request:\n    branches: [main]\n", 1,
         )
         self.assertNotEqual(broken, self.contents)

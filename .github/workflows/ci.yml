@@ -18,10 +18,10 @@ on:
   # remains useful ahead of opening the pull request, but it cannot substitute for the event's own
   # run, so the trigger is restored.
   pull_request:
-    branches: [dev, main]
+    branches: [dev, main, release/0.8]
     types: [opened, synchronize, reopened, edited, labeled, unlabeled]
   push:
-    branches: [dev, main]
+    branches: [dev, main, release/0.8]
   # A merge queue on `dev` waits for `ci-required` on each merge-group commit. Without this trigger
   # that context is never reported there, and every queued pull request times out. It must be in
   # place before a queue is enabled.
@@ -33,6 +33,11 @@ on:
     - cron: "17 3 * * 0"
   workflow_dispatch:
     inputs:
+      integration_base:
+        description: Maintained integration target for exact candidate range
+        type: choice
+        options: [dev, release/0.8]
+        default: dev
       # Verifies one review candidate on the exact commit about to be reviewed. `full` is the only
       # option on purpose: the result lands on that commit, where a pull request into `dev` reads it,
       # so no lighter tier may be selectable here. The classifier refuses anything else as well.
@@ -770,6 +775,7 @@ jobs:
         shell: bash
         env:
           EVENT_NAME: ${{ inputs.routing_run_id != '' && 'pull_request' || github.event_name }}
+          INTEGRATION_BASE: ${{ inputs.integration_base || github.event.pull_request.base.ref || 'dev' }}
           BASE_SHA: ${{ inputs.routing_run_id != '' && inputs.base_sha || github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
           HEAD_SHA: ${{ inputs.routing_run_id != '' && inputs.head_sha || github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
         run: |
@@ -781,7 +787,8 @@ jobs:
           if [ "$EVENT_NAME" = schedule ]; then
             base="$head"
           elif [ "$EVENT_NAME" = workflow_dispatch ]; then
-            base=$(git merge-base origin/dev "$head")
+            case "$INTEGRATION_BASE" in dev|release/0.8) ;; *) echo "Unsupported integration base" >&2; exit 1 ;; esac
+            base=$(git merge-base "origin/$INTEGRATION_BASE" "$head")
           fi
           test -n "$base"
           test -n "$head"

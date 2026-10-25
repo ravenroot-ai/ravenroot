@@ -155,7 +155,7 @@ def classify(
     # Dependabot pull request replaying itself through ci.yml's dispatch inputs, because the real
     # Dependabot pull request targets `main`, not `dev`. Either way a later merge into `dev` relies on
     # the result being the complete suite rather than a cheap diagnostic one.
-    if event_name == "merge_group" or (event_name == "pull_request" and base_ref == "dev"):
+    if event_name == "merge_group" or (event_name == "pull_request" and base_ref in {"dev", "release/0.8"}):
         return {"tier": "full", "release_intent": "integration", "docs_only": str(docs_only).lower()}
 
     if event_name == "pull_request" and base_ref == "main":

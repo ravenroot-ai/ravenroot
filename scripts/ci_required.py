@@ -307,16 +307,16 @@ def verify_triggers(contents: str) -> list[str]:
     """
     problems: list[str] = []
     triggers = trigger_block(contents)
-    if "  pull_request:\n    branches: [dev, main]\n" not in triggers:
+    if "  pull_request:\n    branches: [dev, main, release/0.8]\n" not in triggers:
         problems.append(
-            "ci.yml: `pull_request` must name exactly `[dev, main]`. A pull request's own event is "
+            "ci.yml: `pull_request` must name exactly `[dev, main, release/0.8]`. A pull request's own event is "
             "what publishes ci-required for it; a dispatched run's check suite never enters that pull "
             "request's rollup, so removing this trigger leaves ci-required absent rather than green, "
             "and the pull request can never be queued or merged."
         )
-    if "  push:\n    branches: [dev, main]\n" not in triggers:
+    if "  push:\n    branches: [dev, main, release/0.8]\n" not in triggers:
         problems.append(
-            "ci.yml: `push` must name exactly `[dev, main]`. Work-branch pushes belong to the fast "
+            "ci.yml: `push` must name exactly `[dev, main, release/0.8]`. Work-branch pushes belong to the fast "
             "tier in ci-fast.yml; the full tier on every push would saturate the runners."
         )
     if "\n  merge_group:\n" not in triggers:

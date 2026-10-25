@@ -28,7 +28,7 @@ jobs:
             exit 1
           fi
 
-          if [ "$HEAD_BRANCH" = "dev" ]; then
+          if [ "$HEAD_BRANCH" = "dev" ] || [ "$HEAD_BRANCH" = "release/0.8" ]; then
             echo "Internal release or content-promotion pull request accepted."
             exit 0
           fi

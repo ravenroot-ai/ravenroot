@@ -147,8 +147,8 @@ def selected_pull_request(path: Path, head_sha: str) -> tuple[str, str]:
     if len(selected) != 1:
         raise ReleaseContractError("the merged pull request must have exactly one release intent label")
     head_ref = candidate.get("head", {}).get("ref", "")
-    if head_ref != "dev" and not head_ref.startswith("hotfix/"):
-        raise ReleaseContractError("the merged pull request is not from dev or a protected hotfix branch")
+    if head_ref not in {"dev", "release/0.8"} and not head_ref.startswith("hotfix/"):
+        raise ReleaseContractError("the merged pull request is not from dev, release/0.8 or a protected hotfix branch")
     intent = selected[0].removeprefix("release:")
     if head_ref.startswith("hotfix/") and intent != "patch":
         raise ReleaseContractError("hotfix branches may authorize only release:patch")

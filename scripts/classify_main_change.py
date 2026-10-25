@@ -155,7 +155,7 @@ def classify(
     # Dependabot pull request replaying itself through ci.yml's dispatch inputs, because the real
     # Dependabot pull request targets `main`, not `dev`. Either way a later merge into `dev` relies on
     # the result being the complete suite rather than a cheap diagnostic one.
-    if event_name == "merge_group" or (event_name == "pull_request" and base_ref == "dev"):
+    if event_name == "merge_group" or (event_name == "pull_request" and base_ref in {"dev", "release/0.8"}):
         return {"tier": "full", "release_intent": "integration", "docs_only": str(docs_only).lower()}
 
     if event_name == "pull_request" and base_ref == "main":
@@ -184,13 +184,13 @@ def classify(
         # `main-source-policy` refuses it: a promotion tier granted to an arbitrary head would give
         # that commit a green ci-required with no functional job behind it.
         same_repository = bool(repository) and head_repository == repository
-        if same_repository and head_ref == "dev":
+        if same_repository and head_ref in {"dev", "release/0.8"}:
             tier = "promotion"
         elif same_repository and head_ref.startswith("hotfix/"):
             tier = "full"
         else:
             raise ClassificationError(
-                f"A pull request into main must come from dev or a hotfix/* branch of {repository or 'this repository'}; "
+                f"A pull request into main must come from dev, release/0.8 or a hotfix/* branch of {repository or 'this repository'}; "
                 f"refusing head {head_repository or '?'}:{head_ref or '?'}."
             )
         return {"tier": tier, "release_intent": intent, "docs_only": str(docs_only).lower()}
@@ -201,7 +201,7 @@ def classify(
     # The merge queue has already run the full suite on the exact integration commit. Running it a
     # third time after that commit advances `dev` adds latency and runner load without testing new
     # code. Branch protection prevents an unqueued write, so this tier is intentionally nearly bare.
-    if event_name == "push" and ref_name == "dev":
+    if event_name == "push" and ref_name in {"dev", "release/0.8"}:
         return {"tier": "postmerge", "release_intent": "integration", "docs_only": str(docs_only).lower()}
 
     return {"tier": "full", "release_intent": "integration", "docs_only": str(docs_only).lower()}
@@ -229,6 +229,16 @@ def write_github_outputs(values: dict[str, str]) -> None:
             output.write(f"{key}={value}\n")
 
 
+def equivalent_merge_source(commit: str = 'HEAD') -> str:
+    """Return the source only for a two-parent merge with exactly the tested source tree."""
+    parents = subprocess.check_output(['git', 'show', '-s', '--format=%P', commit], text=True).split()
+    if len(parents) != 2:
+        return ''
+    source_tree = subprocess.check_output(['git', 'rev-parse', parents[1] + '^{tree}'], text=True).strip()
+    merge_tree = subprocess.check_output(['git', 'rev-parse', commit + '^{tree}'], text=True).strip()
+    return parents[1] if source_tree == merge_tree else ''
+
+
 def main() -> int:
     try:
         paths = changed_paths(os.environ.get("BASE_SHA", ""), os.environ.get("HEAD_SHA", ""))
@@ -244,6 +254,10 @@ def main() -> int:
             repository=os.environ.get("REPOSITORY", ""),
             routed_inputs={name: os.environ.get(variable, "") for name, variable in ROUTED_INPUTS.items()},
         )
+        if os.environ.get('EVENT_NAME') == 'push' and os.environ.get('REF_NAME') == 'main' and result['tier'] == 'full':
+            # Only a real merge with exactly the source tree can reuse upstream verification.
+            if equivalent_merge_source():
+                result['tier'] = 'promotion'
     except (ClassificationError, subprocess.CalledProcessError) as exc:
         print(f"Release classification failed: {exc}", file=sys.stderr)
         return 1

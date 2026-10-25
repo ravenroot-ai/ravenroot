@@ -18,10 +18,10 @@ on:
   # remains useful ahead of opening the pull request, but it cannot substitute for the event's own
   # run, so the trigger is restored.
   pull_request:
-    branches: [dev, main]
+    branches: [dev, main, release/0.8]
     types: [opened, synchronize, reopened, edited, labeled, unlabeled]
   push:
-    branches: [dev, main]
+    branches: [dev, main, release/0.8]
   # A merge queue on `dev` waits for `ci-required` on each merge-group commit. Without this trigger
   # that context is never reported there, and every queued pull request times out. It must be in
   # place before a queue is enabled.
@@ -42,6 +42,15 @@ on:
         type: choice
         options: [full]
         default: full
+      integration_ref:
+        description: Explicit trusted integration target
+        type: choice
+        options: [dev, release/0.8]
+        default: dev
+      force_complete:
+        description: Execute whole-product regression regardless of impact
+        type: boolean
+        default: false
       routing_run_id:
         description: Trusted Dependabot authorization workflow run
         required: false
@@ -78,7 +87,7 @@ jobs:
   docs-site:
     name: docs-site
     needs: [release-classification]
-    if: contains(fromJSON('["docs","full"]'), needs.release-classification.outputs.tier)
+    if: ${{ !cancelled() && contains(fromJSON('["docs","full"]'), needs.release-classification.outputs.tier) && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'docs-site') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -94,6 +103,8 @@ jobs:
           distribution: temurin
           java-version: "21"
           cache: maven
+      - name: Refuse stale locally cached project prerequisites
+        run: rm -rf "$HOME/.m2/repository/ai/ravenroot"
       - name: Compare node documentation and examples with compiled descriptors
         working-directory: ravenroot
         run: |
@@ -133,6 +144,8 @@ jobs:
       contents: read
       pull-requests: read
     outputs:
+      jobs: ${{ steps.impact.outputs.jobs }}
+      plan: ${{ steps.impact.outputs.plan }}
       tier: ${{ steps.classify.outputs.tier }}
       release-intent: ${{ steps.classify.outputs.release_intent }}
       docs-only: ${{ steps.classify.outputs.docs_only }}
@@ -222,6 +235,30 @@ jobs:
           ROUTED_HEAD_SHA: ${{ inputs.head_sha }}
           ROUTED_MERGE_SHA: ${{ inputs.merge_sha }}
         run: python3 scripts/classify_main_change.py
+      - name: Derive the exact maintenance verification plan
+        id: impact
+        env:
+          EVENT_NAME: ${{ inputs.routing_run_id != '' && 'pull_request' || github.event_name }}
+          BASE_SHA: ${{ inputs.routing_run_id != '' && inputs.base_sha || github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+          LANE: ${{ inputs.integration_ref || github.base_ref || github.event.merge_group.base_ref || github.ref_name }}
+          FORCE_COMPLETE: ${{ inputs.force_complete }}
+        run: |
+          set -euo pipefail
+          lane="${LANE#refs/heads/}"
+          case "$lane" in dev|release/0.8) ;; *) lane=dev ;; esac
+          extra=()
+          if [ "$FORCE_COMPLETE" = true ] || [ "$EVENT_NAME" = schedule ]; then
+            extra+=(--force-complete)
+          fi
+          python3 scripts/impact_plan.py --event "$EVENT_NAME" --base "$BASE_SHA" \
+            --candidate HEAD --lane "$lane" "${extra[@]}"
+      - name: Archive the machine-readable impact and omission evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: impact-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: impact-plan.json
+          if-no-files-found: error
+          retention-days: 7
       # Authorization refuses a promotion whose version is not the one its label authorizes, but only
       # after the merge, which leaves a promotion on `main` and a release that never starts. The same
       # rule runs here, on the merge the pull request would produce, while it can still be refused.
@@ -242,10 +279,18 @@ jobs:
             --base "$(git rev-parse HEAD^1)" --head "$(git rev-parse HEAD)" --labels "$PR_LABELS" \
             --prior-prs-json "$RUNNER_TEMP/prior-promotion-prs.json"
 
+  full-configurator:
+    name: full-configurator
+    needs: [release-classification, full-preflight]
+    if: ${{ !cancelled() && needs.release-classification.outputs.tier == 'full' && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-configurator') }}
+    uses: ./.github/workflows/configurator.yml
+    permissions:
+      contents: read
+
   full-docs-policy:
     name: full-docs-policy
     needs: [release-classification]
-    if: contains(fromJSON('["docs","full"]'), needs.release-classification.outputs.tier)
+    if: ${{ !cancelled() && contains(fromJSON('["docs","full"]'), needs.release-classification.outputs.tier) && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-docs-policy') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
@@ -283,8 +328,8 @@ jobs:
 
   full-python-contracts:
     name: full-python-contracts
-    needs: [release-classification, full-preflight]
-    if: needs.release-classification.outputs.tier == 'full'
+    needs: [release-classification, full-preflight, backend-build]
+    if: ${{ !cancelled() && needs.release-classification.outputs.tier == 'full' && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-python-contracts') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -317,6 +362,7 @@ jobs:
           python3 -m unittest scripts.tests.test_check_commit_attribution
           python3 -m unittest scripts.tests.test_ci_topology
           python3 -m unittest scripts.tests.test_minio_fixture
+          python3 -m unittest scripts.tests.test_impact_plan scripts.tests.test_ci_artifacts
           python3 -m unittest scripts.tests.test_select_backend_tests
           python3 -m unittest scripts.tests.test_audit_operational_configuration
           python3 -m unittest scripts.tests.test_extension_pack
@@ -332,8 +378,8 @@ jobs:
 
   full-shell-contracts:
     name: full-shell-contracts
-    needs: [release-classification, full-preflight]
-    if: needs.release-classification.outputs.tier == 'full'
+    needs: [release-classification, full-preflight, backend-build]
+    if: ${{ !cancelled() && needs.release-classification.outputs.tier == 'full' && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-shell-contracts') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -361,7 +407,7 @@ jobs:
   full-source-policy:
     name: full-source-policy
     needs: [release-classification]
-    if: contains(fromJSON('["docs","full"]'), needs.release-classification.outputs.tier)
+    if: ${{ !cancelled() && contains(fromJSON('["docs","full"]'), needs.release-classification.outputs.tier) && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-source-policy') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -392,7 +438,7 @@ jobs:
   full-ui-audit:
     name: full-ui-audit
     needs: [release-classification]
-    if: needs.release-classification.outputs.tier == 'full'
+    if: ${{ !cancelled() && needs.release-classification.outputs.tier == 'full' && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-ui-audit') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -416,7 +462,7 @@ jobs:
   full-ui-unit-tests:
     name: full-ui-unit-tests
     needs: [release-classification]
-    if: needs.release-classification.outputs.tier == 'full'
+    if: ${{ !cancelled() && needs.release-classification.outputs.tier == 'full' && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-ui-unit-tests') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -440,7 +486,7 @@ jobs:
   full-ui-build:
     name: full-ui-build
     needs: [release-classification]
-    if: needs.release-classification.outputs.tier == 'full'
+    if: ${{ !cancelled() && needs.release-classification.outputs.tier == 'full' && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-ui-build') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -468,6 +514,8 @@ jobs:
           cp -R ravenroot/ravenroot-ui/dist/. ci-artifacts/ui/
           docker build --file Dockerfile.ui --tag ravenroot-ui:test .
           python3 scripts/verify_ui_container.py --image ravenroot-ui:test
+      - name: Seal current-candidate UI provenance
+        run: python3 scripts/ci_artifacts.py seal ravenroot/ravenroot-ui/dist
       - name: Archive the verified UI
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -486,7 +534,7 @@ jobs:
   full-ui-e2e-harness:
     name: full-ui-e2e-harness
     needs: [release-classification, full-preflight, full-ui-build]
-    if: needs.release-classification.outputs.tier == 'full'
+    if: ${{ !cancelled() && needs.release-classification.outputs.tier == 'full' && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-ui-e2e-harness') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -517,6 +565,8 @@ jobs:
         with:
           name: ravenroot-ui
           path: ravenroot/ravenroot-ui/dist
+      - name: Verify UI artifact identity
+        run: python3 scripts/ci_artifacts.py verify ravenroot/ravenroot-ui/dist
       - name: Cache Playwright Chromium
         id: playwright-cache
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
@@ -531,6 +581,8 @@ jobs:
         if: steps.playwright-cache.outputs.cache-hit == 'true'
         working-directory: ravenroot/ravenroot-ui
         run: npx playwright install-deps chromium
+      - name: Refuse stale locally cached project prerequisites
+        run: rm -rf "$HOME/.m2/repository/ai/ravenroot"
       - name: Run the Human Task confirmation real-process browser harness
         working-directory: ravenroot
         run: >-
@@ -554,7 +606,7 @@ jobs:
   full-ui-e2e-shard:
     name: full-ui-e2e-shard (${{ matrix.shard }}/${{ strategy.job-total }})
     needs: [release-classification, full-preflight, full-ui-build]
-    if: needs.release-classification.outputs.tier == 'full'
+    if: ${{ !cancelled() && needs.release-classification.outputs.tier == 'full' && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-ui-e2e-shard') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
@@ -582,6 +634,8 @@ jobs:
         with:
           name: ravenroot-ui
           path: ravenroot/ravenroot-ui/dist
+      - name: Verify UI artifact identity
+        run: python3 scripts/ci_artifacts.py verify ravenroot/ravenroot-ui/dist
       - name: Cache Playwright Chromium
         id: playwright-cache
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
@@ -618,9 +672,9 @@ jobs:
   full-ui-e2e:
     name: full-ui-e2e
     needs: [release-classification, full-ui-e2e-harness, full-ui-e2e-shard]
-    # `always()` so a failing shard produces a failing `full-ui-e2e` rather than a skipped one. A
-    # skip would still be refused by ci-required, but it would report the wrong reason.
-    if: always() && needs.release-classification.outputs.tier == 'full'
+    # An explicit status function observes failed/skipped prerequisites, but false on cancellation
+    # lets GitHub stop the work. The final gate still refuses incomplete or cancelled evidence.
+    if: ${{ !cancelled() && needs.release-classification.outputs.tier == 'full' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-ui-e2e') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -646,7 +700,7 @@ jobs:
   backend-build:
     name: full-backend-build
     needs: [release-classification, minio-fixture-preflight]
-    if: needs.release-classification.outputs.tier == 'full'
+    if: ${{ !cancelled() && needs.release-classification.outputs.tier == 'full' && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'backend-build') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -667,16 +721,30 @@ jobs:
             ravenroot-adapter-openai-compatible/pom.xml
             ravenroot-dev-harness/pom.xml
             ravenroot-sample/pom.xml
+      - name: Remove cached project artifacts; third-party dependencies remain accelerators
+        run: rm -rf "$HOME/.m2/repository/ai/ravenroot"
       - name: Build and locally install the backend without executing tests
         working-directory: ravenroot
-        run: mvn -B --no-transfer-progress -DskipTests clean install
+        env:
+          PLAN: ${{ needs.release-classification.outputs.plan }}
+        run: |
+          set -euo pipefail
+          projects=$(jq -r '[.build[] | select(startswith("ravenroot/")) | ltrimstr("ravenroot/") | select(. != "ravenroot")] | join(",")' <<<"$PLAN")
+          if jq -e '.full' <<<"$PLAN" >/dev/null; then
+            mvn -B --no-transfer-progress -DskipTests clean install
+          else
+            test -n "$projects"
+            mvn -B --no-transfer-progress -pl "$projects" -am -DskipTests clean install
+          fi
       - name: Stage the verified runtime artifact and local reactor repository
         run: |
           set -euo pipefail
           version=$(python3 scripts/check_product_version.py --print-version)
           mkdir -p ci-artifacts/backend/targets/ravenroot/ravenroot-distribution/target
-          cp ravenroot/ravenroot-distribution/target/ravenroot.jar \
-            ci-artifacts/backend/targets/ravenroot/ravenroot-distribution/target/ravenroot.jar
+          if [ -f ravenroot/ravenroot-distribution/target/ravenroot.jar ]; then
+            cp ravenroot/ravenroot-distribution/target/ravenroot.jar \
+              ci-artifacts/backend/targets/ravenroot/ravenroot-distribution/target/ravenroot.jar
+          fi
           mkdir -p ci-artifacts/backend/maven-repository/ai
           for artifact in "$HOME/.m2/repository/ai/ravenroot"/*; do
             [ -d "$artifact/$version" ] || continue
@@ -685,6 +753,8 @@ jobs:
             mkdir -p "$destination"
             cp -R "$artifact/$version" "$destination/$version"
           done
+      - name: Seal current-candidate backend provenance
+        run: python3 scripts/ci_artifacts.py seal ci-artifacts/backend
       - name: Archive the backend build outputs
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -697,7 +767,7 @@ jobs:
   minio-fixture-preflight:
     name: full-minio-fixture-preflight
     needs: [release-classification]
-    if: needs.release-classification.outputs.tier == 'full'
+    if: ${{ !cancelled() && needs.release-classification.outputs.tier == 'full' && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'minio-fixture-preflight') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -728,21 +798,22 @@ jobs:
       - full-ui-build
       - minio-fixture-preflight
       - backend-build
-    if: always() && needs.release-classification.outputs.tier == 'full'
+    if: ${{ !cancelled() && needs.release-classification.outputs.tier == 'full' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-preflight') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Admit the integration candidate to regression testing
         env:
+          PLAN_JOBS: ${{ needs.release-classification.outputs.jobs }}
           RESULTS: ${{ toJSON(needs) }}
         run: |
-          jq -e 'to_entries | all(.key == "release-classification" or .value.result == "success")' \
+          jq -e --argjson jobs "$PLAN_JOBS" 'to_entries | all(.key as $key | if $key == "release-classification" or ($jobs | index($key)) then .value.result == "success" else .value.result == "skipped" end)' \
             <<<"$RESULTS" >/dev/null
 
   full-backend-tests:
     name: full-backend-tests
-    needs: [release-classification, full-preflight]
-    if: needs.release-classification.outputs.tier == 'full'
+    needs: [release-classification, full-preflight, backend-build]
+    if: ${{ !cancelled() && needs.release-classification.outputs.tier == 'full' && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-backend-tests') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     permissions:
@@ -765,27 +836,33 @@ jobs:
           cache-dependency-path: |
             ravenroot/pom.xml
             ravenroot/**/pom.xml
-      - name: Select backend regression scope from the exact candidate range
+      - name: Consume the authoritative build/test plan
         id: backend-scope
-        shell: bash
         env:
-          EVENT_NAME: ${{ inputs.routing_run_id != '' && 'pull_request' || github.event_name }}
-          BASE_SHA: ${{ inputs.routing_run_id != '' && inputs.base_sha || github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
-          HEAD_SHA: ${{ inputs.routing_run_id != '' && inputs.head_sha || github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
+          PLAN: ${{ needs.release-classification.outputs.plan }}
         run: |
           set -euo pipefail
-          # Scheduled runs intentionally select the all-reactor regression path. PRs, dispatches,
-          # and merge groups derive a safe focused scope from their exact candidate range instead.
-          base="$BASE_SHA"
-          head="$HEAD_SHA"
-          if [ "$EVENT_NAME" = schedule ]; then
-            base="$head"
-          elif [ "$EVENT_NAME" = workflow_dispatch ]; then
-            base=$(git merge-base origin/dev "$head")
+          if jq -e '.full' <<<"$PLAN" >/dev/null; then
+            echo mode=all >> "$GITHUB_OUTPUT"
+          else
+            echo mode=selected >> "$GITHUB_OUTPUT"
           fi
-          test -n "$base"
-          test -n "$head"
-          python3 scripts/select_backend_tests.py --event "$EVENT_NAME" --base "$base" --head "$head"
+          {
+            echo "native=$(jq -r '.native_acceptance' <<<"$PLAN")"
+            echo "extension_pack=$(jq -r '.extension_pack' <<<"$PLAN")"
+            echo "projects=$(jq -r '[.test[] | select(startswith("ravenroot/")) | ltrimstr("ravenroot/")] | join(",")' <<<"$PLAN")"
+          } >> "$GITHUB_OUTPUT"
+      - name: Download current-candidate prerequisites
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          name: ravenroot-backend-build
+          path: ci-artifacts/backend
+      - name: Verify and restore current-candidate prerequisites
+        run: |
+          python3 scripts/ci_artifacts.py verify ci-artifacts/backend
+          rm -rf "$HOME/.m2/repository/ai/ravenroot"
+          mkdir -p "$HOME/.m2/repository/ai/ravenroot"
+          cp -R ci-artifacts/backend/maven-repository/ai/ravenroot/. "$HOME/.m2/repository/ai/ravenroot/"
       - name: Revalidate and cache MinIO fixtures before Maven needs them
         if: steps.backend-scope.outputs.mode == 'all' || contains(steps.backend-scope.outputs.projects, 'ravenroot-extensions/ravenroot-object-storage')
         env:
@@ -802,22 +879,22 @@ jobs:
           if [ "$BACKEND_SCOPE" = all ]; then
             mvn -B --no-transfer-progress clean verify
           elif [ "$BACKEND_SCOPE" = selected ] && [ -n "$BACKEND_PROJECTS" ]; then
-            mvn -B --no-transfer-progress -pl "$BACKEND_PROJECTS" -am verify
-          elif [ "$BACKEND_SCOPE" = none ] && [ -z "$BACKEND_PROJECTS" ]; then
-            echo "No backend paths changed; whole-reactor backend-build remains the compile gate."
+            mvn -B --no-transfer-progress -pl "$BACKEND_PROJECTS" verify
+          elif [ "$BACKEND_SCOPE" = selected ] && [ -z "$BACKEND_PROJECTS" ]; then
+            echo "No backend test owner selected; current-candidate prerequisites were verified."
           else
             echo "Refusing invalid backend scope '$BACKEND_SCOPE' with projects '$BACKEND_PROJECTS'." >&2
             exit 1
           fi
       - name: Verify the isolated writable runner acceptance fixture
-        if: steps.backend-scope.outputs.mode == 'all'
+        if: steps.backend-scope.outputs.native == 'true'
         run: python3 -m unittest scripts.tests.test_runner_quota_acceptance scripts.tests.test_model_protocol_endpoint scripts.tests.test_kubernetes_runner_acceptance
       - name: Run secretless hermetic model-protocol Workspace acceptance on native XFS project quotas
-        if: steps.backend-scope.outputs.mode == 'all'
+        if: steps.backend-scope.outputs.native == 'true'
         timeout-minutes: 20
         run: python3 scripts/fixtures/runner_quota_acceptance.py
       - name: Install pinned native Kubernetes acceptance tools
-        if: steps.backend-scope.outputs.mode == 'all'
+        if: steps.backend-scope.outputs.native == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -829,17 +906,17 @@ jobs:
           chmod 755 "$fixture_tools/minikube" "$fixture_tools/kubectl"
           echo "$fixture_tools" >> "$GITHUB_PATH"
       - name: Run native Kubernetes governed executor acceptance without capability skips
-        if: steps.backend-scope.outputs.mode == 'all'
+        if: steps.backend-scope.outputs.native == 'true'
         timeout-minutes: 20
         run: python3 scripts/fixtures/kubernetes_runner_acceptance.py
       - name: Verify the published extension pack from a clean staged consumer
-        if: steps.backend-scope.outputs.mode == 'all'
+        if: steps.backend-scope.outputs.extension_pack == 'true'
         run: ./scripts/verify-extension-pack-consumer.sh
 
   backend-test:
     name: full-support-modules
     needs: [release-classification, full-preflight, backend-build]
-    if: needs.release-classification.outputs.tier == 'full'
+    if: ${{ !cancelled() && needs.release-classification.outputs.tier == 'full' && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'backend-test') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -867,12 +944,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          python3 scripts/ci_artifacts.py verify ci-artifacts/backend
+          rm -rf "$HOME/.m2/repository/ai/ravenroot"
           mkdir -p "$HOME/.m2/repository/ai"
           mkdir -p "$HOME/.m2/repository/ai/ravenroot"
           cp -R ci-artifacts/backend/maven-repository/ai/ravenroot/. \
             "$HOME/.m2/repository/ai/ravenroot/"
       - name: Verify out-of-reactor adapters, harness, and sample
         run: |
+          # impact-plan independent_build_scopes.backend-test records all four projects;
+          # its build closure includes every reactor prerequisite restored above.
           # The harness consumes the OpenAI-compatible adapter. Install both
           # unpublished adapters into this job's local repository first so the
           # verification result never depends on a warm Maven cache.
@@ -891,7 +972,7 @@ jobs:
   full-plugin-boundary:
     name: full-plugin-boundary
     needs: [release-classification, full-preflight, backend-build]
-    if: needs.release-classification.outputs.tier == 'full'
+    if: ${{ !cancelled() && needs.release-classification.outputs.tier == 'full' && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-plugin-boundary') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -914,6 +995,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          python3 scripts/ci_artifacts.py verify ci-artifacts/backend
+          rm -rf "$HOME/.m2/repository/ai/ravenroot"
           mkdir -p "$HOME/.m2/repository/ai"
           mkdir -p "$HOME/.m2/repository/ai/ravenroot"
           cp -R ci-artifacts/backend/maven-repository/ai/ravenroot/. \
@@ -930,6 +1013,8 @@ jobs:
             ./plugin.sh install "$bundle_dir" --dir ci-artifacts/plugins
           done
           ./plugin.sh check-published ci-artifacts/plugins
+      - name: Seal validated plugin provenance
+        run: python3 scripts/ci_artifacts.py seal ci-artifacts/plugins
       - name: Archive the staged plugin set
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -941,8 +1026,8 @@ jobs:
 
   full-api-documentation:
     name: full-api-documentation
-    needs: [release-classification, full-preflight]
-    if: needs.release-classification.outputs.tier == 'full'
+    needs: [release-classification, full-preflight, backend-build]
+    if: ${{ !cancelled() && needs.release-classification.outputs.tier == 'full' && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-api-documentation') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -956,6 +1041,8 @@ jobs:
           distribution: temurin
           java-version: "21"
           cache: maven
+      - name: Refuse stale locally cached project prerequisites
+        run: rm -rf "$HOME/.m2/repository/ai/ravenroot"
       - name: Build the public SDK Javadoc archive with DocLint
         working-directory: ravenroot
         # full-backend-tests owns the complete test suite; this job owns Javadoc and DocLint.
@@ -979,7 +1066,7 @@ jobs:
 
   full-runtime-auth-smoke:
     name: full-runtime-auth-smoke
-    if: needs.release-classification.outputs.tier == 'full'
+    if: ${{ !cancelled() && needs.release-classification.outputs.tier == 'full' && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-runtime-auth-smoke') }}
     needs: [release-classification, full-preflight, backend-build]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -998,6 +1085,8 @@ jobs:
         with:
           name: ravenroot-backend-build
           path: ci-artifacts/backend
+      - name: Verify backend artifact identity
+        run: python3 scripts/ci_artifacts.py verify ci-artifacts/backend
       - name: Smoke-test fail-closed authentication
         shell: bash
         run: |
@@ -1011,7 +1100,7 @@ jobs:
 
   full-runtime-jar-smoke:
     name: full-runtime-jar-smoke
-    if: needs.release-classification.outputs.tier == 'full'
+    if: ${{ !cancelled() && needs.release-classification.outputs.tier == 'full' && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-runtime-jar-smoke') }}
     needs: [release-classification, full-preflight, backend-build]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -1030,6 +1119,8 @@ jobs:
         with:
           name: ravenroot-backend-build
           path: ci-artifacts/backend
+      - name: Verify backend artifact identity
+        run: python3 scripts/ci_artifacts.py verify ci-artifacts/backend
       - name: Smoke-test the runnable JAR
         shell: bash
         env:
@@ -1055,6 +1146,7 @@ jobs:
     name: full-regression
     needs:
       - release-classification
+      - full-configurator
       - full-python-contracts
       - full-shell-contracts
       - full-ui-e2e
@@ -1064,20 +1156,21 @@ jobs:
       - full-api-documentation
       - full-runtime-auth-smoke
       - full-runtime-jar-smoke
-    if: always() && needs.release-classification.outputs.tier == 'full'
+    if: ${{ !cancelled() && needs.release-classification.outputs.tier == 'full' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-regression') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Admit the integration candidate to the container smoke test
         env:
+          PLAN_JOBS: ${{ needs.release-classification.outputs.jobs }}
           RESULTS: ${{ toJSON(needs) }}
         run: |
-          jq -e 'to_entries | all(.key == "release-classification" or .value.result == "success")' \
+          jq -e --argjson jobs "$PLAN_JOBS" 'to_entries | all(.key as $key | if $key == "release-classification" or ($jobs | index($key)) then .value.result == "success" else .value.result == "skipped" end)' \
             <<<"$RESULTS" >/dev/null
 
   full-runtime-container-smoke:
     name: full-runtime-container-smoke
-    if: needs.release-classification.outputs.tier == 'full'
+    if: ${{ !cancelled() && needs.release-classification.outputs.tier == 'full' && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-runtime-container-smoke') }}
     needs: [release-classification, full-regression, full-ui-build, backend-build, full-plugin-boundary]
     runs-on: ubuntu-24.04
     timeout-minutes: 35
@@ -1092,17 +1185,26 @@ jobs:
           name: ravenroot-backend-build
           path: ci-artifacts/backend
       - name: Remove build-only Maven artifacts from the OCI context
-        run: rm -rf ci-artifacts/backend/maven-repository
+        run: |
+          python3 scripts/ci_artifacts.py verify ci-artifacts/backend
+          rm -rf ci-artifacts/backend/maven-repository
       - name: Download verified UI
         uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
         with:
           name: ravenroot-ui
           path: ci-artifacts/ui
+      - name: Verify UI artifact identity
+        run: python3 scripts/ci_artifacts.py verify ci-artifacts/ui
       - name: Download the validated plugin set
         uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
         with:
           name: ravenroot-plugins
           path: ci-artifacts/backend/plugins
+      - name: Verify validated plugin provenance and preserve empty-plugin image semantics
+        run: |
+          python3 scripts/ci_artifacts.py verify ci-artifacts/backend/plugins
+          rm ci-artifacts/backend/plugins/provenance.json
+          rm ci-artifacts/ui/provenance.json
       - name: Build the OCI image without publishing it
         shell: bash
         run: |
@@ -1142,6 +1244,7 @@ jobs:
       - release-classification
       - docs-site
       - full-docs-policy
+      - full-configurator
       - full-python-contracts
       - full-shell-contracts
       - full-source-policy
@@ -1179,24 +1282,48 @@ jobs:
             echo "release-classification reported '$CLASSIFICATION'; ci-required cannot pass." >&2
             exit 1
           fi
+      - name: Refuse cancellation before checkout
+        if: ${{ cancelled() }}
+        run: |
+          echo "A cancelled workflow cannot execute checked-out gate code." >&2
+          exit 1
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           ref: ${{ inputs.merge_sha || github.sha }}
       # A promotion runs no functional job, so its ci-required may be green only if the full tier
       # already passed on this exact commit — in the merge queue or on an explicitly dispatched
       # run. The deliberately bare push to dev is not evidence. #301 merged
       # on another run's green while nothing checked that it was a full run of this commit.
+      - name: Bind promotion reuse to the exact source tree
+        if: needs.release-classification.outputs.tier == 'promotion'
+        env:
+          PR_SOURCE: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          source="$PR_SOURCE"
+          if [ -z "$source" ]; then
+            test "$(git show -s --format=%P HEAD | wc -w | tr -d ' ')" = 2
+            source=$(git rev-parse HEAD^2)
+          fi
+          test "$(git rev-parse "HEAD^{tree}")" = "$(git rev-parse "$source^{tree}")"
+          echo "PROMOTION_SOURCE_SHA=$source" >> "$GITHUB_ENV"
       - name: Collect the full-tier evidence a promotion rests on
         if: needs.release-classification.outputs.tier == 'promotion'
         env:
           GH_TOKEN: ${{ github.token }}
-          PROMOTED_SHA: ${{ github.event.pull_request.head.sha }}
+          PROMOTED_SHA: ${{ env.PROMOTION_SOURCE_SHA || github.event.pull_request.head.sha }}
         run: >-
           gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$PROMOTED_SHA&per_page=100"
           > "$RUNNER_TEMP/promotion-evidence.json"
       - name: Require every job this event demanded
+        if: ${{ success() && !cancelled() }}
         env:
+          IMPACT_PLAN: ${{ needs.release-classification.outputs.plan }}
+          IMPACT_LANE: ${{ inputs.integration_ref || github.base_ref || github.event.merge_group.base_ref || github.ref_name }}
+          IMPACT_BASE: ${{ inputs.routing_run_id != '' && inputs.base_sha || github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+          CI_CANCELLED: ${{ job.status != 'success' }}
           CI_TIER: ${{ needs.release-classification.outputs.tier }}
           EVENT_NAME: ${{ inputs.routing_run_id != '' && 'pull_request' || github.event_name }}
           BASE_REF: ${{ inputs.routing_run_id != '' && 'dev' || github.base_ref }}
@@ -1204,7 +1331,12 @@ jobs:
           HEAD_REF: ${{ github.head_ref }}
           HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
           REPOSITORY: ${{ github.repository }}
-          PROMOTED_SHA: ${{ github.event.pull_request.head.sha }}
+          PROMOTED_SHA: ${{ env.PROMOTION_SOURCE_SHA || github.event.pull_request.head.sha }}
           PROMOTION_EVIDENCE: ${{ runner.temp }}/promotion-evidence.json
           NEEDS_JSON: ${{ toJSON(needs) }}
         run: python3 scripts/ci_required.py
+      - name: Refuse cancellation after verification
+        if: ${{ cancelled() }}
+        run: |
+          echo "A cancelled workflow cannot establish ci-required evidence." >&2
+          exit 1

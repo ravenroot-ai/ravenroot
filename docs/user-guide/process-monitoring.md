@@ -49,11 +49,21 @@ it does not download and filter every retained history. **Clear search** restore
 page. Search does not admit START or activate a deployment. Selecting another search retires old
 previews and delayed responses, so an earlier result cannot decorate the new selection.
 
-Choose a business history, then an actual traversal. Each expanded preview preserves the original
-deployed graph and highlights only that traversal's evidence. A maximum of two previews can be open;
-other traversals and node visits load in bounded pages. Select a node to open its persistent inspector,
-then select a visit and attempt. Explicit coverage controls distinguish omitted rows from known zero
-visits. Activity content is a separate authorized bounded read with capture/redaction availability.
+The History workspace keeps business histories in the left sidebar and deployment identity, version,
+and lifecycle state in the header. A completed traversal does not imply that its deployment has stopped
+listening. Select a business history to open its first available traversal in **Graph & timeline**;
+select another traversal above the graph to inspect its own recorded path. The graph keeps the original
+deployed positions. **Traversal map** compares the two most recently opened previews; opening another
+replaces the oldest preview, while all other traversals remain available through the paginated chooser.
+It does not imply a causal connection between those previews. Switching back to **Graph & timeline**
+shows only the selected preview.
+
+Select a node to open visits and attempts beneath the graph. IDs and full record metadata remain in
+**Record details**. Explicit coverage controls distinguish omitted rows from known zero visits; node
+visits and traversal lists load in bounded pages. Activity content is a separate authorized bounded
+read with capture/redaction availability. The native History toolbar offers **Review Human Tasks**
+when an actionable task is known; it returns to the graph and selects the relevant node without
+settling the task.
 See the executed [six-callback walkthrough](../examples/correlation/lakehouse.md) for real screenshots.
 
 Monitoring overlays activity on the graph selected in the current document or deployment view.

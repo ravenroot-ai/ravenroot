@@ -6245,6 +6245,7 @@ function refreshHistoryAttention(owner) {
   const summary = owner.historyDialog?.querySelector('.doc-history-attention');
   const button = owner.historyDialog?.querySelector('.doc-history-review-tasks');
   if (!summary || !button) return;
+  owner.historyMonitor?.setDeploymentStatus?.(owner.deploymentRunStatus || owner.graph?.viewerProjection?.lifecycle, owner.deploymentRunSourceCount);
   const state = owner.humanTasks?.projection;
   const total = state?.kind === 'ready' ? [...state.nodeCounts.values()].reduce((sum, row) => sum + row.pending, 0) : null;
   const escalated = state?.kind === 'ready' ? [...state.nodeCounts.values()].reduce((sum, row) => sum + row.escalated, 0) : 0;
@@ -6288,7 +6289,11 @@ function reconcileDocumentHistory(owner, { open = false } = {}) {
       const node = nodeId && owner.cy.getElementById(nodeId);
       if (node?.length) { owner.cy.nodes().unselect(); node.select(); node.emit('tap'); }
     });
-    bar.append(back, notice, attention, reviewTasks);
+    const information = window.document.createElement('details'); information.className = 'doc-history-information';
+    const informationTitle = window.document.createElement('summary'); informationTitle.textContent = uiText('history.details');
+    information.append(informationTitle, notice);
+    const taskBar = window.document.createElement('div'); taskBar.className = 'doc-history-tasks'; taskBar.append(attention, reviewTasks);
+    bar.append(back, information, taskBar);
     dialog.addEventListener('cancel', event => { event.preventDefault(); returnToGraph(); });
     const container = window.document.createElement('section'); container.className = 'doc-history';
     dialog.append(bar, container); window.document.body.append(dialog);
@@ -6301,7 +6306,8 @@ function reconcileDocumentHistory(owner, { open = false } = {}) {
       if (source.deploymentId !== bound.deploymentId || source.incarnationId !== bound.incarnationId || source.graphVersion !== bound.graphVersion)
         throw new Error('History source changed');
       owner.historyMonitor = createDeploymentHistoryMonitor({ container, projection, isCurrent: current,
-        read: (query, options) => client.deploymentHistory(source, query, options), theme: applicationTheme, t: uiText });
+        read: (query, options) => client.deploymentHistory(source, query, options), theme: applicationTheme, t: uiText, title: owner.mode === DOCUMENT_MODES.DRAFT ? owner.displayName || owner.name : null });
+      refreshHistoryAttention(owner);
     }).catch(() => {
       if (!current()) return;
       const message = window.document.createElement('p'); message.textContent = uiText('history.failed');
@@ -17682,6 +17688,7 @@ uiLocalization.subscribe(() => {
   workspace.documents.forEach(owner => { owner.visualGroupsRenderer?.refreshLocale?.(); owner.historyMonitor?.refreshLocale?.();
     if (owner.historyDialog) { owner.historyDialog.setAttribute('aria-label', uiText('history.title'));
       owner.historyDialog.querySelector('.doc-history-bar button').textContent = uiText('history.return');
+      owner.historyDialog.querySelector('.doc-history-information summary').textContent = uiText('history.details');
       owner.historyDialog.querySelector('.doc-history-draft').textContent = documentHistoryDraftNotice(owner);
       owner.historyDialog.querySelector('.doc-history-review-tasks').textContent = uiText('workspace.run.reviewTasks'); refreshHistoryAttention(owner); }
   });

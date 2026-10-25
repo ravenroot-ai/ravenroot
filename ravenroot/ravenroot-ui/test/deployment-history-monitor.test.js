@@ -37,7 +37,7 @@ it('honors page cap one without draining coverage and preserves inspector during
   expect(queries.every(query => Number(query.limit) === 1)).toBe(true);
   monitor.destroy(); expect(viewers[0].destroy).toHaveBeenCalledOnce();
 });
-it('never mounts a third graph and retires ignored-abort reads without stale publication', async () => {
+it('replaces the oldest preview at the two-graph bound and fences retired reads', async () => {
   let resolveCoverage;
   const { monitor, container, viewers } = fixture(async query => {
     if (query.view === 'policy') return response('policy', [{ maxPageSize: 10 }]);
@@ -47,10 +47,12 @@ it('never mounts a third graph and retires ignored-abort reads without stale pub
   });
   await monitor.ready; await flush();
   const rows = [...container.querySelectorAll('.history-page:nth-child(2) li button')]; rows.forEach(row => row.click()); await flush();
-  expect(viewers).toHaveLength(2); expect(container.querySelectorAll('[data-viewer-root]')).toHaveLength(2);
-  monitor.destroy(); const published = viewers[1].applyHistorySummaries.mock.calls.length;
+  expect(viewers).toHaveLength(3); expect(viewers[0].destroy).toHaveBeenCalled();
+  expect(container.querySelectorAll('[data-viewer-root]')).toHaveLength(2);
+  expect(container.querySelector('[data-traversal-id="t3"]').hidden).toBe(false);
+  monitor.destroy(); const published = viewers[2].applyHistorySummaries.mock.calls.length;
   resolveCoverage(response('nodes', [{ nodeId: 'late', visitCount: 1000 }])); await flush();
-  expect(viewers[1].applyHistorySummaries.mock.calls).toHaveLength(published); expect(container.children).toHaveLength(0);
+  expect(viewers[2].applyHistorySummaries.mock.calls).toHaveLength(published); expect(container.children).toHaveLength(0);
 });
 
 it('business selection retires old graph previews and fences their late coverage', async () => {
@@ -59,7 +61,7 @@ it('business selection retires old graph previews and fences their late coverage
     if (query.view === 'policy') return response('policy', [{ maxPageSize: 10 }]);
     if (query.view === 'histories') return response(query.view, [{ applicationCorrelationId: 'a' }, { applicationCorrelationId: 'b' }]);
     if (query.view === 'traversals') return response(query.view, [{ processInstanceId: 'process', traversalId: query.applicationCorrelationId }]);
-    if (query.view === 'nodes') return new Promise(resolve => { finishOld = resolve; });
+    if (query.view === 'nodes' && query.traversalId === 'a') return new Promise(resolve => { finishOld = resolve; });
     return response(query.view, []);
   });
   await monitor.ready; await flush();
@@ -68,7 +70,9 @@ it('business selection retires old graph previews and fences their late coverage
   container.querySelectorAll('.history-page')[2].querySelector('li button').click(); await flush();
   expect(container.querySelectorAll('.history-traversal')).toHaveLength(1);
   businesses[1].click(); await flush();
-  expect(viewers[0].destroy).toHaveBeenCalledOnce(); expect(container.querySelectorAll('.history-traversal')).toHaveLength(0);
+  expect(viewers[0].destroy).toHaveBeenCalledOnce();
+  expect(container.querySelectorAll('.history-traversal')).toHaveLength(1);
+  expect(container.querySelector('.history-traversal').dataset.traversalId).toBe('b');
   const count = viewers[0].applyHistorySummaries.mock.calls.length;
   finishOld(response('nodes', [{ nodeId: 'stale' }])); await flush();
   expect(viewers[0].applyHistorySummaries.mock.calls).toHaveLength(count);
@@ -148,4 +152,32 @@ it('searches exact IDs and references on the server and fences a prior page that
   [...form.querySelectorAll('button')].find(button => button.textContent === 'Clear search').click(); await flush();
   expect(queries.at(-1)).toEqual({ view: 'histories', limit: '1' });
   expect(business.querySelector('li').textContent).toContain('first'); monitor.destroy();
+});
+
+it('keeps story navigation visible and switches cached traversal graphs without rereading content', async () => {
+  const queries = [];
+  const { monitor, container, viewers } = fixture(async query => {
+    queries.push(query);
+    if (query.view === 'policy') return response(query.view, [{ maxPageSize: 10 }]);
+    if (query.view === 'histories') return response(query.view, [{ applicationCorrelationId: 'mail', publicReference: 'request.eml', state: 'AWAITING_EXTERNAL_EVENT' }]);
+    if (query.view === 'traversals') return response(query.view, [1, 2].map(id => ({ processInstanceId: 'p', traversalId: `t${id}`, entryNodeId: id === 1 ? 'mail' : 'review', status: 'COMPLETED' })));
+    return response(query.view, []);
+  });
+  await monitor.ready; await flush();
+  container.querySelector('[data-history-view="histories"] li button').click(); await flush();
+  expect(container.querySelector('.history-sidebar').hidden).toBe(false);
+  expect(container.querySelector('[data-traversal-id="t1"]').hidden).toBe(false);
+  const controls = container.querySelectorAll('[data-history-view="traversals"] li button');
+  controls[1].click(); await flush();
+  expect(container.querySelector('[data-traversal-id="t1"]').hidden).toBe(true);
+  expect(container.querySelector('[data-traversal-id="t2"]').hidden).toBe(false);
+  const reads = queries.length;
+  controls[0].click(); await flush();
+  expect(queries).toHaveLength(reads); expect(viewers).toHaveLength(2);
+  container.querySelectorAll('.history-presentations button')[1].click();
+  expect([...container.querySelectorAll('.history-traversal')].every(node => !node.hidden)).toBe(true);
+  expect(queries.some(query => query.view === 'activity')).toBe(false);
+  monitor.setDeploymentStatus('READY', 1); expect(container.querySelector('.history-lifecycle').textContent).toBe('Listening · 1 sources');
+  monitor.setDeploymentStatus(undefined); expect(container.querySelector('.history-lifecycle').textContent).toBe('Listening · 1 sources');
+  monitor.destroy();
 });

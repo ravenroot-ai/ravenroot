@@ -50,6 +50,14 @@ for (const cap of [1, 10]) test(`shared monitor bounds thousands of records and 
   const traversals = page.locator('.history-page').filter({ has: page.getByRole('heading', { name: 'Actual traversals', exact: true }) });
   await traversals.locator('li button').first().click();
   const preview = page.locator('.history-traversal'); await expect(preview.locator('[data-design-element="worker"]')).toBeVisible();
+  await expect(page.locator('.history-sidebar')).toBeVisible();
+  await expect(page.locator('.history-lifecycle')).toHaveText('Deployment · Ready');
+  await expect(page.getByRole('button', { name: 'Graph & timeline', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  const graphBounds = await preview.locator('[data-viewer-canvas]').boundingBox();
+  expect(graphBounds.y).toBeLessThan(600);
+  await page.getByRole('button', { name: 'Traversal map', exact: true }).click();
+  await expect(page.locator('.deployment-history')).toHaveAttribute('data-history-presentation', 'map');
+  await page.getByRole('button', { name: 'Graph & timeline', exact: true }).click();
   if (cap === 1) {
     await expect(preview).toContainText('Omitted activity is unknown');
     expect(await page.evaluate(() => window.historyMeasurements.filter(r => r.view === 'nodes').length)).toBe(1);

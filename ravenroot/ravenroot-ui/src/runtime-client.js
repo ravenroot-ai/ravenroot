@@ -793,22 +793,23 @@ export class RavenrootRuntimeClient {
    * Credentials never enter the URL and the server remains responsible for filtering before a
    * frame is queued or serialized.
    */
-  connectDeploymentView(envelope, onFrame, onConnectionChange = () => {}) {
+  connectDeploymentView(envelope, onFrame, onConnectionChange = () => {}, { diagnostics = false } = {}) {
     const view = validateDeploymentViewEnvelope(envelope);
     const controller = new AbortController();
     this.deploymentConnections.add(controller);
-    void this.#consumeDeploymentEvents(view, controller.signal, onFrame, onConnectionChange)
+    void this.#consumeDeploymentEvents(view, controller.signal, onFrame, onConnectionChange, diagnostics)
       .finally(() => this.deploymentConnections.delete(controller));
     return () => controller.abort();
   }
 
-  async #consumeDeploymentEvents(view, signal, onFrame, onConnectionChange) {
+  async #consumeDeploymentEvents(view, signal, onFrame, onConnectionChange, diagnostics) {
     let failures = 0;
     let cursor = '';
     while (!signal.aborted && failures <= this.maxRetries) {
       const source = view.source;
       const path = `/v1/deployments/${encodeURIComponent(source.deploymentId)}/events`
-        + `?graphVersion=${encodeURIComponent(source.graphVersion)}`;
+        + `?graphVersion=${encodeURIComponent(source.graphVersion)}`
+        + (diagnostics ? '&include=diagnostics' : '');
       try {
         const credential = await this.#requestCredential();
         if (signal.aborted) return;
@@ -1799,6 +1800,10 @@ export function deploymentExecutionEvent(payload) {
   return {
     type: value?.type,
     executionId: value?.executionId ?? value?.traversalId,
+    ...Object.fromEntries(['processInstanceId', 'traversalId', 'invocationId', 'attemptId',
+      'engineId', 'sequence', 'processingDuration', 'message', 'messageRedacted', 'messageTruncated',
+      'output', 'outputRedacted', 'outputTruncated'].filter(key => Object.hasOwn(value || {}, key))
+      .map(key => [key, value[key]])),
     nodeId: value?.nodeId ?? null,
     edgeId: value?.edgeId ?? null,
     activeInstances: Number(value?.activeInstances) || 0,

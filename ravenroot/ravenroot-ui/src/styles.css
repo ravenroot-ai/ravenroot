@@ -1800,7 +1800,7 @@
       border: 1px solid var(--bd); border-radius: 5px; color: var(--tx-2); font-size: 11px;
     }
     .graph-interaction-tools {
-      position: absolute; z-index: 5; top: 12px; left: 12px;
+      position: absolute; z-index: 5; top: calc(var(--workspace-doc-header-h) + 8px); left: 12px;
       display: flex; align-items: center; gap: 4px; padding: 4px;
       border: 1px solid var(--bd); border-radius: 7px;
       background: color-mix(in srgb, var(--bg-1) 94%, transparent);
@@ -2758,3 +2758,8 @@
 #node-correlation-preview button { min-height: 44px; }
 #node-correlation-preview textarea { width: 100%; box-sizing: border-box; }
 #node-correlation-preview pre { max-height: 16rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.doc-run-binding { display: flex; margin-left: auto; min-width: 0; max-width: 50%; }
+.doc-run-id { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.doc-run-state { flex-shrink: 0; }
+.doc-pane-header:has(.doc-run-binding) .doc-pane-maximize { margin-left: 0; }

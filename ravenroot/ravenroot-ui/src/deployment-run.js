@@ -57,7 +57,8 @@ export function runOriginDeployment(owner, { client, serviceUrl, tenantId, graph
   owner.deploymentRun = intent;
   const control = { intent, status: null, stopRequested: false, task: null };
   flights.set(owner, control);
-  const publishStatus = status => { control.status = status; owner.deploymentRunStatus = status.state; owner.deploymentRunLastObservedState = status.state; onPhase(owner, intent); };
+  const publishStatus = status => { control.status = status; owner.deploymentRunStatus = status.state; owner.deploymentRunLastObservedState = status.state;
+    owner.deploymentRunSourceCount = status.sourceCount; onPhase(owner, intent); };
   const interrupted = status => ({ intent, status, view: null, initial: null, stoppedBeforeInitial: true });
   const current = () => owner.incarnation === incarnation && owner.deploymentRun === intent && isCurrent(owner, client)
     && intent.serviceUrl === serviceUrl && intent.tenantId === tenantId;
@@ -276,6 +277,7 @@ export async function observeOriginDeployment(owner, { client, isCurrent }) {
       || !binding.registrationIdentity && binding.incarnationId && status.runtimeIncarnationId !== binding.incarnationId)
     throw failure('OBSERVATION_BINDING_CHANGED');
   owner.deploymentRunStatus = status.state; owner.deploymentRunLastObservedState = status.state;
+  owner.deploymentRunSourceCount = status.sourceCount;
   owner.deploymentRunObservedSource = { deploymentId: binding.deploymentId, graphVersion: binding.graphVersion,
     incarnationId: status.runtimeIncarnationId || binding.incarnationId };
   return true;

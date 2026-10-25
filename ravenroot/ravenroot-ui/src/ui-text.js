@@ -554,6 +554,8 @@ export const ENGLISH_MESSAGES = Object.freeze({
   'workspace.run.state.REGISTERED': 'Registered',
   'workspace.run.state.STARTING': 'Starting',
   'workspace.run.state.READY': 'Ready',
+  'workspace.run.listening': 'Listening · {count} sources',
+  'workspace.run.initialCompleted': 'Initial traversal completed. The deployment remains active.',
   'workspace.run.state.DEGRADED': 'Degraded',
   'workspace.run.state.STOPPING': 'Stopping',
   'workspace.run.state.STOPPED': 'Stopped',

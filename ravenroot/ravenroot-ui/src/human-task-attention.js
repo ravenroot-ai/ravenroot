@@ -364,10 +364,20 @@ export function validateHumanTaskAttention(value, capability, expected = {}) {
 
 export function humanTaskContext(documentRecord) {
   const execution = documentRecord?.execution;
+  const binding = documentRecord?.deploymentRun;
+  const selected = documentRecord?.humanTasks;
+  // A durable deployment's public alias is not its runtime task ownership identity.
+  // Reconstruct this context after reload, before any Run command is necessary.
+  if (binding?.graphVersion && (!selected?.deploymentId
+      || selected.deploymentId === binding.deploymentId && !selected.registrationIdentity
+        && selected.graphVersion === binding.graphVersion)) {
+    return { graphVersion: String(binding.graphVersion),
+      deploymentId: String(binding.registrationIdentity || binding.deploymentId) };
+  }
   if (documentRecord?.humanTasks?.deploymentId) {
     if (!documentRecord.humanTasks.graphVersion) return null;
     return { graphVersion: String(documentRecord.humanTasks.graphVersion),
-      deploymentId: String(documentRecord.humanTasks.deploymentId) };
+      deploymentId: String(documentRecord.humanTasks.registrationIdentity || documentRecord.humanTasks.deploymentId) };
   }
   if (!execution?.graphVersion || !execution.processInstanceId) return null;
   return { graphVersion: String(execution.graphVersion),

@@ -2448,10 +2448,21 @@ describe('deployment viewer client', () => {
       activeInstances: 2, publicReason: 'IllegalStateException',
       payload: 'DO-NOT-LEAK', detail: 'DO-NOT-LEAK', secret: 'DO-NOT-LEAK',
     } })).toEqual({
-      type: 'NODE_FAILED', executionId: 'execution-1', nodeId: 'worker', edgeId: null,
+      type: 'NODE_FAILED', executionId: 'execution-1', traversalId: 'execution-1', nodeId: 'worker', edgeId: null,
       activeInstances: 2, inFlightArrivals: 0, fallback: false, occurredAt: null,
       publicReason: 'IllegalStateException', description: '',
     });
+  });
+
+  it('preserves native bounded log diagnostics and causal identities without raw payloads', () => {
+    expect(deploymentExecutionEvent({ event: { type: 'NODE_COMPLETED', executionId: 't1',
+      traversalId: 't1', processInstanceId: 'p1', invocationId: 'i1', attemptId: 'a1',
+      output: 'workflow log', outputRedacted: false, outputTruncated: false,
+      payload: 'private', detail: 'private' } })).toMatchObject({
+      traversalId: 't1', processInstanceId: 'p1', invocationId: 'i1', attemptId: 'a1',
+      output: 'workflow log', outputRedacted: false, outputTruncated: false });
+    expect(deploymentExecutionEvent({ event: { payload: 'private', detail: 'private' } }))
+      .not.toHaveProperty('payload');
   });
 
   it('retains the server fallback bit in the closed execution projection', () => {

@@ -124,15 +124,18 @@ test('hosted traversal activity uses the deployment stream while the one-shot st
   });
   await page.route('**/v1/deployments/*/events?**', route => {
     const status = [...backend.held.values()][0];
+    expect(new URL(route.request().url()).searchParams.get('include')).toBe('diagnostics');
     const source = { deploymentId: status.deploymentId, graphVersion: status.graphVersion, incarnationId: status.runtimeIncarnationId };
     const frames = [
       `event: lifecycle\ndata: ${JSON.stringify({ ...source, lifecycle: 'READY' })}\n\n`,
-      `id: hosted-1\nevent: execution\ndata: ${JSON.stringify({ ...source, event: { type: 'NODE_COMPLETED', executionId: 'hosted-traversal', nodeId: 'source', activeInstances: 0, inFlightArrivals: 0 } })}\n\n`,
+      `id: hosted-1\nevent: execution\ndata: ${JSON.stringify({ ...source, event: { type: 'NODE_COMPLETED', executionId: 'hosted-traversal', traversalId: 'hosted-traversal', processInstanceId: 'hosted-process', invocationId: 'hosted-visit', output: 'Hosted log visible', outputRedacted: false, outputTruncated: false, occurredAt: '2026-10-25T12:00:00Z', nodeId: 'source', activeInstances: 0, inFlightArrivals: 0 } })}\n\n`,
     ];
     return route.fulfill({ contentType: 'text/event-stream', body: frames.join('') });
   });
   await boot(page);
   expect(order.indexOf('observe')).toBeLessThan(order.indexOf('start'));
+  await expect(page.locator('#activity-log')).toContainText('Hosted log visible');
+  await expect(page.locator('.doc-pane--active .doc-run-state')).toContainText('Listening');
   await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().cy.getElementById('source').data('runtimeState'))).toBe('completed');
   await page.locator('#btn-monitoring').click();
   await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().renderer.nodes.find(node => node.id === 'source').runtimeState)).toBe('completed');

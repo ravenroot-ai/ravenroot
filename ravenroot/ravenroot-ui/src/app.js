@@ -666,17 +666,6 @@ function createStylesheet(palette = rendererPalette) {
     shape: 'roundrectangle', 'background-color': surface['human-task'],
     'border-color': node['human-task'], 'border-width': 2.5,
   }},
-  { selector: 'node[humanTaskPending > 0]', style: {
-    'underlay-color': palette.focus, 'underlay-opacity': 0.22, 'underlay-padding': 9,
-    'border-style': 'double', 'border-width': 4,
-  }},
-  { selector: 'node[humanTaskEscalated > 0]', style: {
-    'underlay-color': node.error, 'underlay-opacity': 0.32, 'underlay-padding': 11,
-    'border-style': 'double', 'border-width': 5,
-  }},
-  { selector: 'node.human-task-pulse[humanTaskPending > 0]', style: {
-    'underlay-opacity': 0.45, 'underlay-padding': 15,
-  }},
   // The node the author switched off. Last of the node-type rules on purpose — it has to beat
   // every `node[nodeType=…]` border above it, because "this does not run" outranks "this is an agent"
   // for a reader scanning the drawing, and the surface colour is left alone so the node's identity is
@@ -814,6 +803,18 @@ function createStylesheet(palette = rendererPalette) {
   // Hover/search/trace dimming must not make the selected edge disappear. Its native semantic
   // styling still wins; only the visibility of the selection affordance is restored.
   { selector: 'edge:selected.dim', style: { opacity: 1 }},
+  // Pending human decisions stay visible while selected or under the graph cursor.
+  { selector: 'node[humanTaskPending > 0]', style: {
+    'underlay-color': palette.focus, 'underlay-opacity': 0.22, 'underlay-padding': 9,
+    'border-style': 'double', 'border-width': 4,
+  }},
+  { selector: 'node[humanTaskEscalated > 0]', style: {
+    'underlay-color': node.error, 'underlay-opacity': 0.32, 'underlay-padding': 11,
+    'border-style': 'double', 'border-width': 5,
+  }},
+  { selector: 'node.human-task-pulse[humanTaskPending > 0]', style: {
+    'underlay-opacity': 0.45, 'underlay-padding': 15,
+  }},
   ];
 }
 
@@ -1148,6 +1149,7 @@ let humanTaskController = null;
 let humanTaskControllerOwner = null;
 let humanTaskDecisionDialog = null;
 let humanTaskPulseTimer = null;
+let humanTaskPulseOwner = null;
 let humanTaskRecoveryGeneration = 0;
 const HUMAN_TASK_SELECTION_KEY = 'ravenroot.human-task.selection.v1';
 
@@ -1210,14 +1212,18 @@ function currentHumanTaskCapability() {
 function stopHumanTaskPulse() {
   if (humanTaskPulseTimer != null) clearInterval(humanTaskPulseTimer);
   humanTaskPulseTimer = null;
+  humanTaskPulseOwner = null;
   cy?.nodes('.human-task-pulse').removeClass('human-task-pulse');
   elasticRendererFor(workspace.active)?.nodeSelection?.classed('human-task-pulse', false);
 }
 
 function syncHumanTaskPulse(owner) {
-  stopHumanTaskPulse();
   if (owner !== workspace.active || !owner?.cy?.nodes('[humanTaskPending > 0]').length
-      || globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+      || globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return stopHumanTaskPulse();
+  // Attention polling must not reset the off phase before it becomes visible.
+  if (humanTaskPulseTimer != null && humanTaskPulseOwner === owner) return;
+  stopHumanTaskPulse();
+  humanTaskPulseOwner = owner;
   const counts = owner.humanTasks?.projection?.nodeCounts || new Map();
   let on = true;
   owner.cy.nodes('[humanTaskPending > 0]').addClass('human-task-pulse');
@@ -1229,7 +1235,7 @@ function syncHumanTaskPulse(owner) {
     on = !on;
     owner.cy.nodes('[humanTaskPending > 0]').toggleClass('human-task-pulse', on);
     elasticRendererFor(owner)?.nodeSelection
-      ?.filter(item => (counts.get(item.id)?.pending || 0) > 0)
+      ?.filter(item => (owner.humanTasks?.projection?.nodeCounts?.get(item.id)?.pending || 0) > 0)
       .classed('human-task-pulse', on);
   }, 900);
 }
@@ -1241,6 +1247,7 @@ function applyHumanTaskProjection(owner) {
     const attention = counts.get(node.id()) || { pending: 0, escalated: 0 };
     node.data('humanTaskPending', attention.pending);
     node.data('humanTaskEscalated', attention.escalated);
+    applyRuntimeVisual(node, owner);
     node.data('label', `${NODE_ICONS[node.data('nodeType')] || '• '}${runtimeNodeLabel(node)}`);
     if (isN8nFamilyLayout(owner.visualStyle)) {
       node.style({ label: runtimeNodeLabel(node), 'text-wrap': attention.pending ? 'wrap' : 'none',
@@ -3149,13 +3156,20 @@ function syncPaneHeaders() {
 
     let runBinding = header.querySelector('.doc-run-binding');
     if (document_.deploymentRun) {
-      if (!runBinding) { runBinding = document.createElement('span'); runBinding.className = 'doc-run-binding'; runBinding.setAttribute('role', 'status'); runBinding.setAttribute('aria-live', 'polite'); header.append(runBinding); }
-      runBinding.textContent = uiText('workspace.run.attached', { deploymentId: document_.deploymentRun.deploymentId,
-        version: shortId(document_.deploymentRun.graphVersion) })
+      if (!runBinding) { runBinding = document.createElement('span'); runBinding.className = 'doc-run-binding'; runBinding.setAttribute('role', 'status'); runBinding.setAttribute('aria-live', 'polite'); header.insertBefore(runBinding, header.querySelector('.doc-pane-maximize')); }
+      runBinding.textContent = document_.deploymentRun.deploymentId
         + (document_.deploymentRunStatus ? ` — ${uiText('workspace.run.runtimeState', { state: uiText(({ REGISTERED: 'workspace.run.state.REGISTERED', STARTING: 'workspace.run.state.STARTING', READY: 'workspace.run.state.READY', DEGRADED: 'workspace.run.state.DEGRADED', STOPPING: 'workspace.run.state.STOPPING', STOPPED: 'workspace.run.state.STOPPED', FAILED: 'workspace.run.state.FAILED', UNKNOWN: 'workspace.run.state.UNKNOWN' })[document_.deploymentRunStatus]) })}` : '');
+      if (document_.deploymentRunStatus === 'READY' && document_.deploymentRunSourceCount > 0) {
+        runBinding.textContent = `${document_.deploymentRun.deploymentId} — ${uiText('workspace.run.listening', { count: document_.deploymentRunSourceCount })}`;
+      }
       runBinding.textContent += document_.deploymentRunStopPending ? ` — ${uiText('workspace.run.stopRequested')}` : '';
       runBinding.textContent += document_.deploymentRunOperation === 'ACTIVATING' && !document_.deploymentRunStopPending ? ` — ${uiText('workspace.run.activating')}` : '';
-      runBinding.title = uiText('workspace.run.draftSeparate');
+      runBinding.title = `${runBinding.textContent} · ${shortId(document_.deploymentRun.graphVersion)}\n${uiText('workspace.run.draftSeparate')}`;
+      const identity = document.createElement('span'); identity.className = 'doc-run-id';
+      identity.textContent = document_.deploymentRun.deploymentId;
+      const status = document.createElement('span'); status.className = 'doc-run-state';
+      status.textContent = runBinding.textContent.slice(identity.textContent.length);
+      runBinding.replaceChildren(identity, status);
       pane.dataset.deploymentId = document_.deploymentRun.deploymentId;
       pane.dataset.deploymentVersion = document_.deploymentRun.graphVersion || '';
       pane.dataset.deploymentRunPhase = document_.deploymentRun.phase;
@@ -12972,7 +12986,8 @@ function connectOriginDeploymentView(owner, client, envelope) {
     if (!result.accepted) return;
     observation.live = !result.terminal;
     if (frame.type === 'execution') {
-      const event = frame.event;
+      const event = { ...frame.event, graphVersion: frame.graphVersion,
+        deploymentId: binding.registrationIdentity || binding.deploymentId };
       owner.execution.events.push(runtimeEventProjection(event));
       if (owner.execution.events.length > RUNTIME_EVENT_TAIL) owner.execution.events.shift();
       owner.historyMonitor?.notify?.(event);
@@ -12986,7 +13001,7 @@ function connectOriginDeploymentView(owner, client, envelope) {
       observation.live = false;
       resetDeploymentViewRuntime(state, connection === 'revoked' ? 'DETACHED' : 'UNAVAILABLE'); paint();
     }
-  });
+  }, { diagnostics: true });
   const disconnect = observation.disconnect;
   observation.disconnect = () => { clearTimeout(timer); connected(); disconnect(); };
   return ready;
@@ -13056,7 +13071,9 @@ async function runCapturedDocumentDeployment(owner, client, { graphMl, payload, 
   }
   if (!current()) return false;
   if (result.stoppedBeforeInitial) { syncPaneHeaders(); refreshCommands(); return true; }
-  owner.humanTasks.deploymentId = result.intent.deploymentId; owner.humanTasks.graphVersion = result.intent.graphVersion;
+  owner.humanTasks.deploymentId = result.intent.deploymentId;
+  owner.humanTasks.registrationIdentity = result.intent.registrationIdentity;
+  owner.humanTasks.graphVersion = result.intent.graphVersion;
   owner.provenance.deploymentId = result.intent.deploymentId; owner.provenance.sourceGraphVersion = result.intent.graphVersion;
   // Hosted initial START belongs to the deployment journal, not the one-shot result registry.
   // Its permanent identity must never become an unresolved Test execution after a restart.
@@ -13569,14 +13586,18 @@ function applyRuntimeVisual(node, owner = workspace.active) {
   const active = Number(node.data('instances')) || 0;
   node.data('label', `${NODE_ICONS[node.data('nodeType')] || '• '}${runtimeNodeLabel(node)}`);
   if (isN8nFamilyLayout()) node.style('label', runtimeNodeLabel(node));
+  const pending = Number(node.data('humanTaskPending')) > 0;
+  if (pending) node.removeStyle('underlay-color underlay-opacity underlay-padding');
   if (state === 'idle') return;
   const color = runtimeColor(state);
   node.style({
     'border-color': color,
     'border-width': state === 'active' ? 6 : 4,
-    'underlay-color': color,
-    'underlay-opacity': state === 'active' ? 0.28 : 0.12,
-    'underlay-padding': state === 'active' ? 12 + Math.min(active, 8) * 2 : 7,
+    ...(pending ? {} : {
+      'underlay-color': color,
+      'underlay-opacity': state === 'active' ? 0.28 : 0.12,
+      'underlay-padding': state === 'active' ? 12 + Math.min(active, 8) * 2 : 7,
+    }),
   });
   if (owner === workspace.active) drawingModelController?.scheduleRefresh(owner.id);
 }
@@ -13776,7 +13797,10 @@ function appendActivityEvent(event) {
   const hasNode = Boolean(event.nodeId);
   const instances = Number(event.activeInstances) || 0;
   const inFlight = Number(event.inFlightArrivals) || 0;
-  const detail = uiComputed(() => publicExecutionDescription(description, type, publicReason)
+  const initialCompleted = type === 'EXECUTION_COMPLETED'
+    && event.executionId === workspace.active?.deploymentRun?.traversalId;
+  const detail = uiComputed(() => (initialCompleted
+    ? uiText('workspace.run.initialCompleted') : publicExecutionDescription(description, type, publicReason))
     + (hasNode ? uiText('activity.event.counts', {
       instances, inFlight,
     }) : '')
@@ -17347,6 +17371,7 @@ deploymentsWindow = createDeploymentsWindow({
         || source.authorityGeneration !== workspaceAuthority.generation
         || !tenantAuthorityAllows(owner)) return;
     owner.humanTasks.deploymentId = deployment.deploymentId;
+    owner.humanTasks.registrationIdentity = deployment.registrationIdentity || null;
     owner.humanTasks.graphVersion = deployment.graphVersion;
     source.graph.nodeMap = Object.fromEntries(source.graph.nodes.map(node => [node.id, node]));
     const deployedId = openDocument({
@@ -17364,6 +17389,7 @@ deploymentsWindow = createDeploymentsWindow({
     });
     const deployed = workspace.find(deployedId);
     deployed.humanTasks.deploymentId = deployment.deploymentId;
+    deployed.humanTasks.registrationIdentity = deployment.registrationIdentity || null;
     deployed.humanTasks.graphVersion = deployment.graphVersion;
     void configureHumanTasks(deployed);
     scheduleWorkspacePersistence();
@@ -17372,6 +17398,7 @@ deploymentsWindow = createDeploymentsWindow({
     const owner = workspace.active;
     if (!owner || !tenantAuthorityAllows(owner)) return;
     owner.humanTasks.deploymentId = deployment.deploymentId;
+    owner.humanTasks.registrationIdentity = deployment.registrationIdentity || null;
     owner.humanTasks.graphVersion = deployment.graphVersion;
     void configureHumanTasks(owner);
   },

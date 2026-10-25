@@ -73,6 +73,7 @@ Canonical runtime rules: [ai bundle reference](bundles/ai.md).
 
 | Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---|---|---:|---|---|---:|---|---|---|
+| `credentialMode` | Credential mode | system uses the operator account; personal requires the executing user's linked OpenAI account. | `STRING` | false | system | system,personal | false | Not declared | Not declared | Not declared |
 | `provider` | Provider | Name of a model profile this deployment declared in its environment (RAVENROOT_LLM_PROFILE_<hex(name)>). | `STRING` | true | Not declared | Not declared | true | Not declared | Not declared | Not declared |
 | `instructions` | Instructions | Who the agent is and how it should work. Sent as untrusted graph content, separate from operator policy. Supports <code>{% raw %}{{payload}}{% endraw %}</code>, <code>{% raw %}{{payload.a.b}}{% endraw %}</code> and <code>{% raw %}{{attributes.x}}{% endraw %}</code>. | `TEXT` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `objective` | Objective | The task for this invocation. Sent as the first user turn. Supports <code>{% raw %}{{payload}}{% endraw %}</code>, <code>{% raw %}{{payload.a.b}}{% endraw %}</code> and <code>{% raw %}{{attributes.x}}{% endraw %}</code>. | `TEXT` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
@@ -890,6 +891,7 @@ Canonical runtime rules: [ai bundle reference](bundles/ai.md).
 
 | Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---|---|---:|---|---|---:|---|---|---|
+| `credentialMode` | Credential mode | system uses the operator account; personal requires the executing user's linked OpenAI account. | `STRING` | false | system | system,personal | false | Not declared | Not declared | Not declared |
 | `provider` | Provider | Name of a model profile this deployment declared in its environment (RAVENROOT_LLM_PROFILE_<hex(name)>). | `STRING` | true | Not declared | Not declared | true | Not declared | Not declared | Not declared |
 | `prompt` | Prompt | Instruction template. Supports <code>{% raw %}{{payload}}{% endraw %}</code>, <code>{% raw %}{{payload.a.b}}{% endraw %}</code> and <code>{% raw %}{{attributes.x}}{% endraw %}</code>. | `TEXT` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `model` | Model | Overrides the profile's model. The endpoint is not overridable. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
@@ -2154,6 +2156,7 @@ selector, the legacy Agent descriptor and behavior above remain applicable.
 
 | Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---|---|---:|---|---|---:|---|---|---|
+| `credentialMode` | Credential mode | system uses the operator account; personal requires the executing user's linked OpenAI account. | `STRING` | false | system | system,personal | false | Not declared | Not declared | Not declared |
 | `provider` | Provider | Name of a model profile this deployment declared in its environment (RAVENROOT_LLM_PROFILE_<hex(name)>). | `STRING` | true | Not declared | Not declared | true | agentDefinition:BLANK: | agentDefinition:BLANK: | Not declared |
 | `instructions` | Instructions | Who the agent is and how it should work. Sent as untrusted graph content, separate from operator policy. Supports <code>{% raw %}{{payload}}{% endraw %}</code>, <code>{% raw %}{{payload.a.b}}{% endraw %}</code> and <code>{% raw %}{{attributes.x}}{% endraw %}</code>. | `TEXT` | true | Not declared | Not declared | false | agentDefinition:BLANK: | agentDefinition:BLANK: | Not declared |
 | `objective` | Objective | The task for this invocation. Sent as the first user turn. Supports <code>{% raw %}{{payload}}{% endraw %}</code>, <code>{% raw %}{{payload.a.b}}{% endraw %}</code> and <code>{% raw %}{{attributes.x}}{% endraw %}</code>. | `TEXT` | true | Not declared | Not declared | false | agentDefinition:BLANK: | agentDefinition:BLANK: | Not declared |

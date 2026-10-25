@@ -46,6 +46,24 @@ public record LlmProfile(String name, URI endpoint, String model,
                 maxConcurrency, systemPreamble, null);
     }
 
+    /** Personal mode changes credential selection only after the operator selected OpenAI. */
+    public LlmProfile forNode(ai.ravenroot.api.node.NodeConfiguration node) {
+        String mode = node.property("credentialMode", "system");
+        if (mode.equals("system")) {
+            if (credentialBinding.map(binding -> binding.reference().startsWith("personal:")).orElse(false))
+                throw new IllegalArgumentException("System profiles cannot name a reserved personal credential reference");
+            return this;
+        }
+        if (!mode.equals("personal")) throw new IllegalArgumentException("credentialMode");
+        if (!endpoint.getScheme().equals("https") || !endpoint.getHost().equals("api.openai.com")
+                || endpoint.getPort() != -1 && endpoint.getPort() != 443 || credentialBinding.isEmpty())
+            throw new IllegalArgumentException("Personal mode requires an operator-authorized OpenAI profile and binding");
+        return new LlmProfile(name, URI.create("https://api.openai.com/v1/responses"), model,
+                Optional.of(new OutboundCredentialBinding(credentialBinding.orElseThrow().bindingId(), "personal:openai")),
+                timeoutMs, maxRequestBytes, maxResponseBytes, maxConcurrency, systemPreamble, plaintextAuthorization);
+    }
+    public boolean personal() { return credentialBinding.map(b -> b.reference().equals("personal:openai")).orElse(false); }
+
     public LlmProfile {
         Objects.requireNonNull(name, "name");
         Objects.requireNonNull(endpoint, "endpoint");

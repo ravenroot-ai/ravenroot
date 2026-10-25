@@ -113,6 +113,7 @@ public final class DeploymentGlobalTenantCredentials implements TenantCredential
      */
     @Override
     public Optional<SecretValue> resolve(String packageId, String tenantId, String opaqueReference) {
+        if (opaqueReference != null && opaqueReference.startsWith("personal:")) return Optional.empty();
         return delegate.resolve(opaqueReference);
     }
 
@@ -141,6 +142,21 @@ public final class DeploymentGlobalTenantCredentials implements TenantCredential
 
     private record ReferenceRestricted(TenantCredentialResolver delegate, Set<String> allowed)
             implements TenantCredentialResolver {
+
+        @Override
+        public void requireHttpActive(String packageId, ai.ravenroot.api.security.SecurityContext executor,
+                java.net.URI destination, String reference) {
+            if (!allowed.contains(reference)) throw new SecurityException("Credential unavailable");
+            delegate.requireHttpActive(packageId, executor, destination, reference);
+        }
+
+        @Override
+        public Optional<SecretValue> resolveHttp(String packageId,
+                ai.ravenroot.api.security.SecurityContext executor, java.net.URI destination,
+                String reference) {
+            if (reference == null || !allowed.contains(reference)) return Optional.empty();
+            return delegate.resolveHttp(packageId, executor, destination, reference);
+        }
 
         @Override
         public Optional<SecretValue> resolve(String packageId, String tenantId, String opaqueReference) {

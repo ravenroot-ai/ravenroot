@@ -23,7 +23,7 @@ public final class GovernedAgent {
         if (ordinary != null) for (var property : ordinary.properties()) {
             properties.add(new NodePropertyDescriptor(property.name(), property.displayName(), property.type(),
                     property.required(), property.description(), property.defaultValue(), property.allowedValues(),
-                    property.adapterBinding(), PropertyCondition.blank("agentDefinition"),
+                    property.adapterBinding(), property.name().equals("credentialMode") ? null : PropertyCondition.blank("agentDefinition"),
                     property.required() ? PropertyCondition.blank("agentDefinition") : property.requiredWhen(),
                     property.minimumValue(), property.maximumValue(), property.maximumUtf8Bytes(),
                     property.maximumItems(), property.maximumItemUtf8Bytes()));

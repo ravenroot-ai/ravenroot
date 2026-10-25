@@ -165,6 +165,8 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
     private final BehaviorRegistry behaviors;
     private final ExecutionMonitor monitor;
     private final ExecutionIdentitySource identitySource;
+    byte[] graphDocument() { return graphMl.clone(); }
+
     private final byte[] graphMl;
     /** Immutable definition published only after a successful start; never parsed by a viewer read. */
     private volatile GraphDefinition definition;
@@ -1534,6 +1536,12 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
      */
     private List<SourceHandle> startSources(SecurityContext security, GraphManager parsedGraph, long generation) {
         var nodesById = new java.util.ArrayList<>(parsedGraph.definition().nodes());
+        if (nodesById.stream().anyMatch(node -> "personal".equals(node.properties().get("credentialMode")))
+                && nodesById.stream().anyMatch(node -> node.kind() == NodeKind.BEHAVIOR
+                    && ai.ravenroot.api.catalog.NodeRuntimeNatureProperty.effectiveNature(
+                        behaviors.descriptor(node.behavior()).orElse(null), node.properties())
+                        == ai.ravenroot.api.catalog.NodeRuntimeNature.SOURCE))
+            throw new SecurityException("Personal connections require an explicit browser execution");
         nodesById.sort(java.util.Comparator.comparing(GraphNode::id));
         var started = new java.util.ArrayList<SourceHandle>();
         for (GraphNode node : nodesById) {

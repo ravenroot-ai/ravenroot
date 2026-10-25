@@ -63,6 +63,21 @@ Detailed contract: [Activity content archive](../operator-guide/activity-capture
 | `RAVENROOT_ACTIVITY_CAPTURE_RETENTION_SECONDS` | content retention; default `604800`, from `1` through `315360000` seconds |
 | `RAVENROOT_ACTIVITY_CAPTURE_WRITE_TIMEOUT_MILLIS` | per-content persistence deadline; default `2000`, from `1` through `300000` milliseconds |
 
+## Personal OpenAI connections
+
+Detailed contract: [Personal OpenAI connections](../security/personal-openai-connections.md#operator-configuration).
+
+| Variable or family | Applicability and default boundary |
+|---|---|
+| `RAVENROOT_PERSONAL_ALLOWED_HOSTS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_PERSONAL_ASSISTANT_MODEL` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_PERSONAL_CALLBACK` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_PERSONAL_KEY_FILE` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_PERSONAL_OPENAI_CLIENT_ID` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_PERSONAL_OPENAI_CLIENT_SECRET` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_PERSONAL_OPENAI_MODE` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_PERSONAL_STORE_DIR` | See the linked contract for exact type, default, and applicability. |
+
 ## Authoring assistant
 
 Detailed contract: [Authoring assistant](../operator-guide/authoring-assistant.md#setting-reference).

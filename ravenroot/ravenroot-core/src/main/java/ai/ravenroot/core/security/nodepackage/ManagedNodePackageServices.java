@@ -599,14 +599,29 @@ public final class ManagedNodePackageServices implements NodePackageServices {
             HttpRequest.Builder builder = HttpRequest.newBuilder(destination).timeout(effectiveDeadline);
             outgoingHeaders.forEach((name, values) -> values.forEach(value -> builder.header(name, value)));
             identity.requireActive();
-            request.credential().ifPresent(binding -> injectCredential(builder, tenant, destination, binding));
+            request.credential().ifPresent(binding -> injectCredential(builder, identity.identity(), destination, binding));
             identity.requireActive();
             builder.method(method, body.length == 0
                     ? HttpRequest.BodyPublishers.noBody() : HttpRequest.BodyPublishers.ofByteArray(body));
             HttpResponse<byte[]> response;
             try {
-                response = client().send(builder.build(),
-                        BoundedBodyHandlers.withLimits(limits, request.representationPolicy()));
+                if (request.credential().map(binding -> binding.reference().startsWith("personal:")).orElse(false)) {
+                    var binding = request.credential().orElseThrow();
+                    credentials.requireHttpActive(packageId, identity.identity(), destination, binding.reference());
+                    var pending = client().sendAsync(builder.build(),
+                            BoundedBodyHandlers.withLimits(limits, request.representationPolicy()));
+                    var currency = DEADLINES.scheduleAtFixedRate(() -> {
+                        try { credentials.requireHttpActive(packageId, identity.identity(), destination, binding.reference()); }
+                        catch (RuntimeException revoked) { pending.cancel(true); }
+                    }, 1, 1, TimeUnit.SECONDS);
+                    try {
+                        response = pending.get(effectiveDeadline.toNanos(), TimeUnit.NANOSECONDS);
+                        credentials.requireHttpActive(packageId, identity.identity(), destination, binding.reference());
+                    } finally { currency.cancel(false); if (!pending.isDone()) pending.cancel(true); }
+                } else {
+                    response = client().send(builder.build(),
+                            BoundedBodyHandlers.withLimits(limits, request.representationPolicy()));
+                }
             } catch (Throwable failure) {
                 throw mapFailure(failure);
             }
@@ -674,7 +689,7 @@ public final class ManagedNodePackageServices implements NodePackageServices {
                 WebSocket.Builder builder = client().newWebSocketBuilder().connectTimeout(deadline);
                 headers.forEach((name, values) -> values.forEach(value -> builder.header(name, value)));
                 identity.requireActive();
-                request.credential().ifPresent(binding -> injectCredential(builder, tenant, destination, binding));
+                request.credential().ifPresent(binding -> injectCredential(builder, identity.identity(), destination, binding));
                 if (!request.subprotocols().isEmpty()) {
                     builder.subprotocols(request.subprotocols().get(0),
                             request.subprotocols().subList(1, request.subprotocols().size()).toArray(String[]::new));
@@ -711,7 +726,7 @@ public final class ManagedNodePackageServices implements NodePackageServices {
         return call;
     }
 
-    private void injectCredential(HttpRequest.Builder builder, String tenant, URI destination,
+    private void injectCredential(HttpRequest.Builder builder, SecurityContext executor, URI destination,
                                   OutboundCredentialBinding binding) {
         NodePackageEgressPolicy.CredentialPlacement placement;
         try {
@@ -719,7 +734,7 @@ public final class ManagedNodePackageServices implements NodePackageServices {
         } catch (IllegalArgumentException forbidden) {
             throw refusal(NodePackageServiceException.Reason.DESTINATION_FORBIDDEN);
         }
-        try (SecretValue secret = credentials.resolve(packageId, tenant, binding.reference())
+        try (SecretValue secret = credentials.resolveHttp(packageId, executor, destination, binding.reference())
                 .orElseThrow(() -> refusal(NodePackageServiceException.Reason.CREDENTIAL_UNAVAILABLE))) {
             char[] copied = secret.copy();
             try {
@@ -757,7 +772,7 @@ public final class ManagedNodePackageServices implements NodePackageServices {
         }
     }
 
-    private void injectCredential(WebSocket.Builder builder, String tenant, URI destination,
+    private void injectCredential(WebSocket.Builder builder, SecurityContext executor, URI destination,
                                   OutboundCredentialBinding binding) {
         NodePackageEgressPolicy.CredentialPlacement placement;
         try {
@@ -765,7 +780,7 @@ public final class ManagedNodePackageServices implements NodePackageServices {
         } catch (IllegalArgumentException forbidden) {
             throw refusal(NodePackageServiceException.Reason.DESTINATION_FORBIDDEN);
         }
-        try (SecretValue secret = credentials.resolve(packageId, tenant, binding.reference())
+        try (SecretValue secret = credentials.resolve(packageId, executor.tenantId(), binding.reference())
                 .orElseThrow(() -> refusal(NodePackageServiceException.Reason.CREDENTIAL_UNAVAILABLE))) {
             char[] copied = secret.copy();
             try {

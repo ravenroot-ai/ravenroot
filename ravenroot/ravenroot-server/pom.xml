@@ -20,6 +20,8 @@
         <ravenroot.surefire.extraArgLine>-Dsun.net.httpserver.maxReqHeaderSize=2097152</ravenroot.surefire.extraArgLine>
     </properties>
     <dependencies>
+        <!-- Actual optional AI behaviors are exercised across the HTTP boundary without shipping the bundle. -->
+        <dependency><groupId>ai.ravenroot</groupId><artifactId>ravenroot-ai</artifactId><version>${project.version}</version><scope>test</scope></dependency>
         <dependency>
             <groupId>com.nimbusds</groupId>
             <artifactId>nimbus-jose-jwt</artifactId>

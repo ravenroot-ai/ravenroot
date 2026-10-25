@@ -195,6 +195,9 @@ public final class AgentNodeBehavior implements ai.ravenroot.api.node.GovernedAg
                 // An adapter binding, not a plain required property, for the reason spelled out on
                 // LlmPromptNodeBehavior: leaving it blank makes this an unconfigured node rather than
                 // a defective graph (CORE-07), and the emptiness test must stay adapterIdOf(...).
+                new NodePropertyDescriptor("credentialMode", "Credential mode", NodePropertyType.STRING, false,
+                        "system uses the operator account; personal requires the executing user's linked OpenAI account.",
+                        "system", List.of("system", "personal"), false, null, null),
                 NodePropertyDescriptor.adapterId("provider", "Provider", NodePropertyType.STRING,
                         "Name of a model profile this deployment declared in its environment "
                                 + "(RAVENROOT_LLM_PROFILE_<hex(name)>)."),
@@ -306,7 +309,7 @@ public final class AgentNodeBehavior implements ai.ravenroot.api.node.GovernedAg
             }
             servers.add(server.get());
         }
-        Settings settings = Settings.compile(configuration, resolved.get(), skills, List.copyOf(servers),
+        Settings settings = Settings.compile(configuration, resolved.get().forNode(configuration), skills, List.copyOf(servers),
                 operationalConfiguration);
         return new NodeAction() {
             @Override public CompletionStage<NodeResult> handle(NodeMessage message) {
@@ -324,9 +327,17 @@ public final class AgentNodeBehavior implements ai.ravenroot.api.node.GovernedAg
     public NodeAction createGoverned(String nodeId, NodePackageServices services,
             ai.ravenroot.api.runner.AgentDefinition definition, ai.ravenroot.api.runner.AgentCommand command,
             ai.ravenroot.api.runner.RunnerPolicy authority) {
+        return createGoverned(nodeId, services, definition, command, authority, "system");
+    }
+
+    @Override
+    public NodeAction createGoverned(String nodeId, NodePackageServices services,
+            ai.ravenroot.api.runner.AgentDefinition definition, ai.ravenroot.api.runner.AgentCommand command,
+            ai.ravenroot.api.runner.RunnerPolicy authority, String credentialMode) {
         var profile = profiles.resolve(definition.modelProfile());
         if (profile.isEmpty()) return refuse(AgentException.Code.PROFILE_UNKNOWN, definition.modelProfile());
         var properties = new LinkedHashMap<String, Object>();
+        properties.put("credentialMode", credentialMode);
         properties.put("instructions", definition.instructions()
                 + "\nExecute approved command " + command.name() + ". Return only a JSON object with exactly two fields:"
                 + " outcome (one of " + String.join(", ", new java.util.TreeSet<>(command.outcomes()))
@@ -447,6 +458,7 @@ public final class AgentNodeBehavior implements ai.ravenroot.api.node.GovernedAg
         static Settings compile(NodeConfiguration configuration, LlmProfile profile,
                                 List<AgentSkill> skills, List<McpProfile> mcpServers,
                                 AgentOperationalConfiguration policy) {
+            profile = profile.forNode(configuration);
             String instructions = configuration.requiredProperty("instructions");
             String objective = configuration.requiredProperty("objective");
             String model = configuration.property("model", "").strip();
@@ -1157,6 +1169,7 @@ public final class AgentNodeBehavior implements ai.ravenroot.api.node.GovernedAg
                 var effectiveTuning = new OpenAiCompatibleChat.Tuning(effectiveOutput,
                         settings.tuning().temperature(), settings.tuning().topP(), settings.tuning().seed());
                 body = AgentTurn.writeRequest(settings.model(), messages, tools, effectiveTuning);
+                if (settings.profile().personal()) body = ai.ravenroot.api.ai.OpenAiResponses.fromChat(body);
                 effectiveTimeout = Math.min(remaining, permittedMillis);
                 if (body.length > settings.profile().maxRequestBytes()) {
                     throw new AgentException(AgentException.Code.REQUEST_TOO_LARGE);
@@ -1188,7 +1201,7 @@ public final class AgentNodeBehavior implements ai.ravenroot.api.node.GovernedAg
                                 settings.profile().maxResponseBytes(), settings.profile().maxResponseBytes(),
                                 settings.profile().maxResponseBytes(),
                                 operationalConfiguration.maxHttpDecompressionRatio(),
-                                Duration.ofMillis(effectiveTimeout), Set.of("application/json")),
+                                Duration.ofMillis(effectiveTimeout), settings.profile().personal() ? Set.of("text/event-stream") : Set.of("application/json")),
                         ai.ravenroot.api.node.service.OutboundHttpRepresentationPolicy.SUCCESS_ONLY));
             } catch (RuntimeException failure) {
                 turnBudget.indeterminate();
@@ -1222,7 +1235,8 @@ public final class AgentNodeBehavior implements ai.ravenroot.api.node.GovernedAg
 
         private void advance(OutboundHttpResponse response, CompletableFuture<NodeResult> result,
                              AgentModelReservation turnBudget) {
-            int status = response.statusCode();
+            if (settings.profile().personal()) ai.ravenroot.api.ai.OpenAiResponses.requireStatus(response.statusCode());
+        int status = response.statusCode();
             if (status < 200 || status >= 300) {
                 // The body is NOT read into the failure. An endpoint's error document is remote text
                 // and may quote the objective back; the status is the operator-actionable part.
@@ -1230,7 +1244,7 @@ public final class AgentNodeBehavior implements ai.ravenroot.api.node.GovernedAg
             }
             effectiveMaximumOutputBytes = Math.min(effectiveMaximumOutputBytes,
                     response.effectiveMaximumOutputBytes());
-            AgentTurn.Turn turn = AgentTurn.read(response.body(), settings.profile().maxResponseBytes());
+            AgentTurn.Turn turn = AgentTurn.read(settings.profile().personal() ? ai.ravenroot.api.ai.OpenAiResponses.toChat(response.body()) : response.body(), settings.profile().maxResponseBytes());
             if (settings.governedDefinition() != null && (turn.promptTokens().isEmpty() || turn.completionTokens().isEmpty()))
                 throw new AgentException(AgentException.Code.RESPONSE_UNREADABLE);
             turnBudget.settle(turn.promptTokens(), turn.completionTokens());
@@ -1554,6 +1568,15 @@ public final class AgentNodeBehavior implements ai.ravenroot.api.node.GovernedAg
                             ? AgentException.Code.TEMPLATE_UNRENDERABLE
                             : AgentException.Code.TRANSPORT_UNAVAILABLE,
                     shared.hint());
+        }
+        if (failure instanceof ai.ravenroot.api.ai.OpenAiResponses.Failure provider) {
+            return new AgentException(switch (provider.getMessage()) {
+                case "reconnect-required" -> AgentException.Code.PROVIDER_LOGIN_REQUIRED;
+                case "provider-permission-denied" -> AgentException.Code.PROVIDER_PERMISSION_DENIED;
+                case "provider-quota-exceeded" -> AgentException.Code.PROVIDER_QUOTA_EXCEEDED;
+                case "provider-unavailable" -> AgentException.Code.PROVIDER_UNAVAILABLE;
+                default -> AgentException.Code.RESPONSE_INCOMPLETE;
+            });
         }
         if (failure instanceof CancellationException) {
             return new AgentException(AgentException.Code.DEADLINE_EXCEEDED);

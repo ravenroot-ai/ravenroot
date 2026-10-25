@@ -7,6 +7,7 @@ Apply trust boundaries and controls for identity, untrusted graphs, secrets, cod
 - [Threat model, identity, and authorization](trust-identity.md) — Map principals and resources, then enforce authentication and ownership at every control plane.
 - [Graph input, credentials, and egress](input-secrets-egress.md) — Treat GraphML and payloads as untrusted while keeping secret material and network rights server-side.
 - [Publication boundary policies](publication-boundaries.md) — Validate typed candidates against pinned operator profiles before external effects.
+- [Personal OpenAI connections](personal-openai-connections.md) — Optional verified browser identity, explicit plan consent, owner-bound execution and private results.
 - [AI, tools, and programmable code](ai-code.md) — Bound model calls, agent tools, and program artifacts with explicit adapters, policy, and sandbox supervision.
 - [Embed, privacy, and audit](embed-privacy.md) — Require operator attestations, minimize projections, and retain evidence for access and revocation.
 

@@ -373,9 +373,12 @@ export class RavenrootAssistantClient {
     if (!this.fetchImpl) throw productError("workspace.error.assistant.client.fetch.api.is.not.supported.by.this.browser", new Error('Fetch API is not supported by this browser'));
     const credential = await requestCredential(this.tokenProvider);
     const { token } = credential;
+    if (this.personalMode && path === ASSISTANT_PATHS.messages) options = { ...options, headers: {
+      ...options.headers, 'X-Ravenroot-Assistant-Mode': 'personal', 'X-Ravenroot-Assistant-Model': this.personalModel || '',
+    } };
     const response = await this.fetchImpl(assistantUrl(this.baseUrl, path), {
       ...options,
-      credentials: 'omit',
+      credentials: this.personalMode ? 'same-origin' : 'omit',
       cache: 'no-store',
       headers: token
         ? { ...options.headers, Authorization: `Bearer ${token}` }

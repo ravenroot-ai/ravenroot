@@ -503,6 +503,14 @@ address the same files.
 Directory changes require restart and do not migrate existing data. Stop the service before offline
 backup or restore and use the [persistence lifecycle](../operator-guide/persistence-lifecycle.md).
 
+## Optional personal OpenAI connections
+
+`RAVENROOT_PERSONAL_OPENAI_MODE` defaults to `disabled`. Enable `loopback` only with the exact
+supported local callback, or `registered` with an eligible operator-provisioned HTTPS registration.
+The [personal connection contract](../security/personal-openai-connections.md#operator-configuration)
+lists every `RAVENROOT_PERSONAL_*` setting, secret-storage boundary and deployment constraint.
+Perimeter authentication and system execution remain independently configured.
+
 ## Plugins and authoring assistant
 
 `RAVENROOT_ENABLED_PLUGINS` is a comma-separated set of exact installed manifest IDs. Unset or blank

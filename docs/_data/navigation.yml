@@ -140,6 +140,8 @@
       url: /security/input-secrets-egress.html
     - title: Publication boundary policies
       url: /security/publication-boundaries.html
+    - title: Personal OpenAI connections
+      url: /security/personal-openai-connections.html
     - title: AI, tools, and programmable code
       url: /security/ai-code.html
     - title: Embed, privacy, and audit

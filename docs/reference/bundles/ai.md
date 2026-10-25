@@ -39,6 +39,20 @@ covered on this page and in the public
 browser authoring assistant uses a separate server configuration described in the
 [authoring assistant runbook](../../operator-guide/authoring-assistant.md).
 
+## Optional personal OpenAI execution
+
+Both nodes declare `credentialMode`, with `system` as the backward-compatible default and `personal`
+as an explicit requirement for the verified executor's selected OpenAI connection. A graph may mix
+both modes. Personal mode requires the optional server connection feature, plan consent, and the
+existing operator HTTPS OpenAI profile and managed service grants. It uses public Responses
+streaming with `store=false`; only a completed response succeeds. System mode keeps the profile's
+existing Chat-compatible endpoint and cannot name reserved `personal:` credential references.
+
+See [personal OpenAI connections](../../security/personal-openai-connections.md) for
+identity-only sign-in, explicit plan consent, account model discovery, browser assistant authorization,
+private execution results, finite grants, rotation/revocation and optional owner presence.
+The bundle remains excluded from published product artifacts.
+
 ## What is inside
 
 | Class | Role |

@@ -547,6 +547,43 @@ class ManagedNodePackageServicesTest {
         assertEquals(0, clientCreations.get(), "composition must not start transport/provider state");
     }
 
+    @Test
+    void personalHttpUsesTrustedIdentityAndRevokesAnActiveStream() throws Exception {
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var revoked = new java.util.concurrent.atomic.AtomicBoolean();
+        var seen = new AtomicReference<SecurityContext>();
+        server = server(exchange -> {
+            assertEquals("Bearer personal-subject", exchange.getRequestHeaders().getFirst("Authorization"));
+            exchange.sendResponseHeaders(200, 0);
+            exchange.getResponseBody().write("data: partial\n\n".getBytes(StandardCharsets.UTF_8));
+            exchange.getResponseBody().flush(); entered.countDown();
+            release.await(10, TimeUnit.SECONDS); exchange.close();
+        });
+        int port = server.getAddress().getPort();
+        URI destination = uri(port, "/responses");
+        var policy = NodePackageEgressPolicy.builder().allowOrigin("http", "localhost", port)
+                .allowHttpMethod("POST").bindCredential("personal", new NodePackageEgressPolicy.Origin("http", "localhost", port), "Authorization", "Bearer ").build();
+        TenantCredentialResolver resolver = new TenantCredentialResolver() {
+            @Override public java.util.Optional<SecretValue> resolve(String pkg, String tenant, String ref) { return java.util.Optional.empty(); }
+            @Override public java.util.Optional<SecretValue> resolveHttp(String pkg, SecurityContext owner, URI uri, String ref) {
+                seen.set(owner); return java.util.Optional.of(new SecretValue("personal-subject".toCharArray()));
+            }
+            @Override public void requireHttpActive(String pkg, SecurityContext owner, URI uri, String ref) {
+                if (revoked.get()) throw new SecurityException("revoked");
+            }
+        };
+        var services = services(policy, Set.of(NodePackageCapability.OUTBOUND_HTTP), resolver);
+        NodeMessage delivered = message("tenant-A", Map.of("subject", "forged", "requestId", "forged"));
+        var call = services.outboundHttp().execute(delivered, new OutboundHttpRequest(destination, "POST", Map.of(),
+                new byte[0], Duration.ofSeconds(10), new OutboundCredentialBinding("personal", "personal:openai")));
+        try {
+            assertTrue(entered.await(5, TimeUnit.SECONDS)); assertEquals(delivered.security(), seen.get());
+            revoked.set(true);
+            assertThrows(java.util.concurrent.ExecutionException.class, () -> call.completion().toCompletableFuture().get(5, TimeUnit.SECONDS));
+        } finally { release.countDown(); }
+    }
+
     private ManagedNodePackageServices services(NodePackageEgressPolicy policy,
                                                 Set<NodePackageCapability> capabilities,
                                                 TenantCredentialResolver resolver) {

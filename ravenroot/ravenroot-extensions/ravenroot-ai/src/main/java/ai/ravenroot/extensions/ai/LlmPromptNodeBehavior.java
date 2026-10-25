@@ -113,6 +113,9 @@ public final class LlmPromptNodeBehavior implements NodeBehavior {
                 // the exemption. Respelling it as isBlank(), trim() or strip() reopens the
                 // differential: a value the two sides judge differently is admitted by the schema
                 // and not refused here, and the node then neither validates nor refuses.
+                new NodePropertyDescriptor("credentialMode", "Credential mode", NodePropertyType.STRING, false,
+                        "system uses the operator account; personal requires the executing user's linked OpenAI account.",
+                        "system", List.of("system", "personal"), false, null, null),
                 NodePropertyDescriptor.adapterId("provider", "Provider", NodePropertyType.STRING,
                         "Name of a model profile this deployment declared in its environment "
                                 + "(RAVENROOT_LLM_PROFILE_<hex(name)>)."),
@@ -162,7 +165,7 @@ public final class LlmPromptNodeBehavior implements NodeBehavior {
         if (resolved.isEmpty()) {
             return refuse(LlmPromptException.Code.PROFILE_UNKNOWN, profileName);
         }
-        Settings settings = Settings.compile(configuration, resolved.get());
+        Settings settings = Settings.compile(configuration, resolved.get().forNode(configuration));
         return new LlmPromptAction(services, settings);
     }
 
@@ -277,6 +280,7 @@ public final class LlmPromptNodeBehavior implements NodeBehavior {
             provenance.add(ModelInputProvenance.Kind.INBOUND_ATTRIBUTES,
                     "invocation:" + message.invocationId(), message.attributes());
             byte[] body = OpenAiCompatibleChat.writeRequest(settings.model(), prompt, settings.tuning());
+            if (settings.profile().personal()) body = ai.ravenroot.api.ai.OpenAiResponses.fromChat(body);
             if (body.length > settings.profile().maxRequestBytes()) {
                 throw new IllegalArgumentException("model request exceeds the configured request-byte ceiling");
             }
@@ -289,7 +293,7 @@ public final class LlmPromptNodeBehavior implements NodeBehavior {
                             settings.profile().maxResponseBytes(), settings.profile().maxResponseBytes(),
                             settings.profile().maxResponseBytes(),
                             operationalConfiguration.maxHttpDecompressionRatio(),
-                            Duration.ofMillis(settings.timeoutMs()), Set.of("application/json")),
+                            Duration.ofMillis(settings.timeoutMs()), settings.profile().personal() ? Set.of("text/event-stream") : Set.of("application/json")),
                     ai.ravenroot.api.node.service.OutboundHttpRepresentationPolicy.SUCCESS_ONLY));
         } catch (RuntimeException failure) {
             lease.close();
@@ -315,6 +319,7 @@ public final class LlmPromptNodeBehavior implements NodeBehavior {
 
     private static NodeResult answer(Settings settings, OutboundHttpResponse response, NodeMessage message,
                                      ModelInputProvenance provenance) {
+        if (settings.profile().personal()) ai.ravenroot.api.ai.OpenAiResponses.requireStatus(response.statusCode());
         int status = response.statusCode();
         if (status < 200 || status >= 300) {
             // The body is NOT read into the failure. An endpoint's error document is remote text and
@@ -322,7 +327,7 @@ public final class LlmPromptNodeBehavior implements NodeBehavior {
             throw new LlmPromptException(LlmPromptException.Code.ENDPOINT_REJECTED);
         }
         OpenAiCompatibleChat.Completion completion =
-                OpenAiCompatibleChat.readCompletion(response.body(), settings.profile().maxResponseBytes());
+                OpenAiCompatibleChat.readCompletion(settings.profile().personal() ? ai.ravenroot.api.ai.OpenAiResponses.toChat(response.body()) : response.body(), settings.profile().maxResponseBytes());
         var attributes = new LinkedHashMap<String, Object>(message.attributes());
         // The model this bundle ASKED for, never the one the response reports: an endpoint resolves a
         // name to whatever tag it currently has installed and reports that back, so echoing it would
@@ -365,6 +370,15 @@ public final class LlmPromptNodeBehavior implements NodeBehavior {
         }
         if (failure instanceof LlmPromptException known) {
             return known;
+        }
+        if (failure instanceof ai.ravenroot.api.ai.OpenAiResponses.Failure provider) {
+            return new LlmPromptException(switch (provider.getMessage()) {
+                case "reconnect-required" -> LlmPromptException.Code.PROVIDER_LOGIN_REQUIRED;
+                case "provider-permission-denied" -> LlmPromptException.Code.PROVIDER_PERMISSION_DENIED;
+                case "provider-quota-exceeded" -> LlmPromptException.Code.PROVIDER_QUOTA_EXCEEDED;
+                case "provider-unavailable" -> LlmPromptException.Code.PROVIDER_UNAVAILABLE;
+                default -> LlmPromptException.Code.RESPONSE_INCOMPLETE;
+            });
         }
         if (failure instanceof CancellationException) {
             return new LlmPromptException(LlmPromptException.Code.DEADLINE_EXCEEDED);

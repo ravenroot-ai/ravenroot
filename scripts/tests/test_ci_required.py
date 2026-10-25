@@ -130,7 +130,8 @@ class PromotionEvidenceTest(unittest.TestCase):
 
     def run_of(self, event, conclusion="success", sha=None, path=".github/workflows/ci.yml", branch="dev"):
         return {"event": event, "conclusion": conclusion, "head_sha": sha or self.SHA, "path": path,
-                "head_branch": branch}
+                "head_branch": branch, "head_repository": {"full_name": "ravenroot-ai/ravenroot"},
+                "updated_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()}
 
     def test_a_full_run_that_passed_on_the_commit_is_evidence(self) -> None:
         for event, branch in (("merge_group", "gh-readonly-queue/dev/pr-313-191accac"),
@@ -228,17 +229,8 @@ class VerifyWorkflowTest(unittest.TestCase):
 
     def test_a_re_gated_job_is_refused(self) -> None:
         """The drift that caused this issue, caught at its source rather than after the merge."""
-        broken = self.contents.replace(
-            "  full-ui-e2e-shard:\n    name: full-ui-e2e-shard"
-            " (${{ matrix.shard }}/${{ strategy.job-total }})\n"
-            "    needs: [release-classification, full-preflight, full-ui-build]\n"
-            "    if: needs.release-classification.outputs.tier == 'full'",
-            "  full-ui-e2e-shard:\n    name: full-ui-e2e-shard"
-            " (${{ matrix.shard }}/${{ strategy.job-total }})\n"
-            "    needs: [release-classification, full-preflight, full-ui-build]\n"
-            "    if: needs.release-classification.outputs.tier == 'nightly'",
-            1,
-        )
+        block = job_blocks(self.contents)['full-ui-e2e-shard']
+        broken = self.contents.replace(block, block.replace("outputs.tier == 'full'", "outputs.tier == 'nightly'", 1), 1)
         self.assertNotEqual(broken, self.contents)
         self.assertTrue(any("full-ui-e2e-shard" in problem for problem in verify_workflow(broken)))
 
@@ -331,7 +323,7 @@ class VerifyEventTest(unittest.TestCase):
         repo = "ravenroot-ai/ravenroot"
         for key, tiers in ALLOWED_TIERS_BY_EVENT.items():
             event, ref, head = (*key, None)[:3]
-            head_ref = {"dev": "dev", "hotfix": "hotfix/x"}.get(head, "")
+            head_ref = {"dev": "dev", "release/0.8": "release/0.8", "hotfix": "hotfix/x"}.get(head, "")
             for tier in tiers:
                 with self.subTest(key=key, tier=tier):
                     base, pushed = (ref, "x") if event == "pull_request" else ("", ref or "x")
@@ -510,15 +502,15 @@ class TriggerTest(unittest.TestCase):
         self.assertTrue(any("tier" in problem for problem in verify_workflow(broken)))
 
     def test_the_full_tier_on_work_branch_pushes_is_refused(self) -> None:
-        broken = self.contents.replace("  push:\n    branches: [dev, main]\n",
-                                       "  push:\n    branches: [dev, main, 'feature/**']\n", 1)
+        broken = self.contents.replace("  push:\n    branches: [dev, main, release/0.8]\n",
+                                       "  push:\n    branches: [dev, main, release/0.8, 'feature/**']\n", 1)
         self.assertNotEqual(broken, self.contents)
         self.assertTrue(any("push" in problem for problem in verify_workflow(broken)))
 
     def test_the_committed_pull_request_trigger_names_dev_and_main(self) -> None:
         """Point 4's proof: a pull request's own event must publish ci-required for it."""
         self.assertEqual(verify_workflow(self.contents), [])
-        self.assertIn("  pull_request:\n    branches: [dev, main]\n", self.contents)
+        self.assertIn("  pull_request:\n    branches: [dev, main, release/0.8]\n", self.contents)
 
     def test_a_pull_request_trigger_missing_dev_is_refused(self) -> None:
         """The exact regression point 4's proof exists to close: `dev` dropped from the trigger.
@@ -528,7 +520,7 @@ class TriggerTest(unittest.TestCase):
         request could never be queued. Losing `dev` here again must be refused.
         """
         broken = self.contents.replace(
-            "  pull_request:\n    branches: [dev, main]\n",
+            "  pull_request:\n    branches: [dev, main, release/0.8]\n",
             "  pull_request:\n    branches: [main]\n", 1,
         )
         self.assertNotEqual(broken, self.contents)

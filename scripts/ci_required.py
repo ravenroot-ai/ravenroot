@@ -35,9 +35,13 @@ import argparse
 import json
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
+from datetime import datetime, timezone
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
 WORKFLOW = Path(__file__).resolve().parents[1] / ".github" / "workflows" / "ci.yml"
@@ -115,12 +119,15 @@ REQUIRED_BY_TIER = {
 # convention, so a future edit cannot reintroduce a partial tier here without failing closed.
 ALLOWED_TIERS_BY_EVENT = {
     ("pull_request", "dev"): frozenset({"full"}),
+    ("pull_request", "release/0.8"): frozenset({"full"}),
+    ("push", "release/0.8"): frozenset({"postmerge"}),
+    ("pull_request", "main", "release/0.8"): frozenset({"promotion"}),
     # A pull request into main is keyed by its head as well: only this repository's `dev` is a
     # promotion, a `hotfix/*` runs the full tier, and any other head is not part of the model.
     ("pull_request", "main", "dev"): frozenset({"promotion"}),
     ("pull_request", "main", "hotfix"): frozenset({"full"}),
     ("push", "dev"): frozenset({"postmerge"}),
-    ("push", "main"): frozenset({"full", "docs"}),
+    ("push", "main"): frozenset({"full", "docs", "promotion"}),
     ("workflow_dispatch", ""): frozenset({"full"}),
     ("merge_group", ""): frozenset({"full"}),
     ("schedule", ""): frozenset({"full"}),
@@ -147,6 +154,16 @@ EXPECTED_CONDITIONS = {
     "full-preflight": AGGREGATOR_CONDITION,
     "full-ui-e2e": AGGREGATOR_CONDITION,
     "full-regression": AGGREGATOR_CONDITION,
+}
+
+# Job admission and the final gate consume the recorded impact plan together. always() prevents
+# an intentionally omitted prerequisite from suppressing a selected consumer or aggregator.
+EXPECTED_CONDITIONS = {
+    job: (f"always() && {condition.removeprefix('always() && ')} && "
+          + ("needs.release-classification.result == 'success' && "
+             if job not in {'full-preflight', 'full-regression', 'full-ui-e2e'} else "")
+          + f"contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), '{job}')")
+    for job, condition in EXPECTED_CONDITIONS.items()
 }
 
 
@@ -307,16 +324,16 @@ def verify_triggers(contents: str) -> list[str]:
     """
     problems: list[str] = []
     triggers = trigger_block(contents)
-    if "  pull_request:\n    branches: [dev, main]\n" not in triggers:
+    if "  pull_request:\n    branches: [dev, main, release/0.8]\n" not in triggers:
         problems.append(
-            "ci.yml: `pull_request` must name exactly `[dev, main]`. A pull request's own event is "
+            "ci.yml: `pull_request` must name exactly `[dev, main, release/0.8]`. A pull request's own event is "
             "what publishes ci-required for it; a dispatched run's check suite never enters that pull "
             "request's rollup, so removing this trigger leaves ci-required absent rather than green, "
             "and the pull request can never be queued or merged."
         )
-    if "  push:\n    branches: [dev, main]\n" not in triggers:
+    if "  push:\n    branches: [dev, main, release/0.8]\n" not in triggers:
         problems.append(
-            "ci.yml: `push` must name exactly `[dev, main]`. Work-branch pushes belong to the fast "
+            "ci.yml: `push` must name exactly `[dev, main, release/0.8]`. Work-branch pushes belong to the fast "
             "tier in ci-fast.yml; the full tier on every push would saturate the runners."
         )
     if "\n  merge_group:\n" not in triggers:
@@ -514,7 +531,7 @@ def event_key(
     """Key an event the way ALLOWED_TIERS_BY_EVENT does."""
     if event_name == "pull_request" and base_ref == "main":
         same = bool(repository) and head_repository == repository
-        head = "dev" if same and head_ref == "dev" else "hotfix" if same and head_ref.startswith("hotfix/") else "other"
+        head = head_ref if same and head_ref in {"dev", "release/0.8"} else "hotfix" if same and head_ref.startswith("hotfix/") else "other"
         return (event_name, base_ref, head)
     if event_name == "pull_request":
         return (event_name, base_ref)
@@ -551,8 +568,8 @@ FULL_TIER_EVENTS = frozenset({"merge_group", "workflow_dispatch"})
 
 
 def is_integration_branch(branch: Any) -> bool:
-    """`dev`, or a merge-queue branch for `dev`: where the promoted commit was verified."""
-    return branch == "dev" or (isinstance(branch, str) and branch.startswith("gh-readonly-queue/dev/"))
+    """An exact supported integration branch or its queue, never arbitrary release/* refs."""
+    return branch in {"dev", "release/0.8"} or (isinstance(branch, str) and (branch.startswith("gh-readonly-queue/dev/") or branch.startswith("gh-readonly-queue/release/0.8/")))
 
 
 def verify_promotion_evidence(payload: dict[str, Any] | None, sha: str) -> list[str]:
@@ -568,18 +585,24 @@ def verify_promotion_evidence(payload: dict[str, Any] | None, sha: str) -> list[
     if not isinstance(runs, list):
         return ["no workflow-run evidence was collected for the promoted commit"]
     for run in runs:
-        if (run.get("path") == WORKFLOW_PATH and run.get("head_sha") == sha
+        try:
+            completed = datetime.fromisoformat(str(run.get('updated_at', '')).replace('Z', '+00:00'))
+            age = (datetime.now(timezone.utc) - completed).total_seconds()
+        except (ValueError, TypeError):
+            continue
+        trusted = run.get('head_repository', {}).get('full_name') == 'ravenroot-ai/ravenroot'
+        if (trusted and 0 <= age <= 24 * 60 * 60 and run.get("path") == WORKFLOW_PATH and run.get("head_sha") == sha
                 and run.get("event") in FULL_TIER_EVENTS and run.get("conclusion") == "success"
                 and is_integration_branch(run.get("head_branch"))):
             return []
     return [
-        f"no full-tier ci.yml run on dev has passed on {sha} (merge queue or dispatch). "
+        f"no fresh trusted full-tier ci.yml integration run has passed on {sha} (merge queue or dispatch). "
         "A promotion re-runs no functional job, so it may be green only on a full run of this exact "
         "commit; re-run this check once that run has passed."
     ]
 
 
-def verify_results(tier: str, results: dict[str, str]) -> list[str]:
+def verify_results(tier: str, results: dict[str, str], plan: dict | None = None) -> list[str]:
     """Report every way the observed job results fall short of what the event demanded."""
     if tier not in REQUIRED_BY_TIER:
         return [
@@ -591,6 +614,18 @@ def verify_results(tier: str, results: dict[str, str]) -> list[str]:
     observed = set(results)
     expected = {CLASSIFICATION_JOB} | set(GATED_JOBS)
     required = {CLASSIFICATION_JOB} | REQUIRED_BY_TIER[tier]
+    if plan is not None and tier == 'full':
+        try:
+            from scripts.impact_plan import make_plan
+            recomputed = make_plan(plan['baseline'], plan['candidate'], plan['event'], plan['lane'], plan['full'])
+            # Recomputing selections independently rejects forged omission lists and missing jobs.
+            if any(recomputed[key] != plan.get(key) for key in ('jobs', 'build', 'test', 'full', 'integrations', 'candidate', 'tree', 'native_acceptance', 'extension_pack', 'independent_build_scopes', 'job_reasons')) or not set(plan['jobs']) <= set(GATED_JOBS):
+                return ['impact plan jobs do not match independently recomputed scope']
+            if plan['lane'] != 'release/0.8' and set(plan['jobs']) != set(GATED_JOBS):
+                return ['ordinary dev verification must retain the complete job set']
+            required = {CLASSIFICATION_JOB} | set(plan['jobs'])
+        except (KeyError, ValueError, TypeError):
+            return ['invalid or incomplete impact plan']
 
     for job in sorted(expected - observed):
         problems.append(f"{job}: no result reported to {GATE_JOB}.")
@@ -691,7 +726,21 @@ def main(argv: list[str] | None = None) -> int:
             evidence = None
         problems.extend(verify_promotion_evidence(evidence, os.environ.get("PROMOTED_SHA", "")))
     problems.extend(verify_workflow(WORKFLOW.read_text(encoding="utf-8")))
-    problems.extend(verify_results(tier, results))
+    raw_plan = os.environ.get('IMPACT_PLAN', '')
+    plan = json.loads(raw_plan) if raw_plan else None
+    if not plan:
+        problems.append('classification did not produce an impact plan')
+    else:
+        if plan.get('candidate') != subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip():
+            problems.append('impact plan is not bound to the checked-out candidate')
+        lane = os.environ.get('IMPACT_LANE', '').removeprefix('refs/heads/')
+        lane = lane if lane in {'dev', 'release/0.8'} else 'dev'
+        if plan.get('lane') != lane or plan.get('event') != os.environ.get('EVENT_NAME', ''):
+            problems.append('impact plan lane/event does not match the actual triggering event')
+        event_base = os.environ.get('IMPACT_BASE', '')
+        if event_base and plan.get('baseline') != event_base:
+            problems.append('impact plan baseline does not match the actual event baseline')
+    problems.extend(verify_results(tier, results, plan))
 
     if problems:
         print(f"ci-required refuses tier {tier!r}:", file=sys.stderr)

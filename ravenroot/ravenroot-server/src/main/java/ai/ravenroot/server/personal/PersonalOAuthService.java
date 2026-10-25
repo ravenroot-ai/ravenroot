@@ -19,8 +19,8 @@ public final class PersonalOAuthService implements TenantCredentialResolver {
     private static final String AUTH = "https://auth.openai.com/api/accounts/authorize";
     private static final String TOKEN = "https://auth.openai.com/api/accounts/oauth/token";
     private static final String RESOURCE = "https://api.openai.com/v1";
-    private static final String IDENTITY_SCOPES = "openid profile email offline_access";
-    private static final String PLAN_SCOPES = IDENTITY_SCOPES + " resource.invoke chatgpt.tokens.use.direct";
+    private static final String IDENTITY_SCOPES = "openid profile email";
+    private static final String PLAN_SCOPES = IDENTITY_SCOPES + " offline_access resource.invoke chatgpt.tokens.use.direct";
     private static final String COOKIE = "RavenrootPersonal";
     private static final String REGISTRATION_COOKIE = "RavenrootRegistration";
     private static final Set<String> TERMINAL_REFRESH = Set.of("invalid_grant", "invalid_refresh_token", "token_expired", "refresh_token_expired", "refresh_token_invalidated", "refresh_token_reused");

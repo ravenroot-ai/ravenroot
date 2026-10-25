@@ -41,10 +41,10 @@ public class PersonalOAuthServiceTest {
         var parameters = query(url);
         assertEquals("dynamic_agent_client", parameters.get("client_id"));
         assertEquals("S256", parameters.get("code_challenge_method"));
-        assertEquals("openid profile email offline_access", URLDecoder.decode(parameters.get("scope"), StandardCharsets.UTF_8));
+        assertEquals("openid profile email", URLDecoder.decode(parameters.get("scope"), StandardCharsets.UTF_8));
         var plan = call("/sign-in", null, Map.of("enablePlanUse", true));
         var planParameters = query(URI.create((String) plan.document().get("authorizationUrl")));
-        assertTrue(URLDecoder.decode(planParameters.get("scope"), StandardCharsets.UTF_8).contains("chatgpt.tokens.use.direct"));
+        assertEquals("openid profile email offline_access resource.invoke chatgpt.tokens.use.direct", URLDecoder.decode(planParameters.get("scope"), StandardCharsets.UTF_8));
         assertEquals("consent", planParameters.get("prompt"));
         assertNotNull(parameters.get("nonce"));
         String callback = "/auth/callback?code=A&client_id=oaiapp_A&state=" + parameters.get("state");

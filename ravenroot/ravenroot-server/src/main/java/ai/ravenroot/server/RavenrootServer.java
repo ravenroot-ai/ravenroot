@@ -1622,6 +1622,9 @@ public final class RavenrootServer implements AutoCloseable {
                         fail(exchange, httpContext, ErrorCode.AUTHENTICATION_REQUIRED); return;
                     }
                 }
+            } catch (ai.ravenroot.server.personal.PersonalConnectionException denied) {
+                json(exchange, 403, "{\"state\":\"" + escape(denied.code()) + "\"}");
+                return;
             } catch (AuthenticationException denied) {
                 exchange.getResponseHeaders().set("WWW-Authenticate", "Bearer");
                 fail(exchange, httpContext, ErrorCode.AUTHENTICATION_REQUIRED);

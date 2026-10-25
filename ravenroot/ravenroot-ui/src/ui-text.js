@@ -28,7 +28,7 @@ export const ENGLISH_MESSAGES = Object.freeze({
   "personal.state": "Personal connection: {state}",
   "personal.connectionHealth": "{label} — {health}",
   "personal.signIn": "Continue with ChatGPT",
-  "personal.reconnect": "Reconnect / enable plan usage",
+  "personal.reconnect": "Enable ChatGPT plan usage (separate consent)",
   "personal.disconnect": "Disconnect selected account",
   "personal.signOut": "Sign out of Ravenroot personal session",
   "personal.authorize": "Authorize this browser’s personal assistant for 15 minutes",

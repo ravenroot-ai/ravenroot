@@ -21,8 +21,11 @@ It cannot silently use a system account or delegate a browser token to a runner.
 
 A graph may mix the two. Personal graph submission preflights its connection before any node effect, including earlier non-AI nodes. Anonymous, missing-account, locked, revoked, or expired authority is refused; it never changes billing accounts or falls back to a system key.
 
-Open **Personal connections** in the assistant panel. **Continue with ChatGPT** starts browser OAuth. Select a linked account, review its health and plan-use permission, and select system or personal assistant mode. **Authorize this browser's personal assistant** grants at most 15 minutes. Each personal assistant turn is bounded to 4,096 output tokens, a 90-second total request deadline,
-and a 4 MiB stream. Each browser needs its own sign-in and authorization, including another browser signed in to the same account. Identity-only sign-in does not grant model use. Reconnect explicitly to request missing ChatGPT plan permission.
+Open **Personal connections** in the assistant panel. **Continue with ChatGPT** starts browser OAuth. Select a linked account, review its health and plan-use permission, and select system or personal assistant mode. **Authorize this browser's personal assistant** grants at most 15 minutes. Each personal assistant turn has a 90-second total request deadline, a 4 MiB stream bound,
+a 64 KiB accepted UTF-8 text bound, and a local accepted-result limit of 4,096 reported output tokens.
+Missing, invalid, or excess output usage is refused before returning text. These are local result
+and transport limits; SIWC does not support a provider-side `max_output_tokens` ceiling and a
+refused result may already have consumed allocation. Each browser needs its own sign-in and authorization, including another browser signed in to the same account. Identity-only sign-in requests only `openid profile email` and does not grant model use. Choose **Enable ChatGPT plan usage (separate consent)** explicitly, including on first use, to request `offline_access resource.invoke chatgpt.tokens.use.direct` as well. New dynamic registrations request consent; ordinary returning identity sign-ins do not force consent. A provider `invalid_client`/app-unavailable refusal before callback does not establish a Ravenroot identity or authorize inference; start a fresh provider sign-in without importing credentials or silently widening scopes.
 
 The account catalog is fetched using the selected account's credential. The assistant shows its available model names; its requests use the corresponding model slug. Node profiles retain the operator's model default and the inspector's model override. Select a model available to the connected account. An unavailable model is a provider refusal, never a reason to use another account.
 
@@ -32,7 +35,7 @@ Personal execution outputs, downstream Human Task/approval data, events, artifac
 
 ## Operator configuration
 
-Keep the existing perimeter authentication and exposure protections. Optional OAuth does not replace OIDC/local-token authentication where configured. The UI and API must use the same origin for the personal browser flow. Cross-origin system clients keep their existing bearer-token behavior.
+Keep the existing perimeter authentication and exposure protections. Optional OAuth does not replace OIDC/local-token authentication where configured. The UI and API must use the same origin for the personal browser flow. Every cookie-authorized personal entry point independently requires that exact effective origin, even when a different origin is allowed for system clients. Duplicate or contradictory Origin/Fetch Metadata is refused; a same-site different port cannot use ambient personal authority. Headerless non-browser requests retain their existing contract but still require a verified session for personal use. Cross-origin system clients keep their existing bearer-token behavior. The state/PKCE-bound provider callback separately supports its cross-site top-level return; callback host case and default ports are compared by effective origin while the registered redirect URI sent to OpenAI remains exact.
 
 The AI bundle remains optional and is not added to the published product. Install and enable it through the existing [plugin bundle procedure](../operator-guide/plugin-bundles.md). Its managed service grant still needs `outbound-http`, `tool-authorization`, and `agent-resources`, finite budgets, an HTTPS origin grant for `api.openai.com:443`, and a credential placement binding for the `Authorization` header with prefix `Bearer `. If the grant restricts credential references, include the logical `personal:openai` reference alongside any authorized system references. Linking an account does not create any of these outbound grants.
 
@@ -108,3 +111,14 @@ Resolve named states at the correct boundary: login, connect, reconnect, missing
 Never put provider credentials in browser storage, graphs/exports, ConfigMaps, logs, error text, or support evidence. Graphs rebind their logical personal requirement to the verified executor and that environment's selected connection. There is no portable personal secret reference in an exported document.
 
 Official contracts: [quickstart](https://developers.openai.com/siwc/quickstart), [direct registration and sign-in](https://developers.openai.com/siwc/token-sharing-open-source/sign-in), [models and completed inference](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference), [accounts and refresh](https://developers.openai.com/siwc/token-sharing-open-source/profiles-and-sessions), [remote VMs](https://developers.openai.com/siwc/token-sharing-open-source/self-hosted-vms), and [provisioned website registrations](https://developers.openai.com/siwc/website).
+
+The personal Responses adapter sends only supported HTTP fields, `store: false`, `stream: true`,
+and array input. Authorized function declarations are supplied in an initial developer
+`additional_tools` input item; subsequent calls preserve their names and call IDs. It does not
+request hosted tool search or expand the existing approved tool set. Personal prompt and agent
+results require valid reported output usage within the configured local per-turn limit; agents
+also retain total usage, tool-turn, time and output-byte limits before returning a result or
+executing a proposed tool. These limits refuse accepted results and further calls, not provider-side
+hard billing consumption. System/API-key Chat requests preserve their existing `max_tokens` behavior.
+See the current [SIWC preview contract](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations)
+and [additional-tools input contract](https://developers.openai.com/api/docs/guides/tools-tool-search#add-tools-at-a-specific-point-in-the-input).

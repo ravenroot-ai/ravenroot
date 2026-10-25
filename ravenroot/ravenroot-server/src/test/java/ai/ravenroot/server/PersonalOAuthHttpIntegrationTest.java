@@ -42,6 +42,83 @@ class PersonalOAuthHttpIntegrationTest {
     final CountDownLatch firstPersonalFailure = new CountDownLatch(1);
     final List<String> personalAttempts = new CopyOnWriteArrayList<>();
 
+    @Test void allowedForeignOriginCannotUseCookieAuthorityBeforeAnyGraphEffect() throws Exception {
+        var registry = registry().withPersonalConnectionAuthority((identity, requirements) -> personal.get().requireExecutionAuthority(identity, requirements));
+        registry.register("system-finished", message -> CompletableFuture.completedFuture(NodeResult.continueWith(message.payload())));
+        var completed = new LinkedBlockingQueue<ExecutionEvent>();
+        var monitor = new ExecutionMonitor();
+        monitor.subscribe(event -> { if (event.type() == ExecutionEventType.EXECUTION_COMPLETED) completed.add(event); });
+        try (var engine = new PekkoExecutionEngine("personal-origin-boundary")) {
+            var app = new DefaultRavenrootApplication(engine, monitor, registry);
+            try (var server = originServer(app)) {
+                server.start(); install(server);
+                String cookie = login(server, "A", "oaiapp_A");
+                var refused = originPost(server, "/v1/executions?mode=run", cookie, graph(true),
+                        List.of("http://127.0.0.1:1"), List.of("same-site"), false);
+                // Preserve proof that the vulnerable implementation actually grants and runs.
+                if (refused.statusCode() == 202) assertNotNull(completed.poll(10, TimeUnit.SECONDS));
+                String evidence = "status=" + refused.statusCode() + ", grants=" + executionGrants()
+                        + ", effects=" + effects.get() + ", providerCalls=" + provider.inferenceBearers.size();
+                assertEquals(409, refused.statusCode(), evidence);
+                assertTrue(refused.body().contains("origin-refused"), refused.body());
+                assertEquals(0, executionGrants()); assertEquals(0, effects.get()); assertTrue(provider.inferenceBearers.isEmpty());
+                for (var fetch : List.of(List.of("same-site"), List.of("cross-site"),
+                        List.of("same-origin", "same-origin"), List.of("same-origin, same-site"), List.of("unknown"))) {
+                    var ambiguous = originPost(server, "/v1/executions?mode=run", cookie, graph(true), List.of(), fetch, false);
+                    assertEquals(409, ambiguous.statusCode(), ambiguous.body());
+                }
+                var contradiction = originPost(server, "/v1/executions?mode=run", cookie, graph(true),
+                        List.of(base(server)), List.of("cross-site"), false);
+                assertEquals(409, contradiction.statusCode(), contradiction.body());
+                var duplicate = originPost(server, "/v1/executions?mode=run", cookie, graph(true),
+                        List.of(base(server), base(server)), List.of("same-origin"), false);
+                assertEquals(400, duplicate.statusCode());
+                assertEquals(0, executionGrants()); assertEquals(0, effects.get()); assertTrue(provider.inferenceBearers.isEmpty());
+                var system = originPost(server, "/v1/executions?mode=run", cookie, graph(false),
+                        List.of("http://127.0.0.1:1"), List.of("same-site"), false);
+                assertEquals(202, system.statusCode(), system.body()); assertNotNull(completed.poll(10, TimeUnit.SECONDS));
+                assertEquals(0, executionGrants()); assertEquals(List.of("system-key"), provider.inferenceBearers);
+                var personalRun = originPost(server, "/v1/executions?mode=run", cookie, graph(true),
+                        List.of(base(server)), List.of("same-origin"), false);
+                assertEquals(202, personalRun.statusCode(), personalRun.body()); assertNotNull(completed.poll(10, TimeUnit.SECONDS));
+                assertEquals(1, executionGrants()); assertEquals(2, effects.get());
+                assertEquals(2, Collections.frequency(provider.inferenceBearers, "access-A"));
+            }
+        }
+    }
+
+    @Test void personalAssistantAndPrivateContextRefuseForeignOriginsAndUnaccountedOutput() throws Exception {
+        try (var engine = new PekkoExecutionEngine("personal-assistant-origin")) {
+            var app = new DefaultRavenrootApplication(engine, new ExecutionMonitor(), registry());
+            try (var server = originServer(app)) {
+                server.start(); install(server);
+                String cookie = login(server, "A", "oaiapp_A");
+                assertEquals(200, post(server, "/v1/personal/authorize", cookie, "{}").statusCode());
+                var foreign = originPost(server, "/v1/assistant/messages", cookie, "{\"prompt\":\"hello\"}",
+                        List.of("http://127.0.0.1:1"), List.of("same-site"), true);
+                assertEquals(403, foreign.statusCode(), foreign.body()); assertTrue(foreign.body().contains("origin-refused"));
+                var privateRead = browser.send(HttpRequest.newBuilder(URI.create(base(server) + "/v1/executions"))
+                        .header("Cookie", cookie).header("X-Ravenroot-Execution-Context", "personal")
+                        .header("Origin", "http://127.0.0.1:1").header("Sec-Fetch-Site", "same-site").GET().build(), HttpResponse.BodyHandlers.ofString());
+                assertEquals(403, privateRead.statusCode(), privateRead.body());
+                assertTrue(provider.inferenceBearers.isEmpty()); assertEquals(0, executionGrants());
+                var valid = originPost(server, "/v1/assistant/messages", cookie, "{\"prompt\":\"hello\"}",
+                        List.of(base(server)), List.of("same-origin"), true);
+                assertEquals(200, valid.statusCode(), valid.body()); assertEquals(List.of("access-A"), provider.inferenceBearers);
+                for (var usage : Arrays.asList(null, Map.<String, Object>of("input_tokens", 1),
+                        Map.<String, Object>of("input_tokens", 1, "output_tokens", 4097),
+                        Map.<String, Object>of("input_tokens", 1, "output_tokens", -1))) {
+                    provider.usage = usage;
+                    var rejected = originPost(server, "/v1/assistant/messages", cookie, "{\"prompt\":\"hello\"}", List.of(), List.of(), true);
+                    assertEquals(409, rejected.statusCode(), rejected.body()); assertFalse(rejected.body().contains("completed-answer"));
+                }
+                provider.usage = Map.of("input_tokens", 1, "output_tokens", 1);
+                provider.responseText = "x".repeat(65537);
+                assertEquals(409, originPost(server, "/v1/assistant/messages", cookie, "{\"prompt\":\"hello\"}", List.of(), List.of(), true).statusCode());
+            }
+        }
+    }
+
     @Test void sameDeployedMixedDefinitionRunsForTwoBrowsersWithSeparateCredentialsAndPrivateDurableOutputs() throws Exception {
         var registry = registry();
         registry.withPersonalConnectionAuthority((identity, requirements) -> personal.get().requireExecutionAuthority(identity, requirements));
@@ -309,6 +386,33 @@ class PersonalOAuthHttpIntegrationTest {
         }
     }
 
+    RavenrootServer originServer(DefaultRavenrootApplication app) throws Exception {
+        int port;
+        try (var socket = new ServerSocket(0, 0, InetAddress.getByName("127.0.0.1"))) { port = socket.getLocalPort(); }
+        var security = new HttpSecurityConfiguration(new BrowserOriginPolicy(Set.of("http://127.0.0.1:" + port, "http://127.0.0.1:1")),
+                SecurityHeadersPolicy.fromEnvironment(Map.of()), Duration.ofSeconds(30));
+        return new RavenrootServer(app, new InetSocketAddress("127.0.0.1", port), null, true,
+                new DisabledLoopbackAuthenticator(), security, Clock.systemUTC(), new DefaultAuthorizationService(event -> { }),
+                new ai.ravenroot.server.ratelimit.RateLimiter(ai.ravenroot.server.ratelimit.RateLimitConfiguration.DEFAULTS,
+                        ai.ravenroot.server.ratelimit.TrustedProxyConfiguration.direct(), event -> { }), event -> { },
+                ai.ravenroot.server.readiness.ReadinessGate.engineOnly(() -> app.status().state()), Duration.ZERO,
+                event -> { }, event -> { }, event -> { }, Duration.ofSeconds(5), event -> { }, AssistantService.fromEnvironment(Map.of()));
+    }
+    HttpResponse<String> originPost(RavenrootServer server, String path, String cookie, String body,
+            List<String> origins, List<String> fetchSites, boolean assistant) throws Exception {
+        var request = HttpRequest.newBuilder(URI.create(base(server) + path)).POST(HttpRequest.BodyPublishers.ofString(body))
+                .header("Content-Type", body.startsWith("<") ? "text/plain" : "application/json");
+        if (cookie != null) request.header("Cookie", cookie);
+        origins.forEach(value -> request.header("Origin", value));
+        fetchSites.forEach(value -> request.header("Sec-Fetch-Site", value));
+        if (assistant) request.header("X-Ravenroot-Assistant-Mode", "personal");
+        return browser.send(request.build(), HttpResponse.BodyHandlers.ofString());
+    }
+    int executionGrants() {
+        return new ProtectedConnectionStore(directory.resolve("connections"), directory.resolve("key"))
+                .transaction(state -> ((Map<?, ?>) state.getOrDefault("executions", Map.of())).size());
+    }
+
     RavenrootServer server(DefaultRavenrootApplication app) throws Exception {
         return new RavenrootServer(app, new InetSocketAddress("127.0.0.1", 0), null,
                 new DisabledLoopbackAuthenticator(), new DefaultAuthorizationService(event -> { }), AssistantService.fromEnvironment(Map.of()));
@@ -392,7 +496,8 @@ class PersonalOAuthHttpIntegrationTest {
         String cookie = begin.headers().firstValue("Set-Cookie").orElseThrow().split(";", 2)[0];
         String url = (String) object(begin.body()).get("authorizationUrl");
         String state = Arrays.stream(URI.create(url).getQuery().split("&")).filter(p -> p.startsWith("state=")).findFirst().orElseThrow().substring(6);
-        var callback = get(server, "/auth/callback?code=" + user + "&client_id=" + client + "&state=" + state, cookie, false);
+        var callback = browser.send(HttpRequest.newBuilder(URI.create(base(server) + "/auth/callback?code=" + user + "&client_id=" + client + "&state=" + state))
+                .header("Cookie", cookie).header("Sec-Fetch-Site", "cross-site").GET().build(), HttpResponse.BodyHandlers.ofString());
         assertEquals(303, callback.statusCode(), callback.body());
         return callback.headers().firstValue("Set-Cookie").orElseThrow().split(";", 2)[0];
     }

@@ -42,8 +42,12 @@ public final class OpenAiResponses {
             // Preserve the existing tool schema semantics; runtime authorization validates each call.
             definition.put("strict", false); tools.add(definition);
         }
-        if (!tools.isEmpty()) { request.put("tools", tools); request.put("parallel_tool_calls", false); }
-        if (source.containsKey("max_tokens")) request.put("max_output_tokens", source.get("max_tokens"));
+        if (!tools.isEmpty()) {
+            input.addFirst(Map.of("type", "additional_tools", "role", "developer", "tools", tools));
+            request.put("parallel_tool_calls", false);
+        }
+        // SIWC HTTP rejects max_output_tokens and sampling controls. Callers enforce accepted
+        // usage locally; an API-key Chat request retains its separate provider-side tuning.
         return json(request);
     }
 
@@ -85,13 +89,40 @@ public final class OpenAiResponses {
                 "finish_reason", calls.isEmpty() ? "stop" : "tool_calls")), "usage", accounting));
     }
     /**
+     * Enforces a local accepted-result output budget using reported, validated usage.
+     * @param stream bounded Responses server-sent events
+     * @param maximumOutputTokens maximum reported output accepted by the caller
+     * @return Chat-compatible bytes only after the output usage satisfies the local budget
+     * @throws Failure if output usage is missing, invalid or exceeds the local budget
+     */
+    public static byte[] toChat(byte[] stream, long maximumOutputTokens) {
+        byte[] chat = toChat(stream);
+        Object reported = map(object(chat).get("usage")).get("completion_tokens");
+        if (!(reported instanceof Number count)) throw error("provider-usage-missing");
+        if (maximumOutputTokens < 1 || count.longValue() > maximumOutputTokens) throw error("provider-output-limit-exceeded");
+        return chat;
+    }
+    /**
+     * Accepts completed text only within a locally checked reported-output budget.
+     * @param stream bounded Responses server-sent events
+     * @param maximumOutputTokens maximum reported output accepted by the caller
+     * @return completed text after validating usage and refusing tool calls
+     * @throws Failure if completion or its accepted output budget is invalid
+     */
+    public static String text(byte[] stream, long maximumOutputTokens) {
+        return textFromChat(toChat(stream, maximumOutputTokens));
+    }
+    /**
      * Reads one completed text response without permitting tool execution.
      * @param stream bounded UTF-8 Responses server-sent events
      * @return nonblank completed output text
      * @throws Failure if completion is absent, invalid, empty or requests a tool
      */
     public static String text(byte[] stream) {
-        var choices = list(object(toChat(stream)).get("choices"));
+        return textFromChat(toChat(stream));
+    }
+    private static String textFromChat(byte[] chat) {
+        var choices = list(object(chat).get("choices"));
         var message = map(map(choices.getFirst()).get("message"));
         if (!list(message.get("tool_calls")).isEmpty()) throw error("unsupported-tool");
         String text = string(message, "content"); if (text.isBlank()) throw error("provider-empty-response"); return text;

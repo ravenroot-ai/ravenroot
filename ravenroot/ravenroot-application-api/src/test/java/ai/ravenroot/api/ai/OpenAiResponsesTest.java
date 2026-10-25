@@ -11,13 +11,43 @@ class OpenAiResponsesTest {
         String input = "{\"model\":\"account-model\",\"messages\":[{\"role\":\"system\",\"content\":\"operator policy\"},{\"role\":\"user\",\"content\":\"question\"}],\"tools\":[{\"type\":\"function\",\"function\":{\"name\":\"bounded_tool\",\"parameters\":{\"type\":\"object\"}}}]}";
         Map<?, ?> request = object(OpenAiResponses.fromChat(bytes(input)));
         assertEquals(true, request.get("stream")); assertEquals(false, request.get("store"));
-        assertEquals("developer", ((Map<?, ?>) ((List<?>) request.get("input")).getFirst()).get("role"));
-        assertEquals("bounded_tool", ((Map<?, ?>) ((List<?>) request.get("tools")).getFirst()).get("name"));
+        var declaration = (Map<?, ?>) ((List<?>) request.get("input")).getFirst();
+        assertEquals("developer", declaration.get("role")); assertEquals("additional_tools", declaration.get("type"));
+        assertEquals("bounded_tool", ((Map<?, ?>) ((List<?>) declaration.get("tools")).getFirst()).get("name"));
+        assertFalse(request.containsKey("tools"));
         assertEquals(false, request.get("parallel_tool_calls"));
         assertEquals("answer", OpenAiResponses.text(completed(Map.of("status", "completed", "output", List.of(Map.of("type", "message", "content", List.of(Map.of("type", "output_text", "text", "answer"))))))));
         byte[] tool = OpenAiResponses.toChat(completed(Map.of("status", "completed", "output", List.of(Map.of("type", "function_call", "call_id", "call-1", "name", "bounded_tool", "arguments", "{}")))));
         var choice = (Map<?, ?>) ((List<?>) object(tool).get("choices")).getFirst();
         assertEquals("tool_calls", choice.get("finish_reason"));
+    }
+    @Test void personalWireOmitsUnsupportedControlsAndPreservesFunctionHistoryAndAuthority() {
+        var definition = Map.of("type", "function", "function", Map.of("name", "approved_tool", "parameters", Map.of("type", "object")));
+        var source = new LinkedHashMap<String, Object>();
+        source.put("model", "account-model"); source.put("tools", List.of(definition)); source.put("max_tokens", 12);
+        source.put("temperature", 0.5); source.put("top_p", 0.8); source.put("seed", 42);
+        source.put("messages", List.of(Map.of("role", "user", "content", "hello"),
+                Map.of("role", "assistant", "tool_calls", List.of(Map.of("id", "call-1", "function", Map.of("name", "approved_tool", "arguments", "{}")))),
+                Map.of("role", "tool", "tool_call_id", "call-1", "content", "approved-result")));
+        var request = object(OpenAiResponses.fromChat(bytes(PayloadJson.write(PayloadValue.fromJava(source, PayloadLimits.DEFAULTS)))));
+        assertEquals(Set.of("model", "input", "stream", "store", "parallel_tool_calls"), request.keySet());
+        var input = (List<?>) request.get("input"); var declarations = (Map<?, ?>) input.getFirst();
+        assertEquals("additional_tools", declarations.get("type")); assertEquals("developer", declarations.get("role"));
+        var tool = (Map<?, ?>) ((List<?>) declarations.get("tools")).getFirst();
+        assertEquals(Set.of("name", "parameters", "type", "strict"), tool.keySet()); assertEquals("approved_tool", tool.get("name"));
+        assertEquals("function_call", ((Map<?, ?>) input.get(2)).get("type")); assertEquals("approved_tool", ((Map<?, ?>) input.get(2)).get("name"));
+        assertEquals("call-1", ((Map<?, ?>) input.get(3)).get("call_id")); assertEquals("approved-result", ((Map<?, ?>) input.get(3)).get("output"));
+    }
+    @Test void acceptedOutputBudgetRequiresRealUsageBeforeReturningTextOrTools() {
+        var result = new LinkedHashMap<String, Object>(); result.put("status", "completed");
+        result.put("output", List.of(Map.of("type", "message", "content", List.of(Map.of("type", "output_text", "text", "answer")))));
+        assertEquals("provider-usage-missing", assertThrows(IllegalArgumentException.class, () -> OpenAiResponses.text(completed(result), 4)).getMessage());
+        result.put("usage", Map.of("output_tokens", 5));
+        assertEquals("provider-output-limit-exceeded", assertThrows(IllegalArgumentException.class, () -> OpenAiResponses.text(completed(result), 4)).getMessage());
+        result.put("usage", Map.of("output_tokens", 4)); assertEquals("answer", OpenAiResponses.text(completed(result), 4));
+        result.put("output", List.of(Map.of("type", "function_call", "call_id", "call-1", "name", "approved_tool", "arguments", "{}")));
+        result.put("usage", Map.of("output_tokens", 5));
+        assertEquals("provider-output-limit-exceeded", assertThrows(IllegalArgumentException.class, () -> OpenAiResponses.toChat(completed(result), 4)).getMessage());
     }
     @Test void terminalEventAndFailureClassificationAreMandatory() {
         assertEquals("provider-stream-interrupted", assertThrows(IllegalArgumentException.class, () -> OpenAiResponses.text(bytes("data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n"))).getMessage());

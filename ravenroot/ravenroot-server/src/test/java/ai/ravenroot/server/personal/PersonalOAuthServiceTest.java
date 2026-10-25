@@ -42,6 +42,7 @@ public class PersonalOAuthServiceTest {
         assertEquals("dynamic_agent_client", parameters.get("client_id"));
         assertEquals("S256", parameters.get("code_challenge_method"));
         assertEquals("openid profile email", URLDecoder.decode(parameters.get("scope"), StandardCharsets.UTF_8));
+        assertEquals("consent", parameters.get("prompt"));
         var plan = call("/sign-in", null, Map.of("enablePlanUse", true));
         var planParameters = query(URI.create((String) plan.document().get("authorizationUrl")));
         assertEquals("openid profile email offline_access resource.invoke chatgpt.tokens.use.direct", URLDecoder.decode(planParameters.get("scope"), StandardCharsets.UTF_8));
@@ -78,7 +79,7 @@ public class PersonalOAuthServiceTest {
         assertEquals("completed-answer", service.assistant(headers(a), context, "hello", "account-model"));
         assertThrows(PersonalConnectionException.class, () -> service.assistant(headers(second), personalContext(second, "other"), "hello", "account-model"));
         assertEquals("access-A", provider.inferenceBearer);
-        assertEquals(4096L, provider.lastInference.get("max_output_tokens"));
+        assertFalse(provider.lastInference.containsKey("max_output_tokens"));
         call("/sign-out", a, Map.of());
         assertThrows(PersonalConnectionException.class, () -> service.assistant(headers(a), context, "hello", "account-model"));
     }
@@ -220,6 +221,7 @@ public class PersonalOAuthServiceTest {
         var rememberedBegin = call("/sign-in", remembered, Map.of());
         var routed = query(URI.create((String) rememberedBegin.document().get("authorizationUrl")));
         assertEquals("oaiapp_A", routed.get("client_id"));
+        assertFalse(routed.containsKey("prompt"));
         assertEquals(initial.get("ext_agent_host_id"), routed.get("ext_agent_host_id"));
         assertFalse(rememberedBegin.document().toString().contains("id_token"));
         assertEquals("anonymous-loopback", service.principal(headers(rememberedBegin.cookie()), perimeter).subject());
@@ -253,6 +255,39 @@ public class PersonalOAuthServiceTest {
         String state = query(URI.create((String) begin.document().get("authorizationUrl"))).get("state");
         var callback = exchange("/auth/callback?code=A&client_id=oaiapp_A&state=" + state + "&state=" + state, begin.cookie(), null);
         service.callback(callback); assertEquals(400, callback.code); assertEquals(0, provider.tokens.get());
+    }
+
+    @Test void callbackUsesEffectiveOriginWithoutChangingTheExactRegisteredRedirect() throws Exception {
+        config = new PersonalOAuthConfiguration("registered", URI.create("https://EXAMPLE.invalid:443/auth/callback"), "oaiapp_registered", "",
+                directory.resolve("registered"), directory.resolve("registered-key"), config.allowedHosts(), "account-model");
+        service = create();
+        for (String badHost : List.of("other.invalid", "example.invalid:444", "user@example.invalid", "example.invalid/path", "example.invalid?query", "example.invalid,")) {
+            var rejected = registeredBegin();
+            assertEquals(200, rejected.code);
+            String state = query(URI.create((String) rejected.document().get("authorizationUrl"))).get("state");
+            var callback = exchange("/auth/callback?code=A&state=" + state, rejected.cookie(), null);
+            callback.request.set("Host", badHost); callback.request.set("X-Forwarded-Host", "example.invalid");
+            service.callback(callback); assertEquals(400, callback.code);
+        }
+        assertEquals(0, provider.tokens.get());
+        var begin = registeredBegin(); assertEquals(200, begin.code);
+        URI authorization = URI.create((String) begin.document().get("authorizationUrl"));
+        assertEquals(config.callback().toString(), URLDecoder.decode(query(authorization).get("redirect_uri"), StandardCharsets.UTF_8));
+        var callback = exchange("/auth/callback?code=A&state=" + query(authorization).get("state"), begin.cookie(), null);
+        callback.request.set("Host", "example.invalid"); callback.request.set("Sec-Fetch-Site", "cross-site");
+        service.callback(callback); assertEquals(303, callback.code); assertEquals(1, provider.tokens.get());
+        for (String origin : List.of("https://example.invalid:444", "https://user@example.invalid", "https://example.invalid/", "https://example.invalid?query")) {
+            var headers = headers(callback.cookie()); headers.set("Origin", origin);
+            assertEquals("origin-refused", assertThrows(PersonalConnectionException.class, () -> service.principal(headers, perimeter)).code());
+        }
+        var headers = headers(callback.cookie()); headers.set("Origin", "https://example.invalid"); headers.set("Sec-Fetch-Site", "same-origin");
+        assertEquals(PersonalOAuthService.ISSUER, service.principal(headers, perimeter).issuer());
+    }
+    FakeExchange registeredBegin() throws Exception {
+        var begin = exchange("/v1/personal/sign-in", null, Map.of());
+        begin.request.set("Host", "example.invalid"); begin.request.set("Origin", "https://example.invalid"); begin.request.set("Sec-Fetch-Site", "same-origin");
+        service.handle(begin, perimeter, new RequestContext("registered", perimeter.subject(), PrincipalType.USER, perimeter.issuer(), perimeter.tenantId(), perimeter.roles(), perimeter.scopes()));
+        return begin;
     }
 
     String login(String subject, String client, String browser) throws Exception {
@@ -304,6 +339,7 @@ public class PersonalOAuthServiceTest {
         int initialExpiry = 3600; String inferenceBearer;
         String refreshScope; String refreshedSubject; String refreshError;
         public String responseText = "completed-answer";
+        public Map<String, Object> usage = Map.of("input_tokens", 2, "output_tokens", 2);
         Map<String, Object> lastInference = Map.of();
         @Override @SuppressWarnings("unchecked") public <T> HttpResponse<T> send(HttpRequest request, HttpResponse.BodyHandler<T> handler) {
             byte[] result;
@@ -321,8 +357,12 @@ public class PersonalOAuthServiceTest {
                 Map<String, Object> body = cast(PayloadJson.read(requestBody(request).getBytes(StandardCharsets.UTF_8), ProtectedConnectionStore.LIMITS).toJava());
                 lastInference = body;
                 assertEquals(false, body.get("store")); assertEquals(true, body.get("stream"));
+                assertTrue(Set.of("model", "input", "stream", "store", "parallel_tool_calls").containsAll(body.keySet()), "Unsupported SIWC request field");
+                assertInstanceOf(List.class, body.get("input"));
                 var output = Map.of("type", "message", "content", List.of(Map.of("type", "output_text", "text", responseText)));
-                var completed = Map.of("status", "completed", "output", List.of(output), "usage", Map.of("input_tokens", 2, "output_tokens", 2));
+                var completed = new LinkedHashMap<String, Object>();
+                completed.put("status", "completed"); completed.put("output", List.of(output));
+                if (usage != null) completed.put("usage", usage);
                 result = ("data: " + new String(ProtectedConnectionStore.json(Map.of("type", "response.completed", "response", completed)), StandardCharsets.UTF_8) + "\n\n").getBytes(StandardCharsets.UTF_8);
             } else if (path.equals("/v1/chat/completions")) {
                 inferenceBearers.add(request.headers().firstValue("Authorization").orElse("").replace("Bearer ", ""));

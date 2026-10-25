@@ -25,19 +25,21 @@ class PersonalResponsesNodeTest {
         var services = new AiTestSupport.HttpDouble();
         services.response = CompletableFuture.completedFuture(new OutboundHttpResponse(200, Map.of("content-type", List.of("text/event-stream")), streamText("personal-answer").getBytes(StandardCharsets.UTF_8)));
         var node = new LlmPromptNodeBehavior(AiTestSupport.resolving(profile()));
-        var action = node.create(AiTestSupport.configuration(Map.of("provider", "openai", "prompt", "{{payload}}", "credentialMode", "personal")), services);
+        var action = node.create(AiTestSupport.configuration(Map.of("provider", "openai", "prompt", "{{payload}}", "credentialMode", "personal", "maxTokens", 4)), services);
         var result = action.handle(AiTestSupport.message("hello")).toCompletableFuture().join();
         assertEquals("personal-answer", result.payload());
         var request = services.request.get();
         assertEquals("https://api.openai.com/v1/responses", request.destination().toString());
         assertEquals("personal:openai", request.credential().orElseThrow().reference());
         Map<?, ?> body = object(request.body()); assertEquals(true, body.get("stream")); assertEquals(false, body.get("store"));
+        assertFalse(body.containsKey("max_output_tokens"));
         assertFalse(new String(request.body(), StandardCharsets.UTF_8).contains("system-key"));
         var system = new AiTestSupport.HttpDouble();
-        node.create(AiTestSupport.configuration(Map.of("provider", "openai", "prompt", "hello")), system)
+        node.create(AiTestSupport.configuration(Map.of("provider", "openai", "prompt", "hello", "maxTokens", 4)), system)
                 .handle(AiTestSupport.message("hello")).toCompletableFuture().join();
         assertEquals("https://api.openai.com/v1/chat/completions", system.request.get().destination().toString());
         assertEquals("system-key", system.request.get().credential().orElseThrow().reference());
+        assertEquals(4L, object(system.request.get().body()).get("max_tokens"));
     }
     @Test void agentUsesTheSameBoundedToolLoopWithResponsesFunctionOutput() {
         var services = new AiTestSupport.ScriptedHttp().then(streamCall()).then(streamText("agent-answer"));
@@ -48,7 +50,26 @@ class PersonalResponsesNodeTest {
         assertTrue(new String(services.bodies().get(1), StandardCharsets.UTF_8).contains("function_call_output"));
         Map<?, ?> first = object(services.bodies().getFirst());
         assertEquals(false, first.get("parallel_tool_calls"));
-        assertTrue(((List<?>) first.get("tools")).stream().allMatch(t -> Boolean.FALSE.equals(((Map<?, ?>) t).get("strict"))));
+        assertFalse(first.containsKey("tools")); assertFalse(first.containsKey("max_output_tokens"));
+        var declaration = (Map<?, ?>) ((List<?>) first.get("input")).getFirst();
+        assertEquals("additional_tools", declaration.get("type"));
+        assertTrue(((List<?>) declaration.get("tools")).stream().allMatch(t -> Boolean.FALSE.equals(((Map<?, ?>) t).get("strict"))));
+    }
+    @Test void personalPromptAndAgentRefuseMissingOrExcessUsageBeforeAcceptingResultsOrTools() {
+        for (var usage : List.of(Map.<String, Object>of(), Map.<String, Object>of("input_tokens", 1, "output_tokens", 5),
+                Map.<String, Object>of("input_tokens", 1, "output_tokens", -1))) {
+            var text = stream(Map.of("status", "completed", "usage", usage, "output", List.of(Map.of("type", "message", "content", List.of(Map.of("type", "output_text", "text", "unaccepted"))))));
+            var promptService = new AiTestSupport.ScriptedHttp().then(text);
+            var prompt = new LlmPromptNodeBehavior(AiTestSupport.resolving(profile())).create(AiTestSupport.configuration(
+                    Map.of("provider", "openai", "prompt", "hello", "credentialMode", "personal", "maxTokens", 4)), promptService);
+            assertThrows(CompletionException.class, () -> prompt.handle(AiTestSupport.message("hello")).toCompletableFuture().join());
+            var call = stream(Map.of("status", "completed", "usage", usage, "output", List.of(Map.of("type", "function_call", "call_id", "call-1", "name", "load_skill", "arguments", "{}"))));
+            var agentService = new AiTestSupport.ScriptedHttp().then(call).then(streamText("must-not-run"));
+            var agent = new AgentNodeBehavior(AiTestSupport.resolving(profile())).create(AiTestSupport.agentConfiguration(
+                    Map.of("provider", "openai", "instructions", "be concise", "objective", "hello", "credentialMode", "personal", "maxTokens", 4)), agentService);
+            assertThrows(CompletionException.class, () -> agent.handle(AiTestSupport.message("hello")).toCompletableFuture().join());
+            assertEquals(1, agentService.calls()); assertEquals(0, agentService.toolAuthorizations.get());
+        }
     }
     @Test void quotaAndInterruptedStreamsDoNotProduceSuccessfulNodeResults() {
         for (String response : List.of("data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n", "data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"subscription_sharing_usage_limit_exceeded\"}}}\n\n")) {

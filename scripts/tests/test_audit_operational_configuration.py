@@ -4480,7 +4480,8 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 mock.patch.object(audit, "embed_enabled_authority_errors", return_value=[]), \
                 mock.patch.object(audit, "interaction_websocket_authority_errors", return_value=[]), \
                 mock.patch.object(audit, "activity_capture_authority_errors", return_value=[]), mock.patch.object(audit, "graph_authoring_authority_errors", return_value=[]), \
-                mock.patch.object(audit, "ai_operational_authority_errors", return_value=[]):
+                mock.patch.object(audit, "ai_operational_authority_errors", return_value=[]), \
+                mock.patch.object(audit, "personal_oauth_configuration_authority_errors", return_value=[]):
             return audit.inventory_errors(ROOT, document, tuple(candidates.values()))
 
     def graph_limit_errors(self, root: Path, authorities, entries, candidates):
@@ -6565,7 +6566,8 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                     mock.patch.object(audit, "embed_enabled_authority_errors", return_value=[]), \
                     mock.patch.object(audit, "interaction_websocket_authority_errors", return_value=[]), \
                     mock.patch.object(audit, "activity_capture_authority_errors", return_value=[]), mock.patch.object(audit, "graph_authoring_authority_errors", return_value=[]), \
-                    mock.patch.object(audit, "ai_operational_authority_errors", return_value=[]):
+                    mock.patch.object(audit, "ai_operational_authority_errors", return_value=[]), \
+                mock.patch.object(audit, "personal_oauth_configuration_authority_errors", return_value=[]):
                 return audit.inventory_errors(ROOT, value, (candidate, binding))
 
         self.assertEqual([], errors(document))

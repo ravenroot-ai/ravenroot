@@ -1244,8 +1244,8 @@ public final class AgentNodeBehavior implements ai.ravenroot.api.node.GovernedAg
             }
             effectiveMaximumOutputBytes = Math.min(effectiveMaximumOutputBytes,
                     response.effectiveMaximumOutputBytes());
-            AgentTurn.Turn turn = AgentTurn.read(settings.profile().personal() ? ai.ravenroot.api.ai.OpenAiResponses.toChat(response.body()) : response.body(), settings.profile().maxResponseBytes());
-            if (settings.governedDefinition() != null && (turn.promptTokens().isEmpty() || turn.completionTokens().isEmpty()))
+            AgentTurn.Turn turn = AgentTurn.read(settings.profile().personal() ? ai.ravenroot.api.ai.OpenAiResponses.toChat(response.body(), Math.min(settings.tuning().maxTokens().orElse(Long.MAX_VALUE), turnBudget.maximumOutputTokens())) : response.body(), settings.profile().maxResponseBytes());
+            if ((settings.governedDefinition() != null || settings.profile().personal()) && (turn.promptTokens().isEmpty() || turn.completionTokens().isEmpty()))
                 throw new AgentException(AgentException.Code.RESPONSE_UNREADABLE);
             turnBudget.settle(turn.promptTokens(), turn.completionTokens());
             var modelOutput = new LinkedHashMap<String, Object>();

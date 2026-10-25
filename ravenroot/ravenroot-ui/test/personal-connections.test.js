@@ -11,6 +11,7 @@ function setup(initial = signed()) {
   const fetch = vi.fn(async (url, options) => {
     const path = new URL(url).pathname;
     let body = state;
+    if (path.endsWith('/sign-in')) body = { authorizationUrl: `${location.origin}/authorize` };
     if (path.endsWith('/models')) body = { models: [{ slug: 'account-model', display_name: 'Account model' }] };
     if (path.endsWith('/registration')) body = { registration: 'opaque-returning-code', expiresIn: 600 };
     if (path.endsWith('/protect')) body = { state: 'locked' };
@@ -33,6 +34,17 @@ describe('optional personal account controls', () => {
     expect(fetch.mock.calls.every(([url, options]) => new URL(url).origin === location.origin
       && options.credentials === 'same-origin' && !options.headers.Authorization)).toBe(true);
     expect(callbacks.onMode).toHaveBeenLastCalledWith('system', 'account-model', false);
+  });
+  it('keeps identity-only sign-in separate from an explicit first-time plan-use choice', async () => {
+    const assign = vi.fn(); vi.stubGlobal('location', { origin: location.origin, assign });
+    const fixture = setup({ state: 'signed-out', connections: [] }); await mounted.refresh();
+    button(fixture.host, 'personal.signIn').click();
+    await vi.waitFor(() => expect(assign).toHaveBeenCalledTimes(1));
+    button(fixture.host, 'personal.reconnect').click();
+    await vi.waitFor(() => expect(assign).toHaveBeenCalledTimes(2));
+    const starts = fixture.fetch.mock.calls.filter(([url]) => new URL(url).pathname.endsWith('/sign-in'));
+    expect(starts.map(([, options]) => JSON.parse(options.body))).toEqual([{}, { connection: '', enablePlanUse: true }]);
+    expect(button(fixture.host, 'personal.reconnect').textContent).toContain('separate consent');
   });
   it('clears a retained private answer on account switch even when local owner is unchanged', async () => {
     const fixture = setup(); await mounted.refresh();

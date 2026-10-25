@@ -58,6 +58,7 @@ public final class PersonalOAuthService implements TenantCredentialResolver {
 
     /** Retains perimeter roles/scopes. A personal login cannot bypass the configured authenticator. */
     public AuthenticatedPrincipal principal(Headers headers, AuthenticatedPrincipal perimeter) {
+        requireSameOrigin(headers);
         var session = current(headers, perimeterKey(perimeter));
         if (session == null || session.owner() == null) return perimeter;
         var roles = java.util.EnumSet.noneOf(Role.class); roles.addAll(perimeter.roles());
@@ -85,9 +86,8 @@ public final class PersonalOAuthService implements TenantCredentialResolver {
         try {
             URI incoming = exchange.getRequestURI();
             if (!exchange.getRequestMethod().equals("GET") || !incoming.getRawPath().equals(configuration.callback().getRawPath())
-                    || !configuration.callback().getRawAuthority().equals(exchange.getRequestHeaders().getFirst("Host"))
-                    || incoming.isAbsolute() && (!incoming.getScheme().equals(configuration.callback().getScheme())
-                        || !incoming.getRawAuthority().equals(configuration.callback().getRawAuthority()))) throw refused("sign-in-unverified");
+                    || incoming.getRawFragment() != null || !callbackAuthority(exchange.getRequestHeaders())
+                    || incoming.isAbsolute() && !origin(incoming, true).equals(origin(configuration.callback(), true))) throw refused("sign-in-unverified");
             Map<String, String> query = query(incoming.getRawQuery());
             String state = query.getOrDefault("state", "");
             Pending attempt = pending.remove(state); // single consumption on success and every failure
@@ -164,6 +164,7 @@ public final class PersonalOAuthService implements TenantCredentialResolver {
 
     public void handle(HttpExchange exchange, AuthenticatedPrincipal perimeter, RequestContext context) throws IOException {
         try {
+            requireSameOrigin(exchange.getRequestHeaders());
             String path = exchange.getRequestURI().getPath();
             String action = path.substring("/v1/personal".length());
             if (exchange.getRequestMethod().equals("GET") && action.isEmpty()) { status(exchange, perimeter); return; }
@@ -174,7 +175,6 @@ public final class PersonalOAuthService implements TenantCredentialResolver {
                 reply(exchange, 200, Map.of("models", modelCatalog(token))); return;
             }
             if (!exchange.getRequestMethod().equals("POST")) { reply(exchange, 405, Map.of("state", "method-not-allowed")); return; }
-            requireSameOrigin(exchange);
             Map<String, Object> body = readBody(exchange);
             if (action.equals("/sign-in")) { begin(exchange, perimeter, body); return; }
             var session = current(exchange.getRequestHeaders(), perimeterKey(perimeter));
@@ -223,8 +223,7 @@ public final class PersonalOAuthService implements TenantCredentialResolver {
 
     private void begin(HttpExchange exchange, AuthenticatedPrincipal perimeter, Map<String, Object> body) throws IOException {
         if (!configuration.networkReady()) throw refused("provider-egress-not-granted");
-        String host = exchange.getRequestHeaders().getFirst("Host");
-        if (host != null && !host.equals(configuration.callback().getRawAuthority())) throw refused("unsupported-deployment");
+        if (!callbackAuthority(exchange.getRequestHeaders())) throw refused("unsupported-deployment");
         purgeExpired();
         if (pending.size() >= 256 || sessions.size() >= 4096) throw refused("capacity-unavailable");
         String browser = cookie(exchange.getRequestHeaders());
@@ -269,7 +268,7 @@ public final class PersonalOAuthService implements TenantCredentialResolver {
         parameters.put("code_challenge", digest(pkce)); parameters.put("resource", RESOURCE);
         parameters.put("ext_agent_host_id", store.transaction(data -> text(data, "host")));
         if (client.equals("dynamic_agent_client")) parameters.put("agent_name_hint", "Ravenroot");
-        if (Boolean.TRUE.equals(body.get("enablePlanUse"))) parameters.put("prompt", "consent");
+        if (client.equals("dynamic_agent_client") || planUse) parameters.put("prompt", "consent");
         setCookie(exchange, browser, owner == null ? 600 : 28_800);
         reply(exchange, 200, Map.of("authorizationUrl", AUTH + "?" + form(parameters)));
     }
@@ -308,6 +307,7 @@ public final class PersonalOAuthService implements TenantCredentialResolver {
     /** Trusted adapter provenance is durable alongside the distinct verified executor. */
     public void authorizeExecution(Headers headers, RequestContext context, Set<String> requirements, Map<String, String> source) {
         if (requirements.isEmpty()) return;
+        requireSameOrigin(headers);
         if (!ownsSession(headers, context)) throw refused("login-required");
         String browser = cookie(headers);
         BrowserSession session = sessions.get(browser);
@@ -393,6 +393,7 @@ public final class PersonalOAuthService implements TenantCredentialResolver {
     }
 
     public String assistant(Headers headers, RequestContext context, String prompt, String requestedModel) {
+        requireSameOrigin(headers);
         if (!ownsSession(headers, context)) throw refused("login-required");
         String browser = cookie(headers); BrowserSession session = sessions.get(browser);
         if (!assistantAuthorized(browser, session)) throw refused("assistant-authorization-required");
@@ -402,7 +403,7 @@ public final class PersonalOAuthService implements TenantCredentialResolver {
         if (model.isBlank() && !available.isEmpty()) model = available.getFirst();
         if (!available.contains(model)) throw refused("model-unavailable");
         var response = request(URI.create(RESOURCE + "/responses"), "POST", Map.of("Authorization", "Bearer " + token, "Content-Type", "application/json"),
-                ProtectedConnectionStore.json(Map.of("model", model, "input", List.of(Map.of("role", "user", "content", prompt)), "stream", true, "store", false, "max_output_tokens", 4096)), 4 * 1024 * 1024,
+                ProtectedConnectionStore.json(Map.of("model", model, "input", List.of(Map.of("role", "user", "content", prompt)), "stream", true, "store", false)), 4 * 1024 * 1024,
                 () -> {
                     if (!ownsSession(headers, context) || !assistantAuthorized(browser, session)) throw refused("assistant-authorization-expired");
                     store.transaction(data -> {
@@ -412,7 +413,11 @@ public final class PersonalOAuthService implements TenantCredentialResolver {
                         return null;
                     });
                 });
-        try { return ai.ravenroot.api.ai.OpenAiResponses.text(response); }
+        try {
+            String answer = ai.ravenroot.api.ai.OpenAiResponses.text(response, 4096);
+            if (answer.getBytes(StandardCharsets.UTF_8).length > 65536) throw refused("provider-output-limit-exceeded");
+            return answer;
+        }
         catch (IllegalArgumentException failure) { throw refused(failure.getMessage()); }
     }
     public List<String> models(String token) {
@@ -601,13 +606,41 @@ public final class PersonalOAuthService implements TenantCredentialResolver {
         catch (InterruptedException cancelled) { Thread.currentThread().interrupt(); throw refused("cancelled"); }
         catch (Exception failure) { throw refused("provider-unavailable"); }
     }
-    private void requireSameOrigin(HttpExchange exchange) {
-        String origin = exchange.getRequestHeaders().getFirst("Origin");
-        URI callback = configuration.callback();
-        String expected = callback.getScheme() + "://" + callback.getRawAuthority();
-        if (origin != null && !origin.equals(expected)) throw refused("origin-refused");
-        String fetch = exchange.getRequestHeaders().getFirst("Sec-Fetch-Site");
-        if ("cross-site".equals(fetch)) throw refused("origin-refused");
+    private record Origin(String scheme, String host, int port) { }
+    private static Origin origin(URI value, boolean pathAllowed) {
+        String scheme = Objects.toString(value.getScheme(), "").toLowerCase(Locale.ROOT);
+        String host = value.getHost();
+        int port = value.getPort();
+        if (!Set.of("http", "https").contains(scheme) || host == null || value.getRawUserInfo() != null
+                || value.getRawFragment() != null || (!pathAllowed && (value.getRawQuery() != null
+                    || value.getRawPath() != null && !value.getRawPath().isEmpty()))
+                || port == 0 || port > 65535 || value.getRawAuthority().endsWith(":")) throw refused("origin-refused");
+        return new Origin(scheme, host.toLowerCase(Locale.ROOT), port < 0 ? scheme.equals("https") ? 443 : 80 : port);
+    }
+    private static String oneHeader(Headers headers, String name) {
+        var values = headers.get(name);
+        if (values == null) return null;
+        if (values.size() != 1 || values.getFirst().isBlank()) throw refused("origin-refused");
+        return values.getFirst();
+    }
+    private boolean callbackAuthority(Headers headers) {
+        try {
+            String host = oneHeader(headers, "Host");
+            return host != null && origin(URI.create(configuration.callback().getScheme() + "://" + host), false)
+                    .equals(origin(configuration.callback(), true));
+        } catch (RuntimeException invalid) { return false; }
+    }
+    private void requireSameOrigin(Headers headers) {
+        try {
+            String declared = oneHeader(headers, "Origin");
+            if (declared != null && !origin(URI.create(declared), false).equals(origin(configuration.callback(), true)))
+                throw refused("origin-refused");
+            String fetch = oneHeader(headers, "Sec-Fetch-Site");
+            if (fetch != null && (!Set.of("same-origin", "same-site", "cross-site", "none").contains(fetch)
+                    || fetch.equals("cross-site") || fetch.equals("same-site") && declared == null)) throw refused("origin-refused");
+            // Headerless native clients retain their existing contract. Browser metadata never
+            // widens cookie authority to the operator's separate system-client CORS allowlist.
+        } catch (RuntimeException invalid) { throw refused("origin-refused"); }
     }
     private void setCookie(HttpExchange exchange, String value, int seconds) { setCookie(exchange, COOKIE, value, seconds); }
     private void setCookie(HttpExchange exchange, String name, String value, int seconds) {

@@ -191,6 +191,8 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             fixture = {"entries": entries, "retiredEntries": [], "migrationHistory": [],
                        "evidenceRecords": {candidate.evidence_digest: candidate.evidence
                                            for candidate in candidates}}
+            fixture.update(schemaVersion=audit.SCHEMA_VERSION, reconciliationRequired=False,
+                           reconciliationHistory=[], remediationDomains=audit.build_remediation_domains(entries))
             self.assertEqual([], audit.inventory_errors(root, fixture, candidates))
             for before, after in (("\"disabled\"", "\"loopback\""),
                                   ("RAVENROOT_PERSONAL_OPENAI_MODE", "RAVENROOT_OTHER_MODE")):

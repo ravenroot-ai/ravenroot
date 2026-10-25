@@ -157,13 +157,14 @@ EXPECTED_CONDITIONS = {
     "full-regression": AGGREGATOR_CONDITION,
 }
 
-# Job admission and the final gate consume the recorded impact plan together. always() prevents
-# an intentionally omitted prerequisite from suppressing a selected consumer or aggregator.
+# Explicit !cancelled() is a status function: omitted/failed needs do not implicitly skip selected
+# consumers or barriers, while server-side cancellation can stop expensive work. The cheap final
+# gate remains always() so cancellation cannot become a GitHub-successful skipped required check.
 EXPECTED_CONDITIONS = {
-    job: (f"always() && {condition.removeprefix('always() && ')} && "
+    job: ("${{ !cancelled() && " + condition.removeprefix("always() && ") + " && "
           + ("needs.release-classification.result == 'success' && "
              if job not in {'full-preflight', 'full-regression', 'full-ui-e2e'} else "")
-          + f"contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), '{job}')")
+          + f"contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), '{job}')" + " }}")
     for job, condition in EXPECTED_CONDITIONS.items()
 }
 
@@ -258,6 +259,15 @@ def verify_workflow(contents: str) -> list[str]:
                 f"{GATE_JOB}: must run with `if: always()`, or a skipped dependency would skip the "
                 "gate itself and leave the ruleset waiting on a context that never reports."
             )
+        if "          CI_CANCELLED: ${{ job.status != 'success' }}" not in gate:
+            problems.append(f"{GATE_JOB}: must bind the gate status into the verifier.")
+        if "      - name: Require every job this event demanded\n        if: ${{ success() && !cancelled() }}\n" not in gate:
+            problems.append(f"{GATE_JOB}: verifier must require successful guards and an uncancelled workflow.")
+        checkout_position = gate.find("      - name: Check out repository\n")
+        if PRECHECKOUT_CANCELLATION_GUARD not in gate or checkout_position < 0 or gate.index(PRECHECKOUT_CANCELLATION_GUARD) > checkout_position:
+            problems.append(f"{GATE_JOB}: must refuse cancellation before checkout.")
+        if not gate.rstrip().endswith(CANCELLATION_GUARD.rstrip()):
+            problems.append(f"{GATE_JOB}: must end with the cancellation refusal after verification.")
         observed = declared_needs(gate)
         wanted = {CLASSIFICATION_JOB} | set(GATED_JOBS)
         for job in sorted(wanted - observed):
@@ -385,6 +395,23 @@ CLASSIFICATION_GUARD = (
     "          CLASSIFICATION: ${{ needs.release-classification.result }}\n"
     "        run: |\n"
     "          if [ \"$CLASSIFICATION\" != success ]; then\n"
+)
+
+
+PRECHECKOUT_CANCELLATION_GUARD = (
+    "      - name: Refuse cancellation before checkout\n"
+    "        if: ${{ cancelled() }}\n"
+    "        run: |\n"
+    '          echo "A cancelled workflow cannot execute checked-out gate code." >&2\n'
+    "          exit 1\n"
+)
+
+CANCELLATION_GUARD = (
+    "      - name: Refuse cancellation after verification\n"
+    "        if: ${{ cancelled() }}\n"
+    "        run: |\n"
+    '          echo "A cancelled workflow cannot establish ci-required evidence." >&2\n'
+    "          exit 1\n"
 )
 
 
@@ -603,8 +630,10 @@ def verify_promotion_evidence(payload: dict[str, Any] | None, sha: str) -> list[
     ]
 
 
-def verify_results(tier: str, results: dict[str, str], plan: dict | None = None) -> list[str]:
+def verify_results(tier: str, results: dict[str, str], plan: dict | None = None, *, cancelled: bool = False) -> list[str]:
     """Report every way the observed job results fall short of what the event demanded."""
+    if cancelled:
+        return ["cancelled or unknown workflow state cannot establish ci-required evidence"]
     if tier not in REQUIRED_BY_TIER:
         return [
             f"Unknown CI tier {tier!r}. Expected one of: {', '.join(sorted(REQUIRED_BY_TIER))}. "
@@ -741,7 +770,7 @@ def main(argv: list[str] | None = None) -> int:
         event_base = os.environ.get('IMPACT_BASE', '')
         if event_base and plan.get('baseline') != event_base:
             problems.append('impact plan baseline does not match the actual event baseline')
-    problems.extend(verify_results(tier, results, plan))
+    problems.extend(verify_results(tier, results, plan, cancelled=os.environ.get("CI_CANCELLED", "unknown") != "false"))
 
     if problems:
         print(f"ci-required refuses tier {tier!r}:", file=sys.stderr)

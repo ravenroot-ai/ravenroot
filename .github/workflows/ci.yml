@@ -87,7 +87,7 @@ jobs:
   docs-site:
     name: docs-site
     needs: [release-classification]
-    if: always() && contains(fromJSON('["docs","full"]'), needs.release-classification.outputs.tier) && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'docs-site')
+    if: ${{ !cancelled() && contains(fromJSON('["docs","full"]'), needs.release-classification.outputs.tier) && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'docs-site') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -282,7 +282,7 @@ jobs:
   full-configurator:
     name: full-configurator
     needs: [release-classification, full-preflight]
-    if: always() && needs.release-classification.outputs.tier == 'full' && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-configurator')
+    if: ${{ !cancelled() && needs.release-classification.outputs.tier == 'full' && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-configurator') }}
     uses: ./.github/workflows/configurator.yml
     permissions:
       contents: read
@@ -290,7 +290,7 @@ jobs:
   full-docs-policy:
     name: full-docs-policy
     needs: [release-classification]
-    if: always() && contains(fromJSON('["docs","full"]'), needs.release-classification.outputs.tier) && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-docs-policy')
+    if: ${{ !cancelled() && contains(fromJSON('["docs","full"]'), needs.release-classification.outputs.tier) && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-docs-policy') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
@@ -329,7 +329,7 @@ jobs:
   full-python-contracts:
     name: full-python-contracts
     needs: [release-classification, full-preflight, backend-build]
-    if: always() && needs.release-classification.outputs.tier == 'full' && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-python-contracts')
+    if: ${{ !cancelled() && needs.release-classification.outputs.tier == 'full' && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-python-contracts') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -379,7 +379,7 @@ jobs:
   full-shell-contracts:
     name: full-shell-contracts
     needs: [release-classification, full-preflight, backend-build]
-    if: always() && needs.release-classification.outputs.tier == 'full' && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-shell-contracts')
+    if: ${{ !cancelled() && needs.release-classification.outputs.tier == 'full' && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-shell-contracts') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -407,7 +407,7 @@ jobs:
   full-source-policy:
     name: full-source-policy
     needs: [release-classification]
-    if: always() && contains(fromJSON('["docs","full"]'), needs.release-classification.outputs.tier) && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-source-policy')
+    if: ${{ !cancelled() && contains(fromJSON('["docs","full"]'), needs.release-classification.outputs.tier) && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-source-policy') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -438,7 +438,7 @@ jobs:
   full-ui-audit:
     name: full-ui-audit
     needs: [release-classification]
-    if: always() && needs.release-classification.outputs.tier == 'full' && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-ui-audit')
+    if: ${{ !cancelled() && needs.release-classification.outputs.tier == 'full' && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-ui-audit') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -462,7 +462,7 @@ jobs:
   full-ui-unit-tests:
     name: full-ui-unit-tests
     needs: [release-classification]
-    if: always() && needs.release-classification.outputs.tier == 'full' && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-ui-unit-tests')
+    if: ${{ !cancelled() && needs.release-classification.outputs.tier == 'full' && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-ui-unit-tests') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -486,7 +486,7 @@ jobs:
   full-ui-build:
     name: full-ui-build
     needs: [release-classification]
-    if: always() && needs.release-classification.outputs.tier == 'full' && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-ui-build')
+    if: ${{ !cancelled() && needs.release-classification.outputs.tier == 'full' && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-ui-build') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -534,7 +534,7 @@ jobs:
   full-ui-e2e-harness:
     name: full-ui-e2e-harness
     needs: [release-classification, full-preflight, full-ui-build]
-    if: always() && needs.release-classification.outputs.tier == 'full' && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-ui-e2e-harness')
+    if: ${{ !cancelled() && needs.release-classification.outputs.tier == 'full' && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-ui-e2e-harness') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -606,7 +606,7 @@ jobs:
   full-ui-e2e-shard:
     name: full-ui-e2e-shard (${{ matrix.shard }}/${{ strategy.job-total }})
     needs: [release-classification, full-preflight, full-ui-build]
-    if: always() && needs.release-classification.outputs.tier == 'full' && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-ui-e2e-shard')
+    if: ${{ !cancelled() && needs.release-classification.outputs.tier == 'full' && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-ui-e2e-shard') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
@@ -672,9 +672,9 @@ jobs:
   full-ui-e2e:
     name: full-ui-e2e
     needs: [release-classification, full-ui-e2e-harness, full-ui-e2e-shard]
-    # `always()` so a failing shard produces a failing `full-ui-e2e` rather than a skipped one. A
-    # skip would still be refused by ci-required, but it would report the wrong reason.
-    if: always() && needs.release-classification.outputs.tier == 'full' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-ui-e2e')
+    # An explicit status function observes failed/skipped prerequisites, but false on cancellation
+    # lets GitHub stop the work. The final gate still refuses incomplete or cancelled evidence.
+    if: ${{ !cancelled() && needs.release-classification.outputs.tier == 'full' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-ui-e2e') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -700,7 +700,7 @@ jobs:
   backend-build:
     name: full-backend-build
     needs: [release-classification, minio-fixture-preflight]
-    if: always() && needs.release-classification.outputs.tier == 'full' && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'backend-build')
+    if: ${{ !cancelled() && needs.release-classification.outputs.tier == 'full' && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'backend-build') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -767,7 +767,7 @@ jobs:
   minio-fixture-preflight:
     name: full-minio-fixture-preflight
     needs: [release-classification]
-    if: always() && needs.release-classification.outputs.tier == 'full' && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'minio-fixture-preflight')
+    if: ${{ !cancelled() && needs.release-classification.outputs.tier == 'full' && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'minio-fixture-preflight') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -798,7 +798,7 @@ jobs:
       - full-ui-build
       - minio-fixture-preflight
       - backend-build
-    if: always() && needs.release-classification.outputs.tier == 'full' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-preflight')
+    if: ${{ !cancelled() && needs.release-classification.outputs.tier == 'full' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-preflight') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -813,7 +813,7 @@ jobs:
   full-backend-tests:
     name: full-backend-tests
     needs: [release-classification, full-preflight, backend-build]
-    if: always() && needs.release-classification.outputs.tier == 'full' && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-backend-tests')
+    if: ${{ !cancelled() && needs.release-classification.outputs.tier == 'full' && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-backend-tests') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     permissions:
@@ -916,7 +916,7 @@ jobs:
   backend-test:
     name: full-support-modules
     needs: [release-classification, full-preflight, backend-build]
-    if: always() && needs.release-classification.outputs.tier == 'full' && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'backend-test')
+    if: ${{ !cancelled() && needs.release-classification.outputs.tier == 'full' && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'backend-test') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -970,7 +970,7 @@ jobs:
   full-plugin-boundary:
     name: full-plugin-boundary
     needs: [release-classification, full-preflight, backend-build]
-    if: always() && needs.release-classification.outputs.tier == 'full' && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-plugin-boundary')
+    if: ${{ !cancelled() && needs.release-classification.outputs.tier == 'full' && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-plugin-boundary') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -1025,7 +1025,7 @@ jobs:
   full-api-documentation:
     name: full-api-documentation
     needs: [release-classification, full-preflight, backend-build]
-    if: always() && needs.release-classification.outputs.tier == 'full' && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-api-documentation')
+    if: ${{ !cancelled() && needs.release-classification.outputs.tier == 'full' && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-api-documentation') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -1064,7 +1064,7 @@ jobs:
 
   full-runtime-auth-smoke:
     name: full-runtime-auth-smoke
-    if: always() && needs.release-classification.outputs.tier == 'full' && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-runtime-auth-smoke')
+    if: ${{ !cancelled() && needs.release-classification.outputs.tier == 'full' && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-runtime-auth-smoke') }}
     needs: [release-classification, full-preflight, backend-build]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -1098,7 +1098,7 @@ jobs:
 
   full-runtime-jar-smoke:
     name: full-runtime-jar-smoke
-    if: always() && needs.release-classification.outputs.tier == 'full' && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-runtime-jar-smoke')
+    if: ${{ !cancelled() && needs.release-classification.outputs.tier == 'full' && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-runtime-jar-smoke') }}
     needs: [release-classification, full-preflight, backend-build]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -1154,7 +1154,7 @@ jobs:
       - full-api-documentation
       - full-runtime-auth-smoke
       - full-runtime-jar-smoke
-    if: always() && needs.release-classification.outputs.tier == 'full' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-regression')
+    if: ${{ !cancelled() && needs.release-classification.outputs.tier == 'full' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-regression') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -1168,7 +1168,7 @@ jobs:
 
   full-runtime-container-smoke:
     name: full-runtime-container-smoke
-    if: always() && needs.release-classification.outputs.tier == 'full' && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-runtime-container-smoke')
+    if: ${{ !cancelled() && needs.release-classification.outputs.tier == 'full' && needs.release-classification.result == 'success' && contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), 'full-runtime-container-smoke') }}
     needs: [release-classification, full-regression, full-ui-build, backend-build, full-plugin-boundary]
     runs-on: ubuntu-24.04
     timeout-minutes: 35
@@ -1280,6 +1280,11 @@ jobs:
             echo "release-classification reported '$CLASSIFICATION'; ci-required cannot pass." >&2
             exit 1
           fi
+      - name: Refuse cancellation before checkout
+        if: ${{ cancelled() }}
+        run: |
+          echo "A cancelled workflow cannot execute checked-out gate code." >&2
+          exit 1
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -1311,10 +1316,12 @@ jobs:
           gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$PROMOTED_SHA&per_page=100"
           > "$RUNNER_TEMP/promotion-evidence.json"
       - name: Require every job this event demanded
+        if: ${{ success() && !cancelled() }}
         env:
           IMPACT_PLAN: ${{ needs.release-classification.outputs.plan }}
           IMPACT_LANE: ${{ inputs.integration_ref || github.base_ref || github.event.merge_group.base_ref || github.ref_name }}
           IMPACT_BASE: ${{ inputs.routing_run_id != '' && inputs.base_sha || github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+          CI_CANCELLED: ${{ job.status != 'success' }}
           CI_TIER: ${{ needs.release-classification.outputs.tier }}
           EVENT_NAME: ${{ inputs.routing_run_id != '' && 'pull_request' || github.event_name }}
           BASE_REF: ${{ inputs.routing_run_id != '' && 'dev' || github.base_ref }}
@@ -1326,3 +1333,8 @@ jobs:
           PROMOTION_EVIDENCE: ${{ runner.temp }}/promotion-evidence.json
           NEEDS_JSON: ${{ toJSON(needs) }}
         run: python3 scripts/ci_required.py
+      - name: Refuse cancellation after verification
+        if: ${{ cancelled() }}
+        run: |
+          echo "A cancelled workflow cannot establish ci-required evidence." >&2
+          exit 1

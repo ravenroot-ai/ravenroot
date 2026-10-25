@@ -571,3 +571,87 @@ class TriggerTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class CancellationAdmissionTest(unittest.TestCase):
+    """Exercise actual workflow expressions against documented cancellation/needs semantics."""
+    @classmethod
+    def setUpClass(cls):
+        cls.contents = WORKFLOW.read_text(encoding='utf-8')
+        cls.jobs = job_blocks(cls.contents)
+
+    def admitted(self, job, *, cancelled=False, selected=True, prerequisite='skipped'):
+        from scripts.ci_required import declared_condition
+        condition = declared_condition(self.jobs[job])
+        # GitHub adds success() only when no explicit status function is present. An omitted
+        # prerequisite must not suppress this consumer, but workflow cancellation must suppress it.
+        explicit_status = any(token in condition for token in ('cancelled()', 'always()', 'success()', 'failure()'))
+        if not explicit_status and prerequisite != 'success':
+            return False
+        expression = condition.removeprefix('${{').removesuffix('}}').strip()
+        expression = expression.replace('!cancelled()', str(not cancelled)).replace('always()', 'True')
+        expression = expression.replace("contains(fromJSON('[\"docs\",\"full\"]'), needs.release-classification.outputs.tier)", 'True')
+        expression = expression.replace("needs.release-classification.outputs.tier == 'full'", 'True')
+        expression = expression.replace("needs.release-classification.result == 'success'", 'True')
+        expression = expression.replace(f"contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), '{job}')", str(selected))
+        expression = expression.replace('&&', 'and')
+        self.assertRegex(expression, r'^(?:True|False|and|or|not|\s|\(|\))*$')
+        return eval(expression, {'__builtins__': {}}, {})
+
+    def test_selected_consumer_runs_after_deliberately_omitted_need(self):
+        # backend-build needs MinIO, which an independently safe scope may omit. The consumer
+        # must still run and furnish evidence rather than inheriting GitHub's implicit success().
+        self.assertTrue(self.admitted('backend-build', prerequisite='skipped'))
+        self.assertFalse(self.admitted('backend-build', selected=False, prerequisite='skipped'))
+
+    def test_failure_observation_stays_live_but_cancellation_stops_every_planned_job(self):
+        for job in GATED_JOBS:
+            with self.subTest(job=job):
+                self.assertTrue(self.admitted(job, prerequisite='failure'))
+                self.assertFalse(self.admitted(job, cancelled=True, prerequisite='failure'))
+                self.assertFalse(self.admitted(job, cancelled=True, prerequisite='skipped'))
+        results = results_for('full', **{'full-preflight': 'failure'})
+        self.assertTrue(verify_results('full', results))
+
+    def test_real_ui_plan_accepts_only_recorded_omissions_and_complete_selected_results(self):
+        from unittest.mock import patch
+        from scripts.impact_plan import make_plan
+        # Exercise both planner and verifier on the real pinned POM graph, with one explicit
+        # representative UI-only range. Omitted backend work may skip; selected UI work may not.
+        with patch('scripts.impact_plan.paths_between', return_value=['ravenroot/ravenroot-ui/src/App.js']):
+            plan = make_plan('HEAD', 'HEAD', 'pull_request', 'release/0.8')
+            self.assertFalse(plan['full'])
+            self.assertNotIn('backend-build', plan['jobs'])
+            results = {CLASSIFICATION_JOB: 'success'} | {
+                job: 'success' if job in plan['jobs'] else 'skipped' for job in GATED_JOBS
+            }
+            self.assertEqual(verify_results('full', results, plan), [])
+            for result in ('failure', 'cancelled', 'skipped'):
+                with self.subTest(result=result):
+                    self.assertTrue(verify_results('full', results | {'full-ui-build': result}, plan))
+            self.assertTrue(verify_results('full', results, plan, cancelled=True))
+
+    def test_reintroducing_uncancellable_always_is_a_topology_failure(self):
+        block = self.jobs['full-backend-tests']
+        broken = self.contents.replace(block, block.replace('!cancelled()', 'always()', 1))
+        self.assertTrue(any('full-backend-tests' in item for item in verify_workflow(broken)))
+
+    def test_cancellation_cannot_borrow_all_success_or_a_no_functional_tier(self):
+        for tier in REQUIRED_BY_TIER:
+            with self.subTest(tier=tier):
+                self.assertTrue(verify_results(tier, results_for(tier), cancelled=True))
+        for result in ('cancelled', 'skipped', 'unknown'):
+            self.assertTrue(verify_results('full', results_for('full', **{'full-backend-tests': result})))
+
+    def test_required_gate_cannot_silently_skip_or_drop_cancellation_refusal(self):
+        from scripts.ci_required import CANCELLATION_GUARD, PRECHECKOUT_CANCELLATION_GUARD
+        gate = self.jobs[GATE_JOB]
+        self.assertEqual(verify_workflow(self.contents), [])
+        for replacement in (
+            gate.replace('    if: always()', '    if: ${{ !cancelled() }}', 1),
+            gate.replace("CI_CANCELLED: ${{ job.status != 'success' }}", "CI_CANCELLED: 'false'", 1),
+            gate.replace(CANCELLATION_GUARD, '', 1),
+            gate.replace(PRECHECKOUT_CANCELLATION_GUARD, '', 1),
+            gate.replace('if: ${{ success() && !cancelled() }}', 'if: always()', 1),
+        ):
+            with self.subTest(replacement=replacement[:60]):
+                self.assertTrue(verify_workflow(self.contents.replace(gate, replacement)))

@@ -56,6 +56,13 @@ real AMQP/Compose exercise; complete fallback includes that job and its independ
 The advisory feature-push `ci-fast` workflow retains its compile/build feedback because a branch
 push has no trusted issue-lane selection. It publishes only `ci-fast` and can never stand in for
 `ci-required`; this remaining repeated compilation is explicit.
+Selected jobs and phase barriers use the explicit `!cancelled()` status function. They can
+observe failed or deliberately omitted prerequisites, while normal workflow cancellation stops
+expensive work. The cheap final `ci-required` gate retains `always()` to report a refusal rather
+than a successful skipped required check; it rejects cancellation before checkout, in result
+verification, and after verification. Cancelled, missing and incomplete evidence never authorize
+an integration or promotion.
+
 Dev retains its complete verification policy. A queue candidate reports its own native check;
 no first-PR or single-entry-queue exception exists.
 

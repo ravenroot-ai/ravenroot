@@ -7,6 +7,7 @@ import java.util.*;
 /** Bounded SIWC Responses wire codec. Success requires an explicit completed terminal event. */
 public final class OpenAiResponses {
     private static final PayloadLimits LIMITS = new PayloadLimits(4 * 1024 * 1024, 32, 100_000, 100_000, 2 * 1024 * 1024, 4096);
+    private static final String REPLAY = "ravenroot.responses.output";
     private OpenAiResponses() { }
 
     /**
@@ -21,6 +22,13 @@ public final class OpenAiResponses {
         for (Object value : list(source.get("messages"))) {
             Map<String, Object> message = map(value);
             String role = string(message, "role");
+            if (message.containsKey(REPLAY)) {
+                if (!role.equals("assistant")) throw error("provider-history-invalid");
+                for (Object retained : list(message.get(REPLAY))) {
+                    var item = map(retained); requireReplayable(item); input.add(item);
+                }
+                continue;
+            }
             if (role.equals("tool")) {
                 input.add(Map.of("type", "function_call_output", "call_id", string(message, "tool_call_id"), "output", string(message, "content")));
                 continue;
@@ -62,6 +70,7 @@ public final class OpenAiResponses {
         StringBuilder text = new StringBuilder(); List<Object> calls = new ArrayList<>();
         for (Object value : list(completed.get("output"))) {
             var output = map(value);
+            requireReplayable(output);
             if ("message".equals(output.get("type"))) {
                 for (Object content : list(output.get("content"))) {
                     var part = map(content);
@@ -74,7 +83,10 @@ public final class OpenAiResponses {
             }
         }
         Map<String, Object> message = new LinkedHashMap<>(); message.put("role", "assistant"); message.put("content", text.toString());
-        if (!calls.isEmpty()) message.put("tool_calls", calls);
+        if (!calls.isEmpty()) {
+            message.put("tool_calls", calls);
+            message.put(REPLAY, list(completed.get("output")));
+        }
         Map<String, Object> usage = map(completed.get("usage"));
         Map<String, Object> accounting = new LinkedHashMap<>();
         for (String field : List.of("input_tokens", "output_tokens")) {
@@ -87,6 +99,28 @@ public final class OpenAiResponses {
         }
         return json(Map.of("model", string(completed, "model"), "choices", List.of(Map.of("index", 0, "message", message,
                 "finish_reason", calls.isEmpty() ? "stop" : "tool_calls")), "usage", accounting));
+    }
+    /**
+     * Retains validated stateless provider output for a subsequent authorized tool turn.
+     * @param completedChat the bounded Chat-compatible result already checked against local budgets
+     * @return an internal assistant history message preserving reasoning, phase and call identities
+     * @throws Failure if a replayable assistant tool result is absent or has unsupported output
+     */
+    public static PayloadValue assistantHistory(byte[] completedChat) {
+        var choices = list(object(completedChat).get("choices"));
+        if (choices.size() != 1) throw error("provider-history-invalid");
+        var message = map(map(choices.getFirst()).get("message"));
+        var replay = list(message.get(REPLAY));
+        if (!"assistant".equals(message.get("role")) || replay.isEmpty()) throw error("provider-history-invalid");
+        for (Object item : replay) requireReplayable(map(item));
+        return PayloadValue.fromJava(Map.of("role", "assistant", REPLAY, replay), LIMITS);
+    }
+    private static void requireReplayable(Map<String, Object> item) {
+        String type = string(item, "type");
+        if (type.equals("reasoning") && string(item, "encrypted_content").isBlank()) throw error("provider-history-invalid");
+        if (!Set.of("reasoning", "message", "function_call").contains(type)
+                || type.equals("message") && item.containsKey("role") && !"assistant".equals(item.get("role")))
+            throw error("unsupported-output");
     }
     /**
      * Enforces a local accepted-result output budget using reported, validated usage.

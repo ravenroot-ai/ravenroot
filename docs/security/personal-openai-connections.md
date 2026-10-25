@@ -122,3 +122,10 @@ executing a proposed tool. These limits refuse accepted results and further call
 hard billing consumption. System/API-key Chat requests preserve their existing `max_tokens` behavior.
 See the current [SIWC preview contract](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations)
 and [additional-tools input contract](https://developers.openai.com/api/docs/guides/tools-tool-search#add-tools-at-a-specific-point-in-the-input).
+
+Stateless personal Agent continuations replay the supported provider output items, including opaque
+encrypted reasoning and assistant phase, before the corresponding function outputs. This context
+stays in the executing owner's bounded internal conversation/checkpoint; it is not added to browser
+assistant history, shared editor context or model-output provenance. Unsupported output item types
+are refused before tool execution. Replay context never grants tool authority or changes the pinned
+connection. See [stateless reasoning continuity](https://developers.openai.com/api/docs/guides/reasoning#preserve-reasoning-without-stored-responses).

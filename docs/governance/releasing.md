@@ -8,7 +8,7 @@ the explicit decision to publish a selected set of product changes.
 
 | Branch | Purpose | Accepted changes |
 |---|---|---|
-| `main` | Default branch, released product history, and current public documentation | Release or content-promotion pull requests from the internal `dev` branch; exceptionally, protected internal `hotfix/*` pull requests |
+| `main` | Default branch, released product history, and current public documentation | Release or content-promotion pull requests from the exact internal `dev` or `release/0.8` branch; exceptionally, protected internal `hotfix/*` pull requests |
 | `dev` | Integration branch for the next release | Reviewed topic branches and pull requests from repository branches or forks, each verified by its own `pull_request` event (see [Where the checks run](#where-the-checks-run)) |
 | `feature/*`, `fix/*`, `docs/*`, `test/*` | Focused contribution branches based on `dev` | One bounded change returning to `dev` |
 | `hotfix/*` | Exceptional urgent correction based on `main` | Patch release returning to `main`, followed by synchronization to `dev` |
@@ -20,7 +20,7 @@ rules must require pull requests and the relevant status checks on both protecte
 The `main-source-policy` status check accepts a pull request to `main` only when its head repository is
 exactly this repository and its head branch is either:
 
-- the exact `dev` branch; or
+- the exact `dev` or `release/0.8` branch; or
 - a `hotfix/*` branch.
 
 The check runs from the base branch through `pull_request_target`, has no repository permissions, does
@@ -45,7 +45,7 @@ label against the changed paths before any merge is allowed.
 | `release:minor` | Backward-compatible feature or incompatible `0.x` change | Promotion | Minor increment and publication |
 | `release:major` | Stable-series incompatible change | Promotion | Major increment and publication |
 
-The promotion tier belongs to the internal `dev` branch alone. A protected `hotfix/*` branch never
+The promotion tier belongs to the exact internal `dev` and `release/0.8` branches. A protected `hotfix/*` branch never
 passed through `dev`, so a pull request from one runs the complete functional suite; a pull request
 into `main` from any other head is refused by `release-classification`, as `main-source-policy`
 refuses it.
@@ -496,3 +496,17 @@ restricted to the full image and UI image repository names and refuses immutable
 All new publication stays inside the same protected release environment; no additional registry
 credentials or publication authority are granted to ordinary CI. For the frontend deployment and
 verification commands see [UI-only Kubernetes installation](../operator-guide/kubernetes-ui-only.md).
+
+## Independently maintained 0.8 line
+
+`release/0.8` is a maintained integration branch rooted in the published 0.8 release, independent
+of 0.9 development on `dev`. The exact internal branch is also an allowed future promotion source;
+this is not a wildcard permission for `release/*`. Use `scripts/prepare_release.py --source
+release/0.8 --intent INTENT` only after the owner chooses release intent. Preparation, review,
+synchronization and promotion must all use that source. Preserve release-environment approval.
+
+The [maintenance verification and promotion procedure](impact-aware-ci.md) defines the source-policy
+activation prerequisite on `main`, exact-source-tree evidence, weekly full regression, conflict
+handling and explicit validated forward-ports to dev. The ordinary dev procedure above remains the
+default. Maintenance never synchronizes dev into 0.8, increments versions merely for a branch name,
+or publishes without the owner's decisions.

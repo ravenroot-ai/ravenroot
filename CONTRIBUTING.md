@@ -83,3 +83,10 @@ workflow once that workflow is available. A documentation-only promotion may ins
 
 Read [Releasing Ravenroot](docs/governance/releasing.md) for the complete branch, version, hotfix, and
 publication policy.
+
+## Maintaining the 0.8 line
+
+For a contribution explicitly selected for 0.8 maintenance, base the topic on `release/0.8`
+and target exactly that branch. Keep ordinary work on `dev`; never merge the 0.9 development
+line into maintenance. Read [impact-aware CI](docs/governance/impact-aware-ci.md) for plans,
+complete verification, artifact provenance and later forward-ports.

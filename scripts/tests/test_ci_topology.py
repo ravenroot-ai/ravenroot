@@ -54,10 +54,10 @@ class ContinuousIntegrationTopologyTest(unittest.TestCase):
         self.assertIn("-DskipTests clean install", self.jobs["backend-build"])
         self.assertNotIn("clean verify", self.jobs["backend-build"])
         self.assertIn("clean verify", self.jobs["full-backend-tests"])
-        self.assertIn("scripts/select_backend_tests.py", self.jobs["full-backend-tests"])
-        self.assertIn("-pl \"$BACKEND_PROJECTS\" -am verify", self.jobs["full-backend-tests"])
+        self.assertIn("Consume the authoritative build/test plan", self.jobs["full-backend-tests"])
+        self.assertIn("-pl \"$BACKEND_PROJECTS\" verify", self.jobs["full-backend-tests"])
         self.assertNotRegex(self.jobs["full-backend-tests"], r"mvn[^\n]*\s-amd(?:\s|$)")
-        self.assertIn("[ \"$BACKEND_SCOPE\" = none ] && [ -z \"$BACKEND_PROJECTS\" ]", self.jobs["full-backend-tests"])
+        self.assertIn("[ \"$BACKEND_SCOPE\" = selected ] && [ -z \"$BACKEND_PROJECTS\" ]", self.jobs["full-backend-tests"])
         self.assertIn("Refusing invalid backend scope", self.jobs["full-backend-tests"])
         backend_checkout = self.jobs["full-backend-tests"].split("- name: Set up Java", 1)[0]
         self.assertIn("fetch-depth: 0", backend_checkout)
@@ -202,16 +202,28 @@ class ContinuousIntegrationTopologyTest(unittest.TestCase):
     def test_full_tier_has_a_scheduled_all_reactor_regression_lane(self) -> None:
         self.assertIn("  schedule:\n    - cron:", self.contents)
         backend = self.jobs["full-backend-tests"]
-        self.assertIn("Scheduled runs intentionally select the all-reactor regression path", backend)
-        self.assertEqual(6, backend.count("if: steps.backend-scope.outputs.mode == 'all'"))
+        self.assertIn('"$EVENT_NAME" = schedule', self.jobs["release-classification"])
+        self.assertIn("force-complete", self.jobs["release-classification"])
+        self.assertEqual(4, backend.count("if: steps.backend-scope.outputs.native == 'true'"))
+        self.assertEqual(1, backend.count("if: steps.backend-scope.outputs.extension_pack == 'true'"))
 
     def test_push_consumers_use_the_exact_push_base(self) -> None:
         classifier = self.jobs["release-classification"]
         backend = self.jobs["full-backend-tests"]
         expected_fallback = "github.event.merge_group.base_sha || github.event.before"
         self.assertIn(expected_fallback, classifier)
-        self.assertIn(expected_fallback, backend)
-        self.assertIn('test -n "$base"', backend)
+        self.assertIn("PLAN: ${{ needs.release-classification.outputs.plan }}", backend)
+        self.assertIn("ci_artifacts.py verify", backend)
+
+    def test_provenance_is_verified_before_runtime_manifests_are_removed(self):
+        job=self.jobs['full-runtime-container-smoke']
+        verify=job.index('ci_artifacts.py verify ci-artifacts/backend/plugins')
+        remove=job.index('rm ci-artifacts/backend/plugins/provenance.json')
+        build=job.index('docker build --file Dockerfile.ci')
+        self.assertLess(verify,remove)
+        self.assertLess(remove,build)
+        self.assertIn('full-configurator', self.jobs)
+        self.assertIn('uses: ./.github/workflows/configurator.yml',self.jobs['full-configurator'])
 
 
 class ConfiguratorWorkflowTopologyTest(unittest.TestCase):
@@ -238,3 +250,17 @@ class ConfiguratorWorkflowTopologyTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SupportScopeTopologyTest(unittest.TestCase):
+    def test_actual_ordered_commands_match_declared_support_scope(self):
+        from scripts.impact_plan import SUPPORT
+        job = job_blocks(WORKFLOW.read_text())['backend-test']
+        loops = re.findall(r'for project in ([^;]+); do', job)
+        self.assertEqual(loops, ['ravenroot-adapter-anthropic ravenroot-adapter-openai-compatible',
+                                 'ravenroot-dev-harness ravenroot-sample'])
+        self.assertEqual(set(' '.join(loops).split()), SUPPORT)
+        self.assertIn('python3 scripts/ci_artifacts.py verify ci-artifacts/backend', job)
+        self.assertLess(job.index('rm -rf "$HOME/.m2/repository/ai/ravenroot"'), job.index('cp -R ci-artifacts/backend/maven-repository'))
+        self.assertIn('RAVENROOT_ENGINE: pekko', job)
+        self.assertIn('exec:java -Dexec.args="hello ravenroot"', job)

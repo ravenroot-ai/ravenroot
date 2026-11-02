@@ -257,7 +257,7 @@ export function stopOriginDeployment(owner, { client, isCurrent, reason }) {
         const reply = await client.stopDeployment(binding.deploymentId, command);
         check();
         const stopped = reply?.status || reply;
-        if (stopped && verify(stopped).state === 'STOPPED') {
+        if (stopped?.state === 'STOPPED' && verify(stopped).state === 'STOPPED') {
           owner.deploymentRunStatus = 'STOPPED'; owner.deploymentRunLastObservedState = 'STOPPED';
           return true;
         }

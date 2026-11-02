@@ -225,7 +225,9 @@ def navigation_with_notes(root: Path, target: str) -> str:
     return navigation[: match.start()] + entry + navigation[match.start() :]
 
 
-def prepare(root: Path, intent: str) -> dict[str, object]:
+def prepare(root: Path, intent: str, source: str = "dev") -> dict[str, object]:
+    if source not in {"dev", "release/0.8"}:
+        raise ReleaseContractError("release source must be exactly dev or release/0.8")
     if intent not in INTENTS:
         raise ReleaseContractError(f"intent must be one of {', '.join(INTENTS)}; got {intent!r}")
     previous = latest_release(root)
@@ -253,6 +255,7 @@ def prepare(root: Path, intent: str) -> dict[str, object]:
         for path, _ in fragments:
             path.unlink()
     return {
+        "source": source,
         "previous": str(previous),
         "version": target,
         "intent": intent,
@@ -263,10 +266,11 @@ def prepare(root: Path, intent: str) -> dict[str, object]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--intent", required=True, choices=INTENTS)
+    parser.add_argument("--source", choices=["dev", "release/0.8"], default="dev")
     arguments = parser.parse_args(argv)
     root = Path(__file__).resolve().parents[1]
     try:
-        summary = prepare(root, arguments.intent)
+        summary = prepare(root, arguments.intent, arguments.source)
         from scripts.check_product_version import errors
 
         findings = errors(summary["version"])

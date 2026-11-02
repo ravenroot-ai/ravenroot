@@ -302,13 +302,43 @@ class KubernetesAcceptanceFixtureTest(unittest.TestCase):
         self.assertNotIn("subprocess", failure_path)
         self.assertNotIn("exec", failure_path)
         self.assertIn('if result.returncode:', failure_path)
-        workflow = self.support_sources()["workflow"]
+        self.assert_native_upload_contract(self.support_sources()["workflow"])
+
+    def assert_native_upload_contract(self, workflow):
         upload = workflow.split("- name: Retain sanitized native Kubernetes results", 1)[1].split("- name:", 1)[0]
-        self.assertIn("if: always() && steps.backend-scope.outputs.mode == 'all'", upload)
+        self.assertIn("if: always() && steps.backend-scope.outputs.native == 'true'", upload)
         self.assertEqual(["ravenroot/ravenroot-core/target/native-kubernetes-reports/KubernetesPodRunnerNativeTest.json",
                           "ravenroot/ravenroot-core/target/native-kubernetes-reports/KubernetesWorkspaceGraphNativeTest.json"],
                          re.findall(r"(?m)^            (\S+)$", upload))
         self.assertNotIn("surefire-reports", upload)
+
+    def test_upload_follows_native_selection_for_complete_and_selected_plans_after_any_outcome(self):
+        workflow = self.support_sources()["workflow"]
+        self.assert_native_upload_contract(workflow)
+        upload = workflow.split("- name: Retain sanitized native Kubernetes results", 1)[1].split("- name:", 1)[0]
+        condition = re.search(r"(?m)^        if: (.+)$", upload).group(1)
+        for mode, native, expected in (("all", True, True), ("selected", True, True), ("selected", False, False)):
+            for outcome in ("success", "failure", "cancelled"):
+                with self.subTest(mode=mode, native=native, outcome=outcome):
+                    # always() remains true after failure/cancellation; only actual native scope
+                    # controls retention. In particular selected native work must not lose reports.
+                    expression = condition.replace("always()", "True").replace(
+                        "steps.backend-scope.outputs.native == 'true'", str(native)).replace("&&", "and")
+                    self.assertRegex(expression, r"^(?:True|False|and|\s|\(|\))*$")
+                    self.assertEqual(expected, eval(expression, {"__builtins__": {}}, {}))
+
+    def test_upload_rejects_mode_only_selection_missing_always_and_unsafe_report_paths(self):
+        workflow = self.support_sources()["workflow"]
+        start = workflow.index("      - name: Retain sanitized native Kubernetes results")
+        end = workflow.index("      - name:", start + 1)
+        upload = workflow[start:end]
+        mutations = [upload.replace("outputs.native == 'true'", "outputs.mode == 'all'"),
+                     upload.replace("always() && ", ""),
+                     upload.replace("native-kubernetes-reports/KubernetesPodRunnerNativeTest.json", "surefire-reports/*.xml"),
+                     upload.replace("          if-no-files-found:", "            /private/extra-report.json\n          if-no-files-found:")]
+        for changed in mutations:
+            with self.subTest(changed=changed[:30]), self.assertRaises(AssertionError):
+                self.assert_native_upload_contract(workflow[:start] + changed + workflow[end:])
 
     def test_inventory_uses_finite_retained_pvs_and_minimal_manager_authority(self):
         objects = fixture.resources("owned-node")["items"]

@@ -166,21 +166,37 @@ public final class GraalVmProgramRuntime implements ProgramRuntime {
     private CompletableFuture<Object> invoke(ProgramWireProtocol.Mode mode, java.util.function.Supplier<GeneratedArtifact> source,
                                              ProgramRequest request, ProgramAdmission admission) {
         var session = new AtomicReference<SandboxSupervisorLauncher.SandboxSupervisorSession>();
-        var cleaned = new AtomicBoolean();
+        var cleanup = new InvocationCleanup(session);
         var cancelled = new AtomicBoolean();
-        var cleanupSettled = new CompletableFuture<Void>();
-        var result = new CancellableFuture(() -> { cancelled.set(true); cleanup(session.get(), cleaned, SandboxSupervisorLauncher.SandboxTermination.CANCELLED); });
+        var result = new CancellableFuture(() -> {
+            cancelled.set(true);
+            cleanup.settle(true, SandboxSupervisorLauncher.SandboxTermination.CANCELLED);
+        });
+        Throwable registrationFailure = null;
         if (admission != null) {
-            // The other half of the control: an execution admitted a microsecond before a retirement
-            // is legitimately admitted and its source may already be in the worker, so redemption
-            // cannot stop it. Cancelling it is the only remaining remedy.
-            admission.onRevoked(() -> result.cancel(true));
-            cleanupSettled.whenComplete((ignored, error) -> admission.close());
+            try { admission.onRevoked(() -> result.cancel(true)); }
+            catch (Throwable error) { registrationFailure = error; }
         }
+        final Throwable initialFailure = registrationFailure;
         Thread.startVirtualThread(() -> {
-            try { result.complete(invokeSupervisor(mode, source, request, session, cleaned, cancelled)); }
-            catch (Throwable error) { if (!result.isCancelled()) result.completeExceptionally(error); }
-            finally { cleanupSettled.complete(null); }
+            Object value = null;
+            Throwable failure = initialFailure;
+            if (failure == null) {
+                try { value = invokeSupervisor(mode, source, request, session, cancelled); }
+                catch (Throwable error) { failure = error; }
+            }
+            // Settlement includes failed cleanup attempts. It is not a claim of proven reaping.
+            Throwable finalizationFailure = cleanup.settle(failure != null || cancelled.get(),
+                    cancelled.get() ? SandboxSupervisorLauncher.SandboxTermination.CANCELLED
+                            : SandboxSupervisorLauncher.SandboxTermination.IO_FAILURE);
+            if (admission != null) {
+                try { admission.close(); }
+                catch (Throwable error) { finalizationFailure = combineFailure(finalizationFailure, error); }
+            }
+            failure = combineFailure(failure, finalizationFailure);
+            boolean published = failure == null ? result.complete(value) : result.completeExceptionally(failure);
+            if (!published && result.cancellationRequested() && finalizationFailure != null)
+                logCleanupFailure(finalizationFailure);
         });
         return result;
     }
@@ -188,7 +204,7 @@ public final class GraalVmProgramRuntime implements ProgramRuntime {
     private Object invokeSupervisor(ProgramWireProtocol.Mode mode, java.util.function.Supplier<GeneratedArtifact> source,
                                     ProgramRequest request,
                                     AtomicReference<SandboxSupervisorLauncher.SandboxSupervisorSession> sessionRef,
-                                    AtomicBoolean cleaned, AtomicBoolean cancelled) throws Exception {
+                                    AtomicBoolean cancelled) throws Exception {
         final long start = System.nanoTime();
         final long deadline = start + policy.deadline().toNanos();
         // This is the capability gate: with RAVENROOT_GRAAL_SANDBOX_SUPERVISOR unset the constructor
@@ -219,65 +235,59 @@ public final class GraalVmProgramRuntime implements ProgramRuntime {
                     ProgramRuntimeUnavailableException.Reason.SANDBOX_UNAVAILABLE, unusable.getMessage(), unusable);
         }
         sessionRef.set(session);
+        // Launch includes optional placement attestation and ProcessBuilder.start(). Both
+        // consume this request's deadline. GraalPy initialization happens in the child and
+        // is observed later by session.await(); source is never redeemed after this deadline.
+        checkDeadline(start, deadline, cancelled, "after_launch");
+        // The redemption point. Authoritative state is re-read HERE, on the far side
+        // of process launch and virtual-thread scheduling, and the source that goes to the worker
+        // on the next line is the one redemption returned. Nothing can intervene between the two
+        // because there is no interval -- the check is the acquisition. Moving this above
+        // launcher.launch(policy), or hoisting it into execute(), reopens the window.
+        GeneratedArtifact artifact = source.get();
+        verifyArtifact(artifact);
+        // Escape site one of two: Future.get(timeout) answers a RAW TimeoutException, which
+        // is not the shape the rest of this class uses for a deadline. Unwrapped, it fell past
+        // every typed branch of RavenrootServer.artifactFailureCode and reached the author as
+        // "the request was rejected as invalid", obscuring the actual timeout.
         try {
-            // Launch includes optional placement attestation and ProcessBuilder.start(). Both
-            // consume this request's deadline. GraalPy initialization happens in the child and
-            // is observed later by session.await(); source is never redeemed after this deadline.
-            checkDeadline(start, deadline, cancelled, "after_launch");
-            // The redemption point. Authoritative state is re-read HERE, on the far side
-            // of process launch and virtual-thread scheduling, and the source that goes to the worker
-            // on the next line is the one redemption returned. Nothing can intervene between the two
-            // because there is no interval -- the check is the acquisition. Moving this above
-            // launcher.launch(policy), or hoisting it into execute(), reopens the window.
-            GeneratedArtifact artifact = source.get();
-            verifyArtifact(artifact);
-            // Escape site one of two: Future.get(timeout) answers a RAW TimeoutException, which
-            // is not the shape the rest of this class uses for a deadline. Unwrapped, it fell past
-            // every typed branch of RavenrootServer.artifactFailureCode and reached the author as
-            // "the request was rejected as invalid", obscuring the actual timeout.
-            try {
-                writeRequestBounded(session.workerInput(), mode, artifact, request, remaining(deadline),
-                        policy.externalIoLimits().maximumRequestBytes());
-            } catch (TimeoutException expired) {
-                throw deadlineExceeded("write_request", start, expired);
-            }
-            checkDeadline(start, deadline, cancelled, "after_request_write");
-            var diagnostics = readBoundedAsync(session.diagnostics(), MAX_DIAGNOSTIC_BYTES);
-            SandboxSupervisorLauncher.SandboxOutcome outcome = session.await(remaining(deadline));
-            // A DEADLINE_EXCEEDED outcome is the same fact as the checks above, so it must not
-            // keep travelling as the IllegalStateException that artifactFailureCode reads as a state
-            // conflict. The other outcomes are left exactly as they were: reclassifying them is a
-            // separate classification question.
-            //
-            // WHAT THIS OUTCOME DOES NOT ESTABLISH, because this comment used to say it did. It called
-            // this "the supervisor's own verdict", and the only production implementation does not
-            // warrant that: SandboxSupervisorProcessLauncher's session answers DEADLINE_EXCEEDED from
-            // !process.waitFor(remaining) alone, which establishes only that the child had not exited
-            // within the remaining budget. That IS the caller's own timeout -- exactly what
-            // SandboxSupervisorContract#theSupervisorEnforcesTheDeclaredDeadline requires a conforming
-            // supervisor NOT to leave the deadline to. So at this stage WHETHER THE WORKER EVER RAN IS
-            // UNKNOWN: a supervisor stuck in setup, or a worker still inside GraalPy's cold start,
-            // arrives here with the program never executed.
-            // Do not infer progress from this outcome; it is also the stage this adapter reaches in
-            // practice, five times per full reactor run.
-            if (outcome == SandboxSupervisorLauncher.SandboxOutcome.DEADLINE_EXCEEDED)
-                throw deadlineExceeded("sandbox_outcome", start, null);
-            if (outcome != SandboxSupervisorLauncher.SandboxOutcome.COMPLETED) throw sandboxFailure(outcome);
-            byte[] response = SandboxSupervisorProtocol.readWorkerResponse(session.supervisorControl(), MAX_RESPONSE_BYTES);
-            // Escape site two of two: the wait on worker diagnostics.
-            try {
-                diagnostics.get(Math.max(1, remaining(deadline).toMillis()), TimeUnit.MILLISECONDS);
-            } catch (TimeoutException expired) {
-                throw deadlineExceeded("diagnostics", start, expired);
-            }
-            checkDeadline(start, deadline, cancelled, "after_response");
-            try { return ProgramWireProtocol.readResponse(new ByteArrayInputStream(response)); }
-            catch (ProgramWireProtocol.ProgramWorkerException error) { throw rejection(error); }
-        } catch (Throwable error) {
-            cleanup(session, cleaned, cancelled.get() ? SandboxSupervisorLauncher.SandboxTermination.CANCELLED
-                    : SandboxSupervisorLauncher.SandboxTermination.IO_FAILURE);
-            throw error;
-        } finally { try { session.close(); } catch (IOException ignored) { } }
+            writeRequestBounded(session.workerInput(), mode, artifact, request, remaining(deadline),
+                    policy.externalIoLimits().maximumRequestBytes());
+        } catch (TimeoutException expired) {
+            throw deadlineExceeded("write_request", start, expired);
+        }
+        checkDeadline(start, deadline, cancelled, "after_request_write");
+        var diagnostics = readBoundedAsync(session.diagnostics(), MAX_DIAGNOSTIC_BYTES);
+        SandboxSupervisorLauncher.SandboxOutcome outcome = session.await(remaining(deadline));
+        // A DEADLINE_EXCEEDED outcome is the same fact as the checks above, so it must not
+        // keep travelling as the IllegalStateException that artifactFailureCode reads as a state
+        // conflict. The other outcomes are left exactly as they were: reclassifying them is a
+        // separate classification question.
+        //
+        // WHAT THIS OUTCOME DOES NOT ESTABLISH, because this comment used to say it did. It called
+        // this "the supervisor's own verdict", and the only production implementation does not
+        // warrant that: SandboxSupervisorProcessLauncher's session answers DEADLINE_EXCEEDED from
+        // !process.waitFor(remaining) alone, which establishes only that the child had not exited
+        // within the remaining budget. That IS the caller's own timeout -- exactly what
+        // SandboxSupervisorContract#theSupervisorEnforcesTheDeclaredDeadline requires a conforming
+        // supervisor NOT to leave the deadline to. So at this stage WHETHER THE WORKER EVER RAN IS
+        // UNKNOWN: a supervisor stuck in setup, or a worker still inside GraalPy's cold start,
+        // arrives here with the program never executed.
+        // Do not infer progress from this outcome; it is also the stage this adapter reaches in
+        // practice, five times per full reactor run.
+        if (outcome == SandboxSupervisorLauncher.SandboxOutcome.DEADLINE_EXCEEDED)
+            throw deadlineExceeded("sandbox_outcome", start, null);
+        if (outcome != SandboxSupervisorLauncher.SandboxOutcome.COMPLETED) throw sandboxFailure(outcome);
+        byte[] response = SandboxSupervisorProtocol.readWorkerResponse(session.supervisorControl(), MAX_RESPONSE_BYTES);
+        // Escape site two of two: the wait on worker diagnostics.
+        try {
+            diagnostics.get(Math.max(1, remaining(deadline).toMillis()), TimeUnit.MILLISECONDS);
+        } catch (TimeoutException expired) {
+            throw deadlineExceeded("diagnostics", start, expired);
+        }
+        checkDeadline(start, deadline, cancelled, "after_response");
+        try { return ProgramWireProtocol.readResponse(new ByteArrayInputStream(response)); }
+        catch (ProgramWireProtocol.ProgramWorkerException error) { throw rejection(error); }
     }
 
     /**
@@ -369,12 +379,54 @@ public final class GraalVmProgramRuntime implements ProgramRuntime {
         return escaped.toString();
     }
 
-    private static void cleanup(SandboxSupervisorLauncher.SandboxSupervisorSession session, AtomicBoolean cleaned,
-                                SandboxSupervisorLauncher.SandboxTermination termination) {
-        if (session == null || !cleaned.compareAndSet(false, true)) return;
-        try { session.terminate(termination); session.await(REAP_TIMEOUT); }
-        catch (Exception ignored) { /* authoritative supervisor acknowledgement is required before returning */ }
-        try { session.close(); } catch (IOException ignored) { }
+    private static Throwable combineFailure(Throwable primary, Throwable additional) {
+        if (primary == null) return additional;
+        if (additional != null && additional != primary) primary.addSuppressed(additional);
+        return primary;
+    }
+
+    /** One per-invocation cleanup attempt, shared through its completion rather than its start. */
+    private static final class InvocationCleanup {
+        private final AtomicReference<SandboxSupervisorLauncher.SandboxSupervisorSession> session;
+        private final AtomicReference<CompletableFuture<Throwable>> settlement = new AtomicReference<>();
+        InvocationCleanup(AtomicReference<SandboxSupervisorLauncher.SandboxSupervisorSession> session) {
+            this.session = session;
+        }
+        Throwable settle(boolean terminate, SandboxSupervisorLauncher.SandboxTermination reason) {
+            var current = session.get();
+            // Cancellation cannot claim cleanup before a blocked launch publishes its session.
+            if (current == null) return null;
+            var attempt = new CompletableFuture<Throwable>();
+            if (settlement.compareAndSet(null, attempt)) {
+                Throwable failure = null;
+                if (terminate) {
+                    try { current.terminate(reason); }
+                    catch (Throwable error) { failure = error; }
+                    try {
+                        var outcome = current.await(REAP_TIMEOUT);
+                        if (outcome == null || outcome == SandboxSupervisorLauncher.SandboxOutcome.DEADLINE_EXCEEDED
+                                || outcome == SandboxSupervisorLauncher.SandboxOutcome.REAP_FAILED) {
+                            failure = combineFailure(failure, new IOException("SANDBOX_REAP_FAILED: " + outcome));
+                        }
+                    } catch (Throwable error) {
+                        if (error instanceof InterruptedException) Thread.currentThread().interrupt();
+                        failure = combineFailure(failure, error);
+                    }
+                }
+                try { current.close(); }
+                catch (Throwable error) { failure = combineFailure(failure, error); }
+                attempt.complete(failure);
+            }
+            return settlement.get().join();
+        }
+    }
+
+    private static void logCleanupFailure(Throwable failure) {
+        try {
+            // One bounded diagnostic, without source, request data or arbitrary exception messages.
+            System.err.println("{\"event\":\"program_cleanup_failed\",\"failureType\":\""
+                    + jsonEscape(failure.getClass().getSimpleName()) + "\"}");
+        } catch (RuntimeException ignored) { /* diagnostics cannot change cancellation */ }
     }
 
     /**
@@ -494,19 +546,20 @@ public final class GraalVmProgramRuntime implements ProgramRuntime {
     }
     private static final class CancellableFuture extends CompletableFuture<Object> {
         private final Runnable cancellation;
-        private final AtomicBoolean cancellationClaimed = new AtomicBoolean();
+        private final java.util.concurrent.atomic.AtomicInteger terminal = new java.util.concurrent.atomic.AtomicInteger();
         CancellableFuture(Runnable cancellation) { this.cancellation = cancellation; }
         @Override public boolean cancel(boolean mayInterruptIfRunning) {
-            if (isDone() || !cancellationClaimed.compareAndSet(false, true)) return false;
+            if (isDone() || !terminal.compareAndSet(0, 2)) return false;
             try { cancellation.run(); }
             finally { super.cancel(mayInterruptIfRunning); }
             return isCancelled();
         }
+        boolean cancellationRequested() { return terminal.get() == 2; }
         @Override public boolean complete(Object value) {
-            return !cancellationClaimed.get() && super.complete(value);
+            return terminal.compareAndSet(0, 1) && super.complete(value);
         }
         @Override public boolean completeExceptionally(Throwable failure) {
-            return !cancellationClaimed.get() && super.completeExceptionally(failure);
+            return terminal.compareAndSet(0, 1) && super.completeExceptionally(failure);
         }
     }
 

@@ -103,7 +103,9 @@ test('real SOURCE traffic stays with its originating document and appears on exa
   await histories.getByRole('button', { name: 'Search histories', exact: true }).click();
   await expect(histories.locator('li')).toHaveCount(1); await histories.locator('li button').click();
   const traversals = monitor.locator('.history-page').filter({ has: page.getByRole('heading', { name: 'Actual traversals', exact: true }) });
-  await expect(traversals.locator('li')).toHaveCount(1); await expect(traversals).toContainText('Entry consume');
+  await expect(traversals.locator('li')).toHaveCount(1);
+  await expect(traversals.getByRole('button', { name: /Entry consume/ })).toBeVisible();
+  await expect(traversals.locator('.history-row-title')).toHaveText('From consume');
   await traversals.locator('li button').click();
   const preview = monitor.locator('.history-traversal'); const canvas = preview.locator('[data-viewer-canvas]');
   await expect(preview).toContainText('Complete coverage: 3 visited nodes and 2 traversed edges');

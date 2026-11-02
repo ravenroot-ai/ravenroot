@@ -1,4 +1,4 @@
-name: Schedule complete 0.8 regression
+name: Schedule complete integration regressions
 on:
   schedule:
     - cron: '47 3 * * 0'
@@ -7,15 +7,20 @@ permissions:
   actions: write
   contents: read
 jobs:
-  dispatch-maintenance:
+  dispatch-integration:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        integration_ref: [dev, release/0.8]
     steps:
-      - name: Dispatch complete verification on the maintained branch
+      - name: Dispatch complete verification on each supported integration branch
         env:
           GH_TOKEN: ${{ github.token }}
+          INTEGRATION_REF: ${{ matrix.integration_ref }}
         run: >-
           gh api --method POST
           "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/dispatches"
-          -f ref=release/0.8 -f 'inputs[tier]=full'
-          -f 'inputs[integration_ref]=release/0.8' -f 'inputs[force_complete]=true'
+          -f ref="$INTEGRATION_REF" -f 'inputs[tier]=full'
+          -f "inputs[integration_ref]=$INTEGRATION_REF" -f 'inputs[force_complete]=true'

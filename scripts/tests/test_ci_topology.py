@@ -272,3 +272,20 @@ class ConfiguratorCandidateBindingTest(unittest.TestCase):
         self.assertIn('candidate_ref: ${{ inputs.merge_sha || github.sha }}', jobs['full-configurator'])
         consumer = (WORKFLOW.parent / 'configurator.yml').read_text()
         self.assertIn('ref: ${{ inputs.candidate_ref || github.sha }}', consumer)
+
+
+class CompleteIntegrationScheduleTest(unittest.TestCase):
+    def test_complete_dispatch_targets_each_exact_lane_from_its_own_source(self):
+        scheduler = WORKFLOW.with_name('maintenance-regression.yml').read_text()
+        job = job_blocks(scheduler)['dispatch-integration']
+        lanes = re.search(r'(?m)^        integration_ref: \[(.*)\]$', job)
+        self.assertIsNotNone(lanes)
+        self.assertEqual([lane.strip() for lane in lanes.group(1).split(',')], ['dev', 'release/0.8'])
+        self.assertIn('fail-fast: false', job)
+        self.assertIn('INTEGRATION_REF: ${{ matrix.integration_ref }}', job)
+        self.assertIn('-f ref="$INTEGRATION_REF"', job)
+        self.assertIn('-f "inputs[integration_ref]=$INTEGRATION_REF"', job)
+        self.assertIn("-f 'inputs[tier]=full'", job)
+        self.assertIn("-f 'inputs[force_complete]=true'", job)
+        self.assertIn('  schedule:\n    - cron:', scheduler)
+        self.assertIn('  schedule:\n    - cron:', WORKFLOW.read_text())

@@ -106,9 +106,12 @@ satisfy a PR's own status rollup. This conservative outcome avoids an unproven s
 Dispatch `ci.yml` on the exact candidate with `tier=full`, `integration_ref=release/0.8` and
 `force_complete=true` (or `integration_ref=dev` for development) to force every functional and policy job, including native XFS/Kubernetes
 acceptance and full Maven regression. `maintenance-regression.yml` dispatches this complete run
-weekly on the maintenance branch. GitHub schedules are loaded from the default branch: this
+weekly on each exact supported integration branch, `dev` and `release/0.8`. Its static matrix
+binds the workflow source ref and `integration_ref` to the same branch; each dispatch forces
+complete verification. GitHub schedules are loaded from the default branch: this
 scheduler becomes active only after the reviewed workflow is present on `main`; until that
-activation, maintainers must arrange the same weekly explicit dispatch and observe its result.
+activation, maintainers must arrange the same weekly explicit complete dispatch on each branch
+and observe both results.
 The existing default-branch schedule remains intact. A workflow file on a maintenance branch
 alone does not establish a running scheduler.
 

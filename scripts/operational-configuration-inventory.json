@@ -522143,7 +522143,7 @@
       "rationale": "A testkit module ships reusable test fixtures under src/main; it is not production runtime configuration."
     },
     {
-      "id": "oc-bf461cb43a190a9559fa",
+      "id": "oc-a0ff7ea0d2352c5c79c6",
       "path": "scripts/tests/test_audit_operational_configuration.py",
       "line": 2261,
       "symbol": "test_route_table_authority_proves_all_positions_consumers_and_bounds",
@@ -522151,18 +522151,14 @@
       "role": "inline",
       "expression": "'methods'",
       "expressionDigest": "65556bdba817c3421060524cf60b04425ac9d451859021e5be6713bd9672e2b7",
-      "evidenceDigest": "bacddf43700a48840ae2ba956a754867b69f221ca888b5eb9a101ff794e9d1e1",
+      "evidenceDigest": "960b10bf644bc2a97722f9c35a86bc1cf6f2234f85edfb102fb318a9fbab5cc1",
       "surface": "test-fixture",
       "status": "retained",
       "classification": "test-fixture",
-      "rationale": "This exact executable contract/mutation fixture checks the current route catalog, semantic preservation across approved identity migration, and closed history policy authority.",
-      "identityMigration": {
-        "history": "issue-590-attempt3-source-reconciliation-v1",
-        "fromId": "oc-17cf3e754f956eaac26a"
-      }
+      "rationale": "#605 exact closed RouteTable regression fixture 'methods' asserts130descriptors and890sourceatoms, including482summaryatoms, and still rejects missing/foreign constructor positions."
     },
     {
-      "id": "oc-df25fbd76e8d9e551cd9",
+      "id": "oc-70c479ea83f66a303466",
       "path": "scripts/tests/test_audit_operational_configuration.py",
       "line": 2261,
       "symbol": "test_route_table_authority_proves_all_positions_consumers_and_bounds",
@@ -522170,18 +522166,14 @@
       "role": "inline",
       "expression": "'path'",
       "expressionDigest": "eea93017abd63be23228bab538905014ff0895e0b0ee7ee6ece6414716269bb8",
-      "evidenceDigest": "bacddf43700a48840ae2ba956a754867b69f221ca888b5eb9a101ff794e9d1e1",
+      "evidenceDigest": "960b10bf644bc2a97722f9c35a86bc1cf6f2234f85edfb102fb318a9fbab5cc1",
       "surface": "test-fixture",
       "status": "retained",
       "classification": "test-fixture",
-      "rationale": "This exact executable contract/mutation fixture checks the current route catalog, semantic preservation across approved identity migration, and closed history policy authority.",
-      "identityMigration": {
-        "history": "issue-590-attempt3-source-reconciliation-v1",
-        "fromId": "oc-a6ff17af12ddfef651d5"
-      }
+      "rationale": "#605 exact closed RouteTable regression fixture 'path' asserts130descriptors and890sourceatoms, including482summaryatoms, and still rejects missing/foreign constructor positions."
     },
     {
-      "id": "oc-d71ce5f70af8fba5f3b3",
+      "id": "oc-73b20e56480d8b5b4753",
       "path": "scripts/tests/test_audit_operational_configuration.py",
       "line": 2261,
       "symbol": "test_route_table_authority_proves_all_positions_consumers_and_bounds",
@@ -522189,18 +522181,14 @@
       "role": "inline",
       "expression": "'successStatuses'",
       "expressionDigest": "44d57e4afcce3cd098bc934916f25a0beac4ee6c788ed1660b18fc9a25629375",
-      "evidenceDigest": "bacddf43700a48840ae2ba956a754867b69f221ca888b5eb9a101ff794e9d1e1",
+      "evidenceDigest": "960b10bf644bc2a97722f9c35a86bc1cf6f2234f85edfb102fb318a9fbab5cc1",
       "surface": "test-fixture",
       "status": "retained",
       "classification": "test-fixture",
-      "rationale": "This exact executable contract/mutation fixture checks the current route catalog, semantic preservation across approved identity migration, and closed history policy authority.",
-      "identityMigration": {
-        "history": "issue-590-attempt3-source-reconciliation-v1",
-        "fromId": "oc-3591a5dca4e886525e21"
-      }
+      "rationale": "#605 exact closed RouteTable regression fixture 'successStatuses' asserts130descriptors and890sourceatoms, including482summaryatoms, and still rejects missing/foreign constructor positions."
     },
     {
-      "id": "oc-90ef15b7861e95a588d6",
+      "id": "oc-6e460ef93784460b90f0",
       "path": "scripts/tests/test_audit_operational_configuration.py",
       "line": 2261,
       "symbol": "test_route_table_authority_proves_all_positions_consumers_and_bounds",
@@ -522208,87 +522196,71 @@
       "role": "inline",
       "expression": "'summary'",
       "expressionDigest": "ed6ab312997466d2862112ab8111178d332d7e5f6d1111d259acbb446f0ffc84",
-      "evidenceDigest": "bacddf43700a48840ae2ba956a754867b69f221ca888b5eb9a101ff794e9d1e1",
+      "evidenceDigest": "960b10bf644bc2a97722f9c35a86bc1cf6f2234f85edfb102fb318a9fbab5cc1",
       "surface": "test-fixture",
       "status": "retained",
       "classification": "test-fixture",
-      "rationale": "This exact executable contract/mutation fixture checks the current route catalog, semantic preservation across approved identity migration, and closed history policy authority.",
-      "identityMigration": {
-        "history": "issue-590-attempt3-source-reconciliation-v1",
-        "fromId": "oc-fcdd4b24a2eddde0ab3b"
-      }
+      "rationale": "#605 exact closed RouteTable regression fixture 'summary' asserts130descriptors and890sourceatoms, including482summaryatoms, and still rejects missing/foreign constructor positions."
     },
     {
-      "id": "oc-a3a8fc6f16e602ddd394",
+      "id": "oc-524c8a3667c3a397cbf1",
       "path": "scripts/tests/test_audit_operational_configuration.py",
       "line": 2261,
       "symbol": "test_route_table_authority_proves_all_positions_consumers_and_bounds",
       "kind": "inline-script-operational",
       "role": "inline",
-      "expression": "128",
-      "expressionDigest": "2747b7c718564ba5f066f0523b03e17f6a496b06851333d2d59ab6d863225848",
-      "evidenceDigest": "bacddf43700a48840ae2ba956a754867b69f221ca888b5eb9a101ff794e9d1e1",
+      "expression": "130",
+      "expressionDigest": "38d66d9692ac590000a91b03a88da1c88d51fab2b78f63171f553ecc551a0c6f",
+      "evidenceDigest": "960b10bf644bc2a97722f9c35a86bc1cf6f2234f85edfb102fb318a9fbab5cc1",
       "surface": "test-fixture",
       "status": "retained",
       "classification": "test-fixture",
-      "rationale": "This exact executable contract/mutation fixture checks the current route catalog, semantic preservation across approved identity migration, and closed history policy authority.",
-      "identityMigration": {
-        "history": "issue-590-attempt3-source-reconciliation-v1",
-        "fromId": "oc-f7fd1526e8c7ce3ab8c2"
-      }
+      "rationale": "#605 exact closed RouteTable regression fixture 130 asserts130descriptors and890sourceatoms, including482summaryatoms, and still rejects missing/foreign constructor positions."
     },
     {
-      "id": "oc-4ce6067761fc2c732f74",
+      "id": "oc-3e49b567411c49aae05c",
       "path": "scripts/tests/test_audit_operational_configuration.py",
       "line": 2261,
       "symbol": "test_route_table_authority_proves_all_positions_consumers_and_bounds",
       "kind": "inline-script-operational",
       "role": "inline",
-      "expression": "132",
-      "expressionDigest": "dbb1ded63bc70732626c5dfe6c7f50ced3d560e970f30b15335ac290358748f6",
-      "evidenceDigest": "bacddf43700a48840ae2ba956a754867b69f221ca888b5eb9a101ff794e9d1e1",
+      "expression": "135",
+      "expressionDigest": "13671077b66a29874a2578b5240319092ef2a1043228e433e9b006b5e53e7513",
+      "evidenceDigest": "960b10bf644bc2a97722f9c35a86bc1cf6f2234f85edfb102fb318a9fbab5cc1",
       "surface": "test-fixture",
       "status": "retained",
       "classification": "test-fixture",
-      "rationale": "This exact executable contract/mutation fixture checks the current route catalog, semantic preservation across approved identity migration, and closed history policy authority.",
-      "identityMigration": {
-        "history": "issue-590-attempt3-source-reconciliation-v1",
-        "fromId": "oc-762a2e06765275705f9c"
-      }
+      "rationale": "#605 exact closed RouteTable regression fixture 135 asserts130descriptors and890sourceatoms, including482summaryatoms, and still rejects missing/foreign constructor positions."
     },
     {
-      "id": "oc-238a92850192508aeff4",
+      "id": "oc-e6d9b210d36f216da3b4",
       "path": "scripts/tests/test_audit_operational_configuration.py",
       "line": 2261,
       "symbol": "test_route_table_authority_proves_all_positions_consumers_and_bounds",
       "kind": "inline-script-operational",
       "role": "inline",
-      "expression": "141",
-      "expressionDigest": "2c7d5490e6050836f8f2f0d496b1c8d6a38d4ffac2b898e6e77751bdcd20ebf5",
-      "evidenceDigest": "bacddf43700a48840ae2ba956a754867b69f221ca888b5eb9a101ff794e9d1e1",
+      "expression": "143",
+      "expressionDigest": "d6f0c71ef0c88e45e4b3a2118fcb83b0def392d759c901e9d755d0e879028727",
+      "evidenceDigest": "960b10bf644bc2a97722f9c35a86bc1cf6f2234f85edfb102fb318a9fbab5cc1",
       "surface": "test-fixture",
       "status": "retained",
       "classification": "test-fixture",
-      "rationale": "This exact executable contract/mutation fixture checks the current route catalog, semantic preservation across approved identity migration, and closed history policy authority.",
-      "identityMigration": {
-        "history": "issue-590-attempt3-source-reconciliation-v1",
-        "fromId": "oc-b6487b92a31cc566f4c6"
-      }
+      "rationale": "#605 exact closed RouteTable regression fixture 143 asserts130descriptors and890sourceatoms, including482summaryatoms, and still rejects missing/foreign constructor positions."
     },
     {
-      "id": "oc-515d496bd294695ea0d1",
+      "id": "oc-3faac79d6157c87ef8d7",
       "path": "scripts/tests/test_audit_operational_configuration.py",
       "line": 2261,
       "symbol": "test_route_table_authority_proves_all_positions_consumers_and_bounds",
       "kind": "inline-script-operational",
       "role": "inline",
-      "expression": "480",
-      "expressionDigest": "ddfe0e8d462af661f81db36589c39882dc0f2330785b5d80cd34f2f520ad618f",
-      "evidenceDigest": "bacddf43700a48840ae2ba956a754867b69f221ca888b5eb9a101ff794e9d1e1",
+      "expression": "482",
+      "expressionDigest": "d4679c618f1af07ee8570edd4b931e2e68e1c2d4b7d3c2f1033a9b597f85d4b0",
+      "evidenceDigest": "960b10bf644bc2a97722f9c35a86bc1cf6f2234f85edfb102fb318a9fbab5cc1",
       "surface": "test-fixture",
       "status": "retained",
       "classification": "test-fixture",
-      "rationale": "This exact engine lifecycle fixture fragment exercises real SOURCE admission with an independent START, preserving adapter readiness, restart and projected request/reply guarantees."
+      "rationale": "#605 exact closed RouteTable regression fixture 482 asserts130descriptors and890sourceatoms, including482summaryatoms, and still rejects missing/foreign constructor positions."
     },
     {
       "id": "oc-2192a372de48a297f9fa",
@@ -693684,6 +693656,170 @@
       },
       "retirementRationale": "#605 changes this artifact-base binding from mandatory Git storage to optional publication-only storage. Retire the old policy honestly; the new bound atom is separately source-reviewed.",
       "evidence": "return new GraphAuthoringConfiguration(mode, provider, provider == Provider.GITLAB ? (split < 0 ? \"\" : project.substring(0, split)) : required(environment, \"RAVENROOT_GRAPH_AUTHORING_REPOSITORY_OWNER\"), provider == Provider.GITLAB ? project.substring(split + 1) : required(environment, \"RAVENROOT_GRAPH_AUTHORING_REPOSITORY_NAME\"), environment.getOrDefault(\"RAVENROOT_GRAPH_AUTHORING_GRAPH_DIRECTORY\", \"graphs\"), environment.getOrDefault(\"RAVENROOT_GRAPH_AUTHORING_DRAFT_BRANCH\", \"draft\"), environment.getOrDefault(\"RAVENROOT_GRAPH_AUTHORING_RELEASE_BRANCH\", \"main\"), URI.create(provider == Provider.GITLAB ? environment.getOrDefault(\"RAVENROOT_GRAPH_AUTHORING_GITLAB_API_BASE\", \"https://gitlab.com/api/v4\") : environment.getOrDefault(\"RAVENROOT_GRAPH_AUTHORING_GITHUB_API_BASE\", \"https://api.github.com\")), enumValue(environment, \"RAVENROOT_GRAPH_AUTHORING_CREDENTIAL_MODE\", CredentialMode.class, null), required(environment, \"RAVENROOT_GRAPH_AUTHORING_CREDENTIAL_REFERENCE\"), environment.getOrDefault(\"RAVENROOT_GRAPH_AUTHORING_GITHUB_APP_ID\", \"\"), environment.getOrDefault(\"RAVENROOT_GRAPH_AUTHORING_GITHUB_INSTALLATION_ID\", \"\"), tenantNamespaces(required(environment, \"RAVENROOT_GRAPH_AUTHORING_TENANT_NAMESPACES\")), URI.create(required(environment, \"RAVENROOT_GRAPH_ARTIFACT_BASE_URL\")), environment.getOrDefault(\"RAVENROOT_GRAPH_ARTIFACT_CATALOG_PATH\", \"catalog.json\"), integer(environment, \"RAVENROOT_GRAPH_AUTHORING_MAX_DOCUMENT_BYTES\", 10 * 1024 * 1024), integer(environment, \"RAVENROOT_GRAPH_AUTHORING_PAGE_SIZE\", 50), Duration.ofMillis(integer(environment, \"RAVENROOT_GRAPH_AUTHORING_REQUEST_TIMEOUT_MILLIS\", 15_000)), integer(environment, \"RAVENROOT_GRAPH_AUTHORING_RETRY_LIMIT\", 1));"
+    },
+    {
+      "id": "oc-238a92850192508aeff4",
+      "path": "scripts/tests/test_audit_operational_configuration.py",
+      "line": 2261,
+      "symbol": "test_route_table_authority_proves_all_positions_consumers_and_bounds",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "141",
+      "expressionDigest": "2c7d5490e6050836f8f2f0d496b1c8d6a38d4ffac2b898e6e77751bdcd20ebf5",
+      "evidenceDigest": "bacddf43700a48840ae2ba956a754867b69f221ca888b5eb9a101ff794e9d1e1",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "This exact executable contract/mutation fixture checks the current route catalog, semantic preservation across approved identity migration, and closed history policy authority.",
+      "identityMigration": {
+        "history": "issue-590-attempt3-source-reconciliation-v1",
+        "fromId": "oc-b6487b92a31cc566f4c6"
+      },
+      "retirementRationale": "#605 replaces this exact route-shape regression fixture value after adding the two accepted submitted-source/independent-execution descriptors; the prior closed shape remains in history.",
+      "evidence": "{'methods': 141, 'path': 128, 'summary': 480, 'successStatuses': 132},"
+    },
+    {
+      "id": "oc-4ce6067761fc2c732f74",
+      "path": "scripts/tests/test_audit_operational_configuration.py",
+      "line": 2261,
+      "symbol": "test_route_table_authority_proves_all_positions_consumers_and_bounds",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "132",
+      "expressionDigest": "dbb1ded63bc70732626c5dfe6c7f50ced3d560e970f30b15335ac290358748f6",
+      "evidenceDigest": "bacddf43700a48840ae2ba956a754867b69f221ca888b5eb9a101ff794e9d1e1",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "This exact executable contract/mutation fixture checks the current route catalog, semantic preservation across approved identity migration, and closed history policy authority.",
+      "identityMigration": {
+        "history": "issue-590-attempt3-source-reconciliation-v1",
+        "fromId": "oc-762a2e06765275705f9c"
+      },
+      "retirementRationale": "#605 replaces this exact route-shape regression fixture value after adding the two accepted submitted-source/independent-execution descriptors; the prior closed shape remains in history.",
+      "evidence": "{'methods': 141, 'path': 128, 'summary': 480, 'successStatuses': 132},"
+    },
+    {
+      "id": "oc-515d496bd294695ea0d1",
+      "path": "scripts/tests/test_audit_operational_configuration.py",
+      "line": 2261,
+      "symbol": "test_route_table_authority_proves_all_positions_consumers_and_bounds",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "480",
+      "expressionDigest": "ddfe0e8d462af661f81db36589c39882dc0f2330785b5d80cd34f2f520ad618f",
+      "evidenceDigest": "bacddf43700a48840ae2ba956a754867b69f221ca888b5eb9a101ff794e9d1e1",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "This exact engine lifecycle fixture fragment exercises real SOURCE admission with an independent START, preserving adapter readiness, restart and projected request/reply guarantees.",
+      "retirementRationale": "#605 replaces this exact route-shape regression fixture value after adding the two accepted submitted-source/independent-execution descriptors; the prior closed shape remains in history.",
+      "evidence": "{'methods': 141, 'path': 128, 'summary': 480, 'successStatuses': 132},"
+    },
+    {
+      "id": "oc-90ef15b7861e95a588d6",
+      "path": "scripts/tests/test_audit_operational_configuration.py",
+      "line": 2261,
+      "symbol": "test_route_table_authority_proves_all_positions_consumers_and_bounds",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "'summary'",
+      "expressionDigest": "ed6ab312997466d2862112ab8111178d332d7e5f6d1111d259acbb446f0ffc84",
+      "evidenceDigest": "bacddf43700a48840ae2ba956a754867b69f221ca888b5eb9a101ff794e9d1e1",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "This exact executable contract/mutation fixture checks the current route catalog, semantic preservation across approved identity migration, and closed history policy authority.",
+      "identityMigration": {
+        "history": "issue-590-attempt3-source-reconciliation-v1",
+        "fromId": "oc-fcdd4b24a2eddde0ab3b"
+      },
+      "retirementRationale": "#605 replaces this exact route-shape regression fixture value after adding the two accepted submitted-source/independent-execution descriptors; the prior closed shape remains in history.",
+      "evidence": "{'methods': 141, 'path': 128, 'summary': 480, 'successStatuses': 132},"
+    },
+    {
+      "id": "oc-a3a8fc6f16e602ddd394",
+      "path": "scripts/tests/test_audit_operational_configuration.py",
+      "line": 2261,
+      "symbol": "test_route_table_authority_proves_all_positions_consumers_and_bounds",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "128",
+      "expressionDigest": "2747b7c718564ba5f066f0523b03e17f6a496b06851333d2d59ab6d863225848",
+      "evidenceDigest": "bacddf43700a48840ae2ba956a754867b69f221ca888b5eb9a101ff794e9d1e1",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "This exact executable contract/mutation fixture checks the current route catalog, semantic preservation across approved identity migration, and closed history policy authority.",
+      "identityMigration": {
+        "history": "issue-590-attempt3-source-reconciliation-v1",
+        "fromId": "oc-f7fd1526e8c7ce3ab8c2"
+      },
+      "retirementRationale": "#605 replaces this exact route-shape regression fixture value after adding the two accepted submitted-source/independent-execution descriptors; the prior closed shape remains in history.",
+      "evidence": "{'methods': 141, 'path': 128, 'summary': 480, 'successStatuses': 132},"
+    },
+    {
+      "id": "oc-bf461cb43a190a9559fa",
+      "path": "scripts/tests/test_audit_operational_configuration.py",
+      "line": 2261,
+      "symbol": "test_route_table_authority_proves_all_positions_consumers_and_bounds",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "'methods'",
+      "expressionDigest": "65556bdba817c3421060524cf60b04425ac9d451859021e5be6713bd9672e2b7",
+      "evidenceDigest": "bacddf43700a48840ae2ba956a754867b69f221ca888b5eb9a101ff794e9d1e1",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "This exact executable contract/mutation fixture checks the current route catalog, semantic preservation across approved identity migration, and closed history policy authority.",
+      "identityMigration": {
+        "history": "issue-590-attempt3-source-reconciliation-v1",
+        "fromId": "oc-17cf3e754f956eaac26a"
+      },
+      "retirementRationale": "#605 replaces this exact route-shape regression fixture value after adding the two accepted submitted-source/independent-execution descriptors; the prior closed shape remains in history.",
+      "evidence": "{'methods': 141, 'path': 128, 'summary': 480, 'successStatuses': 132},"
+    },
+    {
+      "id": "oc-d71ce5f70af8fba5f3b3",
+      "path": "scripts/tests/test_audit_operational_configuration.py",
+      "line": 2261,
+      "symbol": "test_route_table_authority_proves_all_positions_consumers_and_bounds",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "'successStatuses'",
+      "expressionDigest": "44d57e4afcce3cd098bc934916f25a0beac4ee6c788ed1660b18fc9a25629375",
+      "evidenceDigest": "bacddf43700a48840ae2ba956a754867b69f221ca888b5eb9a101ff794e9d1e1",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "This exact executable contract/mutation fixture checks the current route catalog, semantic preservation across approved identity migration, and closed history policy authority.",
+      "identityMigration": {
+        "history": "issue-590-attempt3-source-reconciliation-v1",
+        "fromId": "oc-3591a5dca4e886525e21"
+      },
+      "retirementRationale": "#605 replaces this exact route-shape regression fixture value after adding the two accepted submitted-source/independent-execution descriptors; the prior closed shape remains in history.",
+      "evidence": "{'methods': 141, 'path': 128, 'summary': 480, 'successStatuses': 132},"
+    },
+    {
+      "id": "oc-df25fbd76e8d9e551cd9",
+      "path": "scripts/tests/test_audit_operational_configuration.py",
+      "line": 2261,
+      "symbol": "test_route_table_authority_proves_all_positions_consumers_and_bounds",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "'path'",
+      "expressionDigest": "eea93017abd63be23228bab538905014ff0895e0b0ee7ee6ece6414716269bb8",
+      "evidenceDigest": "bacddf43700a48840ae2ba956a754867b69f221ca888b5eb9a101ff794e9d1e1",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "This exact executable contract/mutation fixture checks the current route catalog, semantic preservation across approved identity migration, and closed history policy authority.",
+      "identityMigration": {
+        "history": "issue-590-attempt3-source-reconciliation-v1",
+        "fromId": "oc-a6ff17af12ddfef651d5"
+      },
+      "retirementRationale": "#605 replaces this exact route-shape regression fixture value after adding the two accepted submitted-source/independent-execution descriptors; the prior closed shape remains in history.",
+      "evidence": "{'methods': 141, 'path': 128, 'summary': 480, 'successStatuses': 132},"
     }
   ],
   "evidenceRecords": {
@@ -700632,6 +700768,7 @@
     "9607c5cb0b5d983a29cc552b17d251ba5b652a482c0c30f07e472c2dbe4560da": "private static final java.util.Set<String> DESIGN_ARRANGEMENTS = java.util.Set.of( \"hierarchical\", \"flow\", \"organic\", \"keep\", \"hierarchical-new\", \"layered-down\");",
     "9607e2725f74bd4582df4a6d5d570184ecd0edbaf0489152a45617b0b1ca2b2a": "\"RAVENROOT_EGRESS_RESERVED_EXCEPTIONS\": \"host.docker.internal:PRIVATE\",",
     "9608a18e62152afc3001e35231ec09bf4de00de4af890aeae42c104159b3ffc3": "RAVENROOT_HUMAN_TASK_MAX_DECISION_COMMENT_BYTES=16384",
+    "960b10bf644bc2a97722f9c35a86bc1cf6f2234f85edfb102fb318a9fbab5cc1": "{'methods': 143, 'path': 130, 'summary': 482, 'successStatuses': 135},",
     "960d05875a9f592a945545275b30e469ebd2e79d48702dfcb8d2c77ca22a537d": "notes = f\"docs/releases/v{current_version}.md\"",
     "961612fa60a37acc33fcacb2e8e65bc41400f9627e1abb83442400aebd1d1935": "diagnostics = re.findall(r\"Kubernetes operation (QUOTA|ADMISSION|AUTHORIZATION|CONFLICT|UNAVAILABLE) \\(client exit (-1|[0-9]{1,3})\\); effect remains unconfirmed; command=(OTHER|ATTEST|NETWORK_CONTROL) diagnostic=(UNKNOWN|ATTESTER_MARKER|CLIENT_DEADLINE) phase=(UNKNOWN|NETWORK|IDENTITY|PRIVILEGES|CREDENTIAL|ROOT|LANDLOCK|CEILINGS|STORAGE|PROCESS|CGROUP|WORKSPACE|CONTROL) reason=(UNKNOWN|REFUSED|OS_ERROR|INVALID_VALUE|PROCESS_EXIT|PROCESS_TIMEOUT|CPU_THROTTLING_MISSING|SEED_UNCERTAIN|SEED_IDENTITY_CHANGED)(?=$|[\\s)])\", text)",
     "9617c49a1bce48c6a52e5332f61bbed46f9d78e4ecbca12dde6edb3b5a2bd92d": "static final Duration START_RECHECK = Duration.ofSeconds(1);",
@@ -702344,7 +702481,6 @@
     "babdb531bfc1f604571d2fd2cf07827ae9276f5ed3f8adc0a0e52d428d859725": "expression = expression.replace(\"needs.release-classification.result == 'success'\", 'True')",
     "baca76c6611294b7319c478ac1eee5d9a4442df544f7c2088f391496bec8193f": "managerChannel = FileChannel.open(this.state.resolve(\"kubernetes-manager.lock\"), StandardOpenOption.CREATE, StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS);",
     "bacb9571b32ac1cfbcf581f7964a10cb97467a4b2ebdaf96a86d2996a6d4f02c": "private static final int MAX_IDENTIFIER = 256;",
-    "bacddf43700a48840ae2ba956a754867b69f221ca888b5eb9a101ff794e9d1e1": "{'methods': 141, 'path': 128, 'summary': 480, 'successStatuses': 132},",
     "bad1ec9589991b92a4995fb31ac101ff7be2a461a3c711c82a4ea516d4827f99": "const position = reversed ? list.length - 1 - rank : rank;",
     "bad441cebffa997c9fe8d23a8dece1bae09084c81f73ecabf26dfcb654bfa483": "message: \"Agent credentials and Kubernetes retries are forbidden\"",
     "bad45c5edb50dee800faa8fbd6561e54b6e028d06c2cf3f8228be8fdc3789133": "for field, value in ((\"owner\", \"other#Type\"), (\"field\", \"httpQueue\"), (\"bindings\", []),",
@@ -1480203,6 +1480339,124 @@
             "pinning": "Resolved once at server composition; callers cannot select repository, path, endpoint, or credential.",
             "coverage": "Typed configuration, authenticated HTTP adapter, Git provider, immutable publication catalog, deployment carriers, UI client, publisher, and executable tests.",
             "rationale": "The closed graph authoring configuration owns this server-side setting."
+          }
+        }
+      ]
+    },
+    {
+      "id": "issue-605-closed-route-shape-regression-evidence",
+      "issue": "#605",
+      "sourceRevision": "d71398276827ab4c0a2101ea13140de6e8016ebb",
+      "targetRevision": "1bfbb33a7faf154e744c7e232330b780e9aa931a",
+      "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+      "sourceInventoryDigest": "e4e8f24946963076a29b2186b94ed0fa42395f939d289f3c5992640c2895b52d",
+      "targetCandidateDigest": "d48c4979d44670ccfc7369ed55706609ce47f5ad8e9ddc3b75a031fc0eee8470",
+      "mappings": [],
+      "retirements": [
+        {
+          "id": "oc-238a92850192508aeff4",
+          "approved": true,
+          "rationale": "#605 replaces this exact route-shape regression fixture value after adding the two accepted submitted-source/independent-execution descriptors; the prior closed shape remains in history."
+        },
+        {
+          "id": "oc-4ce6067761fc2c732f74",
+          "approved": true,
+          "rationale": "#605 replaces this exact route-shape regression fixture value after adding the two accepted submitted-source/independent-execution descriptors; the prior closed shape remains in history."
+        },
+        {
+          "id": "oc-515d496bd294695ea0d1",
+          "approved": true,
+          "rationale": "#605 replaces this exact route-shape regression fixture value after adding the two accepted submitted-source/independent-execution descriptors; the prior closed shape remains in history."
+        },
+        {
+          "id": "oc-90ef15b7861e95a588d6",
+          "approved": true,
+          "rationale": "#605 replaces this exact route-shape regression fixture value after adding the two accepted submitted-source/independent-execution descriptors; the prior closed shape remains in history."
+        },
+        {
+          "id": "oc-a3a8fc6f16e602ddd394",
+          "approved": true,
+          "rationale": "#605 replaces this exact route-shape regression fixture value after adding the two accepted submitted-source/independent-execution descriptors; the prior closed shape remains in history."
+        },
+        {
+          "id": "oc-bf461cb43a190a9559fa",
+          "approved": true,
+          "rationale": "#605 replaces this exact route-shape regression fixture value after adding the two accepted submitted-source/independent-execution descriptors; the prior closed shape remains in history."
+        },
+        {
+          "id": "oc-d71ce5f70af8fba5f3b3",
+          "approved": true,
+          "rationale": "#605 replaces this exact route-shape regression fixture value after adding the two accepted submitted-source/independent-execution descriptors; the prior closed shape remains in history."
+        },
+        {
+          "id": "oc-df25fbd76e8d9e551cd9",
+          "approved": true,
+          "rationale": "#605 replaces this exact route-shape regression fixture value after adding the two accepted submitted-source/independent-execution descriptors; the prior closed shape remains in history."
+        }
+      ],
+      "additions": [
+        {
+          "id": "oc-3e49b567411c49aae05c",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "#605 exact closed RouteTable regression fixture 135 asserts130descriptors and890sourceatoms, including482summaryatoms, and still rejects missing/foreign constructor positions."
+          }
+        },
+        {
+          "id": "oc-3faac79d6157c87ef8d7",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "#605 exact closed RouteTable regression fixture 482 asserts130descriptors and890sourceatoms, including482summaryatoms, and still rejects missing/foreign constructor positions."
+          }
+        },
+        {
+          "id": "oc-524c8a3667c3a397cbf1",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "#605 exact closed RouteTable regression fixture 130 asserts130descriptors and890sourceatoms, including482summaryatoms, and still rejects missing/foreign constructor positions."
+          }
+        },
+        {
+          "id": "oc-6e460ef93784460b90f0",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "#605 exact closed RouteTable regression fixture 'summary' asserts130descriptors and890sourceatoms, including482summaryatoms, and still rejects missing/foreign constructor positions."
+          }
+        },
+        {
+          "id": "oc-70c479ea83f66a303466",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "#605 exact closed RouteTable regression fixture 'path' asserts130descriptors and890sourceatoms, including482summaryatoms, and still rejects missing/foreign constructor positions."
+          }
+        },
+        {
+          "id": "oc-73b20e56480d8b5b4753",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "#605 exact closed RouteTable regression fixture 'successStatuses' asserts130descriptors and890sourceatoms, including482summaryatoms, and still rejects missing/foreign constructor positions."
+          }
+        },
+        {
+          "id": "oc-a0ff7ea0d2352c5c79c6",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "#605 exact closed RouteTable regression fixture 'methods' asserts130descriptors and890sourceatoms, including482summaryatoms, and still rejects missing/foreign constructor positions."
+          }
+        },
+        {
+          "id": "oc-e6d9b210d36f216da3b4",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "#605 exact closed RouteTable regression fixture 143 asserts130descriptors and890sourceatoms, including482summaryatoms, and still rejects missing/foreign constructor positions."
           }
         }
       ]

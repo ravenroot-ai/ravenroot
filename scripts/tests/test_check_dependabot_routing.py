@@ -178,3 +178,13 @@ class UnsupportedCheckoutLayoutTest(unittest.TestCase):
                             '        {uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1}'):
             with self.subTest(replacement=replacement), self.assertRaises(RoutingPolicyError):
                 check_ci_workflow(self.ci.replace(action, replacement, 1))
+
+
+class FlowStyleCheckoutStepTest(unittest.TestCase):
+    def test_valid_yaml_flow_step_cannot_hide_an_unbound_checkout(self):
+        ci = (ROOT / '.github/workflows/ci.yml').read_text()
+        start = ci.index('      - name: Check out repository\n')
+        end = ci.index('      - name:', start + 1)
+        flow = '      - {uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1, with: {ref: "${{ github.sha }}"}}\n'
+        with self.assertRaisesRegex(RoutingPolicyError, 'observable supported step layout'):
+            check_ci_workflow(ci[:start] + flow + ci[end:])

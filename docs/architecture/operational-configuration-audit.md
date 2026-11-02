@@ -36,25 +36,25 @@ semantic review and focused source inventories remain required for those boundar
 
 | Measure | Count |
 |---|---:|
-| Atomic operational candidates discovered | 33706 |
+| Atomic operational candidates discovered | 33714 |
 | Source-proven Helm operator fields | 39 |
 | Helm operator fields represented by lexical inventory rows | 31 |
 | Source-proven Helm fields outside lexical candidate patterns | 8 |
-| Reviewed | 33706 |
+| Reviewed | 33714 |
 | Pending review | 0 |
 | Confirmed hard-coded candidates awaiting remediation | 0 |
 | Unique confirmed operator-configurable parameters | 374 |
 | Unique parameters converted to centralized configuration | 16 |
 | Duplicate authorities removed | 27 |
-| Retained security ceilings or defaults | 2535 |
-| Retained protocol or format invariants | 14321 |
+| Retained security ceilings or defaults | 2533 |
+| Retained protocol or format invariants | 14328 |
 | Retained published contract descriptions | 633 |
 | Retained presentation text | 3111 |
 | Retained derived values | 1234 |
-| Test fixtures | 9915 |
+| Test fixtures | 9918 |
 | Intentionally deferred | 0 |
 
-Retired source candidates preserved in inventory history: 3033.
+Retired source candidates preserved in inventory history: 3035.
 
 Approved normalized-identity reappearances: 23. Active candidates and
 retired historical payloads remain counted separately; an approval records identity reuse only.
@@ -62,10 +62,10 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 210.
+Checked source reconciliations: 211.
 
 The following tables are exhaustive projections of the same active inventory; each includes
-zero-count or unclassified rows as needed and sums to 33706 candidates.
+zero-count or unclassified rows as needed and sums to 33714 candidates.
 
 ### Status counts
 
@@ -77,7 +77,7 @@ zero-count or unclassified rows as needed and sums to 33706 candidates.
 | deferred | 0 |
 | duplicate-removed | 0 |
 | pending-review | 0 |
-| retained | 31749 |
+| retained | 31757 |
 
 ### Classification counts
 
@@ -86,10 +86,10 @@ zero-count or unclassified rows as needed and sums to 33706 candidates.
 | derived | 1234 |
 | operator-configurable | 1957 |
 | presentation-text | 3111 |
-| protocol-or-format-invariant | 14321 |
+| protocol-or-format-invariant | 14328 |
 | published-contract-description | 633 |
-| security-ceiling-or-default | 2535 |
-| test-fixture | 9915 |
+| security-ceiling-or-default | 2533 |
+| test-fixture | 9918 |
 | unclassified | 0 |
 
 ### Surface counts
@@ -99,8 +99,8 @@ zero-count or unclassified rows as needed and sums to 33706 candidates.
 | deployment | 3215 |
 | deployment-example | 20 |
 | java | 8599 |
-| script | 3091 |
-| test-fixture | 9915 |
+| script | 3096 |
+| test-fixture | 9918 |
 | ui | 8866 |
 
 ### Owning remediation counts
@@ -117,8 +117,8 @@ assigned to an issue retroactively.
 | #318 | 107 |
 | #319 | 334 |
 | #320 | 1466 |
-| #321 | 8102 |
-| Retained; no remediation required | 23532 |
+| #321 | 8100 |
+| Retained; no remediation required | 23542 |
 
 ## Latest reconciliation
 
@@ -127,12 +127,12 @@ identity and retirement has its own approved record in the machine-readable inve
 
 | Partition | Count |
 |---|---:|
-| Source inventory candidates | 33702 |
-| Unchanged identities | 33702 |
+| Source inventory candidates | 33706 |
+| Unchanged identities | 33704 |
 | Approved identity migrations | 0 |
-| Approved retirements | 0 |
-| Semantically classified additions | 4 |
-| Current candidates | 33706 |
+| Approved retirements | 2 |
+| Semantically classified additions | 10 |
+| Current candidates | 33714 |
 
 ## Final semantic review
 
@@ -22416,9 +22416,14 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-5fa7ff0b9dd0b4affee7` | `scripts/check_dependabot_routing.py:81` `check_dependabot_config` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
 | `oc-f3c7e4d371837abf2363` | `scripts/check_dependabot_routing.py:81` `check_dependabot_config` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
 | `oc-ac22fb65ae33352cd377` | `scripts/check_dependabot_routing.py:83` `check_dependabot_config` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-9a1fcdba096c3654d4b7` | `scripts/check_dependabot_routing.py:108` `check_ci_workflow` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-77f7c143fa9ba06f0079` | `scripts/check_dependabot_routing.py:122` `check_ci_workflow` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |
-| `oc-242f8e206109eea0ab90` | `scripts/check_dependabot_routing.py:123` `check_ci_workflow` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |
+| `oc-34f6f4a72d7d6f7272a6` | `scripts/check_dependabot_routing.py:103` `workflow_jobs` | script | retained | protocol-or-format-invariant | #604 workflow_jobs atom '1' is fixed workflow-parser framing, exact candidate-routing vocabulary, or fail-closed diagnostic text. It does not configure runtime or operator capacity. |
+| `oc-4c039a1479743ad2c1e5` | `scripts/check_dependabot_routing.py:129` `check_checkout_bindings` | script | retained | protocol-or-format-invariant | #604 check_checkout_bindings atom '""' is fixed workflow-parser framing, exact candidate-routing vocabulary, or fail-closed diagnostic text. It does not configure runtime or operator capacity. |
+| `oc-f7a279097f14890ad61c` | `scripts/check_dependabot_routing.py:149` `check_checkout_bindings` | script | retained | protocol-or-format-invariant | #604 check_checkout_bindings atom '"actions/checkout"' is fixed workflow-parser framing, exact candidate-routing vocabulary, or fail-closed diagnostic text. It does not configure runtime or operator capacity. |
+| `oc-5b8bfa19f1ebc7a7042e` | `scripts/check_dependabot_routing.py:154` `check_checkout_bindings` | script | retained | protocol-or-format-invariant | #604 check_checkout_bindings atom '"every {context} checkout must use an observable supported step layout"' is fixed workflow-parser framing, exact candidate-routing vocabulary, or fail-closed diagnostic text. It does not configure runtime or operator capacity. |
+| `oc-9a1fcdba096c3654d4b7` | `scripts/check_dependabot_routing.py:174` `check_ci_workflow` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-43a8b1c2e8c04e23ff81` | `scripts/check_dependabot_routing.py:196` `check_configurator_workflow` | script | retained | protocol-or-format-invariant | #604 check_configurator_workflow atom '""' is fixed workflow-parser framing, exact candidate-routing vocabulary, or fail-closed diagnostic text. It does not configure runtime or operator capacity. |
+| `oc-9000f46966f3b8333dde` | `scripts/check_dependabot_routing.py:196` `check_configurator_workflow` | script | retained | protocol-or-format-invariant | #604 check_configurator_workflow atom '""' is fixed workflow-parser framing, exact candidate-routing vocabulary, or fail-closed diagnostic text. It does not configure runtime or operator capacity. |
+| `oc-dd40040e6367a4cf54a8` | `scripts/check_dependabot_routing.py:196` `check_configurator_workflow` | script | retained | protocol-or-format-invariant | #604 check_configurator_workflow atom '"The supported CI call propagates its candidate; standalone events retain github.sha."' is fixed workflow-parser framing, exact candidate-routing vocabulary, or fail-closed diagnostic text. It does not configure runtime or operator capacity. |
 | `oc-08f7e9e7f998b1c76801` | `scripts/check_docs_site.py:2` `module` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
 | `oc-5b09e1410a24ebe8df83` | `scripts/check_docs_site.py:2` `module` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
 | `oc-92328d17945f226b1f39` | `scripts/check_docs_site.py:2` `module` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |

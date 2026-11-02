@@ -217,6 +217,10 @@ an earlier browser document incarnation.
 
 The authenticated deployment status includes optional `runtimeIncarnationId`, the exact hosted runtime identity available before activation. Compatibility status producers may omit it. The editor captures that identity, the tenant, graph version, and durable registration identity before issuing Start or Stop. Conditional Start uses the same three binding headers as conditional Stop. A replacement under the same name is refused before opening a listener. The ordinary operator lifecycle endpoints and SDK overloads continue to support explicitly unconditional control of the current named deployment.
 
+When observation ends or loses continuity, the originating graph clears its previous runtime node
+highlights and edge activity. This is a presentation reset; retained execution and history identities
+remain intact. An unavailable observer does not authorize another traversal.
+
 Before the first traversal, Run confirms live observation of that exact deployment. If observation
 cannot be confirmed within ten seconds, the deployment may still truthfully show READY. Use Run
 again to retry the same saved deployment, input and execution request. No second registration or

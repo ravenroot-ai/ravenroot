@@ -3756,7 +3756,8 @@ function openDocument({ name = defaultDocumentName(), displayName, graph = null,
 }
 
 function paintDocumentDeploymentView(owner, state) {
-  const cleared = owner.cy.nodes().some(node => node.data('runtimeObserved') && !state.nodeStates.has(node.id()));
+  const cleared = !state.nodeStates.size
+    || owner.cy.nodes().some(node => node.data('runtimeObserved') && !state.nodeStates.has(node.id()));
   applyDeploymentViewStateToRenderer(owner.cy, state);
   owner.execution.monitoringFlow = state.runtime;
   if (cleared) applyVisualStyle(owner.visualStyle, owner.cy, owner, { preserveEdgeGeometry: true });
@@ -3765,7 +3766,8 @@ function paintDocumentDeploymentView(owner, state) {
     node.data('instances', view?.instances || 0);
     node.data('arrivals', view?.arrivals || 0);
     if (view) applyRuntimeVisual(node, owner);
-    updateD3RuntimeNode(owner, node.id(), view?.instances || 0, view?.state || 'idle', view?.arrivals || 0);
+    updateD3RuntimeNode(owner, node.id(), view?.instances || 0, view?.state || 'idle', view?.arrivals || 0,
+      { runtimeObserved: Boolean(view) });
   });
   owner.cy.edges().forEach(edge => updateRuntimeEdge(owner, edge.id()));
   if (owner === workspace.active) drawingModelController?.scheduleRefresh(owner.id);
@@ -13071,20 +13073,42 @@ function connectOriginDeploymentView(owner, client, envelope, { signal } = {}) {
   const state = createDeploymentViewState({ ...source, lifecycle: envelope.lifecycle });
   const observation = { client, binding, source, state, ready: null, live: false, disconnect: null, barrier: null };
   owner.originDeploymentView = observation;
-  const current = () => workspace.find(owner.id) === owner && owner.incarnation === incarnation && owner.originDeploymentView === observation
-    && owner.deploymentRun === binding && runtimeClient === client && workspaceAuthority === authority && tenantAuthorityAllows(owner, client)
-    && observation.barrier?.active !== false;
+  const canvas = owner.cy, tenantId = owner.tenantId;
+  const ownsSource = () => workspace.find(owner.id) === owner && owner.incarnation === incarnation
+    && owner.originDeploymentView === observation && owner.deploymentRun === binding && owner.tenantId === tenantId
+    && source.deploymentId === state.binding.deploymentId && source.graphVersion === state.binding.graphVersion
+    && source.incarnationId === state.binding.incarnationId;
+  const current = () => ownsSource() && runtimeClient === client && workspaceAuthority === authority
+    && tenantAuthorityAllows(owner, client) && observation.barrier?.active !== false;
+  const ownsRenderer = () => ownsSource() && owner.cy === canvas && canvas && !canvas.destroyed();
+  const mayPaint = () => !(owner.execution.executionId && !owner.execution.finished.has(owner.execution.executionId))
+    && documentMatchesDeployment(owner);
+  // Ending observation may revoke stream authority. Clearing its own paint needs only captured
+  // presentation ownership; this predicate must never authorize an event or initial admission.
+  const publishReset = () => {
+    if (!state.nodeStates.size && !state.edgeStates.size && ownsRenderer() && mayPaint()) {
+      // A background Monitoring renderer is paused, but still owns its old flow decoration.
+      // Its reset is in-place and never reheats the simulation or accepts new runtime data.
+      elasticRendererFor(owner)?.resetRuntime?.({ idleStroke: runtimeColor('idle') });
+      paintDocumentDeploymentView(owner, state);
+    }
+  };
   const barrier = createDeploymentObservationBarrier({ source, isCurrent: current, signal,
-    cancel: () => { observation.live = false; observation.stopStream?.(); } });
+    cancel: () => {
+      observation.live = false; observation.stopStream?.();
+      if (['LIVE', 'CONNECTING'].includes(state.continuity))
+        resetDeploymentViewRuntime(state, 'UNAVAILABLE', 'OBSERVATION_ENDED');
+      publishReset();
+    } });
   observation.barrier = barrier; observation.ready = barrier.ready;
   let paintQueued = false;
   const paint = () => {
     if (paintQueued) return;
     paintQueued = true;
+    const renderer = owner.renderer;
     scheduleFrame(() => {
       paintQueued = false;
-      const testing = owner.execution.executionId && !owner.execution.finished.has(owner.execution.executionId);
-      if (current() && !testing && owner.cy && documentMatchesDeployment(owner)) paintDocumentDeploymentView(owner, state);
+      if (current() && ownsRenderer() && owner.renderer === renderer && mayPaint()) paintDocumentDeploymentView(owner, state);
     });
   };
   observation.stopStream = client.connectDeploymentObservation(source, frame => {
@@ -13108,7 +13132,7 @@ function connectOriginDeploymentView(owner, client, envelope, { signal } = {}) {
     if (connection !== 'connected') observation.live = false;
     if (['error', 'revoked'].includes(connection)) {
       observation.live = false;
-      resetDeploymentViewRuntime(state, connection === 'revoked' ? 'DETACHED' : 'UNAVAILABLE'); paint();
+      resetDeploymentViewRuntime(state, connection === 'revoked' ? 'DETACHED' : 'UNAVAILABLE'); publishReset();
     }
   }, { diagnostics: true });
   observation.disconnect = () => { barrier.retire(); observation.stopStream(); };
@@ -13720,7 +13744,7 @@ function updateD3RuntimeNode(owner, nodeId, activeInstances, state, inFlightArri
   datum.instances = activeInstances;
   datum.arrivals = inFlightArrivals;
   datum.runtimeState = state;
-  datum.runtimeObserved = true;
+  datum.runtimeObserved = event.runtimeObserved !== false;
   datum.lastEventType = event.type || null;
   datum.lastOccurredAt = event.occurredAt || null;
   datum.processingDuration = event.processingDuration ?? null;

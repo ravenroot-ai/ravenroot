@@ -333,6 +333,8 @@ public interface GraphAuthoringRepository extends AutoCloseable {
 
     /**
      * Validates and persists a draft through an expected-parent provider update.
+     * Changed content based on a reviewed release creates its next draft version atomically;
+     * unchanged saves and edits to an unreleased draft retain the assigned version.
      *
      * @param actor authenticated repository actor
      * @param request proposed bytes, expected state, and bounded idempotency key

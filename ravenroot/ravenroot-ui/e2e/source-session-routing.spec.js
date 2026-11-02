@@ -205,7 +205,7 @@ test('Run binds an effective SOURCE deployment with one initial START and Test s
   }));
   await page.locator('#btn-run').click();
   await expect(confirmation).resolves.toMatch(/deployment|START/i);
-  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Ready');
+  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Listening');
   await expect(page.locator('.doc-pane--active .doc-run-binding')).toHaveAttribute('role', 'status');
   await expect(page.locator('#btn-stop')).toBeEnabled();
   await expect(page.locator('#btn-pause')).toBeDisabled();
@@ -235,7 +235,7 @@ test('source Human Task re-entry and a second AMQP message stay in one listening
 
   page.once('dialog', dialog => dialog.accept());
   await page.locator('#btn-run').click();
-  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Ready');
+  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Listening');
   await expect(page.locator('#activity-log')).toContainText('resolved-message-1');
   await expect(page.locator('#activity-log')).toContainText('amqp-message-2');
 
@@ -329,7 +329,7 @@ test('re-authentication holds a source frame until workspace authority can deliv
   await openGraph(page, sourceGraph('external.consume'), 'source-authority-race.graphml');
   page.once('dialog', dialog => dialog.accept());
   await page.locator('#btn-run').click();
-  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Ready');
+  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Listening');
   releaseInitialTraffic();
   await expect.poll(() => page.evaluate(
     () => window.ravenroot.activeDocument().execution.events.length)).toBe(2);
@@ -511,7 +511,7 @@ test('closing the owner cannot cancel a Stop already queued behind its pending s
   expect(deletedSessionIds).toHaveLength(1);
 });
 
-test('an authoritative observation 404 recovers STARTING to stopped', async ({ page }) => {
+test('an absent observation leaves STARTING unavailable until explicit recovery', async ({ page }) => {
   await stubRuntime(page, {
     sourceResponder: async ({ route, request, sessionId }) => {
       if (request.method() === 'POST') {
@@ -529,9 +529,9 @@ test('an authoritative observation 404 recovers STARTING to stopped', async ({ p
 
   page.once('dialog', dialog => dialog.accept());
   await page.locator('#btn-run').click();
-  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Stopped');
+  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('State unavailable');
   await expect(page.locator('#btn-run')).toBeEnabled();
-  await expect(page.locator('#btn-play')).toBeEnabled();
+  await expect(page.locator('#btn-play')).toBeDisabled();
 });
 
 test('an authoritative stop 404 recovers STOPPING to stopped', async ({ page }) => {
@@ -553,14 +553,14 @@ test('an authoritative stop 404 recovers STOPPING to stopped', async ({ page }) 
 
   page.once('dialog', dialog => dialog.accept());
   await page.locator('#btn-run').click();
-  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Ready');
+  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Listening');
   await page.locator('#btn-stop').click();
   await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Stopped');
   await expect(page.locator('#btn-run')).toBeEnabled();
   await expect(page.locator('#btn-play')).toBeEnabled();
 });
 
-test('an ambiguous stop restores the last honest state and keeps observing without allowing Run', async ({ page }) => {
+test('an ambiguous stop keeps observing and permits only bound Run recovery', async ({ page }) => {
   let releaseObservation;
   const observationGate = new Promise(resolve => { releaseObservation = resolve; });
   let stopAttempted = false;
@@ -584,15 +584,15 @@ test('an ambiguous stop restores the last honest state and keeps observing witho
 
   page.once('dialog', dialog => dialog.accept());
   await page.locator('#btn-run').click();
-  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Ready');
+  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Listening');
   await page.locator('#btn-stop').click();
   await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('State unavailable');
   await expect(page.locator('#btn-stop')).toBeEnabled();
-  await expect(page.locator('#btn-run')).toBeDisabled();
+  await expect(page.locator('#btn-run')).toBeEnabled();
   await expect(page.locator('#btn-play')).toBeDisabled();
 
   releaseObservation();
-  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Ready');
+  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Listening');
 });
 
 test('an ambiguous start becomes UNKNOWN until observation proves the listener state', async ({ page }) => {
@@ -619,11 +619,11 @@ test('an ambiguous start becomes UNKNOWN until observation proves the listener s
   await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('State unavailable');
   await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('State unavailable');
   await expect(page.locator('#btn-stop')).toBeEnabled();
-  await expect(page.locator('#btn-run')).toBeDisabled();
+  await expect(page.locator('#btn-run')).toBeEnabled();
   await expect(page.locator('#btn-play')).toBeDisabled();
 
   releaseObservation();
-  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Ready');
+  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Listening');
 });
 
 /**
@@ -643,7 +643,7 @@ test('a listening deployment paints all actual traversals on its unchanged origi
     && new URL(response.url()).pathname.endsWith('/initial-start'));
   page.once('dialog', dialog => dialog.accept());
   await page.locator('#btn-run').click();
-  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Ready');
+  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Listening');
   expect((await initialResponse).status()).toBe(202);
   await expectInitialAdmissionBound(page, await page.evaluate(() => window.ravenroot.activeDocument().id));
 
@@ -690,7 +690,7 @@ test('another deployment traffic is still dropped rather than painted on whichev
 
     page.once('dialog', dialog => dialog.accept());
     await page.locator('#btn-run').click();
-    await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Ready');
+    await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Listening');
 
     await page.waitForTimeout(1_500);
     expect(await page.evaluate(() => window.ravenroot.activeDocument().cy
@@ -736,7 +736,7 @@ test('known continuation stays with its originating bound document through focus
   const initialResponse = page.waitForResponse(response => response.request().method() === 'POST'
     && new URL(response.url()).pathname.endsWith('/initial-start'));
   page.once('dialog', dialog => dialog.accept()); await page.locator('#btn-run').click();
-  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Ready');
+  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Listening');
   const response = await initialResponse;
   expect(response.status()).toBe(202);
   const accepted = await response.json();

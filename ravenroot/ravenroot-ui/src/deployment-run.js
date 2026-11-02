@@ -130,19 +130,28 @@ export function runOriginDeployment(owner, { client, serviceUrl, tenantId, graph
         intent.phase = status.state === 'FAILED' ? 'FAILED' : 'RECONCILE'; await save();
         throw failure('ACTIVATION_NOT_READY');
       }
-      const view = await client.deploymentView(intent.deploymentId);
+      let view = null;
+      owner.deploymentRunMonitoringError = null;
+      try { view = await client.deploymentView(intent.deploymentId); }
+      catch (error) {
+        // A presentation failure is not an execution/admission failure.
+        owner.deploymentRunMonitoringError = error;
+      }
       if (control.stopRequested) return interrupted(status);
       check();
-      const rebound = Boolean(intent.incarnationId && intent.incarnationId !== view.source.incarnationId);
-      if (view.source.graphVersion !== intent.graphVersion || view.source.deploymentId !== intent.deploymentId
-          || rebound && !(intent.registrationIdentity && status.continuity === 'DURABLE' && status.registrationIdentity === intent.registrationIdentity))
+      const rebound = Boolean(intent.incarnationId && intent.incarnationId !== runtime);
+      if (view && (view.source.graphVersion !== intent.graphVersion
+          || view.source.deploymentId !== intent.deploymentId || view.source.incarnationId !== runtime))
         throw failure('DEPLOYMENT_INCARNATION_CHANGED');
-      if (!rebound) intent.incarnationId = view.source.incarnationId;
+      if (rebound && !(intent.registrationIdentity && status.continuity === 'DURABLE'
+          && status.registrationIdentity === intent.registrationIdentity)) throw failure('DEPLOYMENT_INCARNATION_CHANGED');
+      if (!rebound) intent.incarnationId = runtime;
       intent.phase = rebound ? 'RECONCILE' : 'READY'; await save();
-      if (control.stopRequested) return interrupted(status);
-      // Establish the deployment stream before START: hosted executions do not publish to
-      // the one-shot execution stream, and a fresh deployment subscription starts at now.
-      await onView(view); check();
+      if (view) {
+        try { await onView(view); }
+        catch (error) { owner.deploymentRunMonitoringError = error; }
+        check();
+      }
       if (control.stopRequested) return interrupted(status);
       if (intent.processInstanceId && !rebound) return { intent, status, view, initial: null };
       // Saved admission identities require read-only marker reconciliation. An intent that never
@@ -150,9 +159,9 @@ export function runOriginDeployment(owner, { client, serviceUrl, tenantId, graph
       // marker atomically returns the original traversal if the earlier response was lost.
       const observingSavedAdmission = rebound && Boolean(intent.processInstanceId);
       const initial = observingSavedAdmission ? await client.reconcileInitialStartDeployment(intent.deploymentId, {
-        incarnationId: view.source.incarnationId, graphVersion: intent.graphVersion, requestId: intent.initialStartRequestId,
+        incarnationId: runtime, graphVersion: intent.graphVersion, requestId: intent.initialStartRequestId,
       }) : await client.initialStartDeployment(intent.deploymentId, {
-        incarnationId: view.source.incarnationId, graphVersion: intent.graphVersion, requestId: intent.initialStartRequestId,
+        incarnationId: runtime, graphVersion: intent.graphVersion, requestId: intent.initialStartRequestId,
         input: JSON.parse(intent.inputJson),
       });
       check();
@@ -161,10 +170,11 @@ export function runOriginDeployment(owner, { client, serviceUrl, tenantId, graph
           || intent.processInstanceId && (intent.processInstanceId !== initial.processInstanceId || intent.traversalId !== initial.traversalId))
         throw failure('INITIAL_START_IDENTITY_CHANGED');
       intent.processInstanceId = initial.processInstanceId; intent.traversalId = initial.traversalId;
-      intent.incarnationId = view.source.incarnationId; intent.phase = 'READY'; await save();
+      intent.incarnationId = runtime; intent.phase = 'READY'; await save();
       return { intent, status, view, initial };
     } catch (error) {
-      if (current()) owner.deploymentRunStatus = control.status?.state === 'FAILED' ? 'FAILED' : 'UNKNOWN';
+      if (current()) owner.deploymentRunStatus = ['READY', 'DEGRADED', 'STOPPED', 'FAILED'].includes(control.status?.state)
+        ? control.status.state : 'UNKNOWN';
       if (current() && intent.phase !== 'FAILED') { intent.phase = 'RECONCILE'; await save(); }
       throw error;
     }
@@ -243,7 +253,15 @@ export function stopOriginDeployment(owner, { client, isCurrent, reason }) {
         command.expectedGeneration = status.deploymentGeneration;
         command.reason = explanation.trim(); command.idempotencyKey = globalThis.crypto.randomUUID();
       }
-      try { await client.stopDeployment(binding.deploymentId, command); }
+      try {
+        const reply = await client.stopDeployment(binding.deploymentId, command);
+        check();
+        const stopped = reply?.status || reply;
+        if (stopped && verify(stopped).state === 'STOPPED') {
+          owner.deploymentRunStatus = 'STOPPED'; owner.deploymentRunLastObservedState = 'STOPPED';
+          return true;
+        }
+      }
       catch (error) {
         if (error?.status !== 404) throw error;
         check(); owner.deploymentRunStatus = 'STOPPED'; owner.deploymentRunLastObservedState = 'STOPPED'; return true;
@@ -269,7 +287,8 @@ export async function observeOriginDeployment(owner, { client, isCurrent }) {
   try { status = await client.deployment(binding.deploymentId); }
   catch (error) {
     if (error?.status !== 404 || !current() || !binding.incarnationId) throw error;
-    owner.deploymentRunStatus = 'STOPPED'; owner.deploymentRunLastObservedState = 'STOPPED'; owner.deploymentRunObservedSource = null; return true;
+    owner.deploymentRunStatus = owner.deploymentRunLastObservedState === 'STOPPED' ? 'STOPPED' : 'UNKNOWN';
+    owner.deploymentRunObservedSource = null; return true;
   }
   if (!current() || status.deploymentId !== binding.deploymentId || status.tenantId !== binding.tenantId
       || status.graphVersion !== binding.graphVersion

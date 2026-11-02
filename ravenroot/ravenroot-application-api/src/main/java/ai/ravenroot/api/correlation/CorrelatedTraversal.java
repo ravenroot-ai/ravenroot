@@ -49,6 +49,8 @@ public record CorrelatedTraversal(BusinessScope scope, ApplicationCorrelationCon
         INITIAL_START,
         /** Event admitted at its actual SOURCE node. */
         SOURCE_EVENT,
+        /** Explicit operator request for another traversal at START. */
+        EXPLICIT_START,
         /** Independent traversal released by a complete cross-traversal join. */
         JOIN_CONTINUATION,
         /** Traversal established by an explicitly authorized context derivation. */

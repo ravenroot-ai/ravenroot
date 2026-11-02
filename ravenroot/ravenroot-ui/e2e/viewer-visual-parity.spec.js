@@ -52,6 +52,12 @@ async function stubViewerService(page) {
     if (url.pathname.endsWith('/view')) return route.fulfill({
       status: 200, contentType: 'application/json', body: JSON.stringify(envelope),
     });
+    if (url.pathname === '/v1/deployments/visual-parity') return route.fulfill({ json: {
+      deploymentId: 'visual-parity', state: 'READY', tenantId: 'local', sourceCount: 0,
+      graphVersion: 'graph-v1', runtimeIncarnationId: 'inc-visual', scope: 'LOCAL_PROCESS',
+      diagnostic: null, continuity: 'PROCESS_LOCAL', deploymentRevision: null,
+      desiredState: null, observedState: null, recoveryFailure: null,
+    } });
     if (url.pathname.endsWith('/events')) return route.fulfill({
       status: 200, contentType: 'text/event-stream', body:
         'event: source-gap\ndata: {"reason":"REPLAY_WINDOW_EXCEEDED"}\n\n',

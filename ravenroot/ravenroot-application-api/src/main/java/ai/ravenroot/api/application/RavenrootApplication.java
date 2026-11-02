@@ -512,8 +512,25 @@ public interface RavenrootApplication extends AutoCloseable {
      * Unknown and cross-tenant identifiers are the same empty result.
      * @param tenantId tenant whose deployment is read
      * @param deploymentId tenant-scoped deployment identifier
-     * @return browser-safe view, or empty when the source is unavailable to the tenant
+     * @param rebuild ignore saved drawing metadata and generate fresh presentation only
+     * @return browser-safe view, or empty for an unknown tenant-scoped deployment
+     * @throws DeploymentViewException when the deployment exists but cannot be presented
      */
+    default java.util.Optional<DeploymentViewerView> localDeploymentView(String tenantId, String deploymentId, boolean rebuild) {
+        return localDeploymentView(tenantId, deploymentId);
+    }
+
+    /** Admits an independent START; repeating the same request reconciles its durable receipt. */
+    default EmbedDeploymentStart newLocalDeploymentExecution(SecurityContext security, String deploymentId,
+            String incarnationId, String graphVersion, String requestId, ai.ravenroot.api.payload.PayloadValue input) {
+        return new EmbedDeploymentStart(EmbedDeploymentStart.Outcome.REFUSED, requestId);
+    }
+
+    /** Reads the immutable submitted GraphML for an exact deployment binding without activating it. */
+    default java.util.Optional<byte[]> localDeploymentGraphMl(String tenantId, String deploymentId,
+            String incarnationId, String graphVersion) { return java.util.Optional.empty(); }
+
+    /** Reads the saved presentation, falling back to a rebuilt drawing when available. */
     default java.util.Optional<DeploymentViewerView> localDeploymentView(String tenantId, String deploymentId) {
         return java.util.Optional.empty();
     }

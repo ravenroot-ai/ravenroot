@@ -2526,3 +2526,22 @@ it('does not misdiagnose a structured missing execution as a missing API route',
   expect(missing.uiMessageParams.hint).toBe('');
   expect(new RuntimeRequestError('not found', { status: 404, method: 'GET', path: '/wrong-prefix' }).message).toContain('not an API route');
 });
+
+
+describe('exact deployment source', () => {
+  const source = { deploymentId: 'local-file', incarnationId: 'runtime', graphVersion: 'a'.repeat(64) };
+  it('decodes the full UTF-8 source and sends the exact binding', async () => {
+    const graphMl = '<graphml>è — complete properties</graphml>';
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ ...source,
+      graphMlBase64: Buffer.from(graphMl).toString('base64') }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    const client = new RavenrootRuntimeClient('http://localhost:8080', { fetchImpl });
+    expect((await client.deploymentSource(source)).graphMl).toBe(graphMl);
+    expect(fetchImpl.mock.calls[0][0]).toContain('/local-file/source?incarnationId=runtime&graphVersion=');
+    expect(fetchImpl.mock.calls[0][1].method).toBe('GET');
+  });
+  it('rejects a different version before opening or downloading it', async () => {
+    const client = new RavenrootRuntimeClient('http://localhost:8080', { fetchImpl: async () => new Response(
+      JSON.stringify({ ...source, graphVersion: 'wrong', graphMlBase64: '' }), { status: 200 }) });
+    await expect(client.deploymentSource(source)).rejects.toThrow();
+  });
+});

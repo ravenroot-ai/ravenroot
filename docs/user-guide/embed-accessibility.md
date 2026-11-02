@@ -10,8 +10,10 @@ Consume a pre-authorized read-only projection and navigate Ravenroot without dep
    **Monitoring**. **Render** recomputes only the selected view; changing views restores that view's
    prior viewport and positions without fitting, laying out, or starting a simulation. Opening the
    view attaches observation only; closing it detaches and never
-   stops, restarts, or undeploys the deployment. The attachment is session-only and is not restored
-   as a live document after reloading the workspace.
+   stops, restarts, or undeploys the deployment. Authenticated workspaces retain these read-only tabs, their selection and view settings across
+   refresh. Reconnection verifies the retained registration identity and graph version before
+   observing the current runtime incarnation. Missing or replaced deployments remain disconnected;
+   restoring a tab never registers a deployment or starts an execution.
 4. For a v2 embed, use the labeled **Run** choice. With no authorized runs it is disabled and a live
    status announces the empty state. One run is selected deterministically; multiple runs remain a
    normal keyboard-operable select. A switch clears old runtime cues before the new stream attaches.

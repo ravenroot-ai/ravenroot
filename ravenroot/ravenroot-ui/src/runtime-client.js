@@ -723,6 +723,21 @@ export class RavenrootRuntimeClient {
     return validateLocalDeploymentStatus(result, id);
   }
 
+  async deploymentSource(source, { signal } = {}) {
+    if (!source?.deploymentId || !source?.incarnationId || !source?.graphVersion)
+      throw runtimeClientValidationError('Deployment source requires an exact binding');
+    const query = new URLSearchParams({ incarnationId: source.incarnationId, graphVersion: source.graphVersion });
+    const result = await this.#json(`/v1/deployments/${encodeURIComponent(source.deploymentId)}/source?${query}`, {
+      method: 'GET', headers: { Accept: 'application/json' }, signal,
+    });
+    if (result?.deploymentId !== source.deploymentId || result?.incarnationId !== source.incarnationId
+        || result?.graphVersion !== source.graphVersion || typeof result?.graphMlBase64 !== 'string')
+      throw runtimeClientValidationError('Deployment source binding mismatch');
+    const bytes = Uint8Array.from(atob(result.graphMlBase64), character => character.charCodeAt(0));
+    if (bytes.length > MAX_GRAPH_DOCUMENT_BYTES) throw runtimeClientValidationError('Deployment source exceeds document limit');
+    return { ...result, graphMlBytes: bytes, graphMl: new TextDecoder('utf-8', { fatal: true }).decode(bytes) };
+  }
+
   /** Reads one metadata or explicitly requested content page of an exact current deployment. */
   async deploymentHistory(source, query, { signal } = {}) {
     if (!source?.deploymentId || !source?.incarnationId || !source?.graphVersion)
@@ -778,11 +793,24 @@ export class RavenrootRuntimeClient {
     return result;
   }
 
+  /** Explicit independent run; retries must reuse the persisted requestId and input. */
+  async newDeploymentExecution(deploymentId, request) {
+    const result = await this.#json(`/v1/deployments/${encodeURIComponent(deploymentId)}/executions`, {
+      method: 'POST', headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    });
+    if (!result || !['ACCEPTED', 'DUPLICATE'].includes(result.outcome) || result.requestId !== request.requestId
+        || ![result.processInstanceId, result.traversalId].every(id =>
+          typeof id === 'string' && /^[0-9a-f-]{36}$/i.test(id)))
+      throw runtimeClientValidationError('Invalid explicit execution response');
+    return result;
+  }
+
   /** Resolves one immutable, tenant-scoped deployment presentation without returning raw GraphML. */
-  async deploymentView(deploymentId, { signal } = {}) {
+  async deploymentView(deploymentId, { signal, rebuild = false } = {}) {
     const id = String(deploymentId || '');
     if (!id) throw runtimeClientValidationError('Deployment view requires an id');
-    const result = await this.#json(`/v1/deployments/${encodeURIComponent(id)}/view`, {
+    const result = await this.#json(`/v1/deployments/${encodeURIComponent(id)}/view${rebuild ? '?layout=reset' : ''}`, {
       method: 'GET', headers: { Accept: 'application/json' }, signal,
     });
     return validateDeploymentViewEnvelope(result, id);

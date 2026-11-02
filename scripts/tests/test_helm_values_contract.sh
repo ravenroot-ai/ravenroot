@@ -254,3 +254,24 @@ helm_base --set-string resources.requests.cpu=+0.5 --set-string persistence.size
   --set-string tmpfs.sizeLimit=+0.5Mi >"$TEMP_DIR/positive-sign.yaml"
 
 echo "Helm values contract tests passed."
+
+# Git authoring is useful without immutable publication storage. Only empty disables storage;
+# a configured non-HTTPS value still fails schema validation before rendering.
+for artifact_base in '' 'https://artifacts.example.test/'; do
+  helm_base --set graphAuthoring.enabled=true --set-string graphAuthoring.credentialMode=PAT \
+    --set-string graphAuthoring.repositoryOwner=example \
+    --set-string graphAuthoring.repositoryName=graphs \
+    --set-string graphAuthoring.credentialSecretName=graph-credentials \
+    --set-string graphAuthoring.tenantNamespaces=tenant-a=tenant-a \
+    --set-string "graphAuthoring.artifactBaseUrl=$artifact_base" >"$TEMP_DIR/authoring-storage.yaml"
+done
+if helm_base --set graphAuthoring.enabled=true --set-string graphAuthoring.credentialMode=PAT \
+    --set-string graphAuthoring.repositoryOwner=example \
+    --set-string graphAuthoring.repositoryName=graphs \
+    --set-string graphAuthoring.credentialSecretName=graph-credentials \
+    --set-string graphAuthoring.tenantNamespaces=tenant-a=tenant-a \
+    --set-string graphAuthoring.artifactBaseUrl=http://artifacts.example.test/ \
+    >"$TEMP_DIR/authoring-invalid-storage.out" 2>&1; then
+  echo "Helm accepted configured non-HTTPS publication storage" >&2
+  exit 1
+fi

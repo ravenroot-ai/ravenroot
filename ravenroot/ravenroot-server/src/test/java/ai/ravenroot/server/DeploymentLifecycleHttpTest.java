@@ -72,6 +72,29 @@ class DeploymentLifecycleHttpTest {
     private static final String CORRELATION_PLACEHOLDER = "<correlation>";
 
     @Test
+    void exactSourceIsCompleteReadOnlyAndIndependentOfRepositoryOrActivation() throws Exception {
+        try (var fixture = new Fixture()) {
+            var registered = fixture.request("POST", "/v1/deployments?id=source-copy", SOURCE_GRAPH, "tenant-a");
+            String incarnation = field(registered.body(), "runtimeIncarnationId"), version = field(registered.body(), "graphVersion");
+            String path = "/v1/deployments/source-copy/source?incarnationId=" + incarnation + "&graphVersion=" + version;
+            var cold = fixture.request("GET", path, "", "tenant-a");
+            assertEquals(200, cold.statusCode(), cold.body());
+            assertEquals(SOURCE_GRAPH, new String(java.util.Base64.getDecoder().decode(field(cold.body(), "graphMlBase64")), java.nio.charset.StandardCharsets.UTF_8));
+            assertEquals(0, fixture.source.starts.get());
+            assertEquals("private, no-store", cold.headers().firstValue("Cache-Control").orElseThrow());
+            assertEquals(403, fixture.request("GET", path, "", "tenant-a-monitor").statusCode());
+            assertEquals(404, fixture.request("GET", path, "", "tenant-b").statusCode());
+            assertEquals(409, fixture.request("GET", path.replace(incarnation, "stale"), "", "tenant-a").statusCode());
+            assertEquals(409, fixture.request("GET", path.replace(version, "wrong"), "", "tenant-a").statusCode());
+            assertEquals(400, fixture.request("GET", "/v1/deployments/source-copy/source", "", "tenant-a").statusCode());
+            assertState(fixture.request("POST", "/v1/deployments/source-copy/start", "", "tenant-a"), "READY");
+            assertEquals(cold.body(), fixture.request("GET", path, "", "tenant-a").body());
+            assertEquals(1, fixture.source.starts.get());
+            assertEquals(1, fixture.source.active.get());
+        }
+    }
+
+    @Test
     void allowedBrowserOriginCanPreflightOnlyTheFiniteDeploymentBindingHeaders() throws Exception {
         try (var fixture = new Fixture()) {
             String fields = "authorization,content-type,idempotency-key,x-ravenroot-expected-generation,"
@@ -125,7 +148,7 @@ class DeploymentLifecycleHttpTest {
         try (var fixture = new Fixture()) {
             var registered = fixture.request("POST", "/v1/deployments?id=cold", SOURCE_GRAPH, "tenant-a");
             String incarnation = field(registered.body(), "runtimeIncarnationId"), version = field(registered.body(), "graphVersion");
-            assertEquals(404, fixture.request("GET", "/v1/deployments/cold/view", "", "tenant-a").statusCode());
+            assertEquals(503, fixture.request("GET", "/v1/deployments/cold/view", "", "tenant-a").statusCode());
             assertState(fixture.boundStop("cold", "tenant-a", incarnation, version, null, null), "STOPPED");
             assertEquals(0, fixture.source.starts.get()); assertEquals(0, fixture.source.active.get());
         }
@@ -359,7 +382,7 @@ class DeploymentLifecycleHttpTest {
         try (var fixture = new Fixture()) {
             assertEquals(200, fixture.request("POST", "/v1/deployments?id=observed",
                     NO_SOURCE_GRAPH, "tenant-a").statusCode());
-            assertEquals(404, fixture.request("GET", "/v1/deployments/observed/view", "", "tenant-a")
+            assertEquals(503, fixture.request("GET", "/v1/deployments/observed/view", "", "tenant-a")
                     .statusCode(), "a cold registration has no successfully opened viewer definition");
             assertState(fixture.request("POST", "/v1/deployments/observed/start", "", "tenant-a"), "READY");
             var view = fixture.request("GET", "/v1/deployments/observed/view", "", "tenant-a");
@@ -370,6 +393,12 @@ class DeploymentLifecycleHttpTest {
             assertFalse(view.body().toLowerCase().contains("graphml"), view.body());
             String incarnation = field(view.body(), "incarnationId");
             String version = field(view.body(), "graphVersion");
+            var rebuilt = fixture.request("GET", "/v1/deployments/observed/view?layout=reset", "", "tenant-a");
+            assertEquals(200, rebuilt.statusCode(), rebuilt.body());
+            assertTrue(rebuilt.body().contains("\"renderingStatus\":\"REBUILT\""));
+            assertEquals(incarnation, field(rebuilt.body(), "incarnationId"));
+            assertEquals(version, field(rebuilt.body(), "graphVersion"));
+            assertEquals(400, fixture.request("GET", "/v1/deployments/observed/view?layout=invalid", "", "tenant-a").statusCode());
 
             assertEquals(404, fixture.request("GET", "/v1/deployments/observed/view", "", "tenant-b")
                     .statusCode());
@@ -982,12 +1011,13 @@ class DeploymentLifecycleHttpTest {
         public AuthenticatedPrincipal authenticate(Headers headers) throws AuthenticationException {
             String tenant = headers.getFirst("X-Test-Tenant");
             if (tenant == null || tenant.isBlank()) throw new AuthenticationException("missing tenant");
-            boolean viewer = "tenant-a-viewer".equals(tenant);
+            boolean viewer = "tenant-a-viewer".equals(tenant) || "tenant-a-monitor".equals(tenant);
             return new AuthenticatedPrincipal(tenant, AuthenticatedPrincipal.Type.USER,
                     "urn:ravenroot:test", viewer ? "tenant-a" : tenant,
                     viewer ? Set.of(Role.OPERATOR) : Set.of(Role.OPERATOR, Role.PLATFORM_ADMIN),
                     java.util.Arrays.stream(AuthorizationAction.values())
                             .filter(AuthorizationAction::available)
+                            .filter(action -> !"tenant-a-monitor".equals(tenant) || action != AuthorizationAction.GRAPH_READ)
                             .filter(action -> !viewer || action != AuthorizationAction.EXECUTION_START
                                     && action != AuthorizationAction.EXECUTION_CONTROL)
                             .map(AuthorizationAction::requiredScope)

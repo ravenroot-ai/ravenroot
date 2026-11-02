@@ -485,6 +485,10 @@ public final class RouteTable {
                     true, false, 200,
                     concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_RESOURCE.code(),
                             ErrorCode.INVALID_REQUEST.code(), ErrorCode.REQUEST_INTERRUPTED.code()), NEVER, false),
+            new RouteDescriptor(Set.of("GET"), "/v1/deployments/{id}/source",
+                    "Returns the complete immutable submitted GraphML, base64 encoded, for the exact incarnationId and graphVersion query binding. Requires graph inspection and deployment observation; never activates or executes work.",
+                    true, false, 200, concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_RESOURCE.code(),
+                            ErrorCode.INVALID_REQUEST.code(), ErrorCode.CONFLICT.code()), NEVER, false),
             new RouteDescriptor(Set.of("GET"), "/v1/deployments/{id}/view",
                     "Returns the versioned, allowlisted viewer projection for one exact local deployment "
                             + "incarnation. Raw GraphML, node properties, credentials and payloads are absent.",
@@ -513,6 +517,9 @@ public final class RouteTable {
                             + "without admitting work; missing or unavailable custody is explicit and never becomes an empty initial execution.",
                     true, false, 200, concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(), ErrorCode.CONFLICT.code(),
                             ErrorCode.REQUEST_INTERRUPTED.code()), READ, true),
+            new RouteDescriptor(Set.of("POST"), "/v1/deployments/{id}/executions",
+                    "Explicitly admits a new durable START traversal on the pinned deployment. Reusing requestId reconciles the same admission across reload and runtime restart; a new requestId requests independent work.",
+                    true, false, Set.of(200, 202), concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(), ErrorCode.CONFLICT.code()), NEVER, false),
             new RouteDescriptor(Set.of("POST"), "/v1/deployments/{id}/initial-start",
                     "Accepts or reconciles the single initial START for the authorized deployment. "
                             + "Requires exact incarnationId and graphVersion, a bounded requestId and structured input. "

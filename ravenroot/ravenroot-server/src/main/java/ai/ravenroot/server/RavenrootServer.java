@@ -4381,9 +4381,42 @@ public final class RavenrootServer implements AutoCloseable {
                 deploymentJson(exchange, httpContext, 200, restored.orElseThrow(), durableDeploymentRecord(context.tenantId(), deploymentId).orElse(null));
                 return;
             }
+            if (segments.length == 3 && "source".equals(segments[2])) {
+                if (!method(exchange, httpContext, "GET")) return;
+                if (!query.keySet().equals(java.util.Set.of("incarnationId", "graphVersion"))
+                        || query.get("incarnationId").isBlank() || query.get("graphVersion").isBlank()) {
+                    fail(exchange, httpContext, ErrorCode.INVALID_REQUEST); return;
+                }
+                exchange.getResponseHeaders().set("Cache-Control", "private, no-store");
+                java.util.Optional<byte[]> source;
+                try {
+                    source = authorizedApplication.localDeploymentGraphMl(context, deploymentId,
+                            query.get("incarnationId"), query.get("graphVersion"));
+                } catch (IllegalArgumentException changed) {
+                    json(exchange, 409, "{\"code\":\"DEPLOYMENT_SOURCE_CHANGED\"}"); return;
+                }
+                if (source.isEmpty()) { fail(exchange, httpContext, ErrorCode.UNKNOWN_RESOURCE); return; }
+                json(exchange, 200, "{\"deploymentId\":\"" + escape(deploymentId)
+                        + "\",\"incarnationId\":\"" + escape(query.get("incarnationId"))
+                        + "\",\"graphVersion\":\"" + escape(query.get("graphVersion"))
+                        + "\",\"graphMlBase64\":\"" + java.util.Base64.getEncoder().encodeToString(source.orElseThrow()) + "\"}");
+                return;
+            }
             if (segments.length == 3 && "view".equals(segments[2])) {
                 if (!method(exchange, httpContext, "GET")) return;
-                var view = authorizedApplication.localDeploymentView(context, deploymentId);
+                java.util.Optional<ai.ravenroot.api.application.DeploymentViewerView> view;
+                String layout = query.getOrDefault("layout", "saved");
+                if (!java.util.Set.of("saved", "reset").contains(layout)) {
+                    fail(exchange, httpContext, ErrorCode.INVALID_REQUEST); return;
+                }
+                try {
+                    view = authorizedApplication.localDeploymentView(context, deploymentId, "reset".equals(layout));
+                } catch (ai.ravenroot.api.application.DeploymentViewException unavailable) {
+                    exchange.getResponseHeaders().set("Cache-Control", "private, no-store");
+                    json(exchange, 503, "{\"code\":\"" + unavailable.reason().name()
+                            + "\",\"message\":\"Deployment exists; its presentation is unavailable\",\"retryable\":true}");
+                    return;
+                }
                 if (view.isEmpty()) {
                     fail(exchange, httpContext, ErrorCode.UNKNOWN_RESOURCE);
                     return;
@@ -4404,6 +4437,28 @@ public final class RavenrootServer implements AutoCloseable {
                 var reader = authorizedApplication.deploymentHistory(context, source);
                 exchange.getResponseHeaders().set("Cache-Control", "private, no-store");
                 json(exchange, 200, request.read(reader, context.tenantId()));
+                return;
+            }
+            if (segments.length == 3 && "executions".equals(segments[2])) {
+                if (!method(exchange, httpContext, "POST")) return;
+                var body = strictJsonMap(boundedBody(exchange, payloadLimits.maxEncodedBytes()),
+                        java.util.Set.of("incarnationId", "graphVersion", "requestId", "input"));
+                if (!(body.entries().get("incarnationId") instanceof PayloadValue.TextValue incarnation)
+                        || !(body.entries().get("graphVersion") instanceof PayloadValue.TextValue version)
+                        || !(body.entries().get("requestId") instanceof PayloadValue.TextValue request)
+                        || !body.entries().containsKey("input")) {
+                    fail(exchange, httpContext, ErrorCode.INVALID_REQUEST); return;
+                }
+                var result = authorizedApplication.newLocalDeploymentExecution(context, deploymentId,
+                        incarnation.value(), version.value(), request.value(), body.entries().get("input"));
+                int response = switch (result.outcome()) {
+                    case ACCEPTED -> 202; case DUPLICATE -> 200; case REFUSED -> 409; case RECONCILE -> 503;
+                };
+                exchange.getResponseHeaders().set("Cache-Control", "private, no-store");
+                json(exchange, response, "{\"outcome\":\"" + result.outcome()
+                        + "\",\"requestId\":\"" + escape(result.requestId())
+                        + "\",\"processInstanceId\":" + (result.processInstanceId() == null ? "null" : "\"" + result.processInstanceId() + "\"")
+                        + ",\"traversalId\":" + (result.traversalId() == null ? "null" : "\"" + result.traversalId() + "\"") + "}");
                 return;
             }
             if (segments.length == 3 && "initial-start".equals(segments[2])) {

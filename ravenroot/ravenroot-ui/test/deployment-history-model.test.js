@@ -74,3 +74,14 @@ it('bounds a hostile transport that ignores abort across repeated retired reques
   expect(await Promise.all(reads)).toEqual(Array(32).fill('AbortError'));
   reader.destroy();
 });
+
+
+import { requireHistorySource } from '../src/deployment-history-model.js';
+it('distinguishes stale runtime and graph bindings before opening history', () => {
+  const binding = { deploymentId: 'd', incarnationId: 'i', graphVersion: 'v' };
+  expect(() => requireHistorySource(binding, { ...binding })).not.toThrow();
+  for (const field of ['deploymentId', 'incarnationId', 'graphVersion']) {
+    try { requireHistorySource(binding, { ...binding, [field]: 'replacement' }); throw new Error('accepted replacement'); }
+    catch (error) { expect(error.code).toBe('HISTORY_SOURCE_CHANGED'); }
+  }
+});

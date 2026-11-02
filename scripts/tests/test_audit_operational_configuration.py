@@ -6873,6 +6873,26 @@ class GraphAuthoringPolicyAuditTest(unittest.TestCase):
     def tearDownClass(cls) -> None:
         cls.temporary.cleanup()
 
+    def test_optional_publication_does_not_disable_configured_validation(self) -> None:
+        sources = {path: (self.root / path).read_text(encoding="utf-8")
+                   for path in audit.GRAPH_AUTHORING_FILE_PROOFS}
+        self.assertTrue(audit.graph_authoring_optional_publication_boundary(sources))
+        configuration = audit.GRAPH_AUTHORING_CONFIGURATION_PATH
+        catalog = next(path for path in sources if path.stem == "PublishedGraphArtifactCatalog")
+        for path, before, after in (
+            (configuration, 'requireHttps(artifactBase, "artifact base");', ';'),
+            (configuration, '!artifactBase.getPath().endsWith("/")', 'false'),
+            (configuration, 'return mode == Mode.GIT && !artifactBase.toString().isEmpty();', 'return false;'),
+            (catalog, 'if (!configuration.publicationEnabled()) return List.of();', 'return List.of();'),
+            (catalog, 'confined(configuration.artifactBase().resolve(configuration.artifactCatalogPath()))',
+             'configuration.artifactBase().resolve(configuration.artifactCatalogPath())'),
+        ):
+            with self.subTest(path=path, mutation=after):
+                original = sources[path]
+                self.assertEqual(1, original.count(before))
+                mutated = {**sources, path: original.replace(before, after, 1)}
+                self.assertFalse(audit.graph_authoring_optional_publication_boundary(mutated))
+
     def test_exact_boundary_closes_settings_routes_artifacts_ui_and_deployment_carriers(self) -> None:
         authority = self.authority
         self.assertEqual(len(audit.GRAPH_AUTHORING_SETTINGS) + len(audit.GRAPH_AUTHORING_WEBHOOK_SETTINGS), len(authority["contracts"]))
@@ -7063,6 +7083,11 @@ class GraphAuthoringPolicyAuditTest(unittest.TestCase):
                 (path, None, 'requireExpected(request.expected(), initial.revision());', ';'),
                 (path, None, 'draft.releaseVersion() != release.releaseVersion()', 'false'),
                 (path, None, 'version = draftMetadata.releaseVersion();', 'version = draftMetadata.releaseVersion() + 1;'),
+                (path, None, 'state.draft() != null && equivalent(submitted, state.draft().bytes(), graphId, version)', 'false'),
+                (path, None, 'equivalent(submitted, state.release().bytes(), graphId, version)', 'false'),
+                (path, None, 'state.draft() != null && !MessageDigest.isEqual(state.draft().bytes(), state.release().bytes())', 'false'),
+                (path, None, 'if (version >= GraphReleaseMetadata.MAX_RELEASE_VERSION)', 'if (false)'),
+                (path, None, 'version++;', 'version += 2;'),
                 (path, None, 'release.releaseVersion() >= GraphReleaseMetadata.MAX_RELEASE_VERSION', 'false'),
             ))
         for relative, method, before, after in mutations:

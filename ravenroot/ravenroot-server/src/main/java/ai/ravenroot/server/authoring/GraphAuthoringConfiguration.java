@@ -112,9 +112,11 @@ public record GraphAuthoringConfiguration(
                     throw new IllegalArgumentException("tenant namespaces must map to distinct draft branches");
                 }
             });
-            requireHttps(artifactBase, "artifact base");
-            if (!artifactBase.getPath().endsWith("/")) {
-                throw new IllegalArgumentException("artifact base must end with /");
+            if (!artifactBase.toString().isEmpty()) {
+                requireHttps(artifactBase, "artifact base");
+                if (!artifactBase.getPath().endsWith("/")) {
+                    throw new IllegalArgumentException("artifact base must end with /");
+                }
             }
             requireConfined(artifactCatalogPath, "artifact catalog path");
         }
@@ -150,12 +152,17 @@ public record GraphAuthoringConfiguration(
                 environment.getOrDefault("RAVENROOT_GRAPH_AUTHORING_GITHUB_APP_ID", ""),
                 environment.getOrDefault("RAVENROOT_GRAPH_AUTHORING_GITHUB_INSTALLATION_ID", ""),
                 tenantNamespaces(required(environment, "RAVENROOT_GRAPH_AUTHORING_TENANT_NAMESPACES")),
-                URI.create(required(environment, "RAVENROOT_GRAPH_ARTIFACT_BASE_URL")),
+                URI.create(environment.getOrDefault("RAVENROOT_GRAPH_ARTIFACT_BASE_URL", "").strip()),
                 environment.getOrDefault("RAVENROOT_GRAPH_ARTIFACT_CATALOG_PATH", "catalog.json"),
                 integer(environment, "RAVENROOT_GRAPH_AUTHORING_MAX_DOCUMENT_BYTES", 10 * 1024 * 1024),
                 integer(environment, "RAVENROOT_GRAPH_AUTHORING_PAGE_SIZE", 50),
                 Duration.ofMillis(integer(environment, "RAVENROOT_GRAPH_AUTHORING_REQUEST_TIMEOUT_MILLIS", 15_000)),
                 integer(environment, "RAVENROOT_GRAPH_AUTHORING_RETRY_LIMIT", 1));
+    }
+
+    /** Whether immutable publication storage is configured independently of source authoring. */
+    public boolean publicationEnabled() {
+        return mode == Mode.GIT && !artifactBase.toString().isEmpty();
     }
 
     /** Returns the configured provider project path or numeric GitLab project ID. */

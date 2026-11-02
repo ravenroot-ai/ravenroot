@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createDeploymentRunIntent, persistedDeploymentRun, runOriginDeployment, observeOriginDeployment } from '../src/deployment-run.js';
+import { createDeploymentRunIntent, persistedDeploymentRun, runOriginDeployment, observeOriginDeployment, stopOriginDeployment } from '../src/deployment-run.js';
 import { persistedDocument, workspaceSnapshot, validateWorkspaceSnapshot, workspaceScope } from '../src/workspace-persistence.js';
 const version = 'a'.repeat(64), process = '10000000-0000-0000-0000-000000000001', traversal = '20000000-0000-0000-0000-000000000002';
 const deferred = () => { let resolve; const promise = new Promise(yes => { resolve = yes; }); return { promise, resolve }; };
@@ -17,6 +17,22 @@ function fixture() {
   return { owner, client, options, saved, setCurrent: value => { current = value; } };
 }
 describe('origin document deployment Run', () => {
+  it('admits work with authoritative status even when presentation fails', async () => {
+    const f = fixture();
+    f.client.registerDeployment.mockImplementation(async id => ({ tenantId: 'tenant', deploymentId: id, graphVersion: version, state: 'READY', runtimeIncarnationId: 'runtime-1' }));
+    f.client.deploymentView.mockRejectedValue(Object.assign(new Error('presentation unavailable'), { status: 503 }));
+    const result = await runOriginDeployment(f.owner, f.options);
+    expect(result.initial.outcome).toBe('ACCEPTED');
+    expect(f.owner.deploymentRunStatus).toBe('READY');
+    expect(f.owner.deploymentRunMonitoringError.message).toBe('presentation unavailable');
+    expect(f.client.initialStartDeployment).toHaveBeenCalledTimes(1);
+  });
+  it('a UI renderer failure does not replace or prevent initial admission', async () => {
+    const f = fixture(); f.options.onView = () => { throw new Error('renderer failed'); };
+    await runOriginDeployment(f.owner, f.options);
+    expect(f.client.initialStartDeployment).toHaveBeenCalledTimes(1);
+    expect(f.owner.deploymentRunMonitoringError.message).toBe('renderer failed');
+  });
   it('persists original identities/bytes/input/pin before registration and coalesces concurrent Run', async () => {
     const f = fixture(), gate = deferred(); f.options.persist.mockImplementationOnce(async (_, intent) => { f.saved.push(structuredClone(intent)); await gate.promise; });
     const first = runOriginDeployment(f.owner, f.options); expect(runOriginDeployment(f.owner, f.options)).toBe(first);
@@ -227,4 +243,44 @@ it('attaches the deployment observation before admitting its first traversal', a
   expect(f.client.initialStartDeployment).not.toHaveBeenCalled();
   connected.resolve(); await run;
   expect(f.client.initialStartDeployment).toHaveBeenCalledTimes(1);
+});
+
+
+it('keeps a confirmed Stop when a later observation cannot find the deployment', async () => {
+  const f = fixture();
+  await runOriginDeployment(f.owner, f.options);
+  f.owner.deploymentRunLastObservedState = 'STOPPED';
+  f.owner.deploymentRunStatus = 'STOPPED';
+  f.client.deployment.mockRejectedValue({ status: 404 });
+  await observeOriginDeployment(f.owner, f.options);
+  expect(f.owner.deploymentRunStatus).toBe('STOPPED');
+  f.owner.deploymentRunLastObservedState = 'READY';
+  await observeOriginDeployment(f.owner, f.options);
+  expect(f.owner.deploymentRunStatus).toBe('UNKNOWN');
+  expect(f.client.startDeployment).toHaveBeenCalledTimes(1);
+  expect(f.client.initialStartDeployment).toHaveBeenCalledTimes(1);
+});
+
+it('does not project pre-command REGISTERED as the result of an ambiguous activation', async () => {
+  const f = fixture();
+  f.client.startDeployment.mockRejectedValue(new Error('response lost'));
+  await expect(runOriginDeployment(f.owner, f.options)).rejects.toThrow('response lost');
+  expect(f.owner.deploymentRunStatus).toBe('UNKNOWN');
+  expect(f.client.initialStartDeployment).not.toHaveBeenCalled();
+});
+
+
+it('accepts an identity-verified completed Stop reply without replacing it with a later missing read', async () => {
+  const f = fixture();
+  await runOriginDeployment(f.owner, f.options);
+  const status = { tenantId: 'tenant', deploymentId: f.owner.deploymentRun.deploymentId,
+    graphVersion: version, runtimeIncarnationId: 'runtime-1', continuity: 'PROCESS_LOCAL', state: 'READY' };
+  f.client.deployment.mockResolvedValue(status);
+  f.client.stopDeployment = vi.fn(async () => ({ ...status, state: 'STOPPED' }));
+  await expect(stopOriginDeployment(f.owner, f.options)).resolves.toBe(true);
+  expect(f.owner.deploymentRunStatus).toBe('STOPPED');
+  f.client.deployment.mockRejectedValue({ status: 404 });
+  await observeOriginDeployment(f.owner, f.options);
+  expect(f.owner.deploymentRunStatus).toBe('STOPPED');
+  expect(f.client.stopDeployment).toHaveBeenCalledTimes(1);
 });

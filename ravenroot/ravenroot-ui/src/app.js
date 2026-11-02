@@ -1,3 +1,6 @@
+import { repositoryOperationDialog } from './repository-operation-dialog.js';
+import { readSavedDeploymentView } from './saved-deployment-view.js';
+import { requireHistorySource } from './deployment-history-model.js';
 import { deploymentGraphSignature } from './deployment-graph-match.js';
 import { createDeploymentHistoryMonitor } from './embed-viewer-entry.js';
 import { mountCorrelationPreview } from './correlation-authoring.js';
@@ -1046,7 +1049,7 @@ async function switchWorkspacePersistence(configuration, client) {
       }
       clearActivity();
       addActivityMessage(uiMessage('workspace.notice.editor.6'), uiMessage('workspace.notice.workspaceRestored', {
-        count: restored.documents.length, name: workspace.active?.displayName || '',
+        count: restored.documents.length, name: graphDisplayName || '',
       }));
       if (restored.recoveredStaleSelection) workspacePersistenceReason += uiText("workspace.app.the.stale.selection.was.repaired");
     } else {
@@ -3767,10 +3770,36 @@ function paintDocumentDeploymentView(owner, state) {
   if (owner === workspace.active) drawingModelController?.scheduleRefresh(owner.id);
 }
 
-async function openDeploymentDocument(deploymentId, client = runtimeClient) {
+function openDeploymentSourceDocument(source, action) {
+  // i18n-audit-exempt: authored-content - The filename identifies the immutable deployment version.
+  const filename = `${source.deploymentId}-${source.graphVersion.slice(0, 12)}.graphml`;
+  if (action === 'download') {
+    dispatchDocumentDownload({ xml: source.graphMlBytes || source.graphMl, filename });
+    return;
+  }
+  const graph = parsePreparedGraph(source.graphMl, filename, { maxBytes: currentGraphDocumentByteLimit() });
+  const id = openDocument({ name: filename, graph,
+    mode: action === 'draft' ? DOCUMENT_MODES.DRAFT : DOCUMENT_MODES.DEPLOYED,
+    provenance: { originMode: DOCUMENT_MODES.DEPLOYED, sourceGraphVersion: source.graphVersion },
+  });
+  const owner = workspace.find(id);
+  if (action === 'open') owner.deploymentSource = source;
+  else if (action === 'draft') setModifyMode(true);
+  addActivityMessage(uiMessage('workspace.notice.deployment'), uiMessage('workspace.deployment.source.opened', {
+    version: shortId(source.graphVersion), deploymentId: source.deploymentId }), 'completed');
+  scheduleWorkspacePersistence();
+  return id;
+}
+
+async function openDeploymentDocument(deploymentId, client = runtimeClient, rebuild = false) {
   if (!client) throw productError("workspace.error.app.connect.to.a.ravenroot.service.before.opening.a.deployment", new Error('Connect to a Ravenroot service before opening a deployment.'));
-  const envelope = await client.deploymentView(deploymentId);
+  const [envelope, status] = await Promise.all([client.deploymentView(deploymentId, { rebuild }), client.deployment(deploymentId)]);
+  if (status.graphVersion !== envelope.source.graphVersion || status.runtimeIncarnationId !== envelope.source.incarnationId)
+    throw productError('history.sourceChanged', new Error('Deployment changed during view opening'));
   const graph = deploymentProjectionDocument(envelope);
+  graph.viewerBinding = Object.freeze({ ...graph.viewerBinding, registrationIdentity: status.registrationIdentity });
+  if (['REBUILT', 'DEGRADED'].includes(envelope.renderingStatus))
+    addActivityMessage(uiMessage('workspace.notice.deployment'), uiMessage('workspace.deployment.renderingDegraded'));
   const id = openDocument({
     // i18n-audit-exempt: authored-content - Document filenames are persisted stable identities.
     name: `${deploymentId}.deployment`,
@@ -3790,8 +3819,22 @@ async function openDeploymentDocument(deploymentId, client = runtimeClient) {
   });
   const owner = workspace.find(id);
   if (!owner) throw productError("workspace.error.app.the.deployment.canvas.could.not.be.created", new Error('The deployment canvas could not be created.'));
-  const state = createDeploymentViewState({ ...graph.viewerBinding, lifecycle: envelope.lifecycle });
+  attachDeploymentDocument(owner, envelope, client);
+  setModifyMode(false);
+  syncActiveDocumentChrome();
+  scheduleWorkspacePersistence();
+  return id;
+}
+
+function attachDeploymentDocument(owner, envelope, client) {
+  owner.deploymentView?.disconnect?.();
+  const deploymentId = envelope.source.deploymentId;
+  const state = createDeploymentViewState({ ...owner.graph.viewerBinding, lifecycle: envelope.lifecycle });
+  const authority = workspaceAuthority, incarnation = owner.incarnation;
+  const current = () => workspace.find(owner.id) === owner && owner.incarnation === incarnation
+    && runtimeClient === client && workspaceAuthority === authority && tenantAuthorityAllows(owner, client);
   const repaint = frame => {
+    if (!current()) return;
     const result = applyDeploymentViewFrame(state, frame);
     if (owner.cy) paintDocumentDeploymentView(owner, state);
     syncPaneHeaders();
@@ -3801,6 +3844,7 @@ async function openDeploymentDocument(deploymentId, client = runtimeClient) {
     }
   };
   const disconnect = client.connectDeploymentView(envelope, repaint, (connectionState, message, renderMessage) => {
+    if (!current()) return;
     if (connectionState === 'revoked') {
       resetDeploymentViewRuntime(state, 'DETACHED', 'AUTHORITY_CHANGED');
     } else if (connectionState === 'error') {
@@ -3817,9 +3861,33 @@ async function openDeploymentDocument(deploymentId, client = runtimeClient) {
   owner.deploymentView = { envelope, state, disconnect };
   paintDocumentDeploymentView(owner, state);
   syncPaneHeaders();
-  setModifyMode(false);
-  syncActiveDocumentChrome();
-  return id;
+}
+
+async function reconnectSavedDeploymentView(owner, client = runtimeClient) {
+  if (owner.graph?.format !== 'deployment' || owner.deploymentRun || !tenantAuthorityAllows(owner, client)) return;
+  const binding = owner.graph.viewerBinding;
+  if (!binding?.registrationIdentity) return;
+  const authority = workspaceAuthority, incarnation = owner.incarnation;
+  const current = () => workspace.find(owner.id) === owner && owner.incarnation === incarnation
+    && runtimeClient === client && workspaceAuthority === authority && tenantAuthorityAllows(owner, client);
+  owner.deploymentView?.disconnect?.();
+  owner.graph.lifecycle = 'UNKNOWN';
+  try {
+    const envelope = await readSavedDeploymentView(client, binding);
+    if (!current()) return;
+    owner.graph.viewerBinding = Object.freeze({ ...envelope.source, registrationIdentity: binding.registrationIdentity });
+    owner.graph.lifecycle = envelope.lifecycle;
+    attachDeploymentDocument(owner, envelope, client);
+    scheduleWorkspacePersistence();
+  } catch (error) {
+    if (!current()) return;
+    const state = createDeploymentViewState(binding);
+    resetDeploymentViewRuntime(state, 'UNAVAILABLE', 'OBSERVATION_ENDED');
+    owner.deploymentView = { state, disconnect: () => {} };
+    paintDocumentDeploymentView(owner, state); syncPaneHeaders();
+    addActivityMessage(uiMessage('workspace.notice.deployment'), uiMessage('workspace.deployment.restoreFailed', {
+      deploymentId: binding.deploymentId, reason: uiErrorMessage(error) }), 'failed');
+  }
 }
 
 function forkActiveDocument() {
@@ -6303,17 +6371,33 @@ function reconcileDocumentHistory(owner, { open = false } = {}) {
     void client.deploymentView(bound.deploymentId).then(projection => {
       if (!current()) return;
       const source = projection.source;
-      if (source.deploymentId !== bound.deploymentId || source.incarnationId !== bound.incarnationId || source.graphVersion !== bound.graphVersion)
-        throw new Error('History source changed');
+      requireHistorySource(bound, source);
       owner.historyMonitor = createDeploymentHistoryMonitor({ container, projection, isCurrent: current,
         read: (query, options) => client.deploymentHistory(source, query, options), theme: applicationTheme, t: uiText, title: owner.mode === DOCUMENT_MODES.DRAFT ? owner.displayName || owner.name : null });
       refreshHistoryAttention(owner);
-    }).catch(() => {
+    }).catch(error => {
       if (!current()) return;
-      const message = window.document.createElement('p'); message.textContent = uiText('history.failed');
+      const message = window.document.createElement('p'); message.textContent = uiText('history.viewFailed', { deploymentId: bound.deploymentId, reason: uiErrorReason(error) });
       const retry = window.document.createElement('button'); retry.type = 'button'; retry.textContent = uiText('history.retryView');
       retry.addEventListener('click', () => { if (current()) { retireDocumentHistory(owner); reconcileDocumentHistory(owner, { open: true }); } });
       container.replaceChildren(message, retry);
+      if (error?.code === 'HISTORY_SOURCE_CHANGED') {
+        const reconnect = window.document.createElement('button'); reconnect.type = 'button';
+        reconnect.textContent = uiText('history.openCurrent');
+        reconnect.addEventListener('click', async () => {
+          if (!current()) return;
+          reconnect.disabled = true;
+          try {
+            const id = await openDeploymentDocument(bound.deploymentId, client);
+            retireDocumentHistory(owner);
+            const opened = workspace.find(id);
+            if (opened === workspace.active) reconcileDocumentHistory(opened, { open: true });
+          } catch (failure) {
+            if (current()) message.textContent = uiText('history.viewFailed', { deploymentId: bound.deploymentId, reason: uiErrorReason(failure) });
+          } finally { reconnect.disabled = false; }
+        });
+        retry.hidden = true; container.append(reconnect);
+      }
     });
   }
   refreshHistoryAttention(owner);
@@ -10672,6 +10756,8 @@ function markDocumentDownloaded(prepared, { announce = true } = {}) {
 }
 
 function downloadDocument(id) {
+  const source = workspace.find(id)?.deploymentSource;
+  if (source) { openDeploymentSourceDocument(source, 'download'); return true; }
   const prepared = prepareDocumentDownload(id);
   if (!prepared) return false;
   dispatchDocumentDownload(prepared);
@@ -12227,6 +12313,7 @@ async function connectRuntime(atBoot = false) {
         void configureHumanTasks();
         workspace.documents.forEach(scheduleProgramGraphReadiness);
         workspace.documents.forEach(observeDocumentDeployment);
+        workspace.documents.forEach(owner => { void reconnectSavedDeploymentView(owner, connectedClient); });
         void loadPersonalPalettes(connectedClient);
       } else if (scope?.failed) {
         failWorkspaceAuthority(connectedClient, authorityGeneration, workspacePersistenceReason);
@@ -13077,6 +13164,8 @@ async function runCapturedDocumentDeployment(owner, client, { graphMl, payload, 
   }
   if (!current()) return false;
   if (result.stoppedBeforeInitial) { syncPaneHeaders(); refreshCommands(); return true; }
+  if (owner.deploymentRunMonitoringError) addActivityMessage(uiMessage('workspace.notice.deployment'),
+    uiMessage('workspace.deployment.monitoringUnavailable'), 'failed');
   owner.humanTasks.deploymentId = result.intent.deploymentId;
   owner.humanTasks.registrationIdentity = result.intent.registrationIdentity;
   owner.humanTasks.graphVersion = result.intent.graphVersion;
@@ -13803,8 +13892,9 @@ function appendActivityEvent(event) {
   const hasNode = Boolean(event.nodeId);
   const instances = Number(event.activeInstances) || 0;
   const inFlight = Number(event.inFlightArrivals) || 0;
+  const activeOwner = workspace.active;
   const initialCompleted = type === 'EXECUTION_COMPLETED'
-    && event.executionId === workspace.active?.deploymentRun?.traversalId;
+    && event.executionId === activeOwner?.deploymentRun?.traversalId;
   const detail = uiComputed(() => (initialCompleted
     ? uiText('workspace.run.initialCompleted') : publicExecutionDescription(description, type, publicReason))
     + (hasNode ? uiText('activity.event.counts', {
@@ -16107,6 +16197,17 @@ function setGraphAuthoringAvailability(available) {
 }
 
 function applyAuthoringDocument(target, result, providerDocumentId = result.documentId) {
+  if (target.name !== providerDocumentId) {
+    target.name = providerDocumentId;
+    target.displayName = allocateDocumentDisplayName(providerDocumentId);
+    if (target === workspace.active) {
+      graphName = target.name;
+      graphDisplayName = target.displayName;
+      window.document.getElementById('graph-title').textContent = graphDisplayName;
+      window.document.title = uiText("workspace.app.value1.ravenroot.ui", { graphDisplayName });
+    }
+    syncDocumentSwitcher();
+  }
   target.authoring.providerDocumentId = providerDocumentId;
   target.authoring.revision = structuredClone(result.revision);
   target.authoring.graphId = result.graphId;
@@ -16399,7 +16500,11 @@ async function repositoryDelete() {
 
 async function repositoryRelease() {
   const target = workspace.active; const id = target?.authoring.providerDocumentId;
-  if (!gitAuthoringEnabled() || !id || !repositoryDocumentBindingIsCurrent(target)) return false;
+  if (!gitAuthoringEnabled() || !id || !repositoryDocumentBindingIsCurrent(target)
+      || target.authoring.releaseFlight || target.authoring.saveFlight) return false;
+  target.authoring.releaseFlight = true; refreshCommands();
+  repositoryNotice('');
+  const feedback = repositoryOperationDialog();
   const binding = repositoryOperationBinding(target);
   const { client } = binding;
   const reviewKey = repositoryReviewMessageKey(graphAuthoringCapability.provider);
@@ -16407,13 +16512,15 @@ async function repositoryRelease() {
     requireRepositoryOperationBinding(target, binding);
     const result = await client.release(id, binding.expected);
     requireRepositoryOperationBinding(target, binding);
+    feedback.success(result);
     const reviewType = uiMessage(reviewKey);
     addActivityMessage(uiMessage("workspace.notice.editor.23"), uiMessage("workspace.notice.graph.review", {
       detail1: uiMessage(result.reused ? "workspace.app.existing" : "workspace.app.new"),
       reviewType,
       url: result.url,
     }), 'completed'); return true;
-  } catch (error) { repositoryNotice(uiErrorReason(error) || uiText("workspace.notice.a.release.review.could.not.be.proposed")); return false; }
+  } catch (error) { feedback.failure(repositoryFailureMessage(error)); return false; }
+  finally { target.authoring.releaseFlight = false; refreshCommands(); }
 }
 
 async function publishedArtifacts() {
@@ -16614,6 +16721,7 @@ function commandContext() {
       && !selectedReal.some(id => groupedIds.has(id)),
     invalidGroupMetadata: ['invalid', 'future'].includes(groupMetadata.status),
     hasOriginDeployment: Boolean(owner?.deploymentRun),
+    deploymentUnknown: owner?.deploymentRunStatus === 'UNKNOWN',
     hasDeploymentHistory: Boolean((owner?.deploymentRun || owner?.graph?.viewerBinding)?.graphVersion),
     hasDocument: Boolean(workspace.active && graphData),
     authoringCapability: primaryPersistenceTarget(graphAuthoringCapability),
@@ -16622,7 +16730,10 @@ function commandContext() {
     repositoryReleasedSource: Boolean(activeAuthoring?.providerDocumentId && activeAuthoring?.draftDeleted),
     repositoryDraftAvailable: Boolean(activeAuthoring?.providerDocumentId && activeAuthoring?.draftDeleted
       && activeAuthoring?.successor),
-    authoringSaveFlight: Boolean(activeAuthoring?.saveFlight),
+    authoringSaveFlight: Boolean(activeAuthoring?.saveFlight || activeAuthoring?.releaseFlight),
+    repositorySuccessorVersion: activeAuthoring?.released && !activeAuthoring?.draftDeleted
+      && activeAuthoring?.releaseVersion === activeAuthoring?.releasedVersion && paneIsDirty(owner)
+      ? activeAuthoring.releaseVersion + 1 : null,
     hasOpenDocuments: workspace.size > 0,
     // Preserve every existing public format's command behavior. Only the new safe deployment
     // projection is excluded: it is an attachment, not a serializable or executable authoring graph.
@@ -16676,7 +16787,9 @@ function executeCommand(id, invocation = {}) {
 
 function commandDisplayLabel(command, context) {
   if (context.gitAuthoring && command.id === 'file.open') return uiText('commands.file.open.repositoryLabel');
-  if (context.gitAuthoring && command.id === 'file.save') return uiText('commands.file.save.repositoryLabel');
+  if (context.gitAuthoring && command.id === 'file.save') return context.repositorySuccessorVersion
+    ? uiText('commands.file.save.successorLabel', { version: context.repositorySuccessorVersion })
+    : uiText('commands.file.save.repositoryLabel');
   if (context.repositoryReleasedSource && command.id === 'file.fork') return uiText('commands.file.fork.repositoryLabel');
   return command.label;
 }
@@ -17370,7 +17483,8 @@ deploymentsWindow = createDeploymentsWindow({
       authorityGeneration: workspaceAuthority.generation,
       graphMl: serializeGraphML(graphData), graph: canonicalGraphSnapshot(graphData), name: graphName };
   },
-  onOpenDeployment: (deploymentId, client) => openDeploymentDocument(deploymentId, client),
+  onOpenDeployment: (deploymentId, client, rebuild) => openDeploymentDocument(deploymentId, client, rebuild),
+  onDeploymentSource: openDeploymentSourceDocument,
   onRegistered: (deployment, source) => {
     const owner = workspace.find(source.documentId);
     if (!owner || owner.incarnation !== source.incarnation || !deployment.graphVersion

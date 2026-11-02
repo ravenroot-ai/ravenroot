@@ -908,6 +908,29 @@ public final class AuthorizedRavenrootApplication {
      * @param deploymentId tenant-scoped deployment identifier
      * @return browser-safe view, or empty when unavailable to the caller tenant
      */
+    public java.util.Optional<DeploymentViewerView> localDeploymentView(RequestContext context, String deploymentId, boolean rebuild) {
+        require(context, AuthorizationAction.DEPLOYMENT_OBSERVE,
+                ProtectedResource.owned("deployment-view", requireText(deploymentId, "deployment id"), context.tenantId()));
+        return delegate.localDeploymentView(context.tenantId(), deploymentId, rebuild);
+    }
+
+    /** Full source requires graph inspection as well as deployment observation authority. */
+    public java.util.Optional<byte[]> localDeploymentGraphMl(RequestContext context, String deploymentId,
+            String incarnationId, String graphVersion) {
+        require(context, AuthorizationAction.GRAPH_READ, collection("graphs", context));
+        require(context, AuthorizationAction.DEPLOYMENT_OBSERVE,
+                ProtectedResource.owned("deployment-view", requireText(deploymentId, "deployment id"), context.tenantId()));
+        return delegate.localDeploymentGraphMl(context.tenantId(), deploymentId,
+                requireText(incarnationId, "incarnation id"), requireText(graphVersion, "graph version"));
+    }
+
+    public EmbedDeploymentStart newLocalDeploymentExecution(RequestContext context, String deploymentId,
+            String incarnationId, String graphVersion, String requestId, ai.ravenroot.api.payload.PayloadValue input) {
+        require(context, AuthorizationAction.EXECUTION_START,
+                ProtectedResource.owned("deployment", requireText(deploymentId, "deployment id"), context.tenantId()));
+        return delegate.newLocalDeploymentExecution(SecurityContext.of(context), deploymentId, incarnationId, graphVersion, requestId, input);
+    }
+
     public java.util.Optional<DeploymentViewerView> localDeploymentView(RequestContext context,
                                                                         String deploymentId) {
         require(context, AuthorizationAction.DEPLOYMENT_OBSERVE,

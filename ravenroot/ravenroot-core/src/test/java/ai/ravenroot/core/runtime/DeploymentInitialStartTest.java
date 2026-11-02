@@ -192,6 +192,72 @@ class DeploymentInitialStartTest {
         }
     }
 
+    @Test void explicitAcceptedInputRecoversAfterCrashBeforeDispatch() throws Exception {
+        Path database = directory.resolve("explicit-crash.db");
+        UUID process = UUID.randomUUID(), traversal = UUID.randomUUID();
+        var accepted = Instant.now();
+        var scope = new ai.ravenroot.api.correlation.BusinessScope(IDENTITY.tenantId(), "explicit-crash", deploymentVersion());
+        var entry = new DeploymentEntryIntent(scope, process, traversal, "start",
+                new ai.ravenroot.api.correlation.ApplicationCorrelationContext("explicit-recovery", Optional.empty(), Optional.empty(), "0", Optional.empty()),
+                IDENTITY, OpaquePayload.of("\"accepted\"".getBytes(StandardCharsets.UTF_8), "application/json"),
+                accepted, accepted.plusSeconds(3600), ai.ravenroot.api.correlation.CorrelatedTraversal.Cause.EXPLICIT_START, null, "", null);
+        try (var store = new SqliteExecutionStore(database, Clock.systemUTC())) {
+            store.acceptDeploymentEntry(entry, ai.ravenroot.api.correlation.CorrelationMapping.Mode.ACCEPT_OR_CREATE).toCompletableFuture().get();
+        }
+        try (var engine = new SameThreadExecutionEngine(); var store = new SqliteExecutionStore(database, Clock.systemUTC())) {
+            var monitor = new ExecutionMonitor(); var done = terminalLatch(monitor);
+            var effects = new CopyOnWriteArrayList<Object>();
+            var deployment = deployment("explicit-crash", engine, store, effects, monitor);
+            deployment.start(IDENTITY).toCompletableFuture().get(5, TimeUnit.SECONDS);
+            assertTrue(done.await(5, TimeUnit.SECONDS));
+            assertEquals(List.of("accepted"), effects);
+            assertEquals(ai.ravenroot.api.application.TraversalStatus.COMPLETED,
+                    store.correlatedTraversal(IDENTITY.tenantId(), process, traversal).toCompletableFuture().get().orElseThrow().status());
+            deployment.stop().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test void explicitExecutionIsIndependentIdempotentAndSurvivesRestart() throws Exception {
+        Path database = directory.resolve("explicit.db");
+        UUID first;
+        try (var engine = new SameThreadExecutionEngine(); var store = new SqliteExecutionStore(database, Clock.systemUTC())) {
+            var effects = new CopyOnWriteArrayList<Object>();
+            var monitor = new ExecutionMonitor();
+            var done = new CountDownLatch(2);
+            monitor.subscribe(event -> { if (event.type().isTraversalTerminal()) done.countDown(); });
+            var deployment = deployment("explicit", engine, store, effects, monitor);
+            deployment.start(IDENTITY).toCompletableFuture().get(5, TimeUnit.SECONDS);
+            var result = deployment.newExecution(IDENTITY, "request-one", ai.ravenroot.api.payload.PayloadValue.of("one"));
+            assertEquals(EmbedDeploymentStart.Outcome.ACCEPTED, result.outcome());
+            first = result.processInstanceId();
+            assertEquals(first, deployment.newExecution(IDENTITY, "request-one", ai.ravenroot.api.payload.PayloadValue.of("one")).processInstanceId());
+            var second = deployment.newExecution(IDENTITY, "request-two", ai.ravenroot.api.payload.PayloadValue.of("two"));
+            assertEquals(EmbedDeploymentStart.Outcome.ACCEPTED, second.outcome());
+            assertNotEquals(first, second.processInstanceId());
+            assertTrue(done.await(5, TimeUnit.SECONDS));
+            assertEquals(Set.of("one", "two"), new HashSet<>(effects));
+            assertEquals(2, effects.size());
+            assertTrue(store.initialStart(IDENTITY.tenantId(), "explicit").toCompletableFuture().join().isEmpty());
+            deployment.stop().toCompletableFuture().get(5, TimeUnit.SECONDS);
+            assertEquals(EmbedDeploymentStart.Outcome.REFUSED, deployment.newExecution(IDENTITY, "stopped", ai.ravenroot.api.payload.PayloadValue.of("no")).outcome());
+        }
+        try (var engine = new SameThreadExecutionEngine(); var store = new SqliteExecutionStore(database, Clock.systemUTC())) {
+            var effects = new CopyOnWriteArrayList<Object>();
+            var monitor = new ExecutionMonitor();
+            var done = terminalLatch(monitor);
+            var deployment = deployment("explicit", engine, store, effects, monitor);
+            deployment.start(IDENTITY).toCompletableFuture().get(5, TimeUnit.SECONDS);
+            var retry = deployment.newExecution(IDENTITY, "request-one", ai.ravenroot.api.payload.PayloadValue.of("one"));
+            assertEquals(EmbedDeploymentStart.Outcome.DUPLICATE, retry.outcome());
+            assertEquals(first, retry.processInstanceId());
+            assertTrue(effects.isEmpty());
+            assertEquals(EmbedDeploymentStart.Outcome.ACCEPTED, deployment.newExecution(IDENTITY, "request-three", ai.ravenroot.api.payload.PayloadValue.of("three")).outcome());
+            assertTrue(done.await(5, TimeUnit.SECONDS));
+            assertEquals(List.of("three"), effects);
+            deployment.stop().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        }
+    }
+
     @Test void volatileRestartRetainsSingleStartForSameLogicalObject() throws Exception {
         try (var engine = new SameThreadExecutionEngine()) {
             var effects = new CopyOnWriteArrayList<Object>();

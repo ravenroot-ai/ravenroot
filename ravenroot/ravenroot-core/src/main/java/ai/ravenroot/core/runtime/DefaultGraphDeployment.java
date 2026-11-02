@@ -878,6 +878,8 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
     }
 
     /** Definition captured from the successfully opened runtime manager; viewer reads never reparse input. */
+    byte[] immutableGraphMl() { return graphMl.clone(); }
+
     Optional<GraphDefinition> immutableDefinition() { return Optional.ofNullable(definition); }
 
     Optional<String> visualGroupsMetadata() { return Optional.ofNullable(visualGroupsMetadata); }
@@ -2661,6 +2663,7 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
                 new ai.ravenroot.api.correlation.BusinessScope(security.tenantId(), executionContextDeploymentId, graphVersion),
                 context, processInstanceId, traversalId, entry,
                 entryNodeId == null ? ai.ravenroot.api.correlation.CorrelatedTraversal.Cause.INITIAL_START
+                        : entryNodeId.equals(manager.start().id()) ? ai.ravenroot.api.correlation.CorrelatedTraversal.Cause.EXPLICIT_START
                         : ai.ravenroot.api.correlation.CorrelatedTraversal.Cause.SOURCE_EVENT,
                 ai.ravenroot.api.application.TraversalStatus.RUNNING, null, now, now, null), mapping.mode());
     }
@@ -3153,6 +3156,8 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
         try {
             if (entry.cause() == ai.ravenroot.api.correlation.CorrelatedTraversal.Cause.SOURCE_EVENT)
                 return entry.entryNodeId().equals(ingressEntry(IngressTarget.node(entry.entryNodeId())));
+            if (entry.cause() == ai.ravenroot.api.correlation.CorrelatedTraversal.Cause.EXPLICIT_START)
+                return entry.entryNodeId().equals(manager.start().id());
             var node = manager.definition().node(entry.entryNodeId());
             return !ai.ravenroot.api.catalog.NodeBypassProperty.isBypassed(node.properties())
                     && ai.ravenroot.api.catalog.NodeRuntimeNatureProperty.effectiveNature(node.kind() == NodeKind.BEHAVIOR
@@ -3377,6 +3382,29 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
         PersistenceWaitUnresolvedException(String message, Throwable cause) { super(message, cause); }
     }
 
+    ai.ravenroot.api.application.EmbedDeploymentStart newExecution(SecurityContext security,
+            String requestId, ai.ravenroot.api.payload.PayloadValue input) {
+        var activeDefinition = definition;
+        if (activeDefinition == null || status.state() != DeploymentState.READY && status.state() != DeploymentState.DEGRADED)
+            return new ai.ravenroot.api.application.EmbedDeploymentStart(
+                    ai.ravenroot.api.application.EmbedDeploymentStart.Outcome.REFUSED, requestId, null, null);
+        String entry = activeDefinition.nodes().stream().filter(node -> node.kind() == NodeKind.START).findFirst().orElseThrow().id();
+        String destination = executionContextDeploymentId + "/source/" + encodeSourcePart(entry) + "/explicit-start-v1";
+        UUID process = durableEventId(security.tenantId(), destination, requestId);
+        UUID traversal = UUID.nameUUIDFromBytes((process + "\0traversal").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        var receipt = ((IngressView) ingress).offerDurablyScoped(security, IngressTarget.start(),
+                input.toJava(), "explicit-start-v1", requestId, null, null, persistenceDeadline(), true);
+        var outcome = switch (receipt) {
+            case ai.ravenroot.api.deployment.IngressReceipt.DurablyCommitted ignored -> ai.ravenroot.api.application.EmbedDeploymentStart.Outcome.ACCEPTED;
+            case ai.ravenroot.api.deployment.IngressReceipt.Duplicate ignored -> ai.ravenroot.api.application.EmbedDeploymentStart.Outcome.DUPLICATE;
+            case ai.ravenroot.api.deployment.IngressReceipt.Ambiguous ignored -> ai.ravenroot.api.application.EmbedDeploymentStart.Outcome.RECONCILE;
+            default -> ai.ravenroot.api.application.EmbedDeploymentStart.Outcome.REFUSED;
+        };
+        return new ai.ravenroot.api.application.EmbedDeploymentStart(outcome, requestId,
+                outcome == ai.ravenroot.api.application.EmbedDeploymentStart.Outcome.REFUSED ? null : process,
+                outcome == ai.ravenroot.api.application.EmbedDeploymentStart.Outcome.REFUSED ? null : traversal);
+    }
+
     private String ingressEntry(IngressTarget target) {
         Objects.requireNonNull(target, "target");
         if (target.nodeId().isEmpty()) return null;
@@ -3555,6 +3583,14 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
                 IngressTarget target, Object payload, String sourceId, String idempotentKey,
                 ai.ravenroot.api.persistence.SourceCheckpointStore sourceStore, String sourceNamespace,
                 long deadlineNanos) {
+            return offerDurablyScoped(security, target, payload, sourceId, idempotentKey,
+                    sourceStore, sourceNamespace, deadlineNanos, false);
+        }
+
+        private ai.ravenroot.api.deployment.IngressReceipt offerDurablyScoped(SecurityContext security,
+                IngressTarget target, Object payload, String sourceId, String idempotentKey,
+                ai.ravenroot.api.persistence.SourceCheckpointStore sourceStore, String sourceNamespace,
+                long deadlineNanos, boolean explicitStart) {
             Objects.requireNonNull(sourceId, "sourceId");
             Objects.requireNonNull(idempotentKey, "idempotentKey");
             if (executionStore == null) {
@@ -3563,7 +3599,7 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
             Objects.requireNonNull(security, "security");
             Objects.requireNonNull(target, "target");
             if (definition == null) return new ai.ravenroot.api.deployment.IngressReceipt.Refused("not ready");
-            String entryNodeId = ingressEntry(target);
+            String entryNodeId = explicitStart ? manager.start().id() : ingressEntry(target);
             String tenantId = security.tenantId();
             String destination = entryNodeId == null ? executionContextDeploymentId + "/initial-start-v1"
                     : sourceStore == null ? executionContextDeploymentId + "/source/" + encodeSourcePart(entryNodeId)
@@ -3722,7 +3758,7 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
                                 processInstanceId, traversalId, entryNodeId, correlation.traversal().context(), security,
                                 ai.ravenroot.api.persistence.OpaquePayload.of(input, "application/json"), acceptedAt,
                                 acceptedAt.plus(executionStore.businessHistoryPolicy().historyRetention()),
-                                ai.ravenroot.api.correlation.CorrelatedTraversal.Cause.SOURCE_EVENT, null, "", null);
+                                correlation.traversal().cause(), null, "", null);
                         var admission = awaitStore(executionStore.acceptDeploymentEntry(proposed, correlation.mode()),
                                 deadlineNanos, "atomic source input custody and business admission");
                         if (admission.outcome() == ai.ravenroot.api.persistence.DeploymentEntryAdmission.Outcome.SETTLED) {

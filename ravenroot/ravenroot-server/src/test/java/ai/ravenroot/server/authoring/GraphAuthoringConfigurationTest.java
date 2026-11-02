@@ -72,6 +72,25 @@ class GraphAuthoringConfigurationTest {
         assertThrows(IllegalArgumentException.class, () -> GraphAuthoringConfiguration.fromEnvironment(environment));
     }
 
+    @Test void gitDraftsDoNotRequirePublicationStorage() {
+        var environment = gitEnvironment();
+        environment.remove("RAVENROOT_GRAPH_ARTIFACT_BASE_URL");
+        var configuration = GraphAuthoringConfiguration.fromEnvironment(environment);
+        assertEquals(GraphAuthoringConfiguration.Mode.GIT, configuration.mode());
+        assertFalse(configuration.publicationEnabled());
+        var catalog = new PublishedGraphArtifactCatalog(configuration);
+        assertTrue(catalog.list("tenant-a").isEmpty());
+        assertEquals("absent", catalog.token("tenant-a", "orders", 1, "a".repeat(40), new byte[0]));
+        var missing = assertThrows(ai.ravenroot.api.authoring.GraphAuthoringException.class,
+                () -> catalog.resolve("tenant-a", "orders", 1));
+        assertEquals(ai.ravenroot.api.authoring.GraphAuthoringException.Failure.NOT_FOUND, missing.failure());
+        for (String invalid : java.util.List.of("http://example.test/", "https://example.test/no-slash")) {
+            environment.put("RAVENROOT_GRAPH_ARTIFACT_BASE_URL", invalid);
+            assertThrows(IllegalArgumentException.class,
+                    () -> GraphAuthoringConfiguration.fromEnvironment(environment));
+        }
+    }
+
     private static Map<String, String> gitEnvironment() {
         var value = new HashMap<String, String>();
         value.put("RAVENROOT_GRAPH_AUTHORING_MODE", "GIT");

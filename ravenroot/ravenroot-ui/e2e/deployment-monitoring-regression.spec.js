@@ -50,7 +50,7 @@ test('reload observes missing deployment without activation and keeps Stop disab
   await page.evaluate(() => window.ravenroot.flushWorkspacePersistence());
   backend.held.clear(); const mutations = backend.calls.filter(call => call.method === 'POST').length;
   await page.reload();
-  await expect.poll(() => page.evaluate(() => window.ravenroot?.activeDocument()?.deploymentRunStatus)).toBe('STOPPED');
+  await expect.poll(() => page.evaluate(() => window.ravenroot?.activeDocument()?.deploymentRunStatus)).toBe('UNKNOWN');
   await expect(page.locator('#btn-stop')).toBeDisabled();
   await expect(page.locator('#btn-run')).toBeEnabled();
   expect(backend.calls.filter(call => call.method === 'POST')).toHaveLength(mutations);

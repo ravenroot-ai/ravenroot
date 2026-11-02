@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { keepAuthenticationInMemory } from './memory-only-auth.mjs';
-import { PID, TID, deploymentService } from './deployment-run-fixture.mjs';
+import { PID, TID, deploymentService, interruptMockDeploymentObservation } from './deployment-run-fixture.mjs';
 test.beforeEach(async ({ page }) => keepAuthenticationInMemory(page));
 
 const frame = payload => `event: execution\ndata: ${JSON.stringify(payload)}\n\n`;
@@ -49,11 +49,16 @@ async function installDelayedRuntime(page, mode) {
     get postCount() { return backend ? backend.calls.filter(call => call.method === 'POST' && !call.action).length : postCount; },
     get postedGraphMl() { return backend ? backend.calls.find(call => call.method === 'POST' && !call.action)?.body || '' : postedGraphMl; },
     releaseSubmission,
-    releaseEvents: () => releaseEvents(frame({
-      type: 'NODE_STARTED', executionId, graphVersion: graphVersion(), processInstanceId,
-      ...(backend ? { deploymentId: [...backend.held.keys()][0] } : {}),
-      nodeId: 'dosomething', activeInstances: 1,
-    })),
+    releaseEvents: async () => {
+      // Retain this legacy-feed owner-routing case under an explicit native-channel outage.
+      // Native stream correctness has separate coverage; a live native stream suppresses duplicates.
+      if (backend) await interruptMockDeploymentObservation(page);
+      releaseEvents(frame({
+        type: 'NODE_STARTED', executionId, graphVersion: graphVersion(), processInstanceId,
+        ...(backend ? { deploymentId: [...backend.held.keys()][0] } : {}),
+        nodeId: 'dosomething', activeInstances: 1,
+      }));
+    },
   };
 }
 
@@ -160,7 +165,7 @@ for (const mode of ['test', 'run']) {
       origin.graph.nodes = origin.graph.nodes.filter(node => node.id !== 'dosomething');
       delete origin.graph.nodeMap.dosomething;
     }, before.id);
-    runtime.releaseEvents();
+    await runtime.releaseEvents();
     await expect.poll(() => page.evaluate(id =>
       window.ravenroot.workspace.find(id)?.execution.events.length, before.id)).toBe(1);
     expect(await page.evaluate(([originId, siblingId]) => ({

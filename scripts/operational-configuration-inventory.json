@@ -1501387,6 +1501387,18 @@
           }
         }
       ]
+    },
+    {
+      "id": "issue-605-current-owner-command-flight-proof-v1",
+      "issue": "#605",
+      "sourceRevision": "06f29e8f6524a306289129faf06b8ef9506fd70b",
+      "targetRevision": "2f0b639b475d56bae7dc9b69995cf1f62de624d0",
+      "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+      "sourceInventoryDigest": "292a8519ac6ba37d440cbb93db2d0705c33529d7311c72276f008d95f63f249f",
+      "targetCandidateDigest": "d1942c10b65d0737ab8ef6032121d89c67925fa4e08e5790e1e6159803df5db5",
+      "mappings": [],
+      "retirements": [],
+      "additions": []
     }
   ],
   "semanticReviewHistory": [
@@ -1577884,7 +1577896,7 @@
         },
         {
           "path": "ravenroot/ravenroot-ui/src/app.js",
-          "digest": "daa2a1f8e3bac5c487990a307067c8fc8cd390cfd0eae162d316cb99e727afa1"
+          "digest": "bf50220400b9de72b229fd49c27e1eaae2656cefd302049b317b24858eee68f9"
         },
         {
           "path": "ravenroot/ravenroot-ui/src/program-language.js",
@@ -1579949,7 +1579961,7 @@
   "finalReviewAuthority": {
     "id": "issue-321-final-semantic-review-v1",
     "path": "docs/architecture/operational-configuration-final-review.json",
-    "digest": "f2e695cfd92d18f900bf11ae928e3b2cc26bb31e5b90260f5ea95cd2069626be"
+    "digest": "66b1aa97a1c6922eb4382dcbeaf7d4d1645861b1e26403c485de48d6707a5931"
   },
   "agentBudgetAuthorities": {
     "agent-authority-budget-environment-v1": {

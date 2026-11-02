@@ -54,7 +54,7 @@ semantic review and focused source inventories remain required for those boundar
 | Test fixtures | 9926 |
 | Intentionally deferred | 0 |
 
-Retired source candidates preserved in inventory history: 3036.
+Retired source candidates preserved in inventory history: 3039.
 
 Approved normalized-identity reappearances: 23. Active candidates and
 retired historical payloads remain counted separately; an approval records identity reuse only.
@@ -62,7 +62,7 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 213.
+Checked source reconciliations: 214.
 
 The following tables are exhaustive projections of the same active inventory; each includes
 zero-count or unclassified rows as needed and sums to 33722 candidates.
@@ -127,11 +127,11 @@ identity and retirement has its own approved record in the machine-readable inve
 
 | Partition | Count |
 |---|---:|
-| Source inventory candidates | 33715 |
-| Unchanged identities | 33709 |
-| Approved identity migrations | 5 |
-| Approved retirements | 1 |
-| Semantically classified additions | 8 |
+| Source inventory candidates | 33722 |
+| Unchanged identities | 33718 |
+| Approved identity migrations | 1 |
+| Approved retirements | 3 |
+| Semantically classified additions | 3 |
 | Current candidates | 33722 |
 
 ## Final semantic review
@@ -22400,30 +22400,30 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-0df2639f8c94b965b3da` | `scripts/check_commit_attribution.py:113` `main` | script | retained | protocol-or-format-invariant | This atom is fixed CI-gate vocabulary, event routing, or commit-policy validation of the repository's check topology and is not an operator setting. |
 | `oc-7df0894988b8a02c6153` | `scripts/check_commit_attribution.py:122` `main` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
 | `oc-242d627e5ccb147feb2c` | `scripts/check_commit_attribution.py:127` `main` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |
-| `oc-f416320e3092dc3055a7` | `scripts/check_dependabot_routing.py:12` `module` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |
-| `oc-a694fa10028db9940ed6` | `scripts/check_dependabot_routing.py:46` `parse_updates` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-177c606870b03c2c5664` | `scripts/check_dependabot_routing.py:48` `parse_updates` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-b3c257a79bad7cff69bf` | `scripts/check_dependabot_routing.py:48` `parse_updates` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-44007984cbd4cc54d102` | `scripts/check_dependabot_routing.py:53` `parse_updates` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-6e7daeae1f745cd4ecb2` | `scripts/check_dependabot_routing.py:56` `parse_updates` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |
-| `oc-11f17fd38b3e7b28b1bf` | `scripts/check_dependabot_routing.py:58` `parse_updates` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-148fc789a23fcf030b53` | `scripts/check_dependabot_routing.py:58` `parse_updates` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-192eb55495f7ce77a203` | `scripts/check_dependabot_routing.py:67` `check_dependabot_config` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-24732fb2e8f9ec7d79b1` | `scripts/check_dependabot_routing.py:67` `check_dependabot_config` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-2abea562282c40c259f8` | `scripts/check_dependabot_routing.py:67` `check_dependabot_config` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-d4f543f3df82282177f9` | `scripts/check_dependabot_routing.py:67` `check_dependabot_config` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-8b2a3895c13bbaefe2e9` | `scripts/check_dependabot_routing.py:79` `check_dependabot_config` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-5fa7ff0b9dd0b4affee7` | `scripts/check_dependabot_routing.py:81` `check_dependabot_config` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-f3c7e4d371837abf2363` | `scripts/check_dependabot_routing.py:81` `check_dependabot_config` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-ac22fb65ae33352cd377` | `scripts/check_dependabot_routing.py:83` `check_dependabot_config` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-34f6f4a72d7d6f7272a6` | `scripts/check_dependabot_routing.py:103` `workflow_jobs` | script | retained | protocol-or-format-invariant | #604 workflow_jobs atom '1' is fixed workflow-parser framing, exact candidate-routing vocabulary, or fail-closed diagnostic text. It does not configure runtime or operator capacity. |
-| `oc-4c039a1479743ad2c1e5` | `scripts/check_dependabot_routing.py:129` `check_checkout_bindings` | script | retained | protocol-or-format-invariant | #604 check_checkout_bindings atom '""' is fixed workflow-parser framing, exact candidate-routing vocabulary, or fail-closed diagnostic text. It does not configure runtime or operator capacity. |
-| `oc-f7a279097f14890ad61c` | `scripts/check_dependabot_routing.py:149` `check_checkout_bindings` | script | retained | protocol-or-format-invariant | #604 check_checkout_bindings atom '"actions/checkout"' is fixed workflow-parser framing, exact candidate-routing vocabulary, or fail-closed diagnostic text. It does not configure runtime or operator capacity. |
-| `oc-5b8bfa19f1ebc7a7042e` | `scripts/check_dependabot_routing.py:154` `check_checkout_bindings` | script | retained | protocol-or-format-invariant | #604 check_checkout_bindings atom '"every {context} checkout must use an observable supported step layout"' is fixed workflow-parser framing, exact candidate-routing vocabulary, or fail-closed diagnostic text. It does not configure runtime or operator capacity. |
-| `oc-9a1fcdba096c3654d4b7` | `scripts/check_dependabot_routing.py:174` `check_ci_workflow` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
-| `oc-43a8b1c2e8c04e23ff81` | `scripts/check_dependabot_routing.py:196` `check_configurator_workflow` | script | retained | protocol-or-format-invariant | #604 check_configurator_workflow atom '""' is fixed workflow-parser framing, exact candidate-routing vocabulary, or fail-closed diagnostic text. It does not configure runtime or operator capacity. |
-| `oc-9000f46966f3b8333dde` | `scripts/check_dependabot_routing.py:196` `check_configurator_workflow` | script | retained | protocol-or-format-invariant | #604 check_configurator_workflow atom '""' is fixed workflow-parser framing, exact candidate-routing vocabulary, or fail-closed diagnostic text. It does not configure runtime or operator capacity. |
-| `oc-dd40040e6367a4cf54a8` | `scripts/check_dependabot_routing.py:196` `check_configurator_workflow` | script | retained | protocol-or-format-invariant | #604 check_configurator_workflow atom '"The supported CI call propagates its candidate; standalone events retain github.sha."' is fixed workflow-parser framing, exact candidate-routing vocabulary, or fail-closed diagnostic text. It does not configure runtime or operator capacity. |
+| `oc-f416320e3092dc3055a7` | `scripts/check_dependabot_routing.py:17` `module` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |
+| `oc-a694fa10028db9940ed6` | `scripts/check_dependabot_routing.py:51` `parse_updates` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-177c606870b03c2c5664` | `scripts/check_dependabot_routing.py:53` `parse_updates` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-b3c257a79bad7cff69bf` | `scripts/check_dependabot_routing.py:53` `parse_updates` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-44007984cbd4cc54d102` | `scripts/check_dependabot_routing.py:58` `parse_updates` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-6e7daeae1f745cd4ecb2` | `scripts/check_dependabot_routing.py:61` `parse_updates` | script | retained | security-ceiling-or-default | These script assignments select repository paths, tools, local endpoints, or fallback working values. |
+| `oc-11f17fd38b3e7b28b1bf` | `scripts/check_dependabot_routing.py:63` `parse_updates` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-148fc789a23fcf030b53` | `scripts/check_dependabot_routing.py:63` `parse_updates` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-192eb55495f7ce77a203` | `scripts/check_dependabot_routing.py:72` `check_dependabot_config` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-24732fb2e8f9ec7d79b1` | `scripts/check_dependabot_routing.py:72` `check_dependabot_config` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-2abea562282c40c259f8` | `scripts/check_dependabot_routing.py:72` `check_dependabot_config` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-d4f543f3df82282177f9` | `scripts/check_dependabot_routing.py:72` `check_dependabot_config` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-8b2a3895c13bbaefe2e9` | `scripts/check_dependabot_routing.py:84` `check_dependabot_config` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-5fa7ff0b9dd0b4affee7` | `scripts/check_dependabot_routing.py:86` `check_dependabot_config` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-f3c7e4d371837abf2363` | `scripts/check_dependabot_routing.py:86` `check_dependabot_config` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-ac22fb65ae33352cd377` | `scripts/check_dependabot_routing.py:88` `check_dependabot_config` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-51ff8dc1681bd60405f4` | `scripts/check_dependabot_routing.py:107` `compose_node` | script | retained | protocol-or-format-invariant | #604 reports an unsupported workflow anchor, alias or explicit tag before constructing mappings. This message describes a fixed workflow syntax boundary. |
+| `oc-a8c27aa62c8e2c411ce2` | `scripts/check_dependabot_routing.py:119` `construct_mapping` | script | retained | protocol-or-format-invariant | #604 reports a noncanonical candidate input spelling rather than accepting an ambiguous routing declaration. The diagnostic identifies the rejected key. |
+| `oc-938a8ce5d3251ec1f5cb` | `scripts/check_dependabot_routing.py:128` `construct_mapping` | script | retained | protocol-or-format-invariant | #604 rejects a decoded action declaration outside the supported block layout. The error text identifies the syntax violation. |
+| `oc-e6bee9ae1b63a742be7d` | `scripts/check_dependabot_routing.py:135` `check_checkout_bindings` | script | retained | protocol-or-format-invariant | #604 check_checkout_bindings atom '"every {context} checkout must use an observable supported step layout"' is fixed workflow-parser framing, exact candidate-routing vocabulary, or fail-closed diagnostic text. It does not configure runtime or operator capacity. |
+| `oc-9a1fcdba096c3654d4b7` | `scripts/check_dependabot_routing.py:179` `check_ci_workflow` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
+| `oc-43a8b1c2e8c04e23ff81` | `scripts/check_dependabot_routing.py:203` `check_configurator_workflow` | script | retained | protocol-or-format-invariant | #604 check_configurator_workflow atom '""' is fixed workflow-parser framing, exact candidate-routing vocabulary, or fail-closed diagnostic text. It does not configure runtime or operator capacity. |
+| `oc-9000f46966f3b8333dde` | `scripts/check_dependabot_routing.py:203` `check_configurator_workflow` | script | retained | protocol-or-format-invariant | #604 check_configurator_workflow atom '""' is fixed workflow-parser framing, exact candidate-routing vocabulary, or fail-closed diagnostic text. It does not configure runtime or operator capacity. |
+| `oc-dd40040e6367a4cf54a8` | `scripts/check_dependabot_routing.py:203` `check_configurator_workflow` | script | retained | protocol-or-format-invariant | #604 check_configurator_workflow atom '"The supported CI call propagates its candidate; standalone events retain github.sha."' is fixed workflow-parser framing, exact candidate-routing vocabulary, or fail-closed diagnostic text. It does not configure runtime or operator capacity. |
 | `oc-08f7e9e7f998b1c76801` | `scripts/check_docs_site.py:2` `module` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
 | `oc-5b09e1410a24ebe8df83` | `scripts/check_docs_site.py:2` `module` | script | retained | protocol-or-format-invariant | These atoms are command flags, paths in composed commands, exit statuses, encodings, parser tokens, or repository contract vocabulary. |
 | `oc-92328d17945f226b1f39` | `scripts/check_docs_site.py:2` `module` | script | retained | presentation-text | These script strings are human-readable progress, warning, or failure output. |

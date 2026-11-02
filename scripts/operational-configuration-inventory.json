@@ -463023,7 +463023,7 @@
     {
       "id": "oc-f416320e3092dc3055a7",
       "path": "scripts/check_dependabot_routing.py",
-      "line": 12,
+      "line": 17,
       "symbol": "module",
       "kind": "script-default",
       "role": "ROOT",
@@ -463041,7 +463041,7 @@
     {
       "id": "oc-a694fa10028db9940ed6",
       "path": "scripts/check_dependabot_routing.py",
-      "line": 46,
+      "line": 51,
       "symbol": "parse_updates",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -463059,7 +463059,7 @@
     {
       "id": "oc-177c606870b03c2c5664",
       "path": "scripts/check_dependabot_routing.py",
-      "line": 48,
+      "line": 53,
       "symbol": "parse_updates",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -463077,7 +463077,7 @@
     {
       "id": "oc-b3c257a79bad7cff69bf",
       "path": "scripts/check_dependabot_routing.py",
-      "line": 48,
+      "line": 53,
       "symbol": "parse_updates",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -463095,7 +463095,7 @@
     {
       "id": "oc-44007984cbd4cc54d102",
       "path": "scripts/check_dependabot_routing.py",
-      "line": 53,
+      "line": 58,
       "symbol": "parse_updates",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -463113,7 +463113,7 @@
     {
       "id": "oc-6e7daeae1f745cd4ecb2",
       "path": "scripts/check_dependabot_routing.py",
-      "line": 56,
+      "line": 61,
       "symbol": "parse_updates",
       "kind": "script-default",
       "role": "interval",
@@ -463131,7 +463131,7 @@
     {
       "id": "oc-148fc789a23fcf030b53",
       "path": "scripts/check_dependabot_routing.py",
-      "line": 58,
+      "line": 63,
       "symbol": "parse_updates",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -463149,7 +463149,7 @@
     {
       "id": "oc-11f17fd38b3e7b28b1bf",
       "path": "scripts/check_dependabot_routing.py",
-      "line": 58,
+      "line": 63,
       "symbol": "parse_updates",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -463167,7 +463167,7 @@
     {
       "id": "oc-192eb55495f7ce77a203",
       "path": "scripts/check_dependabot_routing.py",
-      "line": 67,
+      "line": 72,
       "symbol": "check_dependabot_config",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -463185,7 +463185,7 @@
     {
       "id": "oc-d4f543f3df82282177f9",
       "path": "scripts/check_dependabot_routing.py",
-      "line": 67,
+      "line": 72,
       "symbol": "check_dependabot_config",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -463203,7 +463203,7 @@
     {
       "id": "oc-24732fb2e8f9ec7d79b1",
       "path": "scripts/check_dependabot_routing.py",
-      "line": 67,
+      "line": 72,
       "symbol": "check_dependabot_config",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -463221,7 +463221,7 @@
     {
       "id": "oc-2abea562282c40c259f8",
       "path": "scripts/check_dependabot_routing.py",
-      "line": 67,
+      "line": 72,
       "symbol": "check_dependabot_config",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -463239,7 +463239,7 @@
     {
       "id": "oc-8b2a3895c13bbaefe2e9",
       "path": "scripts/check_dependabot_routing.py",
-      "line": 79,
+      "line": 84,
       "symbol": "check_dependabot_config",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -463257,7 +463257,7 @@
     {
       "id": "oc-f3c7e4d371837abf2363",
       "path": "scripts/check_dependabot_routing.py",
-      "line": 81,
+      "line": 86,
       "symbol": "check_dependabot_config",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -463275,7 +463275,7 @@
     {
       "id": "oc-5fa7ff0b9dd0b4affee7",
       "path": "scripts/check_dependabot_routing.py",
-      "line": 81,
+      "line": 86,
       "symbol": "check_dependabot_config",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -463293,7 +463293,7 @@
     {
       "id": "oc-ac22fb65ae33352cd377",
       "path": "scripts/check_dependabot_routing.py",
-      "line": 83,
+      "line": 88,
       "symbol": "check_dependabot_config",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -463309,69 +463309,73 @@
       "remediationOwner": "#321"
     },
     {
-      "id": "oc-34f6f4a72d7d6f7272a6",
+      "id": "oc-51ff8dc1681bd60405f4",
       "path": "scripts/check_dependabot_routing.py",
-      "line": 103,
-      "symbol": "workflow_jobs",
+      "line": 107,
+      "symbol": "compose_node",
       "kind": "inline-script-operational",
       "role": "inline",
-      "expression": "1",
-      "expressionDigest": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
-      "evidenceDigest": "6cca2a1980b1c37319b44ed2d7a5d1776da4a9949be628269c19918438a8fc77",
+      "expression": "\"workflow aliases, anchors and explicit tags are unsupported\"",
+      "expressionDigest": "d3e49172d7b77287f3fa8857cbfe35657ea6bf3db61506a890aa5a28bafdf9b8",
+      "evidenceDigest": "73d729cdaedf82d65fb8e5748685d3654a0510bc3cdf5d1c0a06e64c9f7de542",
       "surface": "script",
       "status": "retained",
       "classification": "protocol-or-format-invariant",
-      "rationale": "#604 workflow_jobs atom '1' is fixed workflow-parser framing, exact candidate-routing vocabulary, or fail-closed diagnostic text. It does not configure runtime or operator capacity."
+      "rationale": "#604 reports an unsupported workflow anchor, alias or explicit tag before constructing mappings. This message describes a fixed workflow syntax boundary."
     },
     {
-      "id": "oc-4c039a1479743ad2c1e5",
+      "id": "oc-a8c27aa62c8e2c411ce2",
       "path": "scripts/check_dependabot_routing.py",
-      "line": 129,
-      "symbol": "check_checkout_bindings",
+      "line": 119,
+      "symbol": "construct_mapping",
       "kind": "inline-script-operational",
       "role": "inline",
-      "expression": "\"\"",
-      "expressionDigest": "12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
-      "evidenceDigest": "9a251433bb4776a771ecd7fb4cf7f1f9bed4915ee6e1079f3316b20599d3a58b",
+      "expression": "\"unsupported candidate input spelling {key.value!r}\"",
+      "expressionDigest": "d10b04fd99adbf55a89c7e7059d88c9390f2ba353664b674b899c287ca6d525a",
+      "evidenceDigest": "0913bb4affabb0b772cd6ad2c802b49dea2145f362b7536642dbe1c9dc0e698c",
       "surface": "script",
       "status": "retained",
       "classification": "protocol-or-format-invariant",
-      "rationale": "#604 check_checkout_bindings atom '\"\"' is fixed workflow-parser framing, exact candidate-routing vocabulary, or fail-closed diagnostic text. It does not configure runtime or operator capacity."
+      "rationale": "#604 reports a noncanonical candidate input spelling rather than accepting an ambiguous routing declaration. The diagnostic identifies the rejected key."
     },
     {
-      "id": "oc-f7a279097f14890ad61c",
+      "id": "oc-938a8ce5d3251ec1f5cb",
       "path": "scripts/check_dependabot_routing.py",
-      "line": 149,
-      "symbol": "check_checkout_bindings",
+      "line": 128,
+      "symbol": "construct_mapping",
       "kind": "inline-script-operational",
       "role": "inline",
-      "expression": "\"actions/checkout\"",
-      "expressionDigest": "2b5dfec55363db9d7010331f4a3bbd13aa99d498ddcadee0d8cfa893061b1a13",
-      "evidenceDigest": "2c094a9d467aa99cb4a48916a554ebae31b1e856b61e09d6913b382aa2a6945f",
+      "expression": "\"unsupported action declaration\"",
+      "expressionDigest": "b753799f970674cfbe5c1614d33cc102619a287483142bb48ddb6901b6c1da94",
+      "evidenceDigest": "aab040ab50547d4eeac662f8eb812d78dcd58e015bfc5aaffd7f3f128d3be1a5",
       "surface": "script",
       "status": "retained",
       "classification": "protocol-or-format-invariant",
-      "rationale": "#604 check_checkout_bindings atom '\"actions/checkout\"' is fixed workflow-parser framing, exact candidate-routing vocabulary, or fail-closed diagnostic text. It does not configure runtime or operator capacity."
+      "rationale": "#604 rejects a decoded action declaration outside the supported block layout. The error text identifies the syntax violation."
     },
     {
-      "id": "oc-5b8bfa19f1ebc7a7042e",
+      "id": "oc-e6bee9ae1b63a742be7d",
       "path": "scripts/check_dependabot_routing.py",
-      "line": 154,
+      "line": 135,
       "symbol": "check_checkout_bindings",
       "kind": "inline-script-operational",
       "role": "inline",
       "expression": "\"every {context} checkout must use an observable supported step layout\"",
       "expressionDigest": "323fb83c3a28f6c6cd880240d36cb38e7efcc8fb7ce31d37cfe617f9dd2e8adb",
-      "evidenceDigest": "cd01087c8edba7c092fb4cdbeac2558a4676dc5e8e03d96e29dd1accf2bc3b58",
+      "evidenceDigest": "6b27a55d696827508ad20157a8e042186a1f0dd2b086e88754d17bee9f590ee2",
       "surface": "script",
       "status": "retained",
       "classification": "protocol-or-format-invariant",
-      "rationale": "#604 check_checkout_bindings atom '\"every {context} checkout must use an observable supported step layout\"' is fixed workflow-parser framing, exact candidate-routing vocabulary, or fail-closed diagnostic text. It does not configure runtime or operator capacity."
+      "rationale": "#604 check_checkout_bindings atom '\"every {context} checkout must use an observable supported step layout\"' is fixed workflow-parser framing, exact candidate-routing vocabulary, or fail-closed diagnostic text. It does not configure runtime or operator capacity.",
+      "identityMigration": {
+        "history": "issue-604-decoded-checkout-bindings",
+        "fromId": "oc-5b8bfa19f1ebc7a7042e"
+      }
     },
     {
       "id": "oc-9a1fcdba096c3654d4b7",
       "path": "scripts/check_dependabot_routing.py",
-      "line": 174,
+      "line": 179,
       "symbol": "check_ci_workflow",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -463389,7 +463393,7 @@
     {
       "id": "oc-43a8b1c2e8c04e23ff81",
       "path": "scripts/check_dependabot_routing.py",
-      "line": 196,
+      "line": 203,
       "symbol": "check_configurator_workflow",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -463404,7 +463408,7 @@
     {
       "id": "oc-9000f46966f3b8333dde",
       "path": "scripts/check_dependabot_routing.py",
-      "line": 196,
+      "line": 203,
       "symbol": "check_configurator_workflow",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -463419,7 +463423,7 @@
     {
       "id": "oc-dd40040e6367a4cf54a8",
       "path": "scripts/check_dependabot_routing.py",
-      "line": 196,
+      "line": 203,
       "symbol": "check_configurator_workflow",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -688016,6 +688020,57 @@
       "rationale": "scripts/tests/test_ci_topology.py::test_full_tier_has_a_scheduled_all_reactor_regression_lane atom '4' is scanner-recognized test-only input, expected evidence, or assertion vocabulary; it configures no production runtime setting. Reconfirmed against current dev source during #604, preserving the reviewed #598 CI contract.",
       "retirementRationale": "#604 replaces fixture atom '4' in test_full_tier_has_a_scheduled_all_reactor_regression_lane: the cheap structural batch moves out of the backend native execution phase, leaving three unchanged real native steps. The previous reviewed expectation is preserved in history; new expectations are classified independently.",
       "evidence": "self.assertEqual(4, backend.count(\"if: steps.backend-scope.outputs.native == 'true'\"))"
+    },
+    {
+      "id": "oc-34f6f4a72d7d6f7272a6",
+      "path": "scripts/check_dependabot_routing.py",
+      "line": 103,
+      "symbol": "workflow_jobs",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "1",
+      "expressionDigest": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "evidenceDigest": "6cca2a1980b1c37319b44ed2d7a5d1776da4a9949be628269c19918438a8fc77",
+      "surface": "script",
+      "status": "retained",
+      "classification": "protocol-or-format-invariant",
+      "rationale": "#604 workflow_jobs atom '1' is fixed workflow-parser framing, exact candidate-routing vocabulary, or fail-closed diagnostic text. It does not configure runtime or operator capacity.",
+      "retirementRationale": "#604 removes the single-split limit from the text-based job scanner. The YAML loader now enumerates the jobs mapping.",
+      "evidence": "if index + 1 < len(matches) else None] for index, match in enumerate(matches)}"
+    },
+    {
+      "id": "oc-4c039a1479743ad2c1e5",
+      "path": "scripts/check_dependabot_routing.py",
+      "line": 129,
+      "symbol": "check_checkout_bindings",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "\"\"",
+      "expressionDigest": "12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+      "evidenceDigest": "9a251433bb4776a771ecd7fb4cf7f1f9bed4915ee6e1079f3316b20599d3a58b",
+      "surface": "script",
+      "status": "retained",
+      "classification": "protocol-or-format-invariant",
+      "rationale": "#604 check_checkout_bindings atom '\"\"' is fixed workflow-parser framing, exact candidate-routing vocabulary, or fail-closed diagnostic text. It does not configure runtime or operator capacity.",
+      "retirementRationale": "#604 replaces the raw step scanner docstring and its lexical framing with decoded step traversal.",
+      "evidence": "\"\"\"Bind every actual checkout step to its own ref, using the supported block layout."
+    },
+    {
+      "id": "oc-f7a279097f14890ad61c",
+      "path": "scripts/check_dependabot_routing.py",
+      "line": 149,
+      "symbol": "check_checkout_bindings",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "\"actions/checkout\"",
+      "expressionDigest": "2b5dfec55363db9d7010331f4a3bbd13aa99d498ddcadee0d8cfa893061b1a13",
+      "evidenceDigest": "2c094a9d467aa99cb4a48916a554ebae31b1e856b61e09d6913b382aa2a6945f",
+      "surface": "script",
+      "status": "retained",
+      "classification": "protocol-or-format-invariant",
+      "rationale": "#604 check_checkout_bindings atom '\"actions/checkout\"' is fixed workflow-parser framing, exact candidate-routing vocabulary, or fail-closed diagnostic text. It does not configure runtime or operator capacity.",
+      "retirementRationale": "#604 removes the literal checkout substring count. The guard now identifies each checkout by its decoded action repository.",
+      "evidence": "declared = contents.count(\"actions/checkout\")"
     }
   ],
   "evidenceRecords": {
@@ -688419,6 +688474,7 @@
     "090a7497d995efd9f403f00b0dbdd7104b2f0de94e656a046e7e70f5a714e6fe": "require_literal \"$compose\" 'RAVENROOT_ARTIFACT_STORE_DIR: /opt/ravenroot/data/artifact-store'",
     "0910aceef60ce2e4f87891c8517b572bf5745f0b46b49e128b2cab4fad20c923": "RAVENROOT_GRAAL_SANDBOX_SUPERVISOR: /opt/ravenroot/dev/sandbox-supervisor.sh",
     "09133658b0012ad28b4318c787032156569e0f6ceed72081075fc159eb93f8d5": "var workers = Executors.newVirtualThreadPerTaskExecutor()) { var barrier = new CyclicBarrier(6);",
+    "0913bb4affabb0b772cd6ad2c802b49dea2145f362b7536642dbe1c9dc0e698c": "raise RoutingPolicyError(f\"unsupported candidate input spelling {key.value!r}\")",
     "0916db541cb143ea6b452e42df909aabd9febb93da4e5c7836fec10c2b745693": "public abstract class ExecutionManifestStoreContract { private static final Instant EPOCH = Instant.parse(\"2026-01-01T00:00:00Z\");",
     "09213dbb2dd6ff8f8b1d92acce3b0bcf2c6884e98a1a5955376d3d62357d7790": "var durableArtifacts = SqliteArtifactRegistry.openUnder(Path.of( System.getenv().getOrDefault(\"RAVENROOT_ARTIFACT_STORE_DIR\", \"/opt/ravenroot/data/artifact-store\")), artifactProvenance.verifier());",
     "0924dd621210865c490650273e7d0a173d5448a90a10d067297d34abe6022579": "private static final String SELECT_ALL_COLUMNS = \"SELECT registration_id, revision, state, tenant_id, workload_issuer, workload_subject, \" + \"parent_origin, capabilities, theme_override, resource_id, deployment_id, \" + \"deployment_version, graph_id, graph_version_id, canonical_digest, policy_revision, \" + \"snapshot_lifecycle, eligibility_gates, projection_json, provisioned_at \" + \", source_version, source_kind, source_deployment_id, source_show_start_execution \" + \"FROM embed_registration WHERE registration_id = ?\";",
@@ -689989,7 +690045,6 @@
     "2bfc4e71fb345a9f090896f43ba9f690921cb68fc42df965aea869d8d83484e2": "} static String environmentVariableName(String tenant, String profile) { return \"RAVENROOT_MAIL_PROFILE_\" + EnvironmentKeyCodec.hex(tenant) + \"_\" + EnvironmentKeyCodec.hex(profile);",
     "2bfc9648a6b88c786c812315302c144a33c312c59b762fc0f0a4267ba9371144": "const runCommand = command => { if (command === 'render' && semanticModes) { if (isMonitoring()) elasticMount?.simulation.alpha(1).restart();",
     "2bfddc156ab2a521182af0e0c890803253ae28c7ebe0c052323bd3c8fa245ecc": "echo \"verify-port-knob: port ${PORT} is already in use — pass a free one as \\$1\" >&2",
-    "2c094a9d467aa99cb4a48916a554ebae31b1e856b61e09d6913b382aa2a6945f": "declared = contents.count(\"actions/checkout\")",
     "2c0e018db2337e24bd0d119bf3e5f5e8a7c49b1d6091629db56a7b8ae5fc3db4": "paths=[\"ravenroot/pom.xml\", \"docs/index.md\"],",
     "2c16c99836b97993e648034ba20d9b35bdd306c549fd226a06f0d8356a6a4af9": "Duration bound = Duration.ofSeconds(5);",
     "2c16d94dd14218cc6880d4eb410de09802e7220098f50a0a39cd4392ce388c38": "\"driver\": {\"type\": \"string\", \"enum\": [\"docker\", \"kubernetes\"]},",
@@ -692924,6 +692979,7 @@
     "6b22cd13a876f329e2311c0d7eeb2723dd7af004d14d71cb1afbe156dc9bfa7b": "{\"intent\": \"none\", \"should_release\": \"false\", \"tag\": \"\"},",
     "6b251a6a1c9864b4671839d4464f6f7297f73c1d736797bfb0fb8dd86baba7e2": "terminalHistoryCapacity: \"\"",
     "6b2579225cb4e43a57da1e4d7d2856bd0e7cc01ce70677fdbc41c45c864d606f": "private static final PublicationRuleId DRIFT = new PublicationRuleId(\"boundary.policy.digest\");",
+    "6b27a55d696827508ad20157a8e042186a1f0dd2b086e88754d17bee9f590ee2": "layout_error = f\"every {context} checkout must use an observable supported step layout\"",
     "6b37dc6be7c726c3ca9dcd5195ba101bc56a12f85fafc144ad2f6a0eca51b587": "\"> field means **not declared**, not unlimited and not unsupported. A behavior can apply a stricter \",",
     "6b41c9d8650f9de39f940e14c3949316234a823986ee1e73f81f8e5b5a778219": "state[\"release\"][\"prerelease\"] = \"--prerelease\" in argv",
     "6b4d1a7da3e7755b9848094600744da20db54859e8dc18b5ab9f33506bb3b2bd": "-e RAVENROOT_ENABLED_PLUGINS=ai.ravenroot.extensions.mail \\",
@@ -692997,7 +693053,6 @@
     "6cb5c1217753637c56e8d33676b940abaf382b74e630713d6adcee8702077c2c": "private static final Set<String> RULE_FIELDS = Set.of( \"name\", \"protocols\", \"ports\", \"hosts\", \"addresses\", \"profiles\", \"allowPlaintext\");",
     "6cc838c85fd8a24cd5d200593ccc5d2a80d643f8236303687bec86b2b681246c": "const request = layoutSessions.request({ documentId: owner.id, cy: target, mode: name, kind, nativeCancel: kind === 'native' ? () => { job?.nativeLayout?.stop();",
     "6cc844c7ecc7fd10c9a4fb7a7812fc8bf07ca1449abd44fabdf46b732ee7c6ff": "assertTrue(entered.await(10, TimeUnit.SECONDS), \"the node must have been entered before it can be cancelled mid-flight\");",
-    "6cca2a1980b1c37319b44ed2d7a5d1776da4a9949be628269c19918438a8fc77": "if index + 1 < len(matches) else None] for index, match in enumerate(matches)}",
     "6cca84b5b846c9394da837d781c6ec12cb9c1444660935b002f9e95f007f4976": "int endpointPort = endpoint.getPort() == -1 ? (\"https\".equals(endpoint.getScheme()) ? 443 : 80) : endpoint.getPort();",
     "6ccb4391884d4bbdbb9cd34863bb281c87e7932c370c23d95e5660a3c1f49fd4": "if (value == '\\r') { pendingCarriageReturn = true;",
     "6ccd44068813324f507f29db2a7eafc420d8def944da600dbe5145fce49b6ea1": "RAVENROOT_ENGINE_MAX_STASHED_COMMANDS_PER_NODE: ${RAVENROOT_ENGINE_MAX_STASHED_COMMANDS_PER_NODE:-}",
@@ -693330,6 +693385,7 @@
     "73cc2aa1f12f8237866a5a625bfb5c2b0e324e0f8036980bbe63b692474a07ed": "const waiting = programNodes(programGraph(owner)).filter(node => state.phases.get(node.id)?.phase === 'APPROVAL_REQUIRED');",
     "73d4648914992b011f822f842f49b27b7929ee4ac6f9f35f19915c3228e341d7": "\"BASE_IMAGE\": \"python@sha256:e81548ac35b07a3bd4805f275107592ef458b1e893c0e04d45aedaa19416cca5\",",
     "73d5d0d5e39c860506bd124f5b193c90fab8144ceae37218b860d896a487ad58": "const visit = id => { state.set(id, 'active');",
+    "73d729cdaedf82d65fb8e5748685d3654a0510bc3cdf5d1c0a06e64c9f7de542": "raise RoutingPolicyError(\"workflow aliases, anchors and explicit tags are unsupported\")",
     "73d838494835eba087ac11fcbd10220c293fcc6be49b7ac9390f5ea4ae845d2e": "static final String MESSAGES_PATH = \"/v1/messages\";",
     "73dc2b1265be113d57e6e802b4e558f85635ed1e137ecb88e868b47b930a3d26": "\"RAVENROOT_ASSISTANT_MAX_TOOL_ITERATIONS\": sys.argv[3],",
     "73dd27e9950eda48e266614346668ec4a5a192d8ebe0e7ea0dcf3da627385a38": "subprocess.run([\"sudo\", \"-n\", \"true\"], check=True, timeout=10)",
@@ -695124,7 +695180,6 @@
     "9a1485e45a583753c7ef13d8f76ab1c05e883c234a7206094da0d032a07cd16b": "return_value=[\"embed-enabled-routing-probe\"]) as routed:",
     "9a17e07fa439ddbb9e9624de2ba54733ba795e3fac0c503259a905b160d6a959": "public record ProgramRuntimeConfiguration(Runtime runtime) { public static final String PROPERTY = \"ravenroot.program.runtime\";",
     "9a1e7c4c3a8a600c1d21f0d9c4d3a8e697f7aa10591f95b5e18fafb9f8d6155f": "maxResponseBytes: \"\"",
-    "9a251433bb4776a771ecd7fb4cf7f1f9bed4915ee6e1079f3316b20599d3a58b": "\"\"\"Bind every actual checkout step to its own ref, using the supported block layout.",
     "9a2b0041c36fc8d90ccadd6403e274dfec99b34c1813371d5b1f8a603354f27a": "RAVENROOT_HUMAN_TASK_MAX_ESCALATION_SECONDS=7200",
     "9a30aa1344999e3006d6a61dfbd44aea06dc076021adafe26d0214a968328fb9": "const count = Math.max(0, Math.trunc(documentCount) || 0);",
     "9a3bff608d3517833cb30f0938b77af59d52b50cac48f4ebfaa8d1d8be68f9ea": "print(\"Usage: verify-empty-plugins-parity.py <image-a> <image-b>\", file=sys.stderr)",
@@ -695912,6 +695967,7 @@
     "aa8862d66571b24f09f889c6ab43976e91691aa4d32332bc40f4bb199b5c98e1": "sys.path.insert(0, str(Path(__file__).resolve().parents[1]))",
     "aa8ba29f389958c9720b1aa6f9acb2d8fa68da1f3fb82176b3fca725b820ba76": "status, path = line.split(\"\\t\", 1)",
     "aaa428b8a9ae5ba34605e65a19ba26c3f72825481c3628ae0368950dcc1f80eb": "jobs.add(CompletableFuture.runAsync(() -> { for (int retry = 0;",
+    "aab040ab50547d4eeac662f8eb812d78dcd58e015bfc5aaffd7f3f128d3be1a5": "raise RoutingPolicyError(\"unsupported action declaration\")",
     "aac061e38554e80f38818712fcba0cfb4d72c5853fa78b35024e11c4624da3bf": "const mismatched = recognized ? '' : `<option value=\"${escapeAttribute(value)}\" selected>${escapeHtml(uiText(\"workspace.template.app.current.value.not.recognized\"))} ${escapeHtml(value)}</option>`;",
     "aac0d01cf0a2eb04abc285e8a203b1a66f24e3f83efafa0eb82e548883abfae9": "patch.object(Path, \"exists\", exists):",
     "aacaf6f80c881b0caa576abe346129dadca32c6399131607574a2958243f1d02": "public static final String MAX_PROGRAMS_PER_BUILD_ENV = \"RAVENROOT_PROGRAM_AUTHORING_MAX_PROGRAMS_PER_BUILD\";",
@@ -697504,7 +697560,6 @@
     "cce60aeaf71dbd44861f4dee07ea378c64c83ed016d5eb46405cf426370cae7b": "f' value: {{{{ include \"ravenroot.graphLimitValue\" .Values.{helm_path} }}}}')",
     "ccef513df4fd01dde01ce49a81d87b898353f67368c2a62de34f0f40aabe4a1d": "{\"pointer\":\"/definitions/aiConfiguration/properties/maxLlmProfileBytes/$ref\",\"reference\":\"#/definitions/aiPositive\",\"required\":true,\"resolutionError\":\"unsupported sibling next to $ref\",\"resolved\":null}",
     "cd007d19d1a4d481e6681359b2ac1f4139ea3ad2d153b854f0334ad54df8c2c1": "source_path.write_text(swapped, encoding=\"utf-8\")",
-    "cd01087c8edba7c092fb4cdbeac2558a4676dc5e8e03d96e29dd1accf2bc3b58": "raise RoutingPolicyError(f\"every {context} checkout must use an observable supported step layout\")",
     "cd0152bc3969b6c4588af8bf47e9d3353993418fc8d24bbc0a6af11b3203630e": "value: {{ include \"ravenroot.graphLimitValue\" .Values.executionRuntime.terminalHistoryCapacity }}",
     "cd07c3693a4994b5716feeccd34d302cb199ab1457cb1cd8d233d90df8b56e17": "} public void requireRequestWithinLimit(byte[] body) { long size = body == null ? 0 : body.length;",
     "cd0b2e040f923cab34ecb5c82a04f0510102267bcd09e7663bcfeec0a155c5d1": "private static final int SQLITE_PERM = 3;",
@@ -1389445,6 +1389500,71 @@
             "status": "retained",
             "classification": "test-fixture",
             "rationale": "#604 test_upload_rejects_mode_only_selection_missing_always_and_unsafe_report_paths atom '\" if-no-files-found:\"' is deterministic positive/negative fixture data for native-scope selection, early structural admission, failed-preflight refusal, or fixed safe report retention; it adds no production setting."
+          }
+        }
+      ]
+    },
+    {
+      "id": "issue-604-decoded-checkout-bindings",
+      "issue": "#604",
+      "sourceRevision": "3a87790e3e13eaba3761bb0899f88f699fcd6eb1",
+      "targetRevision": "f79abd1ae4129e6c8ebb2a77b18e39bf91475ed5",
+      "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+      "sourceInventoryDigest": "b387941c0638e488bef37058601fa0ac5d8584e433cf355a14d3210feed3b6ef",
+      "targetCandidateDigest": "7313b62b485cae72688aedba60d6d1c7b60d9bcf1d48935d9b496a64d7800e6a",
+      "mappings": [
+        {
+          "fromId": "oc-5b8bfa19f1ebc7a7042e",
+          "toId": "oc-e6bee9ae1b63a742be7d",
+          "approved": true,
+          "rationale": "#604 retains the same supported-layout refusal in check_checkout_bindings. The diagnostic is now shared by mapping and step validation.",
+          "equivalence": {
+            "kind": "same-atom-v1",
+            "beforeEvidenceDigest": "cd01087c8edba7c092fb4cdbeac2558a4676dc5e8e03d96e29dd1accf2bc3b58",
+            "afterEvidenceDigest": "6b27a55d696827508ad20157a8e042186a1f0dd2b086e88754d17bee9f590ee2"
+          }
+        }
+      ],
+      "retirements": [
+        {
+          "id": "oc-34f6f4a72d7d6f7272a6",
+          "approved": true,
+          "rationale": "#604 removes the single-split limit from the text-based job scanner. The YAML loader now enumerates the jobs mapping."
+        },
+        {
+          "id": "oc-4c039a1479743ad2c1e5",
+          "approved": true,
+          "rationale": "#604 replaces the raw step scanner docstring and its lexical framing with decoded step traversal."
+        },
+        {
+          "id": "oc-f7a279097f14890ad61c",
+          "approved": true,
+          "rationale": "#604 removes the literal checkout substring count. The guard now identifies each checkout by its decoded action repository."
+        }
+      ],
+      "additions": [
+        {
+          "id": "oc-51ff8dc1681bd60405f4",
+          "metadata": {
+            "status": "retained",
+            "classification": "protocol-or-format-invariant",
+            "rationale": "#604 reports an unsupported workflow anchor, alias or explicit tag before constructing mappings. This message describes a fixed workflow syntax boundary."
+          }
+        },
+        {
+          "id": "oc-938a8ce5d3251ec1f5cb",
+          "metadata": {
+            "status": "retained",
+            "classification": "protocol-or-format-invariant",
+            "rationale": "#604 rejects a decoded action declaration outside the supported block layout. The error text identifies the syntax violation."
+          }
+        },
+        {
+          "id": "oc-a8c27aa62c8e2c411ce2",
+          "metadata": {
+            "status": "retained",
+            "classification": "protocol-or-format-invariant",
+            "rationale": "#604 reports a noncanonical candidate input spelling rather than accepting an ambiguous routing declaration. The diagnostic identifies the rejected key."
           }
         }
       ]

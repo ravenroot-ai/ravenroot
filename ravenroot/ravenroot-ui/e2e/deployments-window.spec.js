@@ -398,7 +398,7 @@ test.describe('the deployments window', () => {
   test('opens a registered deployment without a local file and applies its bounded live stream read-only',
     async ({ page }) => {
       const service = withDeploymentService(page);
-      service.held.set('orders-v3', localDeployment());
+      service.held.set('orders-v3', localDeployment({ runtimeIncarnationId: 'inc-1' }));
       await page.route('**/v1/node-types', route => route.fulfill({
         status: 200, contentType: 'application/json', body: '[]',
       }));

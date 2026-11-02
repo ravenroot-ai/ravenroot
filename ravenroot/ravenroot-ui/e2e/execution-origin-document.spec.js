@@ -45,6 +45,7 @@ async function installDelayedRuntime(page, mode) {
     executionId,
     get graphVersion() { return graphVersion(); },
     get deploymentId() { return [...(backend?.held?.keys() || [])][0]; },
+    get initialStartCalls() { return backend?.calls.filter(call => call.action === 'initial-start') || []; },
     get postCount() { return backend ? backend.calls.filter(call => call.method === 'POST' && !call.action).length : postCount; },
     get postedGraphMl() { return backend ? backend.calls.find(call => call.method === 'POST' && !call.action)?.body || '' : postedGraphMl; },
     releaseSubmission,
@@ -93,8 +94,22 @@ for (const mode of ['test', 'run']) {
     const sibling = await page.evaluate(() => window.ravenroot.openDocument({ name: 'sibling.graphml' }));
     expect(await page.evaluate(() => window.ravenroot.activeDocument().documentId)).toBe(sibling);
     runtime.releaseSubmission();
-    await expect.poll(() => page.evaluate(id =>
-      window.ravenroot.workspace.find(id)?.execution.executionId, before.id)).toBe(runtime.executionId);
+    await expect.poll(() => page.evaluate(({ id, mode }) => {
+      const owner = window.ravenroot.workspace.find(id);
+      return mode === 'run' ? owner?.deploymentRun?.traversalId : owner?.execution.executionId;
+    }, { id: before.id, mode })).toBe(runtime.executionId);
+    if (mode === 'run') {
+      expect(runtime.initialStartCalls).toHaveLength(1);
+      const request = JSON.parse(runtime.initialStartCalls[0].body);
+      expect(await page.evaluate(id => {
+        const owner = window.ravenroot.workspace.find(id);
+        return { binding: owner.deploymentRun, oneShot: owner.execution.executionId };
+      }, before.id)).toMatchObject({ oneShot: null, binding: {
+        deploymentId: runtime.deploymentId, graphVersion: runtime.graphVersion,
+        incarnationId: 'runtime-1', processInstanceId: PID, traversalId: TID,
+        initialStartRequestId: request.requestId, phase: 'READY',
+      } });
+    }
 
     expect(await page.evaluate(([originId, siblingId]) => {
       const origin = window.ravenroot.workspace.find(originId);

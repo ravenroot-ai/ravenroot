@@ -71,7 +71,8 @@ test('native monitor reads bounded real persistent histories, visits and retry a
   await expect(histories.locator('li')).toHaveCount(CAP);
   await expect(histories.locator('li button').first()).toContainText('same-file.csv');
   await expect(histories.locator('li button').first()).toContainText('operation-0000');
-  await expect(histories.locator('li button').first()).toContainText('AWAITING_EXTERNAL_EVENT');
+  await expect(histories.locator('li button').first().locator('.history-row-state')).toHaveAttribute('data-state', 'AWAITING_EXTERNAL_EVENT');
+  await expect(histories.locator('li button').first()).toContainText('Waiting for an external event');
   await histories.getByLabel('Exact application ID', { exact: true }).fill('operation-1999');
   await histories.getByLabel('Exact public reference', { exact: true }).fill('same-file.csv');
   await histories.getByRole('button', { name: 'Search histories', exact: true }).click();
@@ -80,12 +81,12 @@ test('native monitor reads bounded real persistent histories, visits and retry a
   await histories.getByRole('button', { name: 'Clear search', exact: true }).click();
   await expect(histories.locator('li')).toHaveCount(CAP);
   await expect(histories.locator('li button').first()).toContainText('operation-0000');
-  const firstBusiness = await histories.locator('li button').first().innerText();
+  const firstBusiness = await histories.locator('li button').first().getAttribute('aria-label');
   await histories.getByRole('button', { name: 'Next page' }).click();
-  await expect(histories.locator('li button').first()).not.toHaveText(firstBusiness);
+  await expect(histories.locator('li button').first()).not.toHaveAttribute('aria-label', firstBusiness);
   await expect(histories.locator('li button').first()).toContainText('same-file.csv');
   await histories.getByRole('button', { name: 'Previous page' }).click();
-  await expect(histories.locator('li button').first()).toHaveText(firstBusiness);
+  await expect(histories.locator('li button').first()).toHaveAttribute('aria-label', firstBusiness);
   await histories.locator('li button').first().click();
   const traversals = monitor.locator('.history-page').filter({ has: page.getByRole('heading', { name: 'Actual traversals', exact: true }) });
   await traversals.locator('li button').first().click();
@@ -147,7 +148,7 @@ test('native monitor reads bounded real persistent histories, visits and retry a
   writeFileSync(join(OUTPUT, `history-bounds-cap-${CAP}.json`), JSON.stringify({ seededHistories: 2000, workerVisits: 1000, workerAttempts: 2000, reopenedSqlite: CAP === 1, contrast, topology, dom, pages }, null, 2));
   await monitor.evaluate(node => { node.scrollTop = 0; });
   await page.screenshot({ path: join(OUTPUT, `history-monitor-cap-${CAP}.png`), fullPage: true });
-  await monitor.locator(':scope > details').nth(1).locator(':scope > summary').click();
+  await monitor.getByRole('button', { name: 'Traversal map', exact: true }).click();
   if (CAP === 1) { await traversals.getByRole('button', { name: 'Next page' }).click(); await traversals.locator('li button').first().click(); }
   else await traversals.locator('li button').nth(1).click();
   const repeated = monitor.locator('.history-traversal'); await expect(repeated).toHaveCount(2);

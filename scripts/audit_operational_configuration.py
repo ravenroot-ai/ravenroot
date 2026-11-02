@@ -3555,6 +3555,10 @@ def remap_declared_candidate_references(document: dict[str, object],
             if not isinstance(entry, dict):
                 continue
             remap_list(entry, "defaultEvidence")
+            if entry.get("graphAuthoringAuthority") == GRAPH_AUTHORING_AUTHORITY_ID:
+                evidence = entry.get("defaultEvidence")
+                if isinstance(evidence, list) and all(isinstance(value, str) for value in evidence):
+                    evidence.sort()
             binding = entry.get("bindingAuthority")
             if isinstance(binding, dict):
                 for field in ("environmentCandidateId", "propertyCandidateId"):
@@ -3789,7 +3793,7 @@ def remap_declared_candidate_references(document: dict[str, object],
 
     graph_authoring_authorities = document.get("graphAuthoringAuthorities")
     if isinstance(graph_authoring_authorities, dict):
-        for authority in graph_authoring_authorities.values():
+        for authority_id, authority in graph_authoring_authorities.items():
             if not isinstance(authority, dict):
                 continue
             remap_list(authority, "candidateIds")
@@ -3799,6 +3803,10 @@ def remap_declared_candidate_references(document: dict[str, object],
                         remap_list(row, "candidateIds")
                         if field == "contracts":
                             remap_list(row, "defaultEvidence")
+                            evidence = row.get("defaultEvidence")
+                            if authority_id == GRAPH_AUTHORING_AUTHORITY_ID and isinstance(evidence, list) \
+                                    and all(isinstance(value, str) for value in evidence):
+                                evidence.sort()
 
     domains = document.get("remediationDomains")
     domain_rows = domains.get("domains") if isinstance(domains, dict) else None
@@ -16614,9 +16622,9 @@ def route_table_authority_errors(root: Path, authorities: object,
         return ["RouteTable.ALL is not the supported direct RouteDescriptor table"]
     partitions, details, source_candidates = parsed
     errors: list[str] = []
-    expected_counts = {"methods": 141, "path": 128, "summary": 480, "successStatuses": 132}
-    if len(details) != 128 or {role: len(ids) for role, ids in partitions.items()} != expected_counts:
-        errors.append("RouteTable authority no longer has the reviewed 128/881 positional shape")
+    expected_counts = {"methods": 143, "path": 130, "summary": 482, "successStatuses": 135}
+    if len(details) != 130 or {role: len(ids) for role, ids in partitions.items()} != expected_counts:
+        errors.append("RouteTable authority no longer has the reviewed 130/890 positional shape")
     recorded = authority["candidateIdsByRole"]
     if not isinstance(recorded, dict) or set(recorded) != set(expected_counts) \
             or any(recorded.get(role) != partitions[role] for role in expected_counts):

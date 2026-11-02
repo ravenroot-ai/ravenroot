@@ -6873,6 +6873,39 @@ class GraphAuthoringPolicyAuditTest(unittest.TestCase):
     def tearDownClass(cls) -> None:
         cls.temporary.cleanup()
 
+    def test_authoring_evidence_reorders_only_live_ids_and_retains_closed_membership(self) -> None:
+        evidence = ["oc-before-a", "oc-before-z", "oc-before-a"]
+        document = {
+            "entries": [
+                {"graphAuthoringAuthority": audit.GRAPH_AUTHORING_AUTHORITY_ID,
+                 "defaultEvidence": list(evidence)},
+                {"defaultEvidence": list(evidence)},
+            ],
+            "graphAuthoringAuthorities": {audit.GRAPH_AUTHORING_AUTHORITY_ID: {
+                "contracts": [{"defaultEvidence": list(evidence), "candidateIds": list(evidence)}],
+            }},
+            "semanticReviewHistory": [{"beforeMetadata": {"defaultEvidence": list(evidence)}}],
+        }
+        audit.remap_declared_candidate_references(document,
+            {"oc-before-a": "oc-after-z", "oc-before-z": "oc-after-a"})
+        canonical = ["oc-after-a", "oc-after-z", "oc-after-z"]
+        ordered = ["oc-after-z", "oc-after-a", "oc-after-z"]
+        self.assertEqual(canonical, document["entries"][0]["defaultEvidence"])
+        self.assertEqual(ordered, document["entries"][1]["defaultEvidence"])
+        contract = document["graphAuthoringAuthorities"][audit.GRAPH_AUTHORING_AUTHORITY_ID]["contracts"][0]
+        self.assertEqual(canonical, contract["defaultEvidence"])
+        self.assertEqual(ordered, contract["candidateIds"])
+        self.assertEqual(evidence, document["semanticReviewHistory"][0]["beforeMetadata"]["defaultEvidence"])
+        operator = next(row for row in self.entries.values() if row.get("classification") == "operator-configurable")
+        original = operator["defaultEvidence"]
+        for changed in (original + ["oc-foreign"], original[1:], original + original[:1]):
+            with self.subTest(evidence=changed):
+                entries = copy.deepcopy(self.entries)
+                entries[operator["id"]]["defaultEvidence"] = changed
+                audit.remap_declared_candidate_references({"entries": [entries[operator["id"]]]}, {})
+                self.assertTrue(audit.graph_authoring_authority_errors(self.root,
+                    {audit.GRAPH_AUTHORING_AUTHORITY_ID: self.authority}, entries, self.discovered))
+
     def test_optional_publication_does_not_disable_configured_validation(self) -> None:
         sources = {path: (self.root / path).read_text(encoding="utf-8")
                    for path in audit.GRAPH_AUTHORING_FILE_PROOFS}

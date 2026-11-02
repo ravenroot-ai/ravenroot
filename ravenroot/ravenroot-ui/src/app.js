@@ -16809,7 +16809,7 @@ function commandContext() {
     running,
     transientRunning,
     executionPaused: activeExecutionPaused,
-    executionCommandInFlight: activeExecutionCommandInFlight,
+    executionCommandInFlight: Boolean(owner?.execution.commandFlight),
     sourceSessionActive: sourceSessionActive || boundDeploymentActive,
     sourceSessionStopInFlight: Boolean(activeSourceSession?.stopPromise || owner?.deploymentRunStopPending),
     executionUnknown: activeExecutionReconciliation === 'unknown',

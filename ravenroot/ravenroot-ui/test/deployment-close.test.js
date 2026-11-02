@@ -66,8 +66,11 @@ it('does not close over a later binding in the same document incarnation', () =>
 });
 
 it('keeps the decision active after failed Stop or non-stopped authoritative state', async () => {
-  const f = fixture(); f.client.stopDeployment.mockResolvedValue({ state: 'STOPPED' });
+  const f = fixture(); f.client.stopDeployment.mockResolvedValue({ ...f.status, state: 'STOPPING' });
   expect(await stopOriginDeployment(f.owner, f.options)).toBe(false);
+  expect(boundDeploymentNeedsCloseDecision(f.owner)).toBe(true);
+  f.client.stopDeployment.mockResolvedValue({ state: 'STOPPED' });
+  await expect(stopOriginDeployment(f.owner, f.options)).rejects.toThrow('STOP_REGISTRATION_CHANGED');
   expect(boundDeploymentNeedsCloseDecision(f.owner)).toBe(true);
   f.client.stopDeployment.mockRejectedValue(new Error('unavailable'));
   await expect(stopOriginDeployment(f.owner, f.options)).rejects.toThrow('unavailable');

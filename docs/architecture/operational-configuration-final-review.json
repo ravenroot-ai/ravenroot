@@ -4730,7 +4730,7 @@
         },
         {
           "path": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/AuthorizedRavenrootApplication.java",
-          "digest": "da004402c651dc19127beae4021eb22ab857ea94fda6561ea6e05cdd39dd4ab3",
+          "digest": "832e5daa9a7198f74df78b97ed80c2b3288fd7b0e77ebc88451e037b9c767f73",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #550 preserves this reviewed authority while adding bounded Git graph authoring, immutable publication evidence, dependency revalidation, and explicit UI persistence capabilities. Rechecked for #590 source alignment: the retained atom keeps its reviewed meaning alongside explicit deployment, business history and correlation additions; new candidates have separate row-level review. #605 adds graph-read plus deployment-observe source access and deployment-scoped explicit execution authorization; prior authorization, resource and binding rules remain intact."
         }
       ],
@@ -5201,7 +5201,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/AuthorizedRavenrootApplication.java",
-          "digest": "da004402c651dc19127beae4021eb22ab857ea94fda6561ea6e05cdd39dd4ab3",
+          "digest": "832e5daa9a7198f74df78b97ed80c2b3288fd7b0e77ebc88451e037b9c767f73",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #550 preserves this reviewed authority while adding bounded Git graph authoring, immutable publication evidence, dependency revalidation, and explicit UI persistence capabilities. Rechecked for #590 source alignment: the retained atom keeps its reviewed meaning alongside explicit deployment, business history and correlation additions; new candidates have separate row-level review. #605 adds graph-read plus deployment-observe source access and deployment-scoped explicit execution authorization; prior authorization, resource and binding rules remain intact."
         },
         {
@@ -5538,7 +5538,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/AuthorizedRavenrootApplication.java",
-          "digest": "da004402c651dc19127beae4021eb22ab857ea94fda6561ea6e05cdd39dd4ab3",
+          "digest": "832e5daa9a7198f74df78b97ed80c2b3288fd7b0e77ebc88451e037b9c767f73",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #550 preserves this reviewed authority while adding bounded Git graph authoring, immutable publication evidence, dependency revalidation, and explicit UI persistence capabilities. Rechecked for #590 source alignment: the retained atom keeps its reviewed meaning alongside explicit deployment, business history and correlation additions; new candidates have separate row-level review. #605 adds graph-read plus deployment-observe source access and deployment-scoped explicit execution authorization; prior authorization, resource and binding rules remain intact."
         },
         {

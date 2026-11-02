@@ -14939,9 +14939,9 @@ GRAPH_AUTHORING_SUPPORT_FILE_PROOFS = {
     Path("ravenroot/ravenroot-ui/test/document-close-plan.test.js"): "bf00fb125e359ca7bfc0cfbdf6a32f1226310b3a63746412565090dfff516403",
     Path("ravenroot/ravenroot-ui/src/credential-request.js"): "240501ee73c4068eabbd52540de39d4813b59f7a7c6d2a44bed297c33eb91c90",
     Path("ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/RavenrootApplication.java"):
-        "4b51243dca5b0f18ddb66385d2bbd14ea56cea34b18242f5cf7cd46688c64d0b",
+        "dcfcb005f9c340a403f9e7cc975a5dc6c16d1f0e8f9ac13b3835b447c53bddb1",
     Path("ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/AuthorizedRavenrootApplication.java"):
-        "da004402c651dc19127beae4021eb22ab857ea94fda6561ea6e05cdd39dd4ab3",
+        "832e5daa9a7198f74df78b97ed80c2b3288fd7b0e77ebc88451e037b9c767f73",
     Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/WireErrorCodes.java"):
         "71b0aa2cdfdbbd0964c1e4a4aae9c29e6736ad1be2ee9f4d27f868b61d5e7299",
 }

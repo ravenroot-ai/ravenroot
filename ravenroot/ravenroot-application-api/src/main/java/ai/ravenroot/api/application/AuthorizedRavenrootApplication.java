@@ -906,6 +906,7 @@ public final class AuthorizedRavenrootApplication {
      * Resolves one deployment viewer source under its distinct observation action.
      * @param context authenticated request context supplying the owning tenant
      * @param deploymentId tenant-scoped deployment identifier
+     * @param rebuild ignore saved drawing metadata and generate fresh presentation only
      * @return browser-safe view, or empty when unavailable to the caller tenant
      */
     public java.util.Optional<DeploymentViewerView> localDeploymentView(RequestContext context, String deploymentId, boolean rebuild) {
@@ -914,7 +915,15 @@ public final class AuthorizedRavenrootApplication {
         return delegate.localDeploymentView(context.tenantId(), deploymentId, rebuild);
     }
 
-    /** Full source requires graph inspection as well as deployment observation authority. */
+    /**
+     * Reads submitted source under both graph inspection and deployment observation authority.
+     * @param context authenticated request context supplying the owning tenant
+     * @param deploymentId tenant-scoped deployment identifier
+     * @param incarnationId exact physical registration incarnation
+     * @param graphVersion immutable graph version bound to that incarnation
+     * @return submitted GraphML bytes, or empty for an unknown tenant-scoped deployment
+     * @throws IllegalArgumentException when a source identifier is blank or its binding has changed
+     */
     public java.util.Optional<byte[]> localDeploymentGraphMl(RequestContext context, String deploymentId,
             String incarnationId, String graphVersion) {
         require(context, AuthorizationAction.GRAPH_READ, collection("graphs", context));
@@ -924,6 +933,17 @@ public final class AuthorizedRavenrootApplication {
                 requireText(incarnationId, "incarnation id"), requireText(graphVersion, "graph version"));
     }
 
+    /**
+     * Admits an independent START under execution-start authority for the owning deployment.
+     * Reusing the request identifier reconciles the durable receipt for that request.
+     * @param context authenticated request context supplying the owning tenant
+     * @param deploymentId tenant-scoped deployment identifier
+     * @param incarnationId exact physical registration incarnation
+     * @param graphVersion immutable graph version bound to that incarnation
+     * @param requestId stable idempotency identifier for this execution request
+     * @param input START payload subject to payload limits and reserved-key validation
+     * @return admission or reconciliation outcome for the supplied request
+     */
     public EmbedDeploymentStart newLocalDeploymentExecution(RequestContext context, String deploymentId,
             String incarnationId, String graphVersion, String requestId, ai.ravenroot.api.payload.PayloadValue input) {
         require(context, AuthorizationAction.EXECUTION_START,
@@ -931,6 +951,13 @@ public final class AuthorizedRavenrootApplication {
         return delegate.newLocalDeploymentExecution(SecurityContext.of(context), deploymentId, incarnationId, graphVersion, requestId, input);
     }
 
+    /**
+     * Reads saved or recoverable presentation under deployment observation authority.
+     * @param context authenticated request context supplying the owning tenant
+     * @param deploymentId tenant-scoped deployment identifier
+     * @return browser-safe view, or empty for an unknown tenant-scoped deployment
+     * @throws DeploymentViewException when the deployment exists but cannot be presented
+     */
     public java.util.Optional<DeploymentViewerView> localDeploymentView(RequestContext context,
                                                                         String deploymentId) {
         require(context, AuthorizationAction.DEPLOYMENT_OBSERVE,

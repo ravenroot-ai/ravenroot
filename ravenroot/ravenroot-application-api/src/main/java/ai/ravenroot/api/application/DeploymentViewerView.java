@@ -20,6 +20,14 @@ import java.util.Objects;
 public record DeploymentViewerView(String viewerSourceVersion, Source source,
                                    LocalDeploymentState lifecycle, String canonicalDigest,
                                    EmbedGraphProjection projection, String renderingStatus) {
+    /**
+     * Creates a view whose projection uses the saved presentation.
+     * @param version version of the deployment-view source contract
+     * @param source immutable logical and physical source identity
+     * @param lifecycle lifecycle observed for the captured source
+     * @param digest digest binding the captured immutable graph definition
+     * @param projection closed browser-safe graph projection
+     */
     public DeploymentViewerView(String version, Source source, LocalDeploymentState lifecycle,
             String digest, EmbedGraphProjection projection) {
         this(version, source, lifecycle, digest, projection, "SAVED");

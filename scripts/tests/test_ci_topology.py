@@ -9,6 +9,9 @@ that every artifact a job consumes is one it explicitly waited for.
 from __future__ import annotations
 
 import re
+import subprocess
+import os
+import textwrap
 import unittest
 
 from scripts.ci_required import FAST_WORKFLOW, WORKFLOW, declared_needs, job_blocks
@@ -204,7 +207,7 @@ class ContinuousIntegrationTopologyTest(unittest.TestCase):
         backend = self.jobs["full-backend-tests"]
         self.assertIn('"$EVENT_NAME" = schedule', self.jobs["release-classification"])
         self.assertIn("force-complete", self.jobs["release-classification"])
-        self.assertEqual(4, backend.count("if: steps.backend-scope.outputs.native == 'true'"))
+        self.assertEqual(3, backend.count("if: steps.backend-scope.outputs.native == 'true'"))
         self.assertEqual(1, backend.count("if: steps.backend-scope.outputs.extension_pack == 'true'"))
 
     def test_push_consumers_use_the_exact_push_base(self) -> None:
@@ -289,3 +292,39 @@ class CompleteIntegrationScheduleTest(unittest.TestCase):
         self.assertIn("-f 'inputs[force_complete]=true'", job)
         self.assertIn('  schedule:\n    - cron:', scheduler)
         self.assertIn('  schedule:\n    - cron:', WORKFLOW.read_text())
+
+
+class EarlyNativeFixtureContractTest(unittest.TestCase):
+    def test_structural_runner_contracts_are_required_before_maven_regression(self):
+        contents = WORKFLOW.read_text()
+        jobs = job_blocks(contents)
+        command = 'python3 -m unittest scripts.tests.test_runner_quota_acceptance scripts.tests.test_model_protocol_endpoint scripts.tests.test_kubernetes_runner_acceptance'
+        source = jobs['full-source-policy']
+        self.assertEqual(1, contents.count(command))
+        self.assertIn(command, source)
+        step = source.split('- name: Verify native runner fixture contracts before backend testing', 1)[1].split('- name:', 1)[0]
+        self.assertNotIn('if:', step)
+        self.assertNotIn('continue-on-error', step)
+        self.assertNotIn(command, jobs['full-backend-tests'])
+        self.assertIn('full-source-policy', declared_needs(jobs['full-preflight']))
+        self.assertIn('full-preflight', declared_needs(jobs['full-backend-tests']))
+        for phase in ('Run secretless hermetic model-protocol Workspace acceptance on native XFS project quotas',
+                      'Install pinned native Kubernetes acceptance tools',
+                      'Run native Kubernetes governed executor acceptance without capability skips'):
+            native_step = jobs['full-backend-tests'].split('- name: ' + phase, 1)[1].split('- name:', 1)[0]
+            self.assertIn("if: steps.backend-scope.outputs.native == 'true'", native_step)
+
+
+class BackendPreflightAdmissionTest(unittest.TestCase):
+    def test_failed_source_preflight_refuses_backend_work_before_checkout(self):
+        job = job_blocks(WORKFLOW.read_text())['full-backend-tests']
+        steps = job.split('    steps:\n', 1)[1]
+        self.assertTrue(steps.startswith('      - name: Require successful preflight before backend work\n'))
+        guard = steps.split('      - name:', 2)[1]
+        self.assertIn('PREFLIGHT_RESULT: ${{ needs.full-preflight.result }}', guard)
+        script = textwrap.dedent(guard.split('        run: |\n', 1)[1])
+        for result in ('success', 'failure', 'cancelled', 'skipped', ''):
+            with self.subTest(result=result):
+                completed = subprocess.run(['bash', '-c', script], env={**os.environ, 'PREFLIGHT_RESULT': result},
+                                           text=True, capture_output=True)
+                self.assertEqual(result == 'success', completed.returncode == 0)

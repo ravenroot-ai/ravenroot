@@ -347,3 +347,19 @@ class DevelopmentConsumerClosureTest(RealModelConsumerPlanTest):
         self.assertIn('full-ui-e2e-harness', plan['jobs'])
         self.assertIn('ravenroot/ravenroot-extensions/ravenroot-openapi-server',
                       plan['independent_build_scopes']['full-ui-e2e-harness'])
+
+
+class NativePlanScopeTest(unittest.TestCase):
+    plan = ImpactPlanTest.plan
+    def test_native_selection_covers_shared_selected_and_complete_but_not_leaf_scopes(self):
+        selected = self.plan([CORE + '/src/main/java/Runtime.java'], lane='dev')
+        self.assertFalse(selected['full'])
+        self.assertTrue(selected['native_acceptance'])
+        self.assertIn('full-backend-tests', selected['jobs'])
+        complete = self.plan([MAIL + '/src/main/java/Mail.java'], lane='dev', force=True)
+        self.assertTrue(complete['full'])
+        self.assertTrue(complete['native_acceptance'])
+        self.assertIn('full-backend-tests', complete['jobs'])
+        leaf = self.plan([MAIL + '/src/main/java/Mail.java'], lane='dev')
+        self.assertFalse(leaf['full'])
+        self.assertFalse(leaf['native_acceptance'])

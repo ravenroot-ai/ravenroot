@@ -418,6 +418,8 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ inputs.merge_sha || github.sha }}
+      - name: Verify native runner fixture contracts before backend testing
+        run: python3 -m unittest scripts.tests.test_runner_quota_acceptance scripts.tests.test_model_protocol_endpoint scripts.tests.test_kubernetes_runner_acceptance
       - name: Validate source bytes and Maven argLine composition
         run: |
           python3 scripts/check_no_raw_control_bytes.py
@@ -850,6 +852,14 @@ jobs:
       contents: read
       packages: read
     steps:
+      - name: Require successful preflight before backend work
+        env:
+          PREFLIGHT_RESULT: ${{ needs.full-preflight.result }}
+        run: |
+          if [ "$PREFLIGHT_RESULT" != success ]; then
+            echo "Backend preflight did not pass; refusing backend work." >&2
+            exit 1
+          fi
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -916,9 +926,6 @@ jobs:
             echo "Refusing invalid backend scope '$BACKEND_SCOPE' with projects '$BACKEND_PROJECTS'." >&2
             exit 1
           fi
-      - name: Verify the isolated writable runner acceptance fixture
-        if: steps.backend-scope.outputs.native == 'true'
-        run: python3 -m unittest scripts.tests.test_runner_quota_acceptance scripts.tests.test_model_protocol_endpoint scripts.tests.test_kubernetes_runner_acceptance
       - name: Run secretless hermetic model-protocol Workspace acceptance on native XFS project quotas
         if: steps.backend-scope.outputs.native == 'true'
         timeout-minutes: 20

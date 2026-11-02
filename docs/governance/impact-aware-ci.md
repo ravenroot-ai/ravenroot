@@ -58,7 +58,9 @@ checks every explicitly named Java path in its workflow against candidate and qu
 The plan records a concrete reason for every retained job, plus independent compilation scopes
 for documentation and the browser harness. The plan gates compilation, packaging, backend tests, support modules, UI audit/unit/build/browser
 checks, docs, API docs, plugin boundary and runtime smoke checks. Policy validation always
-remains selected. `ci-required` reconstructs the plan from Git, checks it is bound to this candidate,
+remains selected. Native fixture structural contracts run in the required source-policy gate
+before preflight admits backend regression; they exercise mocks and local fixtures, not native
+execution. Selected native XFS/Kubernetes acceptance still runs in its explicit backend phase. `ci-required` reconstructs the plan from Git, checks it is bound to this candidate,
 and refuses a missing selected job, a selected job that skipped/failed, or an unexplained job.
 Configurator resolver/core-carrier contracts use the reusable Configurator workflow, including its
 real AMQP/Compose exercise; complete fallback includes that job and its independent builds.

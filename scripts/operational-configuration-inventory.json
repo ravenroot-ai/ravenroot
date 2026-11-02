@@ -556207,7 +556207,7 @@
     {
       "id": "oc-3b5aa152e3538c8887c3",
       "path": "scripts/tests/test_ci_topology.py",
-      "line": 36,
+      "line": 39,
       "symbol": "test_full_tier_exposes_independently_actionable_jobs",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -556222,7 +556222,7 @@
     {
       "id": "oc-1108c801ebbe6b9fd8a2",
       "path": "scripts/tests/test_ci_topology.py",
-      "line": 53,
+      "line": 56,
       "symbol": "test_builds_and_tests_are_distinct",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -556237,7 +556237,7 @@
     {
       "id": "oc-02f571fa0dc8d95f0cee",
       "path": "scripts/tests/test_ci_topology.py",
-      "line": 53,
+      "line": 56,
       "symbol": "test_builds_and_tests_are_distinct",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -556252,7 +556252,7 @@
     {
       "id": "oc-44b7b9c5757984eb4c94",
       "path": "scripts/tests/test_ci_topology.py",
-      "line": 66,
+      "line": 69,
       "symbol": "test_builds_and_tests_are_distinct",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -556267,7 +556267,7 @@
     {
       "id": "oc-f816d08679bf6aafc1ce",
       "path": "scripts/tests/test_ci_topology.py",
-      "line": 66,
+      "line": 69,
       "symbol": "test_builds_and_tests_are_distinct",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -556282,7 +556282,7 @@
     {
       "id": "oc-044e4ba9da1cc4c1e2ed",
       "path": "scripts/tests/test_ci_topology.py",
-      "line": 76,
+      "line": 79,
       "symbol": "test_full_tier_requires_runner_deployment_evidence_without_tooling_skips",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -556297,7 +556297,7 @@
     {
       "id": "oc-a50aa0a41e6182493f95",
       "path": "scripts/tests/test_ci_topology.py",
-      "line": 76,
+      "line": 79,
       "symbol": "test_full_tier_requires_runner_deployment_evidence_without_tooling_skips",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -556312,7 +556312,7 @@
     {
       "id": "oc-778cb35ba8b7009f6a61",
       "path": "scripts/tests/test_ci_topology.py",
-      "line": 76,
+      "line": 79,
       "symbol": "test_full_tier_requires_runner_deployment_evidence_without_tooling_skips",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -556327,7 +556327,7 @@
     {
       "id": "oc-fac1de92c0876a24985e",
       "path": "scripts/tests/test_ci_topology.py",
-      "line": 84,
+      "line": 87,
       "symbol": "test_full_tier_requires_runner_deployment_evidence_without_tooling_skips",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -556342,7 +556342,7 @@
     {
       "id": "oc-8e0b0e74e37b6f31bbea",
       "path": "scripts/tests/test_ci_topology.py",
-      "line": 109,
+      "line": 112,
       "symbol": "test_verified_artifact_dependencies_are_explicit",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -556357,7 +556357,7 @@
     {
       "id": "oc-2216af52493c4b94caf4",
       "path": "scripts/tests/test_ci_topology.py",
-      "line": 122,
+      "line": 125,
       "symbol": "test_the_end_to_end_aggregator_observes_the_shards_it_reports_for",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -556372,7 +556372,7 @@
     {
       "id": "oc-2e11adfbde4e7a0d289d",
       "path": "scripts/tests/test_ci_topology.py",
-      "line": 122,
+      "line": 125,
       "symbol": "test_the_end_to_end_aggregator_observes_the_shards_it_reports_for",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -556387,7 +556387,7 @@
     {
       "id": "oc-9afd57dceb7c3f0ac77f",
       "path": "scripts/tests/test_ci_topology.py",
-      "line": 122,
+      "line": 125,
       "symbol": "test_the_end_to_end_aggregator_observes_the_shards_it_reports_for",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -556402,7 +556402,7 @@
     {
       "id": "oc-40aac3dd0224cdbd8f81",
       "path": "scripts/tests/test_ci_topology.py",
-      "line": 146,
+      "line": 149,
       "symbol": "test_every_artifact_upload_name_is_unique",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -556417,7 +556417,7 @@
     {
       "id": "oc-3e61f44f4d4e3c93bbbd",
       "path": "scripts/tests/test_ci_topology.py",
-      "line": 146,
+      "line": 149,
       "symbol": "test_every_artifact_upload_name_is_unique",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -556432,7 +556432,7 @@
     {
       "id": "oc-d0c119705a226b125b68",
       "path": "scripts/tests/test_ci_topology.py",
-      "line": 146,
+      "line": 149,
       "symbol": "test_every_artifact_upload_name_is_unique",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -556447,7 +556447,7 @@
     {
       "id": "oc-9357b8a9a762540ff83c",
       "path": "scripts/tests/test_ci_topology.py",
-      "line": 149,
+      "line": 152,
       "symbol": "test_every_artifact_upload_name_is_unique",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -556462,7 +556462,7 @@
     {
       "id": "oc-d4dc0dc168c01a738fdb",
       "path": "scripts/tests/test_ci_topology.py",
-      "line": 155,
+      "line": 158,
       "symbol": "test_feature_feedback_stays_light_and_does_not_repeat_regression_suites",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -556477,7 +556477,7 @@
     {
       "id": "oc-21fd947b6da74e4b395b",
       "path": "scripts/tests/test_ci_topology.py",
-      "line": 155,
+      "line": 158,
       "symbol": "test_feature_feedback_stays_light_and_does_not_repeat_regression_suites",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -556492,7 +556492,7 @@
     {
       "id": "oc-ff3f19b1898bc32e46b0",
       "path": "scripts/tests/test_ci_topology.py",
-      "line": 174,
+      "line": 177,
       "symbol": "test_operational_configuration_audit_runs_once_in_the_full_tier",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -556507,7 +556507,7 @@
     {
       "id": "oc-5e19343580434db2caf7",
       "path": "scripts/tests/test_ci_topology.py",
-      "line": 174,
+      "line": 177,
       "symbol": "test_operational_configuration_audit_runs_once_in_the_full_tier",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -556522,7 +556522,7 @@
     {
       "id": "oc-2ef1849c1369bdc338c3",
       "path": "scripts/tests/test_ci_topology.py",
-      "line": 175,
+      "line": 178,
       "symbol": "test_operational_configuration_audit_runs_once_in_the_full_tier",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -556541,7 +556541,7 @@
     {
       "id": "oc-036364715951d59f063a",
       "path": "scripts/tests/test_ci_topology.py",
-      "line": 175,
+      "line": 178,
       "symbol": "test_operational_configuration_audit_runs_once_in_the_full_tier",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -556556,7 +556556,7 @@
     {
       "id": "oc-7a06848faca78a4643cc",
       "path": "scripts/tests/test_ci_topology.py",
-      "line": 179,
+      "line": 182,
       "symbol": "test_backend_scope_selector_contract_cannot_disappear_from_full_python_contracts",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -556571,7 +556571,7 @@
     {
       "id": "oc-4a504b29f543c0b4744a",
       "path": "scripts/tests/test_ci_topology.py",
-      "line": 179,
+      "line": 182,
       "symbol": "test_backend_scope_selector_contract_cannot_disappear_from_full_python_contracts",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -556586,7 +556586,7 @@
     {
       "id": "oc-b3a4c461229ada14778c",
       "path": "scripts/tests/test_ci_topology.py",
-      "line": 186,
+      "line": 189,
       "symbol": "test_expensive_regressions_wait_for_the_light_preflight",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -556601,7 +556601,7 @@
     {
       "id": "oc-f05ce8eca5404624b34b",
       "path": "scripts/tests/test_ci_topology.py",
-      "line": 186,
+      "line": 189,
       "symbol": "test_expensive_regressions_wait_for_the_light_preflight",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -556616,7 +556616,7 @@
     {
       "id": "oc-9ba1495acbc1d2478ca7",
       "path": "scripts/tests/test_ci_topology.py",
-      "line": 186,
+      "line": 189,
       "symbol": "test_expensive_regressions_wait_for_the_light_preflight",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -556631,7 +556631,7 @@
     {
       "id": "oc-1456a10b8ade7270a92b",
       "path": "scripts/tests/test_ci_topology.py",
-      "line": 186,
+      "line": 189,
       "symbol": "test_expensive_regressions_wait_for_the_light_preflight",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -556646,7 +556646,7 @@
     {
       "id": "oc-3eca25007cc758f08100",
       "path": "scripts/tests/test_ci_topology.py",
-      "line": 188,
+      "line": 191,
       "symbol": "test_expensive_regressions_wait_for_the_light_preflight",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -556661,7 +556661,7 @@
     {
       "id": "oc-3663a8a92c1577e2b7ab",
       "path": "scripts/tests/test_ci_topology.py",
-      "line": 205,
+      "line": 208,
       "symbol": "test_full_tier_has_a_scheduled_all_reactor_regression_lane",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -556676,7 +556676,7 @@
     {
       "id": "oc-0af5292beed1d8f5e404",
       "path": "scripts/tests/test_ci_topology.py",
-      "line": 205,
+      "line": 208,
       "symbol": "test_full_tier_has_a_scheduled_all_reactor_regression_lane",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -556691,7 +556691,7 @@
     {
       "id": "oc-605d61894a35798c9b48",
       "path": "scripts/tests/test_ci_topology.py",
-      "line": 206,
+      "line": 209,
       "symbol": "test_full_tier_has_a_scheduled_all_reactor_regression_lane",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -556706,7 +556706,7 @@
     {
       "id": "oc-78678cf168f36ef3ec11",
       "path": "scripts/tests/test_ci_topology.py",
-      "line": 206,
+      "line": 209,
       "symbol": "test_full_tier_has_a_scheduled_all_reactor_regression_lane",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -556719,39 +556719,43 @@
       "rationale": "scripts/tests/test_ci_topology.py::test_full_tier_has_a_scheduled_all_reactor_regression_lane atom '\"release-classification\"' is scanner-recognized test-only input, expected evidence, or assertion vocabulary; it configures no production runtime setting. Reconfirmed against current dev source during #604, preserving the reviewed #598 CI contract."
     },
     {
-      "id": "oc-530784cbbaf952499236",
+      "id": "oc-bcdce8cbcdb11bfb7597",
       "path": "scripts/tests/test_ci_topology.py",
-      "line": 207,
+      "line": 210,
       "symbol": "test_full_tier_has_a_scheduled_all_reactor_regression_lane",
       "kind": "inline-script-operational",
       "role": "inline",
       "expression": "\"if: steps.backend-scope.outputs.native == 'true'\"",
       "expressionDigest": "4f37785f8a7fbc9eb8e46e44c6d8f54ecc43e5649c4a8dcdbf856927b3972f26",
-      "evidenceDigest": "cfbcb19db8bac80a0036724b16ac9fc9026b38c0cacf185eb5a887e41e998693",
+      "evidenceDigest": "9a612a0df9bde065464c03547efd14407e4842b7f80aa457306f626e4bf5a077",
       "surface": "test-fixture",
       "status": "retained",
       "classification": "test-fixture",
-      "rationale": "scripts/tests/test_ci_topology.py::test_full_tier_has_a_scheduled_all_reactor_regression_lane atom '\"if: steps.backend-scope.outputs.native == \\'true\\'\"' is scanner-recognized test-only input, expected evidence, or assertion vocabulary; it configures no production runtime setting. Reconfirmed against current dev source during #604, preserving the reviewed #598 CI contract."
+      "rationale": "scripts/tests/test_ci_topology.py::test_full_tier_has_a_scheduled_all_reactor_regression_lane atom '\"if: steps.backend-scope.outputs.native == \\'true\\'\"' is scanner-recognized test-only input, expected evidence, or assertion vocabulary; it configures no production runtime setting. Reconfirmed against current dev source during #604, preserving the reviewed #598 CI contract.",
+      "identityMigration": {
+        "history": "issue-604-native-fixture-selection",
+        "fromId": "oc-530784cbbaf952499236"
+      }
     },
     {
-      "id": "oc-606b918d1f8565ed81b5",
+      "id": "oc-b573159bae6e60848164",
       "path": "scripts/tests/test_ci_topology.py",
-      "line": 207,
+      "line": 210,
       "symbol": "test_full_tier_has_a_scheduled_all_reactor_regression_lane",
       "kind": "inline-script-operational",
       "role": "inline",
-      "expression": "4",
-      "expressionDigest": "4b227777d4dd1fc61c6f884f48641d02b4d121d3fd328cb08b5531fcacdabf8a",
-      "evidenceDigest": "cfbcb19db8bac80a0036724b16ac9fc9026b38c0cacf185eb5a887e41e998693",
+      "expression": "3",
+      "expressionDigest": "4e07408562bedb8b60ce05c1decfe3ad16b72230967de01f640b7e4729b49fce",
+      "evidenceDigest": "9a612a0df9bde065464c03547efd14407e4842b7f80aa457306f626e4bf5a077",
       "surface": "test-fixture",
       "status": "retained",
       "classification": "test-fixture",
-      "rationale": "scripts/tests/test_ci_topology.py::test_full_tier_has_a_scheduled_all_reactor_regression_lane atom '4' is scanner-recognized test-only input, expected evidence, or assertion vocabulary; it configures no production runtime setting. Reconfirmed against current dev source during #604, preserving the reviewed #598 CI contract."
+      "rationale": "#604 test_full_tier_has_a_scheduled_all_reactor_regression_lane atom '3' is deterministic positive/negative fixture data for native-scope selection, early structural admission, failed-preflight refusal, or fixed safe report retention; it adds no production setting."
     },
     {
       "id": "oc-05891069777bbbe20a46",
       "path": "scripts/tests/test_ci_topology.py",
-      "line": 208,
+      "line": 211,
       "symbol": "test_full_tier_has_a_scheduled_all_reactor_regression_lane",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -556766,7 +556770,7 @@
     {
       "id": "oc-bc46761aad589e38c4af",
       "path": "scripts/tests/test_ci_topology.py",
-      "line": 208,
+      "line": 211,
       "symbol": "test_full_tier_has_a_scheduled_all_reactor_regression_lane",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -556781,7 +556785,7 @@
     {
       "id": "oc-a0ea84b78e0f4d64edad",
       "path": "scripts/tests/test_ci_topology.py",
-      "line": 211,
+      "line": 214,
       "symbol": "test_push_consumers_use_the_exact_push_base",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -556797,7 +556801,7 @@
     {
       "id": "oc-9004588298982b615a07",
       "path": "scripts/tests/test_ci_topology.py",
-      "line": 215,
+      "line": 218,
       "symbol": "test_push_consumers_use_the_exact_push_base",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -556812,7 +556816,7 @@
     {
       "id": "oc-9ef14f17f25fdf2a3654",
       "path": "scripts/tests/test_ci_topology.py",
-      "line": 262,
+      "line": 265,
       "symbol": "test_actual_ordered_commands_match_declared_support_scope",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -556827,7 +556831,7 @@
     {
       "id": "oc-1a3d169d685d1a00216c",
       "path": "scripts/tests/test_ci_topology.py",
-      "line": 265,
+      "line": 268,
       "symbol": "test_actual_ordered_commands_match_declared_support_scope",
       "kind": "binding-default",
       "role": "binding-value",
@@ -556842,7 +556846,7 @@
     {
       "id": "oc-09cd412271d69ea7c299",
       "path": "scripts/tests/test_ci_topology.py",
-      "line": 265,
+      "line": 268,
       "symbol": "test_actual_ordered_commands_match_declared_support_scope",
       "kind": "environment-binding",
       "role": "RAVENROOT_ENGINE",
@@ -556857,7 +556861,7 @@
     {
       "id": "oc-ce91c23d0c6985c37e49",
       "path": "scripts/tests/test_ci_topology.py",
-      "line": 283,
+      "line": 286,
       "symbol": "test_complete_dispatch_targets_each_exact_lane_from_its_own_source",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -556872,7 +556876,7 @@
     {
       "id": "oc-f8f5fa50fa0ab41ac29f",
       "path": "scripts/tests/test_ci_topology.py",
-      "line": 283,
+      "line": 286,
       "symbol": "test_complete_dispatch_targets_each_exact_lane_from_its_own_source",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -556887,7 +556891,7 @@
     {
       "id": "oc-d126f4d947f4189e910b",
       "path": "scripts/tests/test_ci_topology.py",
-      "line": 283,
+      "line": 286,
       "symbol": "test_complete_dispatch_targets_each_exact_lane_from_its_own_source",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -556902,7 +556906,7 @@
     {
       "id": "oc-3f12e8d2f840c7e9c391",
       "path": "scripts/tests/test_ci_topology.py",
-      "line": 283,
+      "line": 286,
       "symbol": "test_complete_dispatch_targets_each_exact_lane_from_its_own_source",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -556913,6 +556917,21 @@
       "status": "retained",
       "classification": "test-fixture",
       "rationale": "#604 complete-scheduler regression uses '1' in test_complete_dispatch_targets_each_exact_lane_from_its_own_source to assert the exact integration allowlist and parsing of its source declaration; this is deterministic test data."
+    },
+    {
+      "id": "oc-ba1c609ca677bcba1b92",
+      "path": "scripts/tests/test_ci_topology.py",
+      "line": 303,
+      "symbol": "test_structural_runner_contracts_are_required_before_maven_regression",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "1",
+      "expressionDigest": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "evidenceDigest": "00fe2516a835191161544ffe253a11d4fa103d36a4d9884cfc2270c496107f87",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "#604 test_structural_runner_contracts_are_required_before_maven_regression atom '1' is deterministic positive/negative fixture data for native-scope selection, early structural admission, failed-preflight refusal, or fixed safe report retention; it adds no production setting."
     },
     {
       "id": "oc-e14099d44dad2f32e33a",
@@ -582194,7 +582213,7 @@
       "rationale": "Reviewed issue #590 atom 'if result.returncode:' at scripts/tests/test_kubernetes_runner_acceptance.py#test_native_failure_handling_never_reexecutes_attester_and_uploads_only_safe_fixed_reports: executable positive/negative fixture for original attester diagnostics, secret redaction and finite safe report publication; no production authority."
     },
     {
-      "id": "oc-28b77c3e74fa8bb96e83",
+      "id": "oc-d6f9876dc9d6f80badf8",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
       "line": 305,
       "symbol": "test_native_failure_handling_never_reexecutes_attester_and_uploads_only_safe_fixed_reports",
@@ -582202,18 +582221,22 @@
       "role": "inline",
       "expression": "\"workflow\"",
       "expressionDigest": "1688d51cb2decc79d2c2d21d78c57a76c7ed3e9bd2a2e245da0c35e213c857a9",
-      "evidenceDigest": "423abd8971f5c3fa24c99f4c6f2e8b2051cad94e4c7b285af22c8cab1bbc1ac3",
+      "evidenceDigest": "af256541662a9b46016b2a0916108f6ad88eb7e88eef24ae01c6bb6ce5cb8a44",
       "surface": "test-fixture",
       "status": "retained",
       "classification": "test-fixture",
       "remediationOwner": "#590",
-      "rationale": "Reviewed issue #590 atom \"workflow\" at scripts/tests/test_kubernetes_runner_acceptance.py#test_native_failure_handling_never_reexecutes_attester_and_uploads_only_safe_fixed_reports: executable positive/negative fixture for original attester diagnostics, secret redaction and finite safe report publication; no production authority."
+      "rationale": "Reviewed issue #590 atom \"workflow\" at scripts/tests/test_kubernetes_runner_acceptance.py#test_native_failure_handling_never_reexecutes_attester_and_uploads_only_safe_fixed_reports: executable positive/negative fixture for original attester diagnostics, secret redaction and finite safe report publication; no production authority.",
+      "identityMigration": {
+        "history": "issue-604-native-fixture-selection",
+        "fromId": "oc-28b77c3e74fa8bb96e83"
+      }
     },
     {
-      "id": "oc-4f278fab4475dd66bb64",
+      "id": "oc-078ca4c537a5398afa0c",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 308,
-      "symbol": "test_native_failure_handling_never_reexecutes_attester_and_uploads_only_safe_fixed_reports",
+      "line": 310,
+      "symbol": "assert_native_upload_contract",
       "kind": "inline-script-operational",
       "role": "inline",
       "expression": "\"ravenroot/ravenroot-core/target/native-kubernetes-reports/KubernetesPodRunnerNativeTest.json\"",
@@ -582223,13 +582246,17 @@
       "status": "retained",
       "classification": "test-fixture",
       "remediationOwner": "#590",
-      "rationale": "Reviewed issue #590 atom \"ravenroot/ravenroot-core/target/native-kubernetes-reports/KubernetesPodRunnerNativeTest.json\" at scripts/tests/test_kubernetes_runner_acceptance.py#test_native_failure_handling_never_reexecutes_attester_and_uploads_only_safe_fixed_reports: executable positive/negative fixture for original attester diagnostics, secret redaction and finite safe report publication; no production authority."
+      "rationale": "Reviewed issue #590 atom \"ravenroot/ravenroot-core/target/native-kubernetes-reports/KubernetesPodRunnerNativeTest.json\" at scripts/tests/test_kubernetes_runner_acceptance.py#test_native_failure_handling_never_reexecutes_attester_and_uploads_only_safe_fixed_reports: executable positive/negative fixture for original attester diagnostics, secret redaction and finite safe report publication; no production authority.",
+      "identityMigration": {
+        "history": "issue-604-native-fixture-selection",
+        "fromId": "oc-4f278fab4475dd66bb64"
+      }
     },
     {
-      "id": "oc-f9dbebcb86ac191450a2",
+      "id": "oc-51ed4bdd9218cd68987f",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 309,
-      "symbol": "test_native_failure_handling_never_reexecutes_attester_and_uploads_only_safe_fixed_reports",
+      "line": 311,
+      "symbol": "assert_native_upload_contract",
       "kind": "inline-script-operational",
       "role": "inline",
       "expression": "\"ravenroot/ravenroot-core/target/native-kubernetes-reports/KubernetesWorkspaceGraphNativeTest.json\"",
@@ -582239,13 +582266,17 @@
       "status": "retained",
       "classification": "test-fixture",
       "remediationOwner": "#590",
-      "rationale": "Reviewed issue #590 atom \"ravenroot/ravenroot-core/target/native-kubernetes-reports/KubernetesWorkspaceGraphNativeTest.json\" at scripts/tests/test_kubernetes_runner_acceptance.py#test_native_failure_handling_never_reexecutes_attester_and_uploads_only_safe_fixed_reports: executable positive/negative fixture for original attester diagnostics, secret redaction and finite safe report publication; no production authority."
+      "rationale": "Reviewed issue #590 atom \"ravenroot/ravenroot-core/target/native-kubernetes-reports/KubernetesWorkspaceGraphNativeTest.json\" at scripts/tests/test_kubernetes_runner_acceptance.py#test_native_failure_handling_never_reexecutes_attester_and_uploads_only_safe_fixed_reports: executable positive/negative fixture for original attester diagnostics, secret redaction and finite safe report publication; no production authority.",
+      "identityMigration": {
+        "history": "issue-604-native-fixture-selection",
+        "fromId": "oc-f9dbebcb86ac191450a2"
+      }
     },
     {
-      "id": "oc-9afce9e63afe25bfee18",
+      "id": "oc-88c64ea30db195e52c07",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 311,
-      "symbol": "test_native_failure_handling_never_reexecutes_attester_and_uploads_only_safe_fixed_reports",
+      "line": 313,
+      "symbol": "assert_native_upload_contract",
       "kind": "inline-script-operational",
       "role": "inline",
       "expression": "\"surefire-reports\"",
@@ -582255,12 +582286,106 @@
       "status": "retained",
       "classification": "test-fixture",
       "remediationOwner": "#590",
-      "rationale": "Reviewed issue #590 atom \"surefire-reports\" at scripts/tests/test_kubernetes_runner_acceptance.py#test_native_failure_handling_never_reexecutes_attester_and_uploads_only_safe_fixed_reports: executable positive/negative fixture for original attester diagnostics, secret redaction and finite safe report publication; no production authority."
+      "rationale": "Reviewed issue #590 atom \"surefire-reports\" at scripts/tests/test_kubernetes_runner_acceptance.py#test_native_failure_handling_never_reexecutes_attester_and_uploads_only_safe_fixed_reports: executable positive/negative fixture for original attester diagnostics, secret redaction and finite safe report publication; no production authority.",
+      "identityMigration": {
+        "history": "issue-604-native-fixture-selection",
+        "fromId": "oc-9afce9e63afe25bfee18"
+      }
+    },
+    {
+      "id": "oc-8a1cddc7c4d6a9caa521",
+      "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+      "line": 316,
+      "symbol": "test_upload_follows_native_selection_for_complete_and_selected_plans_after_any_outcome",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "\"workflow\"",
+      "expressionDigest": "1688d51cb2decc79d2c2d21d78c57a76c7ed3e9bd2a2e245da0c35e213c857a9",
+      "evidenceDigest": "423abd8971f5c3fa24c99f4c6f2e8b2051cad94e4c7b285af22c8cab1bbc1ac3",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "#604 test_upload_follows_native_selection_for_complete_and_selected_plans_after_any_outcome atom '\"workflow\"' is deterministic positive/negative fixture data for native-scope selection, early structural admission, failed-preflight refusal, or fixed safe report retention; it adds no production setting."
+    },
+    {
+      "id": "oc-9f6699948df4e965fa8f",
+      "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+      "line": 331,
+      "symbol": "test_upload_rejects_mode_only_selection_missing_always_and_unsafe_report_paths",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "\"workflow\"",
+      "expressionDigest": "1688d51cb2decc79d2c2d21d78c57a76c7ed3e9bd2a2e245da0c35e213c857a9",
+      "evidenceDigest": "423abd8971f5c3fa24c99f4c6f2e8b2051cad94e4c7b285af22c8cab1bbc1ac3",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "#604 test_upload_rejects_mode_only_selection_missing_always_and_unsafe_report_paths atom '\"workflow\"' is deterministic positive/negative fixture data for native-scope selection, early structural admission, failed-preflight refusal, or fixed safe report retention; it adds no production setting."
+    },
+    {
+      "id": "oc-c6ffcba307d7084e8b1d",
+      "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+      "line": 337,
+      "symbol": "test_upload_rejects_mode_only_selection_missing_always_and_unsafe_report_paths",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "\"native-kubernetes-reports/KubernetesPodRunnerNativeTest.json\"",
+      "expressionDigest": "71ecf4e7712b5cd944da2c05f76be64d99712381b1c3330c0d3ca5ad9a4ae54c",
+      "evidenceDigest": "91d3a841837f750322edc3b7f0bafaadb2fb5c79c68e22d2348c48fa9636513b",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "#604 test_upload_rejects_mode_only_selection_missing_always_and_unsafe_report_paths atom '\"native-kubernetes-reports/KubernetesPodRunnerNativeTest.json\"' is deterministic positive/negative fixture data for native-scope selection, early structural admission, failed-preflight refusal, or fixed safe report retention; it adds no production setting."
+    },
+    {
+      "id": "oc-2f4655f88d356fe089ac",
+      "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+      "line": 337,
+      "symbol": "test_upload_rejects_mode_only_selection_missing_always_and_unsafe_report_paths",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "\"surefire-reports/*.xml\"",
+      "expressionDigest": "15875892568d6264be1145fda9e5fcf446170740d2357f5a8005b6405a6c5920",
+      "evidenceDigest": "91d3a841837f750322edc3b7f0bafaadb2fb5c79c68e22d2348c48fa9636513b",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "#604 test_upload_rejects_mode_only_selection_missing_always_and_unsafe_report_paths atom '\"surefire-reports/*.xml\"' is deterministic positive/negative fixture data for native-scope selection, early structural admission, failed-preflight refusal, or fixed safe report retention; it adds no production setting."
+    },
+    {
+      "id": "oc-6c386203d96f10ff483c",
+      "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+      "line": 338,
+      "symbol": "test_upload_rejects_mode_only_selection_missing_always_and_unsafe_report_paths",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "\" /private/extra-report.json\\n if-no-files-found:\"",
+      "expressionDigest": "42fec3c83161ede6ba0a6dfac523b3af13b4383fd2a1dbf420f70e567551024f",
+      "evidenceDigest": "f19d0ea1dd9c16e17e91ac74a28bb2c258fb32dbb176996b0abb032759c1a97d",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "#604 test_upload_rejects_mode_only_selection_missing_always_and_unsafe_report_paths atom '\" /private/extra-report.json\\\\n if-no-files-found:\"' is deterministic positive/negative fixture data for native-scope selection, early structural admission, failed-preflight refusal, or fixed safe report retention; it adds no production setting."
+    },
+    {
+      "id": "oc-db50e1c2533e9227f283",
+      "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+      "line": 338,
+      "symbol": "test_upload_rejects_mode_only_selection_missing_always_and_unsafe_report_paths",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "\" if-no-files-found:\"",
+      "expressionDigest": "1fdb3d72773f401a92da8f90c657f8fbb32ca72ccbc9dae476a56e8ed6efb867",
+      "evidenceDigest": "f19d0ea1dd9c16e17e91ac74a28bb2c258fb32dbb176996b0abb032759c1a97d",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "#604 test_upload_rejects_mode_only_selection_missing_always_and_unsafe_report_paths atom '\" if-no-files-found:\"' is deterministic positive/negative fixture data for native-scope selection, early structural admission, failed-preflight refusal, or fixed safe report retention; it adds no production setting."
     },
     {
       "id": "oc-985449c3c6432371fa54",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 318,
+      "line": 348,
       "symbol": "test_inventory_uses_finite_retained_pvs_and_minimal_manager_authority",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -582276,7 +582401,7 @@
     {
       "id": "oc-f519e67f09fb8d4b64d7",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 318,
+      "line": 348,
       "symbol": "test_inventory_uses_finite_retained_pvs_and_minimal_manager_authority",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -582292,7 +582417,7 @@
     {
       "id": "oc-17962dd51c412d419cdb",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 318,
+      "line": 348,
       "symbol": "test_inventory_uses_finite_retained_pvs_and_minimal_manager_authority",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -582308,7 +582433,7 @@
     {
       "id": "oc-0afcae93b13f193992d7",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 318,
+      "line": 348,
       "symbol": "test_inventory_uses_finite_retained_pvs_and_minimal_manager_authority",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -582324,7 +582449,7 @@
     {
       "id": "oc-500f691d1bef986be57e",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 320,
+      "line": 350,
       "symbol": "test_inventory_uses_finite_retained_pvs_and_minimal_manager_authority",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -582340,7 +582465,7 @@
     {
       "id": "oc-28ba1623a95b7667f2e7",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 320,
+      "line": 350,
       "symbol": "test_inventory_uses_finite_retained_pvs_and_minimal_manager_authority",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -582356,7 +582481,7 @@
     {
       "id": "oc-07b0d074c948fe776b09",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 327,
+      "line": 357,
       "symbol": "test_ephemeral_manager_token_file_is_owner_only",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -582372,7 +582497,7 @@
     {
       "id": "oc-fd4c061186b5ef58bc4a",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 327,
+      "line": 357,
       "symbol": "test_ephemeral_manager_token_file_is_owner_only",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -582388,7 +582513,7 @@
     {
       "id": "oc-8950967d462e396f4ad3",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 328,
+      "line": 358,
       "symbol": "test_ephemeral_manager_token_file_is_owner_only",
       "kind": "script-default",
       "role": "path",
@@ -582404,7 +582529,7 @@
     {
       "id": "oc-ee625281944dfae2b59c",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 328,
+      "line": 358,
       "symbol": "test_ephemeral_manager_token_file_is_owner_only",
       "kind": "script-default",
       "role": "path",
@@ -582420,7 +582545,7 @@
     {
       "id": "oc-e47a24050914720123e0",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 330,
+      "line": 360,
       "symbol": "test_ephemeral_manager_token_file_is_owner_only",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -582436,7 +582561,7 @@
     {
       "id": "oc-63b785711d1d803e6514",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 330,
+      "line": 360,
       "symbol": "test_ephemeral_manager_token_file_is_owner_only",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -582452,7 +582577,7 @@
     {
       "id": "oc-762a6be5f8f0aeb58a1b",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 330,
+      "line": 360,
       "symbol": "test_ephemeral_manager_token_file_is_owner_only",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -582468,7 +582593,7 @@
     {
       "id": "oc-3ba37a9214fb68fed036",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 330,
+      "line": 360,
       "symbol": "test_ephemeral_manager_token_file_is_owner_only",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -582484,7 +582609,7 @@
     {
       "id": "oc-40f8ada10ea33e7be8de",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 330,
+      "line": 360,
       "symbol": "test_ephemeral_manager_token_file_is_owner_only",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -582500,7 +582625,7 @@
     {
       "id": "oc-2d0ce7df5c38cd670759",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 340,
+      "line": 370,
       "symbol": "test_wrong_tool_version_or_broken_host_bridge_prevents_cluster_creation",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -582516,7 +582641,7 @@
     {
       "id": "oc-4eb3b54bf7bd54c1fdcf",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 344,
+      "line": 374,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -582532,7 +582657,7 @@
     {
       "id": "oc-55d76194b9e519ca4b64",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 344,
+      "line": 374,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -582548,7 +582673,7 @@
     {
       "id": "oc-fec83064bc770c4c4af7",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 344,
+      "line": 374,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -582564,7 +582689,7 @@
     {
       "id": "oc-e0006dd35581da3c7df8",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 346,
+      "line": 376,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -582580,7 +582705,7 @@
     {
       "id": "oc-56efaf747515c738cd79",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 346,
+      "line": 376,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -582596,7 +582721,7 @@
     {
       "id": "oc-896d6e3aeec0439e09cf",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 346,
+      "line": 376,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -582612,7 +582737,7 @@
     {
       "id": "oc-43d028f876aec5fab408",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 346,
+      "line": 376,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -582628,7 +582753,7 @@
     {
       "id": "oc-b0c87f34322187f4a11d",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 346,
+      "line": 376,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -582644,7 +582769,7 @@
     {
       "id": "oc-3d840e109a58aa17ae35",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 352,
+      "line": 382,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -582660,7 +582785,7 @@
     {
       "id": "oc-c1d052736ad3138ad5f8",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 352,
+      "line": 382,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -582676,7 +582801,7 @@
     {
       "id": "oc-4cfc4e9bb50183bfe8b5",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 358,
+      "line": 388,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -582692,7 +582817,7 @@
     {
       "id": "oc-c04dfa4fee333adae6ac",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 358,
+      "line": 388,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -582708,7 +582833,7 @@
     {
       "id": "oc-4499f5b0f8a2f357618b",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 358,
+      "line": 388,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -582724,7 +582849,7 @@
     {
       "id": "oc-6b37070f0eb7c8ba5731",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 360,
+      "line": 390,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -582740,7 +582865,7 @@
     {
       "id": "oc-6d119f0065b9fcc7c9a4",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 360,
+      "line": 390,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -582756,7 +582881,7 @@
     {
       "id": "oc-9829bb797e4a77ef46f3",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 360,
+      "line": 390,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -582772,7 +582897,7 @@
     {
       "id": "oc-db9b24888a4177f915af",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 362,
+      "line": 392,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -582788,7 +582913,7 @@
     {
       "id": "oc-9a037a177389aca7b63f",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 362,
+      "line": 392,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -582804,7 +582929,7 @@
     {
       "id": "oc-680f185df2873cced470",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 362,
+      "line": 392,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -582820,7 +582945,7 @@
     {
       "id": "oc-b9a07d900262894745de",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 370,
+      "line": 400,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -582836,7 +582961,7 @@
     {
       "id": "oc-cf829f91427040fcb8c4",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 370,
+      "line": 400,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -582852,7 +582977,7 @@
     {
       "id": "oc-863410d4b84d12b78d58",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 370,
+      "line": 400,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -582868,7 +582993,7 @@
     {
       "id": "oc-a2fd5bca070eee98629e",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 370,
+      "line": 400,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -582884,7 +583009,7 @@
     {
       "id": "oc-c1c343d844a73a10b122",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 370,
+      "line": 400,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -582900,7 +583025,7 @@
     {
       "id": "oc-53b16371bc14731467ab",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 371,
+      "line": 401,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -582916,7 +583041,7 @@
     {
       "id": "oc-e635b720e496a37ecafd",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 371,
+      "line": 401,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -582932,7 +583057,7 @@
     {
       "id": "oc-ceb65a5ade4711a8c404",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 371,
+      "line": 401,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -582948,7 +583073,7 @@
     {
       "id": "oc-e700b1bd896512a6bc63",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 371,
+      "line": 401,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -687874,6 +687999,23 @@
       "remediationOwner": "#321",
       "retirementRationale": "#604 replaces the global checkout_count substring count for '\"uses: actions/checkout@\"' with independent conservative action-declaration detection and structural per-checkout own-input validation. The prior source review remains archived.",
       "evidence": "checkout_count = contents.count(\"uses: actions/checkout@\")"
+    },
+    {
+      "id": "oc-606b918d1f8565ed81b5",
+      "path": "scripts/tests/test_ci_topology.py",
+      "line": 207,
+      "symbol": "test_full_tier_has_a_scheduled_all_reactor_regression_lane",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "4",
+      "expressionDigest": "4b227777d4dd1fc61c6f884f48641d02b4d121d3fd328cb08b5531fcacdabf8a",
+      "evidenceDigest": "cfbcb19db8bac80a0036724b16ac9fc9026b38c0cacf185eb5a887e41e998693",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "scripts/tests/test_ci_topology.py::test_full_tier_has_a_scheduled_all_reactor_regression_lane atom '4' is scanner-recognized test-only input, expected evidence, or assertion vocabulary; it configures no production runtime setting. Reconfirmed against current dev source during #604, preserving the reviewed #598 CI contract.",
+      "retirementRationale": "#604 replaces fixture atom '4' in test_full_tier_has_a_scheduled_all_reactor_regression_lane: the cheap structural batch moves out of the backend native execution phase, leaving three unchanged real native steps. The previous reviewed expectation is preserved in history; new expectations are classified independently.",
+      "evidence": "self.assertEqual(4, backend.count(\"if: steps.backend-scope.outputs.native == 'true'\"))"
     }
   ],
   "evidenceRecords": {
@@ -687924,6 +688066,7 @@
     "00dca7caec9031c33d97fec503f3e589b8d36393162ec261c25a205c25802136": "RAVENROOT_HUMAN_TASK_RESPONSE_MAX_VALUE_COUNT",
     "00e9e36c0bc2d47170da20c441eb2b1c882cd77c5a406abff3ebcd4e28450385": "private static final Set<String> PAYLOAD = Set.of(\"version\", \"topic\", \"keyText\", \"keyJson\", \"keyBase64\", \"valueText\", \"valueJson\", \"valueBase64\", \"partition\", \"timestamp\", \"headers\", \"correlationId\");",
     "00f2e5765ea1bc9ca65436e219cb9913a1f8ad70b0867901b98f64f8b84ebfc1": "if components != [\"maxOutputTokens\", \"maxToolIterations\"]:",
+    "00fe2516a835191161544ffe253a11d4fa103d36a4d9884cfc2270c496107f87": "self.assertEqual(1, contents.count(command))",
     "01012e4819e385a9be61630f2b38370d5134563df058a65b433563ea67976766": "private static final int GENERATION_HEX = 32;",
     "0105b7dce86c9fd7528110f917b106db5a28f0856db38fa523ec6049c866e73c": "const cancel = document.createElement('button');",
     "010d07a76fcec64d58c628c5f1e73f8999a3e6754d01cd3ca4abb03017217887": "defaultMode: 256",
@@ -694586,6 +694729,7 @@
     "91c84f58651f33fe59bc8c7da5dbe9ba0674766f0dfd2c64e78345fc4bcc0cbe": "var attempt1 = await(store.executionVisitAttempts(seeded.key, traversal, first.invocationId(), Optional.empty(), 1));",
     "91ca4b3d084e5ecec62551dd3e81217c58f29dfab998c0cb14672e9ed59b5755": "- name: RAVENROOT_HUMAN_TASK_MAX_CONFIRMATION_ACTION_LABEL_BYTES",
     "91ce130a953c0102479eb47b42720fbbe28c8ba9d64e7b3e625980d094657eba": "\" void theCheckedInSpecMatchesWhatTheTableGeneratesRightNow\", 1,",
+    "91d3a841837f750322edc3b7f0bafaadb2fb5c79c68e22d2348c48fa9636513b": "upload.replace(\"native-kubernetes-reports/KubernetesPodRunnerNativeTest.json\", \"surefire-reports/*.xml\"),",
     "91d9d912b3ea0ab2ba3864d3ea03d9f66c48707a085a62fe595889112c070598": "\"kind\": \"assistant-symbol-operational-limits-v1\",",
     "91dfce4c19b298b64090a821f1e329408f541d43a685ae2983ecfdf7b0de0774": "\"record RuntimeLimits(int maxRetries, int maxBatch) {\\n\"",
     "91e62216c44f7821a5c4f5239ff3fdf71b63fc02d6145ab7ef0e65380895f7fa": "java -cp \"$module_dir/target/classes\" ai.ravenroot.extensions.jdbc.JdbcDriverArtifactName \\",
@@ -694989,6 +695133,7 @@
     "9a48c6de98686f8ebe3b0404b9013721f8f647a1bef81ca881169e027022ba01": "public static final String OAUTH_CLIENT_ID_VARIABLE = \"RAVENROOT_ASSISTANT_OAUTH_CLIENT_ID\";",
     "9a4bc0b3c0d81a163eb470c45234fed5a3c6c49e782b59314cf85ec1062964c0": "public AgentOperationalConfiguration { positive(\"RAVENROOT_AI_DEFAULT_MAX_TURNS\", defaultMaxTurns);",
     "9a4fbc21907c118578bb32b5d34493484fc0e22ba81db4e7a1082ed703272553": "} } private Map<String, Object> findMergeRequest( String listing, Actor actor, String head, String base) { for (int page = 1;",
+    "9a612a0df9bde065464c03547efd14407e4842b7f80aa457306f626e4bf5a077": "self.assertEqual(3, backend.count(\"if: steps.backend-scope.outputs.native == 'true'\"))",
     "9a61e0ce83f1d865339049940d0ed3361e3176f29c6dd1707e447a71dfb5a694": "raise AssertionError(f\"version alignment changed non-version content: {path}\")",
     "9a6634d313c0a43969847c6642d6e22723bcd2b6df12cbb99e672ecd912a5c9c": "report.write_text(\"<testsuite>\")",
     "9a6cb01d21fab995130c222640e9a68f2aeb6b7420b4c70faae7e837ce02b426": "private static final Set<String> COMPRESSION = Set.of(\"none\", \"gzip\", \"snappy\", \"lz4\", \"zstd\");",
@@ -695964,6 +696109,7 @@
     "af190b8dd742bf6e0154d16c5ef0df5b419e47d2971115eab5f7706b3a32bd12": "private static final Set<String> KNOWN_FINISH_REASONS = Set.of(\"stop\", \"length\", \"content_filter\", \"tool_calls\", \"function_call\");",
     "af19223ad6f5e454a6b340c95b18db4f5c96b705385ccb9e5fed59ee77111ef5": "(\"launcher\", 'if (placement.hasOverride()) throw new IOException(\"SANDBOX_RESOURCE_CACHE_UNSUPPORTED\");', \"if (false) throw new IOException(\\\"SANDBOX_RESOURCE_CACHE_UNSUPPORTED\\\");\"),",
     "af1f3aab17655a5d8766ed3a8978c9d6c593f3604e64bd821d3baece6331172a": "public record PluginManifest( String schemaVersion, String id, String version, String sdkContract, List<String> nodePackageClasses, List<String> behaviors, Optional<List<String>> nodeCapabilities, PluginArtifact mainArtifact, List<PluginArtifact> dependencyArtifacts) { public static final String SCHEMA_VERSION = \"1\";",
+    "af256541662a9b46016b2a0916108f6ad88eb7e88eef24ae01c6bb6ce5cb8a44": "self.assert_native_upload_contract(self.support_sources()[\"workflow\"])",
     "af2fc5252931948733887d731114c2ba7f48f04468f49764fd6e49672ad6d551": "echo \"Module $dir declares more than one NodePackage:\" >&2",
     "af32c56a9d606a654da97ffd905ea42b0f72d0a8139c31a7dfce2ace4c4033de": "\"MAX_RELEASE_VERSION = Long.MAX_VALUE\"),",
     "af349b3b7ea64b424f337280bb723bd0fa0d4b157b626f2d5cdfea8083498eba": "export const MAX_RUNTIME_COLLECTION_SIZE = 32;",
@@ -697508,7 +697654,6 @@
     "cfb73869b9fd7f69b850cc7d62c5fc942903c0406b41f7f285a204e3f079cfdf": "const incarnation = requiredText(value.document.incarnation, 'document incarnation', IDENTIFIER_LIMIT);",
     "cfbaf485957bb68594b36e1d1099c33a5f3ca7b6a563712772e58255fd8b8ad1": "try { parsed = PayloadJson.read(body, new PayloadLimits(Math.max(1, maxResponseBytes), 32, 10_000, 200_000, Math.max(1, maxResponseBytes / 2), 256));",
     "cfbc123d6d4130b080de90dea8a622054da412d11c9b7fd8992a13eab5e93ad4": "const where = `${file}:${spec.line ?? 0}`;",
-    "cfbcb19db8bac80a0036724b16ac9fc9026b38c0cacf185eb5a887e41e998693": "self.assertEqual(4, backend.count(\"if: steps.backend-scope.outputs.native == 'true'\"))",
     "cfc04ffa25c8f4191956ef85bc98e04111a4133c41cb24bc6ddc643209b6d6cc": "Assumptions.assumeTrue(store().maxClockSkew().compareTo(Duration.ofSeconds(2)) > 0, \"this assertion needs a declared skew budget of at least a couple of seconds to probe\");",
     "cfc91867ee76b935b0cba989e5ec7fd406a1c74396fdba37f4ac138f23d39030": "echo \"Usage: ./plugin.sh bundle-dir <extension-id>\" >&2",
     "cfcff5af25b6b910017c491e0ede4568beafaff51d1dffde01c0ae68e24e7f79": "if lock.get(\"version\") != target or lock.get(\"packages\", {}).get(\"\", {}).get(\"version\") != target:",
@@ -699081,6 +699226,7 @@
     "f1980128cca25e188721852fdff091832b1a8dc673745b251163ffec446e096c": "const proposalId = typeof proposal?.id === 'string' ? proposal.id : '';",
     "f199105d0ac041c7d03af6c6febde96e0918e538ec56e3434d638018a083f777": "if (destination.mode() == Destination.Mode.SUBSCRIBER) { queue = channel.queueDeclare(\"\", false, true, true, null).getQueue();",
     "f19c94a84980dc0ed9348695bc7025570c43c3c11da01bd4d60d4db142213f42": "maxProperties: \"\"",
+    "f19d0ea1dd9c16e17e91ac74a28bb2c258fb32dbb176996b0abb032759c1a97d": "upload.replace(\" if-no-files-found:\", \" /private/extra-report.json\\n if-no-files-found:\")]",
     "f19da9b961a687ed721899eaea26d4f3f8db646a6a8c592f8960cdfa1801372d": "assert_helm \"$TEMP_DIR/helm-blank.yaml\" \"$TEMP_DIR/blanks\"",
     "f19dcdd01d46e46656eea1e0c1e5f85bfd39e948ddd9d87b4a06dbf7984e845d": "if (creationTimeout.isNegative() || creationTimeout.isZero() || creationTimeout.compareTo(Duration.ofMinutes(30)) > 0 || terminationGraceSeconds < 1 || terminationGraceSeconds > 300) throw new IllegalArgumentException(\"invalid Kubernetes lifecycle timeout\");",
     "f1a1db25b7861f0a769bd130af20544cb782646efff4c22eafd4be5565aa5c96": "mkdir -p \"$CONFLICT_DIR/ai.ravenroot.extensions.alpha\"",
@@ -1389145,6 +1389291,160 @@
             "status": "retained",
             "classification": "test-fixture",
             "rationale": "#604 test_valid_yaml_flow_step_cannot_hide_an_unbound_checkout uses \"'observable supported step layout'\" as a valid-YAML flow-style checkout mutation fixture proving an unsupported unbound action cannot disappear from the security checker."
+          }
+        }
+      ]
+    },
+    {
+      "id": "issue-604-native-fixture-selection",
+      "issue": "#604",
+      "sourceRevision": "f65fc57b25d1fbb3181426f5beaedc955e4bbcef",
+      "targetRevision": "1c930e26218aa997cf2124a34c698bc98def8ddf",
+      "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+      "sourceInventoryDigest": "4a3f2b71a31c172db310ba53eed6d194ff9bc192e4b5431ec5f4ef118bb1b8cb",
+      "targetCandidateDigest": "0f34209839998f594d29bf04b8e2fa253aca98c87b92f2a8523bcc5286b090e1",
+      "mappings": [
+        {
+          "fromId": "oc-28b77c3e74fa8bb96e83",
+          "toId": "oc-d6f9876dc9d6f80badf8",
+          "approved": true,
+          "rationale": "#604 preserves reviewed fixture atom '\"workflow\"' while its assertion moves to a reusable upload-contract helper or its surrounding native-phase count changes; the fixed report safety/selection assertion remains active with the same semantic role.",
+          "equivalence": {
+            "kind": "same-expression-location-v1",
+            "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+            "beforeLine": 305,
+            "afterLine": 305,
+            "beforeEvidenceDigest": "423abd8971f5c3fa24c99f4c6f2e8b2051cad94e4c7b285af22c8cab1bbc1ac3",
+            "afterEvidenceDigest": "af256541662a9b46016b2a0916108f6ad88eb7e88eef24ae01c6bb6ce5cb8a44"
+          }
+        },
+        {
+          "fromId": "oc-4f278fab4475dd66bb64",
+          "toId": "oc-078ca4c537a5398afa0c",
+          "approved": true,
+          "rationale": "#604 preserves reviewed fixture atom '\"ravenroot/ravenroot-core/target/native-kubernetes-reports/KubernetesPodRunnerNativeTest.json\"' while its assertion moves to a reusable upload-contract helper or its surrounding native-phase count changes; the fixed report safety/selection assertion remains active with the same semantic role.",
+          "equivalence": {
+            "kind": "same-expression-location-v1",
+            "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+            "beforeLine": 308,
+            "afterLine": 310,
+            "beforeEvidenceDigest": "0771e6bc299d0ce39d3c863b5a5969ef82e3e7054a2e06cebc5764abe96b6ed5",
+            "afterEvidenceDigest": "0771e6bc299d0ce39d3c863b5a5969ef82e3e7054a2e06cebc5764abe96b6ed5"
+          }
+        },
+        {
+          "fromId": "oc-530784cbbaf952499236",
+          "toId": "oc-bcdce8cbcdb11bfb7597",
+          "approved": true,
+          "rationale": "#604 preserves reviewed fixture atom '\"if: steps.backend-scope.outputs.native == \\'true\\'\"' while its assertion moves to a reusable upload-contract helper or its surrounding native-phase count changes; the fixed report safety/selection assertion remains active with the same semantic role.",
+          "equivalence": {
+            "kind": "same-expression-location-v1",
+            "path": "scripts/tests/test_ci_topology.py",
+            "beforeLine": 207,
+            "afterLine": 210,
+            "beforeEvidenceDigest": "cfbcb19db8bac80a0036724b16ac9fc9026b38c0cacf185eb5a887e41e998693",
+            "afterEvidenceDigest": "9a612a0df9bde065464c03547efd14407e4842b7f80aa457306f626e4bf5a077"
+          }
+        },
+        {
+          "fromId": "oc-9afce9e63afe25bfee18",
+          "toId": "oc-88c64ea30db195e52c07",
+          "approved": true,
+          "rationale": "#604 preserves reviewed fixture atom '\"surefire-reports\"' while its assertion moves to a reusable upload-contract helper or its surrounding native-phase count changes; the fixed report safety/selection assertion remains active with the same semantic role.",
+          "equivalence": {
+            "kind": "same-expression-location-v1",
+            "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+            "beforeLine": 311,
+            "afterLine": 313,
+            "beforeEvidenceDigest": "edba68fff1dc8d41fa142e92df4d4a7e1dd6d625077da3b0bcd8ec4806deeba5",
+            "afterEvidenceDigest": "edba68fff1dc8d41fa142e92df4d4a7e1dd6d625077da3b0bcd8ec4806deeba5"
+          }
+        },
+        {
+          "fromId": "oc-f9dbebcb86ac191450a2",
+          "toId": "oc-51ed4bdd9218cd68987f",
+          "approved": true,
+          "rationale": "#604 preserves reviewed fixture atom '\"ravenroot/ravenroot-core/target/native-kubernetes-reports/KubernetesWorkspaceGraphNativeTest.json\"' while its assertion moves to a reusable upload-contract helper or its surrounding native-phase count changes; the fixed report safety/selection assertion remains active with the same semantic role.",
+          "equivalence": {
+            "kind": "same-expression-location-v1",
+            "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+            "beforeLine": 309,
+            "afterLine": 311,
+            "beforeEvidenceDigest": "44d9cf9ba2967916da3f69b92f2a8208f5077f9c1bf7c45f445065e3309a0e9b",
+            "afterEvidenceDigest": "44d9cf9ba2967916da3f69b92f2a8208f5077f9c1bf7c45f445065e3309a0e9b"
+          }
+        }
+      ],
+      "retirements": [
+        {
+          "id": "oc-606b918d1f8565ed81b5",
+          "approved": true,
+          "rationale": "#604 replaces fixture atom '4' in test_full_tier_has_a_scheduled_all_reactor_regression_lane: the cheap structural batch moves out of the backend native execution phase, leaving three unchanged real native steps. The previous reviewed expectation is preserved in history; new expectations are classified independently."
+        }
+      ],
+      "additions": [
+        {
+          "id": "oc-2f4655f88d356fe089ac",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "#604 test_upload_rejects_mode_only_selection_missing_always_and_unsafe_report_paths atom '\"surefire-reports/*.xml\"' is deterministic positive/negative fixture data for native-scope selection, early structural admission, failed-preflight refusal, or fixed safe report retention; it adds no production setting."
+          }
+        },
+        {
+          "id": "oc-6c386203d96f10ff483c",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "#604 test_upload_rejects_mode_only_selection_missing_always_and_unsafe_report_paths atom '\" /private/extra-report.json\\\\n if-no-files-found:\"' is deterministic positive/negative fixture data for native-scope selection, early structural admission, failed-preflight refusal, or fixed safe report retention; it adds no production setting."
+          }
+        },
+        {
+          "id": "oc-8a1cddc7c4d6a9caa521",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "#604 test_upload_follows_native_selection_for_complete_and_selected_plans_after_any_outcome atom '\"workflow\"' is deterministic positive/negative fixture data for native-scope selection, early structural admission, failed-preflight refusal, or fixed safe report retention; it adds no production setting."
+          }
+        },
+        {
+          "id": "oc-9f6699948df4e965fa8f",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "#604 test_upload_rejects_mode_only_selection_missing_always_and_unsafe_report_paths atom '\"workflow\"' is deterministic positive/negative fixture data for native-scope selection, early structural admission, failed-preflight refusal, or fixed safe report retention; it adds no production setting."
+          }
+        },
+        {
+          "id": "oc-b573159bae6e60848164",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "#604 test_full_tier_has_a_scheduled_all_reactor_regression_lane atom '3' is deterministic positive/negative fixture data for native-scope selection, early structural admission, failed-preflight refusal, or fixed safe report retention; it adds no production setting."
+          }
+        },
+        {
+          "id": "oc-ba1c609ca677bcba1b92",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "#604 test_structural_runner_contracts_are_required_before_maven_regression atom '1' is deterministic positive/negative fixture data for native-scope selection, early structural admission, failed-preflight refusal, or fixed safe report retention; it adds no production setting."
+          }
+        },
+        {
+          "id": "oc-c6ffcba307d7084e8b1d",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "#604 test_upload_rejects_mode_only_selection_missing_always_and_unsafe_report_paths atom '\"native-kubernetes-reports/KubernetesPodRunnerNativeTest.json\"' is deterministic positive/negative fixture data for native-scope selection, early structural admission, failed-preflight refusal, or fixed safe report retention; it adds no production setting."
+          }
+        },
+        {
+          "id": "oc-db50e1c2533e9227f283",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "#604 test_upload_rejects_mode_only_selection_missing_always_and_unsafe_report_paths atom '\" if-no-files-found:\"' is deterministic positive/negative fixture data for native-scope selection, early structural admission, failed-preflight refusal, or fixed safe report retention; it adds no production setting."
           }
         }
       ]

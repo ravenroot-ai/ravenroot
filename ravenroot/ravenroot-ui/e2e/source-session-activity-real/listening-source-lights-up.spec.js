@@ -87,7 +87,10 @@ test('real SOURCE traffic stays with its originating document and appears on exa
   await page.evaluate(id => window.ravenroot.activateDocument(id), origin.id);
   await expect(page.locator('#activity-log .activity-entry.output-value').last()).toContainText(/admitted message-\d+/, { timeout: 10_000 });
   await page.locator('[data-menu="layout"]').click(); await page.getByRole('menuitemradio', { name: 'Monitoring', exact: true }).click();
+  await expect(page.locator('.doc-history-dialog[open]')).toHaveCount(0);
+  await page.locator('#btn-history').click();
   const monitor = page.locator('.doc-history'); await expect(monitor).toBeVisible();
+  await page.locator('.doc-history-dialog[open] .doc-history-information > summary').click();
   await expect(page.locator('.doc-history-draft').filter({ visible: true })).toContainText('Your draft differs from this deployment');
   const histories = monitor.locator('.history-page').filter({ has: page.getByRole('heading', { name: 'Business histories', exact: true }) });
   await histories.getByRole('button', { name: 'Refresh page', exact: true }).click();

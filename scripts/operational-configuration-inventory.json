@@ -93772,7 +93772,7 @@
     {
       "id": "oc-ccca54cd8d50139bf83c",
       "path": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/DeploymentViewerView.java",
-      "line": 28,
+      "line": 36,
       "symbol": "DeploymentViewerView",
       "kind": "fixed-declaration",
       "role": "CURRENT_SOURCE_VERSION",
@@ -1480460,6 +1480460,18 @@
           }
         }
       ]
+    },
+    {
+      "id": "issue-605-sdk-docs-embed-consumer-proof-v1",
+      "issue": "#605",
+      "sourceRevision": "04f5cd158c5d5f6d5b0a69530167b25f9645b063",
+      "targetRevision": "88f9336359cd2eef50c85125ab437c1802609a72",
+      "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+      "sourceInventoryDigest": "170c761d3e0484ca31cf3ac2200e401b59a0d17acf236ea2d1bc5ab1cd7bbf5e",
+      "targetCandidateDigest": "d48c4979d44670ccfc7369ed55706609ce47f5ad8e9ddc3b75a031fc0eee8470",
+      "mappings": [],
+      "retirements": [],
+      "additions": []
     }
   ],
   "semanticReviewHistory": [
@@ -1556709,11 +1556721,11 @@
         },
         {
           "path": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/AuthorizedRavenrootApplication.java",
-          "digest": "da004402c651dc19127beae4021eb22ab857ea94fda6561ea6e05cdd39dd4ab3"
+          "digest": "832e5daa9a7198f74df78b97ed80c2b3288fd7b0e77ebc88451e037b9c767f73"
         },
         {
           "path": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/RavenrootApplication.java",
-          "digest": "4b51243dca5b0f18ddb66385d2bbd14ea56cea34b18242f5cf7cd46688c64d0b"
+          "digest": "dcfcb005f9c340a403f9e7cc975a5dc6c16d1f0e8f9ac13b3835b447c53bddb1"
         },
         {
           "path": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ingress/IngressAuthorityDeclaration.java",
@@ -1559022,7 +1559034,7 @@
   "finalReviewAuthority": {
     "id": "issue-321-final-semantic-review-v1",
     "path": "docs/architecture/operational-configuration-final-review.json",
-    "digest": "13944769b4b675f813561fb40e8af42029e1dacf532109599a9795987e432f64"
+    "digest": "53483363ca5d24222eb532f5c6a8644d60bd4586b7659b574e637c86f66ef5e8"
   },
   "agentBudgetAuthorities": {
     "agent-authority-budget-environment-v1": {
@@ -1563838,7 +1563850,7 @@
         },
         {
           "path": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/AuthorizedRavenrootApplication.java",
-          "digest": "da004402c651dc19127beae4021eb22ab857ea94fda6561ea6e05cdd39dd4ab3"
+          "digest": "832e5daa9a7198f74df78b97ed80c2b3288fd7b0e77ebc88451e037b9c767f73"
         },
         {
           "path": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/GraphArtifactDependencies.java",
@@ -1563850,7 +1563862,7 @@
         },
         {
           "path": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/RavenrootApplication.java",
-          "digest": "4b51243dca5b0f18ddb66385d2bbd14ea56cea34b18242f5cf7cd46688c64d0b"
+          "digest": "dcfcb005f9c340a403f9e7cc975a5dc6c16d1f0e8f9ac13b3835b447c53bddb1"
         },
         {
           "path": "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/authoring/GraphAuthoringRepository.java",

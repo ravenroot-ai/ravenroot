@@ -62,7 +62,7 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 216.
+Checked source reconciliations: 217.
 
 The following tables are exhaustive projections of the same active inventory; each includes
 zero-count or unclassified rows as needed and sums to 34037 candidates.
@@ -128,10 +128,10 @@ identity and retirement has its own approved record in the machine-readable inve
 | Partition | Count |
 |---|---:|
 | Source inventory candidates | 34037 |
-| Unchanged identities | 34029 |
+| Unchanged identities | 34037 |
 | Approved identity migrations | 0 |
-| Approved retirements | 8 |
-| Semantically classified additions | 8 |
+| Approved retirements | 0 |
+| Semantically classified additions | 0 |
 | Current candidates | 34037 |
 
 ## Final semantic review
@@ -4761,7 +4761,7 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-07c57343a0675f08c1ad` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/AuthorizedRavenrootApplication.java:225` `supportedProgramLanguages` | java | retained | protocol-or-format-invariant | The property namespace/key controls protected graph metadata and request identity; it is graph protocol, not process configuration. |
 | `oc-d25ebd3faf3327838a70` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/AuthorizedRavenrootApplication.java:252` `startsWith` | java | retained | protocol-or-format-invariant | The property namespace/key controls protected graph metadata and request identity; it is graph protocol, not process configuration. |
 | `oc-5c4137fcc2e51aba26c2` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/AuthorizedRavenrootApplication.java:275` `startsWith` | java | retained | protocol-or-format-invariant | The property namespace/key controls protected graph metadata and request identity; it is graph protocol, not process configuration. |
-| `oc-ccca54cd8d50139bf83c` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/DeploymentViewerView.java:28` `DeploymentViewerView` | java | retained | protocol-or-format-invariant | This is an exact deployment viewer protocol, persistence, DOM, renderer, or document atom. |
+| `oc-ccca54cd8d50139bf83c` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/DeploymentViewerView.java:36` `DeploymentViewerView` | java | retained | protocol-or-format-invariant | This is an exact deployment viewer protocol, persistence, DOM, renderer, or document atom. |
 | `oc-8516a7c9257de655f21f` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/DiagnosticIdentifier.java:15` `DiagnosticIdentifier` | java | retained | security-ceiling-or-default | Issue #473 bounds the UTF-8 size of public diagnostic identifier text before serialization. |
 | `oc-8c6d54c1101fb2aff90d` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/DiagnosticIdentifier.java:17` `DiagnosticIdentifier` | java | retained | security-ceiling-or-default | Issue #473 bounds the UTF-8 size of public diagnostic property text before serialization. |
 | `oc-2488165dfe2a72a8f5e2` | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/DiagnosticIdentifier.java:18` `DiagnosticIdentifier` | java | retained | protocol-or-format-invariant | Issue #473 fixes the shared diagnostic sanitization/format grammar represented by TRUNCATED; it is a public safety contract, not an operator setting. |

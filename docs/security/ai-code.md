@@ -21,7 +21,7 @@ Successful GraalVM program results are published after session cleanup and admis
 Cancellation and revocation share one bounded cleanup attempt, including a session returned after
 cancellation during launch. Cleanup or close errors prevent success, are preserved with an existing
 failure, or are recorded when the result is already cancelled. A failed or unconfirmed cleanup attempt
-is not proof that the process tree was reaped. Each invocation attempts admission closure once after
+is not proof that the process tree was reaped. Each admitted invocation attempts admission closure once after
 cleanup settlement.
 
 ## Residual responsibility

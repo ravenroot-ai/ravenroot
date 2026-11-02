@@ -1421,9 +1421,15 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         interaction = audit.interaction_websocket_authority_from_source(ROOT, discovered)
         self.assertIsNotNone(program)
         self.assertIsNotNone(interaction)
-        # Issue #561 retires three display literals and adds one catalog key; READY and
-        # the empty protocol value retain their meanings through exact source migrations.
-        self.assertEqual(1237, len(program["candidateIds"]))
+        # #605 replaces the old runtime-controls selector with the workflowbar lookup and
+        # div construction in ensureProgramReadinessChrome: one retired atom, two new atoms.
+        self.assertEqual(1238, len(program["candidateIds"]))
+        mount_atoms = {(discovered[identifier].role, discovered[identifier].expression)
+                       for identifier in program["candidateIds"]
+                       if discovered[identifier].path == "ravenroot/ravenroot-ui/src/app.js"
+                       and discovered[identifier].symbol == "ensureProgramReadinessChrome"}
+        self.assertEqual({("bar", "'workflowbar'"), ("controls", "'div'"),
+                          ("summary", "'span'")}, mount_atoms)
         self.assertEqual(166, len(interaction["candidateIds"]))
         self.assertFalse(any(discovered[identifier].fixture for identifier in program["candidateIds"]))
         expected = {

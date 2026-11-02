@@ -49,13 +49,13 @@ export async function graphVersionOf(graphMl) {
  * Restoration calls no mutation here: only an explicit Run enters this function.
  */
 export function runOriginDeployment(owner, { client, serviceUrl, tenantId, graphMl, inputJson,
-  persist, isCurrent, pin = graphVersionOf, onPhase = () => {}, onView = async () => {}, randomId, attachment = null }) {
+  persist, isCurrent, pin = graphVersionOf, onPhase = () => {}, onView = async () => {}, onObservation, randomId, attachment = null }) {
   const existing = flights.get(owner);
   if (existing) return existing.task;
   const incarnation = owner.incarnation;
   const intent = owner.deploymentRun || createDeploymentRunIntent({ serviceUrl, tenantId, graphMl, inputJson, randomId, attachment });
   owner.deploymentRun = intent;
-  const control = { intent, status: null, stopRequested: false, task: null };
+  const control = { intent, status: null, stopRequested: false, task: null, observation: new AbortController() };
   flights.set(owner, control);
   const publishStatus = status => { control.status = status; owner.deploymentRunStatus = status.state; owner.deploymentRunLastObservedState = status.state;
     owner.deploymentRunSourceCount = status.sourceCount; onPhase(owner, intent); };
@@ -153,6 +153,23 @@ export function runOriginDeployment(owner, { client, serviceUrl, tenantId, graph
         check();
       }
       if (control.stopRequested) return interrupted(status);
+      owner.deploymentRunObservationError = null;
+      let observation;
+      try {
+        const source = { kind: 'deployment', deploymentId: intent.deploymentId,
+          graphVersion: intent.graphVersion, incarnationId: runtime };
+        if (typeof onObservation !== 'function') throw failure('OBSERVATION_REQUIRED');
+        const observed = observation = await onObservation({ source, lifecycle: status.state }, { signal: control.observation.signal });
+        check();
+        if (control.stopRequested) return interrupted(status);
+        if (!observed?.canAdmit?.() || observed.source.deploymentId !== source.deploymentId
+            || observed.source.graphVersion !== source.graphVersion || observed.source.incarnationId !== source.incarnationId)
+          throw failure('OBSERVATION_NOT_CONFIRMED');
+      } catch (error) {
+        if (control.stopRequested) return interrupted(status);
+        owner.deploymentRunObservationError = error;
+        throw error;
+      }
       if (intent.processInstanceId && !rebound) return { intent, status, view, initial: null };
       // Saved admission identities require read-only marker reconciliation. An intent that never
       // received identities may finish its original admission on explicit Run; the permanent
@@ -163,7 +180,7 @@ export function runOriginDeployment(owner, { client, serviceUrl, tenantId, graph
       }) : await client.initialStartDeployment(intent.deploymentId, {
         incarnationId: runtime, graphVersion: intent.graphVersion, requestId: intent.initialStartRequestId,
         input: JSON.parse(intent.inputJson),
-      });
+      }, { canAdmit: () => current() && !control.stopRequested && observation.canAdmit() });
       check();
       if (observingSavedAdmission && initial.outcome !== 'DUPLICATE' || !['ACCEPTED', 'DUPLICATE'].includes(initial.outcome)) throw failure('INITIAL_START_UNRESOLVED');
       if (initial.requestId !== intent.initialStartRequestId
@@ -200,7 +217,7 @@ export function stopOriginDeployment(owner, { client, isCurrent, reason }) {
   if (existing) return existing;
   const binding = owner.deploymentRun, incarnation = owner.incarnation;
   const run = flights.get(owner);
-  if (run) run.stopRequested = true;
+  if (run) { run.stopRequested = true; run.observation.abort(); }
   owner.deploymentRunStopPending = true;
   const check = () => {
     if (!binding || owner.incarnation !== incarnation || owner.deploymentRun !== binding

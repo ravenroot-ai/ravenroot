@@ -36,6 +36,32 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AuthorizedRavenrootApplicationTest {
     @Test
+    void observationKeepsItsOwnAuthorityAndDoesNotRequireDrawingOrExecutionRead() {
+        var calls = new ArrayList<String>();
+        RavenrootApplication raw = (RavenrootApplication) java.lang.reflect.Proxy.newProxyInstance(
+                RavenrootApplication.class.getClassLoader(), new Class<?>[]{RavenrootApplication.class},
+                (proxy, method, arguments) -> {
+                    calls.add(method.getName());
+                    if (method.getName().equals("localDeployment")) {
+                        return arguments[0].equals("tenant-a") && arguments[1].equals("observed")
+                                ? java.util.Optional.of(LocalDeploymentStatus.withGraph("observed", LocalDeploymentState.READY, 0, "graph")
+                                        .withRuntimeIncarnationId("runtime")) : java.util.Optional.empty();
+                    }
+                    throw new AssertionError("observation must not call " + method.getName());
+                });
+        var facade = new AuthorizedRavenrootApplication(raw, new DefaultAuthorizationService(event -> {}), event -> {}, true);
+        var observation = context("tenant-a", Role.OPERATOR, "ravenroot.deployment.observe");
+        var value = facade.localDeploymentObservation(observation, "observed").orElseThrow();
+        assertEquals(DeploymentViewerView.Source.deployment("observed", "runtime", "graph"), value.source());
+        assertEquals(LocalDeploymentState.READY, value.lifecycle());
+        assertEquals(List.of("localDeployment"), calls);
+        assertThrows(AuthorizationDeniedException.class, () -> facade.localDeploymentObservation(
+                context("tenant-a", Role.OPERATOR, "ravenroot.observe"), "observed"));
+        assertTrue(facade.localDeploymentObservation(
+                context("tenant-b", Role.OPERATOR, "ravenroot.deployment.observe"), "observed").isEmpty());
+    }
+
+    @Test
     void derivedExternalOutcomeDecisionCannotBypassExecutionControl() {
         var raw = new FakeApplication();
         var facade = new AuthorizedRavenrootApplication(raw, new DefaultAuthorizationService(event -> { }),

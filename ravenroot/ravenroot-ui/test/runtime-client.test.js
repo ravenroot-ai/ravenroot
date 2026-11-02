@@ -2545,3 +2545,56 @@ describe('exact deployment source', () => {
     await expect(client.deploymentSource(source)).rejects.toThrow();
   });
 });
+
+
+it('observes an exact source without a drawing and replays from its lifecycle anchor before the first event', async () => {
+  const source = { kind: 'deployment', deploymentId: 'original', incarnationId: 'runtime', graphVersion: 'version' };
+  const anchor = 'a'.repeat(43), eventCursor = 'b'.repeat(43), frames = [];
+  const lifecycle = `event: lifecycle\ndata: ${JSON.stringify({ ...source, lifecycle: 'READY', cursor: anchor })}\n\n`;
+  const execution = `id: ${eventCursor}\nevent: execution\ndata: ${JSON.stringify({ ...source,
+    event: { type: 'NODE_COMPLETED', executionId: 'first', nodeId: 'start', activeInstances: 0 } })}\n\n`;
+  const gap = `event: source-gap\ndata: ${JSON.stringify({ ...source, reason: 'CURSOR_UNAVAILABLE' })}\n\n`;
+  const fetchImpl = vi.fn().mockResolvedValueOnce(streamResponse([lifecycle]))
+    .mockResolvedValueOnce(streamResponse([lifecycle, execution, gap]));
+  const client = new RavenrootRuntimeClient('https://service', { fetchImpl, sleep: vi.fn(async () => {}) });
+  expect(() => client.connectDeploymentView({ source, lifecycle: 'READY' }, () => {})).toThrow();
+  for (const invalid of [{ ...source, token: 'never-in-source' }, { ...source, incarnationId: '' }, { ...source, kind: 'draft' }])
+    expect(() => client.connectDeploymentObservation(invalid, () => {})).toThrow();
+  const disconnect = client.connectDeploymentObservation(source, frame => frames.push(frame));
+  await vi.waitFor(() => expect(frames).toHaveLength(4)); disconnect();
+  expect(fetchImpl.mock.calls[0][1].headers['Last-Event-ID']).toBeUndefined();
+  expect(fetchImpl.mock.calls[1][1].headers['Last-Event-ID']).toBe(anchor);
+  expect(frames.filter(frame => frame.type === 'execution')).toHaveLength(1);
+});
+
+it('refuses initial admission when observation disconnects during credential resolution, then retries the same request', async () => {
+  const credential = deferredValue(), entered = deferredValue();
+  let live = true;
+  const request = { incarnationId: 'runtime', graphVersion: 'version', requestId: 'original-request', input: { original: true } };
+  const receipt = { outcome: 'ACCEPTED', requestId: request.requestId,
+    processInstanceId: '10000000-0000-0000-0000-000000000001', traversalId: '20000000-0000-0000-0000-000000000002' };
+  const fetchImpl = vi.fn(async () => new Response(JSON.stringify(receipt), { status: 202 }));
+  const tokenProvider = { getAccessToken: vi.fn(() => { entered.resolve(); return credential.promise; }) };
+  const client = new RavenrootRuntimeClient('https://service', { fetchImpl, tokenProvider });
+  const attempt = client.initialStartDeployment('original', request, { canAdmit: () => live });
+  await entered.promise; live = false; credential.resolve('header-only-token');
+  await expect(attempt).rejects.toThrow(); expect(fetchImpl).not.toHaveBeenCalled();
+  live = true;
+  await expect(client.initialStartDeployment('original', request, { canAdmit: () => live })).resolves.toEqual(receipt);
+  expect(fetchImpl).toHaveBeenCalledTimes(1);
+  expect(JSON.parse(fetchImpl.mock.calls[0][1].body)).toEqual(request);
+  expect(fetchImpl.mock.calls[0][0]).not.toContain('header-only-token');
+});
+
+it.each([
+  { lifecycle: 'READY', cursor: 'a'.repeat(43) },
+  { deploymentId: 'foreign', incarnationId: 'runtime', graphVersion: 'version', lifecycle: 'READY', cursor: 'a'.repeat(43) },
+])('refuses incomplete or foreign observation frames before source fallback %#', async frame => {
+  const source = { kind: 'deployment', deploymentId: 'original', incarnationId: 'runtime', graphVersion: 'version' };
+  const received = [], changes = [];
+  const client = new RavenrootRuntimeClient('https://service', { maxRetries: 0,
+    fetchImpl: async () => streamResponse([`event: lifecycle\ndata: ${JSON.stringify(frame)}\n\n`]), sleep: async () => {} });
+  const disconnect = client.connectDeploymentObservation(source, frame => received.push(frame), state => changes.push(state));
+  await vi.waitFor(() => expect(changes).toContain('error')); disconnect();
+  expect(received).toEqual([]);
+});

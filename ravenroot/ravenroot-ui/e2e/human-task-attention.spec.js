@@ -121,6 +121,10 @@ function startService() {
         status.state = 'READY';
         if (durableTasks) return json(response, 200, { outcome: 'TERMINAL', commandId: 'start-1', generation: 1 }, headers);
       }
+      if (action === 'events') {
+        response.writeHead(200, { ...headers, 'Content-Type': 'text/event-stream' });
+        response.write(`event: lifecycle\ndata: ${JSON.stringify({ type: 'lifecycle', deploymentId: status.deploymentId, graphVersion: status.graphVersion, incarnationId: status.runtimeIncarnationId, lifecycle: status.state, cursor: 'c'.repeat(43) })}\n\n`); return;
+      }
       if (action === 'view') return json(response, 200, { viewerSourceVersion: '1',
         source: { kind: 'deployment', deploymentId: status.deploymentId, graphVersion: status.graphVersion,
           incarnationId: status.runtimeIncarnationId }, lifecycle: status.state,

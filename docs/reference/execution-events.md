@@ -16,6 +16,19 @@ authority and the captured deployment binding are rechecked before each event. R
 retain their content-free projection. This live channel does not recover historical output that
 was not retained.
 
+The first lifecycle frame contains the exact deployment, graph version and incarnation, together
+with an opaque `cursor`. A first attachment starts at the live tail. A reconnect sends that cursor
+in `Last-Event-ID`; its lifecycle handshake anchors the resolved replay position before delivering
+backlog. Retention gaps, foreign or expired cursors remain explicit failures. Credentials travel in
+headers, never in the URL. The observation source and lifecycle do not require a usable drawing;
+the full drawing endpoint keeps its separate projection validation.
+
+The editor waits for a matching READY or DEGRADED lifecycle handshake before initial START. A
+connection notification, retry, timeout or missing drawing does not establish observation. A
+10-second observation deadline leaves the deployment's actual lifecycle intact and retains its
+saved execution request for an explicit **Run** retry. Disconnecting revokes admission confirmation;
+only another valid handshake restores it. Stop and document retirement cancel pending admission.
+
 Completing the initial START traversal does not stop a deployment or its listening sources.
 The editor displays the deployment lifecycle separately. Durable Human Task attention is scoped
 by the registration identity and graph version, rather than by the deployment's public alias.

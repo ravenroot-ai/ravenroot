@@ -8528,7 +8528,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'file',
   '',
   '',
-  '4dcc57d260f5cd3a890ac2e7b371bdb17d7c227aef360d735e3ee7fe93feb7b2',
+  '21ebe41b18a079e1c3b91df5648a62be859afcf9e3eb68971b46ac30009ec504',
   1),
  ('scripts/tests/test_program_authoring_platform_configuration.sh',
   'file',
@@ -14941,7 +14941,7 @@ GRAPH_AUTHORING_SUPPORT_FILE_PROOFS = {
     Path("ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/RavenrootApplication.java"):
         "dcfcb005f9c340a403f9e7cc975a5dc6c16d1f0e8f9ac13b3835b447c53bddb1",
     Path("ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/AuthorizedRavenrootApplication.java"):
-        "832e5daa9a7198f74df78b97ed80c2b3288fd7b0e77ebc88451e037b9c767f73",
+        "38834e3d36a02eff8d68a6702b9bacc389ac3def84336a2d60b3023c6f147337",
     Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/WireErrorCodes.java"):
         "71b0aa2cdfdbbd0964c1e4a4aae9c29e6736ad1be2ee9f4d27f868b61d5e7299",
 }

@@ -424,6 +424,87 @@ class DeploymentLifecycleHttpTest {
     }
 
     @Test
+    void observationAndFirstTraversalRemainAvailableWithoutDrawing() throws Exception {
+        var projection = new DeploymentViewRace();
+        try (var fixture = new Fixture(false, projection, true)) {
+            assertEquals(200, fixture.request("POST", "/v1/deployments?id=no-drawing", NO_SOURCE_GRAPH, "tenant-a").statusCode());
+            assertState(fixture.request("POST", "/v1/deployments/no-drawing/start", "", "tenant-a"), "READY");
+            var status = fixture.request("GET", "/v1/deployments/no-drawing", "", "tenant-a");
+            String incarnation = field(status.body(), "runtimeIncarnationId"), version = field(status.body(), "graphVersion");
+            projection.unavailableDrawing = true;
+            assertEquals(503, fixture.request("GET", "/v1/deployments/no-drawing/view", "", "tenant-a").statusCode());
+            var stream = fixture.stream("/v1/deployments/no-drawing/events?graphVersion=" + version, "tenant-a", incarnation);
+            assertEquals(200, stream.statusCode());
+            try (var reader = new java.io.BufferedReader(new java.io.InputStreamReader(stream.body()))) {
+                assertEquals("event: lifecycle", reader.readLine());
+                String handshake = reader.readLine(); reader.readLine();
+                assertTrue(field(handshake, "cursor").matches("[A-Za-z0-9_-]{43}"), handshake);
+                var admission = fixture.request("POST", "/v1/deployments/no-drawing/initial-start",
+                        "{\"incarnationId\":\"" + incarnation + "\",\"graphVersion\":\"" + version
+                                + "\",\"requestId\":\"first\",\"input\":null}", "tenant-a");
+                assertEquals(202, admission.statusCode(), admission.body());
+                assertEquals(7, executionFrames(reader).size());
+            }
+        }
+    }
+
+    @Test
+    void handshakeReplayPositionSurvivesAnotherDropBeforeBacklogDelivery() throws Exception {
+        try (var fixture = new Fixture(false, null, true)) {
+            assertEquals(200, fixture.request("POST", "/v1/deployments?id=anchored", NO_SOURCE_GRAPH, "tenant-a").statusCode());
+            assertState(fixture.request("POST", "/v1/deployments/anchored/start", "", "tenant-a"), "READY");
+            var status = fixture.request("GET", "/v1/deployments/anchored", "", "tenant-a");
+            String incarnation = field(status.body(), "runtimeIncarnationId"), version = field(status.body(), "graphVersion");
+            String path = "/v1/deployments/anchored/events?graphVersion=" + version;
+            String anchor;
+            try (var reader = new java.io.BufferedReader(new java.io.InputStreamReader(fixture.stream(path, "tenant-a", incarnation).body()))) {
+                assertEquals("event: lifecycle", reader.readLine()); anchor = field(reader.readLine(), "cursor");
+            }
+            var admission = fixture.request("POST", "/v1/deployments/anchored/initial-start",
+                    "{\"incarnationId\":\"" + incarnation + "\",\"graphVersion\":\"" + version
+                            + "\",\"requestId\":\"first\",\"input\":null}", "tenant-a");
+            assertEquals(202, admission.statusCode(), admission.body());
+            String process = field(admission.body(), "processInstanceId");
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+            while (true) {
+                var history = HttpClient.newHttpClient().send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + fixture.server.port()
+                        + "/v1/deployments/anchored/history?graphVersion=" + version + "&view=process-traversals&processInstanceId=" + process))
+                        .header("X-Test-Tenant", "tenant-a").header("X-Ravenroot-Deployment-Incarnation", incarnation).GET().build(), HttpResponse.BodyHandlers.ofString());
+                assertEquals(200, history.statusCode(), history.body());
+                if (history.body().contains("\"status\":\"COMPLETED\"")) break;
+                assertTrue(System.nanoTime() < deadline, history.body()); Thread.sleep(10);
+            }
+            String retryAnchor;
+            try (var reader = new java.io.BufferedReader(new java.io.InputStreamReader(fixture.stream(path, "tenant-a", incarnation, anchor).body()))) {
+                assertEquals("event: lifecycle", reader.readLine()); retryAnchor = field(reader.readLine(), "cursor");
+                // Drop immediately without accepting even the first replayed execution frame.
+            }
+            try (var reader = new java.io.BufferedReader(new java.io.InputStreamReader(fixture.stream(path, "tenant-a", incarnation, retryAnchor).body()))) {
+                assertEquals("event: lifecycle", reader.readLine()); reader.readLine(); reader.readLine();
+                assertEquals(7, executionFrames(reader).size());
+            }
+            try (var reader = new java.io.BufferedReader(new java.io.InputStreamReader(fixture.stream(path, "tenant-b", incarnation, anchor).body()))) {
+                assertEquals("event: source-gap", reader.readLine());
+                assertTrue(reader.readLine().contains("CURSOR_UNAVAILABLE"));
+            }
+        }
+    }
+
+    private static List<String> executionFrames(java.io.BufferedReader reader) throws Exception {
+        var task = java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            var result = new java.util.ArrayList<String>();
+            try {
+                for (String line; (line = reader.readLine()) != null;) {
+                    if (line.startsWith("data:") && line.contains("\"type\":\"execution\"")) result.add(line);
+                    if (line.contains("\"type\":\"EXECUTION_COMPLETED\"")) return result;
+                }
+                return result;
+            } catch (java.io.IOException failure) { throw new java.io.UncheckedIOException(failure); }
+        });
+        return task.get(10, TimeUnit.SECONDS);
+    }
+
+    @Test
     void attachedStreamDistinguishesUndeployFromIdenticalBytesReplacement() throws Exception {
         try (var fixture = new Fixture()) {
             assertEquals(200, fixture.request("POST", "/v1/deployments?id=observed",
@@ -953,10 +1034,15 @@ class DeploymentLifecycleHttpTest {
 
         HttpResponse<java.io.InputStream> stream(String path, String tenant, String incarnation)
                 throws Exception {
-            var request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + path))
+            return stream(path, tenant, incarnation, null);
+        }
+
+        HttpResponse<java.io.InputStream> stream(String path, String tenant, String incarnation, String cursor) throws Exception {
+            var builder = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + path))
                     .header("X-Test-Tenant", tenant)
-                    .header("X-Ravenroot-Deployment-Incarnation", incarnation)
-                    .GET().build();
+                    .header("X-Ravenroot-Deployment-Incarnation", incarnation);
+            if (cursor != null) builder.header("Last-Event-ID", cursor);
+            var request = builder.GET().build();
             return HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofInputStream());
         }
 
@@ -973,6 +1059,7 @@ class DeploymentLifecycleHttpTest {
         private final AtomicBoolean armed = new AtomicBoolean();
         private final CountDownLatch lookupReturned = new CountDownLatch(1);
         private final CountDownLatch continueLookup = new CountDownLatch(1);
+        private volatile boolean unavailableDrawing;
 
         private void arm() {
             armed.set(true);
@@ -983,13 +1070,16 @@ class DeploymentLifecycleHttpTest {
                     RavenrootApplication.class.getClassLoader(),
                     new Class<?>[] { RavenrootApplication.class },
                     (proxy, method, arguments) -> {
+                        if (unavailableDrawing && method.getName().equals("localDeploymentView"))
+                            throw new ai.ravenroot.api.application.DeploymentViewException(
+                                    ai.ravenroot.api.application.DeploymentViewException.Reason.PROJECTION_UNAVAILABLE);
                         Object result;
                         try {
                             result = method.invoke(delegate, arguments);
                         } catch (InvocationTargetException reflected) {
                             throw reflected.getCause();
                         }
-                        if ("localDeploymentView".equals(method.getName())
+                        if ("localDeployment".equals(method.getName())
                                 && armed.compareAndSet(true, false)) {
                             lookupReturned.countDown();
                             try {

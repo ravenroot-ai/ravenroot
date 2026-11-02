@@ -131,6 +131,7 @@ export const ENGLISH_MESSAGES = Object.freeze({
   'workspace.run.ready': 'Deployment ready. The initial traversal identity is retained across retry and reload.',
   'workspace.run.failed': 'Deployment Run could not be reconciled. Retry uses the same saved deployment identity.',
 
+  'workspace.run.observationFailed': 'Live observation could not be confirmed. Use Run to retry this same deployment; its saved execution request is retained.',
   'workspace.run.associationChanged': 'The deployment association or workspace authority changed. Your saved deployment identity is retained. Reconcile it before retrying.',
 
   ...STATIC_ENGLISH_MESSAGES,

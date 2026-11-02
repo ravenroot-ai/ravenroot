@@ -1,3 +1,4 @@
+import { keepMockDeploymentStreamsOpen } from './deployment-run-fixture.mjs';
 import { keepAuthenticationInMemory } from './memory-only-auth.mjs';
 import { createHash } from 'node:crypto';
 import { expect, test } from '@playwright/test';
@@ -87,8 +88,11 @@ function durableHumanTaskReentryStream(deploymentId) {
 }
 
 async function stubRuntime(page, { sourceResponder, sourceTraffic, workspaceTenant = 'tenant-authenticated',
-  configurationResponder, eventResponder } = {}) {
+  configurationResponder, eventResponder, legacyAfterAdmission = false } = {}) {
+  await keepMockDeploymentStreamsOpen(page);
   const sourceCalls = [], executionCalls = [], configurationCalls = [], eventCalls = [];
+  let nativeUnavailable = false, admitted;
+  const admissionIssued = new Promise(resolve => { admitted = resolve; });
   let status = null, graphVersion = null, tenant = workspaceTenant;
   let announceSession;
   const startedSession = new Promise(resolve => { announceSession = resolve; });
@@ -105,6 +109,7 @@ async function stubRuntime(page, { sourceResponder, sourceTraffic, workspaceTena
   await page.route('**/v1/node-types', route => route.fulfill({ json: JSON.parse(SOURCE_CATALOG) }));
   await page.route('**/v1/events**', async route => {
     eventCalls.push({ headers: route.request().headers() });
+    if (legacyAfterAdmission) await admissionIssued;
     const routed = { fulfill: options => route.fulfill({ ...options, body: wire(options.body) }) };
     if (eventResponder) { await eventResponder({ route: routed, eventCalls, startedSession }); return; }
     if (!sourceTraffic) { await route.fulfill({ status: 204, body: '' }); return; }
@@ -130,12 +135,21 @@ async function stubRuntime(page, { sourceResponder, sourceTraffic, workspaceTena
       await route.fulfill({ json: status }); return;
     }
     if (!status || status.deploymentId !== id) { await route.fulfill({ status: 404, body: '' }); return; }
+    if (action === 'events') {
+      if (nativeUnavailable) { await route.fulfill({ status: 503, body: '' }); return; }
+      await route.fulfill({ contentType: 'text/event-stream', body: `event: lifecycle\ndata: ${JSON.stringify({ type: 'lifecycle', deploymentId: id, graphVersion, incarnationId: status.runtimeIncarnationId, lifecycle: status.state, cursor: 'c'.repeat(43) })}\n\n` }); return;
+    }
     if (action === 'view') {
       await route.fulfill({ json: { viewerSourceVersion: '1', source: { kind: 'deployment', deploymentId: id,
         graphVersion, incarnationId: status.runtimeIncarnationId }, lifecycle: status.state,
         projection: { viewerContractVersion: '1.0', nodes: [], edges: [] } } }); return;
     }
     if (action === 'initial-start') {
+      if (legacyAfterAdmission) {
+        nativeUnavailable = true;
+        await page.evaluate(() => window.__interruptMockDeploymentObservation());
+        admitted();
+      }
       const body = request.postDataJSON();
       await route.fulfill({ status: 202, json: { outcome: 'ACCEPTED', requestId: body.requestId,
         processInstanceId: '10000000-0000-0000-0000-000000000001', traversalId: '20000000-0000-0000-0000-000000000002' } }); return;
@@ -285,6 +299,7 @@ test('re-authentication holds a source frame until workspace authority can deliv
   });
   let deploymentId;
   const calls = await stubRuntime(page, {
+    legacyAfterAdmission: true,
     configurationResponder: async ({ route, configurationCalls }) => {
       if (configurationCalls.length === 2) {
         announceReauthentication();
@@ -635,7 +650,7 @@ test('an ambiguous start becomes UNKNOWN until observation proves the listener s
  * the deployment its session reports, which is the one identity it can hold in advance.
  */
 test('a listening deployment paints all actual traversals on its unchanged originating graph', async ({ page }) => {
-  await stubRuntime(page, { sourceTraffic: { nodeIds: ['source', 'end'], admissions: 6 } });
+  await stubRuntime(page, { sourceTraffic: { nodeIds: ['source', 'end'], admissions: 6 }, legacyAfterAdmission: true });
   await page.goto('/');
   await openGraph(page, sourceGraph('external.consume'), 'listening.graphml');
 
@@ -726,7 +741,7 @@ test('known continuation stays with its originating bound document through focus
   });
   let release;
   const gate = new Promise(resolve => { release = resolve; });
-  await stubRuntime(page, { eventResponder: async ({ route, startedSession }) => {
+  await stubRuntime(page, { legacyAfterAdmission: true, eventResponder: async ({ route, startedSession }) => {
     const id = await startedSession; await gate;
     await route.fulfill({ status: 200, contentType: 'text/event-stream', body: durableHumanTaskReentryStream(id) });
   } });

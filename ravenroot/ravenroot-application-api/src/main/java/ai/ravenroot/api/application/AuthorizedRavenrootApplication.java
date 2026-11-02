@@ -967,6 +967,29 @@ public final class AuthorizedRavenrootApplication {
     }
 
     /**
+     * Resolves observation identity and lifecycle without requiring a drawing projection.
+     * The same tenant-owned observation resource protects this bounded projection and full views.
+     * Compatibility producers without finite runtime identity retain their existing view lookup.
+     * @param context authenticated request context supplying the owning tenant
+     * @param deploymentId tenant-scoped logical deployment identifier
+     * @return exact source and lifecycle, or empty for an unknown tenant-scoped deployment
+     */
+    public java.util.Optional<DeploymentObservation> localDeploymentObservation(
+            RequestContext context, String deploymentId) {
+        require(context, AuthorizationAction.DEPLOYMENT_OBSERVE,
+                ProtectedResource.owned("deployment-view", requireText(deploymentId, "deployment id"), context.tenantId()));
+        var status = delegate.localDeployment(context.tenantId(), deploymentId);
+        if (status.isEmpty()) return java.util.Optional.empty();
+        var value = status.orElseThrow();
+        if (value.graphVersion().isPresent() && value.runtimeIncarnationId().isPresent()) {
+            return java.util.Optional.of(new DeploymentObservation(DeploymentViewerView.Source.deployment(
+                    value.deploymentId(), value.runtimeIncarnationId().orElseThrow(), value.graphVersion().orElseThrow()), value.state()));
+        }
+        return delegate.localDeploymentView(context.tenantId(), deploymentId)
+                .map(view -> new DeploymentObservation(view.source(), view.lifecycle()));
+    }
+
+    /**
      * Discovers only current READY process-local views for the authenticated workload's tenant.
      * Discovery is descriptive: callers must resolve the exact source tuple again when creating a
      * session because a deployment can be replaced or leave READY immediately after this read.

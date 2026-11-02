@@ -13,6 +13,7 @@ function fixture() {
     initialStartDeployment: vi.fn(async (id, request) => ({ outcome: 'ACCEPTED', requestId: request.requestId, processInstanceId: process, traversalId: traversal })) };
   const options = { client, serviceUrl: 'https://service', tenantId: 'tenant', graphMl: '<original/>', inputJson: '{"original":true}',
     persist: vi.fn(async (_, intent) => { saved.push(structuredClone(intent)); }), isCurrent: origin => current && origin === owner,
+    onObservation: vi.fn(async ({ source }) => ({ source, canAdmit: () => true })),
     pin: vi.fn(async () => version), randomId: () => `request-${++n}` };
   return { owner, client, options, saved, setCurrent: value => { current = value; } };
 }
@@ -237,9 +238,9 @@ describe('read-only origin deployment observation', () => {
 
 it('attaches the deployment observation before admitting its first traversal', async () => {
   const f = fixture(), connected = deferred();
-  f.options.onView = vi.fn(async view => { expect(view.source.graphVersion).toBe(version); await connected.promise; });
+  f.options.onObservation = vi.fn(async ({ source }) => { expect(source.graphVersion).toBe(version); await connected.promise; return { source, canAdmit: () => true }; });
   const run = runOriginDeployment(f.owner, f.options);
-  await vi.waitFor(() => expect(f.options.onView).toHaveBeenCalledTimes(1));
+  await vi.waitFor(() => expect(f.options.onObservation).toHaveBeenCalledTimes(1));
   expect(f.client.initialStartDeployment).not.toHaveBeenCalled();
   connected.resolve(); await run;
   expect(f.client.initialStartDeployment).toHaveBeenCalledTimes(1);
@@ -283,4 +284,69 @@ it('accepts an identity-verified completed Stop reply without replacing it with 
   await observeOriginDeployment(f.owner, f.options);
   expect(f.owner.deploymentRunStatus).toBe('STOPPED');
   expect(f.client.stopDeployment).toHaveBeenCalledTimes(1);
+});
+
+
+it('retains a ready registration and exact saved intent after observation failure, then retries once', async () => {
+  const f = fixture();
+  f.options.onObservation.mockRejectedValueOnce(new Error('observation deadline'));
+  await expect(runOriginDeployment(f.owner, f.options)).rejects.toThrow('observation deadline');
+  const original = structuredClone(f.owner.deploymentRun);
+  expect(original.phase).toBe('RECONCILE'); expect(f.owner.deploymentRunStatus).toBe('READY');
+  expect(f.client.initialStartDeployment).not.toHaveBeenCalled();
+  f.client.deployment.mockResolvedValue({ tenantId: 'tenant', deploymentId: original.deploymentId,
+    graphVersion: version, runtimeIncarnationId: 'runtime-1', state: 'READY' });
+  await runOriginDeployment(f.owner, { ...f.options, graphMl: '<later/>', inputJson: '"later"' });
+  expect(f.client.registerDeployment).toHaveBeenCalledTimes(1);
+  expect(f.client.startDeployment).toHaveBeenCalledTimes(1);
+  expect(f.client.initialStartDeployment).toHaveBeenCalledExactlyOnceWith(original.deploymentId,
+    expect.objectContaining({ requestId: original.initialStartRequestId, input: { original: true } }),
+    expect.objectContaining({ canAdmit: expect.any(Function) }));
+  expect(f.owner.deploymentRun).toMatchObject({ deploymentId: original.deploymentId,
+    activationRequestId: original.activationRequestId, initialStartRequestId: original.initialStartRequestId,
+    graphMl: original.graphMl, inputJson: original.inputJson, processInstanceId: process, traversalId: traversal });
+});
+
+it('Stop cancels pending observation and never admits its first traversal', async () => {
+  const f = fixture();
+  f.options.onObservation.mockImplementation((_, { signal }) => new Promise((resolve, reject) =>
+    signal.addEventListener('abort', () => reject(new Error('cancelled')), { once: true })));
+  const run = runOriginDeployment(f.owner, f.options);
+  await vi.waitFor(() => expect(f.options.onObservation).toHaveBeenCalledTimes(1));
+  const binding = f.owner.deploymentRun;
+  const status = { deploymentId: binding.deploymentId, tenantId: 'tenant', graphVersion: version,
+    runtimeIncarnationId: 'runtime-1', continuity: 'PROCESS_LOCAL', state: 'READY' };
+  f.client.deployment.mockResolvedValue(status);
+  f.client.stopDeployment = vi.fn(async () => ({ ...status, state: 'STOPPED' }));
+  await expect(stopOriginDeployment(f.owner, f.options)).resolves.toBe(true);
+  expect((await run).stoppedBeforeInitial).toBe(true);
+  expect(f.client.initialStartDeployment).not.toHaveBeenCalled();
+  expect(f.client.stopDeployment).toHaveBeenCalledTimes(1);
+});
+
+it('does not classify an unconfirmed observer as a renderer-only failure', async () => {
+  const f = fixture(); f.options.onObservation.mockResolvedValue({ source: {}, canAdmit: () => false });
+  await expect(runOriginDeployment(f.owner, f.options)).rejects.toThrow('OBSERVATION_NOT_CONFIRMED');
+  expect(f.owner.deploymentRunObservationError).toBeDefined();
+  expect(f.client.initialStartDeployment).not.toHaveBeenCalled();
+});
+
+it('retains the original intent after a last-moment observation refusal and normal Run retries it once', async () => {
+  const f = fixture(); let live = true;
+  f.options.onObservation.mockImplementation(async ({ source }) => ({ source, canAdmit: () => live }));
+  const admitted = f.client.initialStartDeployment.getMockImplementation();
+  f.client.initialStartDeployment.mockImplementationOnce(async (_id, _request, { canAdmit }) => {
+    live = false; expect(canAdmit()).toBe(false); throw new Error('OBSERVATION_NOT_CONFIRMED');
+  }).mockImplementation(admitted);
+  await expect(runOriginDeployment(f.owner, f.options)).rejects.toThrow('OBSERVATION_NOT_CONFIRMED');
+  const original = structuredClone(f.owner.deploymentRun);
+  expect(original.phase).toBe('RECONCILE'); expect(f.owner.deploymentRunStatus).toBe('READY');
+  f.client.deployment.mockResolvedValue({ tenantId: 'tenant', deploymentId: original.deploymentId,
+    graphVersion: version, runtimeIncarnationId: 'runtime-1', state: 'READY' });
+  live = true; const result = await runOriginDeployment(f.owner, f.options);
+  expect(result.initial.processInstanceId).toBe(process); expect(result.initial.traversalId).toBe(traversal);
+  expect(f.client.registerDeployment).toHaveBeenCalledTimes(1);
+  expect(f.client.initialStartDeployment.mock.calls[1].slice(0, 2)).toEqual(f.client.initialStartDeployment.mock.calls[0].slice(0, 2));
+  expect(f.owner.deploymentRun).toMatchObject({ deploymentId: original.deploymentId,
+    initialStartRequestId: original.initialStartRequestId, inputJson: original.inputJson, graphMl: original.graphMl });
 });

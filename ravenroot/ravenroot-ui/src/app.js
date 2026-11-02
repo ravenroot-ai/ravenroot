@@ -1,3 +1,4 @@
+import { createDeploymentObservationBarrier } from './deployment-observation.js';
 import { repositoryOperationDialog } from './repository-operation-dialog.js';
 import { readSavedDeploymentView } from './saved-deployment-view.js';
 import { requireHistorySource } from './deployment-history-model.js';
@@ -13048,21 +13049,34 @@ function retireOriginDeploymentView(owner) {
   if (owner) owner.originDeploymentView = null;
 }
 
-function connectOriginDeploymentView(owner, client, envelope) {
-  const source = envelope.source, binding = owner.deploymentRun, authority = workspaceAuthority;
+function connectOriginDeploymentView(owner, client, envelope, { signal } = {}) {
+  const source = envelope.source, binding = owner.deploymentRun, authority = workspaceAuthority, incarnation = owner.incarnation;
   if (!binding || source.deploymentId !== binding.deploymentId || source.graphVersion !== binding.graphVersion
-      || !tenantAuthorityAllows(owner, client)) return Promise.resolve();
+      || !tenantAuthorityAllows(owner, client)) return Promise.reject(productError('workspace.run.observationFailed', new Error('OBSERVATION_SOURCE_CHANGED')));
   const old = owner.originDeploymentView;
-  if (old?.client === client && old.binding === binding && old.source.incarnationId === source.incarnationId) return old.ready;
+  if (old?.client === client && old.binding === binding && old.source.incarnationId === source.incarnationId
+      && (old.barrier?.pending || old.barrier?.canAdmit())) {
+    if (old.barrier.pending && signal) {
+      const cancel = () => old.barrier.retire();
+      if (signal.aborted) cancel();
+      else {
+        signal.addEventListener('abort', cancel, { once: true });
+        const release = () => signal.removeEventListener('abort', cancel);
+        old.ready.then(release, release);
+      }
+    }
+    return old.ready;
+  }
   retireOriginDeploymentView(owner);
   const state = createDeploymentViewState({ ...source, lifecycle: envelope.lifecycle });
-  let connected;
-  const ready = new Promise(resolve => { connected = resolve; });
-  const timer = setTimeout(connected, 3000);
-  const observation = { client, binding, source, state, ready, live: false, disconnect: null };
+  const observation = { client, binding, source, state, ready: null, live: false, disconnect: null, barrier: null };
   owner.originDeploymentView = observation;
-  const current = () => workspace.find(owner.id) === owner && owner.originDeploymentView === observation
-    && owner.deploymentRun === binding && runtimeClient === client && workspaceAuthority === authority && tenantAuthorityAllows(owner, client);
+  const current = () => workspace.find(owner.id) === owner && owner.incarnation === incarnation && owner.originDeploymentView === observation
+    && owner.deploymentRun === binding && runtimeClient === client && workspaceAuthority === authority && tenantAuthorityAllows(owner, client)
+    && observation.barrier?.active !== false;
+  const barrier = createDeploymentObservationBarrier({ source, isCurrent: current, signal,
+    cancel: () => { observation.live = false; observation.stopStream?.(); } });
+  observation.barrier = barrier; observation.ready = barrier.ready;
   let paintQueued = false;
   const paint = () => {
     if (paintQueued) return;
@@ -13073,11 +13087,12 @@ function connectOriginDeploymentView(owner, client, envelope) {
       if (current() && !testing && owner.cy && documentMatchesDeployment(owner)) paintDocumentDeploymentView(owner, state);
     });
   };
-  observation.disconnect = client.connectDeploymentView(envelope, frame => {
+  observation.stopStream = client.connectDeploymentObservation(source, frame => {
     if (!current()) return;
     const result = applyDeploymentViewFrame(state, frame);
-    if (!result.accepted) return;
-    observation.live = !result.terminal;
+    barrier.frame(frame, result);
+    if (!barrier.active || !result.accepted) return;
+    observation.live = !result.terminal && state.continuity === 'LIVE';
     if (frame.type === 'execution') {
       const event = { ...frame.event, graphVersion: frame.graphVersion,
         deploymentId: binding.registrationIdentity || binding.deploymentId };
@@ -13089,15 +13104,15 @@ function connectOriginDeploymentView(owner, client, envelope) {
     paint();
   }, connection => {
     if (!current()) return;
-    clearTimeout(timer); connected();
+    barrier.connection(connection);
+    if (connection !== 'connected') observation.live = false;
     if (['error', 'revoked'].includes(connection)) {
       observation.live = false;
       resetDeploymentViewRuntime(state, connection === 'revoked' ? 'DETACHED' : 'UNAVAILABLE'); paint();
     }
   }, { diagnostics: true });
-  const disconnect = observation.disconnect;
-  observation.disconnect = () => { clearTimeout(timer); connected(); disconnect(); };
-  return ready;
+  observation.disconnect = () => { barrier.retire(); observation.stopStream(); };
+  return observation.ready;
 }
 
 const deploymentObservations = new WeakMap();
@@ -13154,7 +13169,7 @@ async function runCapturedDocumentDeployment(owner, client, { graphMl, payload, 
   let result;
   try { result = await runOriginDeployment(owner, { client, serviceUrl: scope?.serviceUrl || normalizedWorkspaceServiceUrl(client),
     tenantId: owner.tenantId, graphMl, inputJson: JSON.stringify(payload), attachment,
-    persist, isCurrent: current, onView: view => connectOriginDeploymentView(owner, client, view),
+    persist, isCurrent: current, onObservation: (observation, options) => connectOriginDeploymentView(owner, client, observation, options),
     onPhase: () => { syncPaneHeaders(); refreshCommands(); } }); }
   catch (error) {
     void observeOriginDeployment(owner, { client, isCurrent: current }).catch(() => {}).finally(() => {

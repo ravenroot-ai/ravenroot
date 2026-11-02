@@ -45,6 +45,63 @@ class FirstRunPersistenceBrowserTest {
             if (server != null && server.isAlive()) server.destroyForcibly().waitFor(10, TimeUnit.SECONDS);
         }
     }
+    @Test void firstTraversalHasConfirmedObservationEvenWithoutDrawing() throws Exception {
+        Assumptions.assumeTrue(Boolean.getBoolean("ravenroot.deploymentPersistence.browserTest"), "requires built UI and Playwright");
+        Path ui = Path.of(System.getProperty("user.dir"), "../ravenroot-ui").toAbsolutePath().normalize();
+        Path output = Files.createDirectories(Path.of("target", "observation-admission-browser", UUID.randomUUID().toString())).toAbsolutePath();
+        var drawingUnavailable = new java.util.concurrent.atomic.AtomicBoolean();
+        var observationDenied = new java.util.concurrent.atomic.AtomicBoolean();
+        var control = com.sun.net.httpserver.HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+        control.createContext("/drawing", exchange -> {
+            drawingUnavailable.set(exchange.getRequestURI().getQuery().equals("unavailable"));
+            exchange.sendResponseHeaders(204, -1); exchange.close();
+        });
+        control.createContext("/observation", exchange -> {
+            observationDenied.set(exchange.getRequestURI().getQuery().equals("denied"));
+            exchange.sendResponseHeaders(204, -1); exchange.close();
+        });
+        try (var engine = new ai.ravenroot.pekko.PekkoExecutionEngine("observation-admission");
+             var store = new ai.ravenroot.persistence.sqlite.SqliteExecutionStore(output.resolve("execution.db"), java.time.Clock.systemUTC())) {
+            var application = new ai.ravenroot.core.runtime.DefaultRavenrootApplication(engine,
+                    new ai.ravenroot.core.runtime.ExecutionMonitor(), ai.ravenroot.core.runtime.BehaviorRegistry.standard(),
+                    new ai.ravenroot.core.programming.InMemoryArtifactRegistry(), new ai.ravenroot.core.programming.DisabledProgramRuntime(),
+                    ai.ravenroot.api.application.ExecutionIdentitySource.randomUuids(), store, 8, ai.ravenroot.core.runtime.UnknownBehaviorPolicy.passThrough());
+            var observed = (ai.ravenroot.api.application.RavenrootApplication) java.lang.reflect.Proxy.newProxyInstance(
+                    application.getClass().getClassLoader(), new Class<?>[]{ai.ravenroot.api.application.RavenrootApplication.class},
+                    (proxy, method, arguments) -> {
+                        if (drawingUnavailable.get() && method.getName().equals("localDeploymentView"))
+                            throw new ai.ravenroot.api.application.DeploymentViewException(
+                                    ai.ravenroot.api.application.DeploymentViewException.Reason.PROJECTION_UNAVAILABLE);
+                        try { return method.invoke(application, arguments); }
+                        catch (java.lang.reflect.InvocationTargetException reflected) { throw reflected.getCause(); }
+                    });
+            int observationPort;
+            try (var socket = new java.net.ServerSocket(0, 0, InetAddress.getLoopbackAddress())) { observationPort = socket.getLocalPort(); }
+            try (var server = new RavenrootServer(observed, new InetSocketAddress(InetAddress.getLoopbackAddress(), observationPort), ui.resolve("dist"),
+                    headers -> new ai.ravenroot.server.security.AuthenticatedPrincipal("observation-browser",
+                            ai.ravenroot.server.security.AuthenticatedPrincipal.Type.USER, "fixture", "local",
+                            Set.of(ai.ravenroot.api.security.Role.OPERATOR), Arrays.stream(ai.ravenroot.api.security.AuthorizationAction.values())
+                                    .filter(ai.ravenroot.api.security.AuthorizationAction::available)
+                                    .filter(action -> !observationDenied.get() || action != ai.ravenroot.api.security.AuthorizationAction.DEPLOYMENT_OBSERVE)
+                                    .map(ai.ravenroot.api.security.AuthorizationAction::requiredScope).collect(java.util.stream.Collectors.toSet())))) {
+                server.start(); control.start();
+                var driver = new ProcessBuilder(ui.resolve("node_modules/.bin/playwright").toString(), "test", "observation-admission.spec.js",
+                        "--config=playwright.deployment-persistence.config.js").directory(ui.toFile()).redirectErrorStream(true)
+                        .redirectOutput(output.resolve("playwright.log").toFile());
+                driver.environment().put("RAVENROOT_DEPLOYMENT_PERSISTENCE_ORIGIN", "http://127.0.0.1:" + server.port());
+                driver.environment().put("RAVENROOT_DEPLOYMENT_PERSISTENCE_OUTPUT_DIR", output.resolve("playwright-results").toString());
+                driver.environment().put("RAVENROOT_OBSERVATION_CONTROL_ORIGIN", "http://127.0.0.1:" + control.getAddress().getPort());
+                driver.environment().put("RAVENROOT_OBSERVATION_EVIDENCE_DIR", output.toString());
+                Process browser = driver.start();
+                try {
+                    assertTrue(browser.waitFor(180, TimeUnit.SECONDS), "observation browser timeout: " + output);
+                    assertEquals(0, browser.exitValue(), () -> read(output.resolve("playwright.log")));
+                } finally { if (browser.isAlive()) browser.destroyForcibly().waitFor(10, TimeUnit.SECONDS); }
+            } finally { application.close(); }
+        } finally { control.stop(0); }
+        System.out.println("observation-admission evidence=" + output);
+    }
+
     @Test void sdkRestoreRegistersPeriodicRecoveryWithoutHttpSerialization() throws Exception {
         Path output = Files.createTempDirectory("sdk-restore-recovery");
         var clock = java.time.Clock.systemUTC();

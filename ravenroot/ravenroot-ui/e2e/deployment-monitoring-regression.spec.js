@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { keepAuthenticationInMemory } from './memory-only-auth.mjs';
-import { PID, deferred, deploymentService } from './deployment-run-fixture.mjs';
+import { PID, deferred, deploymentService, interruptMockDeploymentObservation } from './deployment-run-fixture.mjs';
 const graph = `<graphml xmlns="http://graphml.graphdrawing.org/xmlns"><key id="kind" for="node" attr.name="kind" attr.type="string"/><key id="b" for="node" attr.name="behavior" attr.type="string"/><graph id="mixed" edgedefault="directed"><node id="start"><data key="kind">START</data></node><node id="source"><data key="kind">BEHAVIOR</data><data key="b">external.consume</data></node><node id="end"><data key="kind">END</data></node><node id="error"><data key="kind">ERROR</data></node><edge id="first" source="start" target="source"/><edge id="second" source="source" target="end"/></graph></graphml>`;
 async function boot(page) {
   await keepAuthenticationInMemory(page);
@@ -25,6 +25,7 @@ for (const mode of ['design', 'monitoring']) test(`Run paints durable events in 
     await route.fulfill({ contentType: 'text/event-stream', body: `id: 1\nevent: execution\ndata: ${JSON.stringify(event)}\n\nid: 2\nevent: execution\ndata: ${JSON.stringify(edge)}\n\n` });
   });
   await boot(page);
+  await interruptMockDeploymentObservation(page); // This case exercises the retained legacy fallback.
   await page.evaluate(() => { window.ravenroot.activeDocument().deploymentRun.registrationIdentity = 'persistent-registration'; });
   if (mode === 'monitoring') await page.locator('#btn-monitoring').click();
   await page.evaluate(() => window.ravenroot.activeDocument()); // capture the new presentation before traffic
@@ -127,7 +128,7 @@ test('hosted traversal activity uses the deployment stream while the one-shot st
     expect(new URL(route.request().url()).searchParams.get('include')).toBe('diagnostics');
     const source = { deploymentId: status.deploymentId, graphVersion: status.graphVersion, incarnationId: status.runtimeIncarnationId };
     const frames = [
-      `event: lifecycle\ndata: ${JSON.stringify({ ...source, lifecycle: 'READY' })}\n\n`,
+      `event: lifecycle\ndata: ${JSON.stringify({ ...source, lifecycle: 'READY', cursor: 'c'.repeat(43) })}\n\n`,
       `id: hosted-1\nevent: execution\ndata: ${JSON.stringify({ ...source, event: { type: 'NODE_COMPLETED', executionId: 'hosted-traversal', traversalId: 'hosted-traversal', processInstanceId: 'hosted-process', invocationId: 'hosted-visit', output: 'Hosted log visible', outputRedacted: false, outputTruncated: false, occurredAt: '2026-10-25T12:00:00Z', nodeId: 'source', activeInstances: 0, inFlightArrivals: 0 } })}\n\n`,
     ];
     return route.fulfill({ contentType: 'text/event-stream', body: frames.join('') });

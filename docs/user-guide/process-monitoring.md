@@ -217,6 +217,12 @@ an earlier browser document incarnation.
 
 The authenticated deployment status includes optional `runtimeIncarnationId`, the exact hosted runtime identity available before activation. Compatibility status producers may omit it. The editor captures that identity, the tenant, graph version, and durable registration identity before issuing Start or Stop. Conditional Start uses the same three binding headers as conditional Stop. A replacement under the same name is refused before opening a listener. The ordinary operator lifecycle endpoints and SDK overloads continue to support explicitly unconditional control of the current named deployment.
 
+Before the first traversal, Run confirms live observation of that exact deployment. If observation
+cannot be confirmed within ten seconds, the deployment may still truthfully show READY. Use Run
+again to retry the same saved deployment, input and execution request. No second registration or
+initial traversal is created. A missing drawing is a presentation problem; it does not prevent
+execution when live observation is available.
+
 Stop requested during a pending Run waits for the captured registration or activation to resolve. It prevents an initial START request that has not yet been issued, then stops the exact runtime. Closing the originating document after requesting Stop does not cancel that cleanup; changing authentication or tenant authority does. A successful Stop closes admission, so a delayed initial START request is refused. A later explicit Run can activate the same deployment again and reconcile its permanent initial marker: an already admitted initial traversal keeps its original process and traversal IDs.
 
 The native history monitor shows current Human Task attention separately from visit history. **Review tasks in graph** returns to the originating graph and selects a node with actionable tasks. Task decisions retain their existing confirmation, exact-generation, and current-authorization checks. Unknown or unavailable attention is displayed explicitly.

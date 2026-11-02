@@ -778,14 +778,14 @@ export class RavenrootRuntimeClient {
   }
 
   /** Runs or reconciles the permanent initial START of this exact deployment incarnation. */
-  async initialStartDeployment(deploymentId, request) {
+  async initialStartDeployment(deploymentId, request, { canAdmit } = {}) {
     if (typeof deploymentId !== 'string' || !deploymentId || !request || typeof request.incarnationId !== 'string'
         || !request.incarnationId || typeof request.graphVersion !== 'string' || !request.graphVersion
         || typeof request.requestId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(request.requestId)
         || !Object.hasOwn(request, 'input')) throw runtimeClientValidationError('Invalid deployment initial START request');
     const result = await this.#json(`/v1/deployments/${encodeURIComponent(deploymentId)}/initial-start`, {
       method: 'POST', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: JSON.stringify(request),
-    });
+    }, canAdmit);
     if (!result || !['ACCEPTED', 'DUPLICATE'].includes(result.outcome) || result.requestId !== request.requestId
         || ![result.processInstanceId, result.traversalId].every(value => typeof value === 'string'
           && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)))
@@ -823,18 +823,26 @@ export class RavenrootRuntimeClient {
    */
   connectDeploymentView(envelope, onFrame, onConnectionChange = () => {}, { diagnostics = false } = {}) {
     const view = validateDeploymentViewEnvelope(envelope);
+    return this.#connectDeploymentObservation(view.source, onFrame, onConnectionChange, diagnostics);
+  }
+
+  /** Observes a closed exact source without requiring or manufacturing a drawing projection. */
+  connectDeploymentObservation(source, onFrame, onConnectionChange = () => {}, { diagnostics = false } = {}) {
+    return this.#connectDeploymentObservation(validateDeploymentObservationSource(source), onFrame, onConnectionChange, diagnostics, true);
+  }
+
+  #connectDeploymentObservation(source, onFrame, onConnectionChange, diagnostics, strictSource = false) {
     const controller = new AbortController();
     this.deploymentConnections.add(controller);
-    void this.#consumeDeploymentEvents(view, controller.signal, onFrame, onConnectionChange, diagnostics)
+    void this.#consumeDeploymentEvents(source, controller.signal, onFrame, onConnectionChange, diagnostics, strictSource)
       .finally(() => this.deploymentConnections.delete(controller));
     return () => controller.abort();
   }
 
-  async #consumeDeploymentEvents(view, signal, onFrame, onConnectionChange, diagnostics) {
+  async #consumeDeploymentEvents(source, signal, onFrame, onConnectionChange, diagnostics, strictSource) {
     let failures = 0;
     let cursor = '';
     while (!signal.aborted && failures <= this.maxRetries) {
-      const source = view.source;
       const path = `/v1/deployments/${encodeURIComponent(source.deploymentId)}/events`
         + `?graphVersion=${encodeURIComponent(source.graphVersion)}`
         + (diagnostics ? '&include=diagnostics' : '');
@@ -864,7 +872,7 @@ export class RavenrootRuntimeClient {
         const read = await this.#readDeploymentStream(response.body.getReader(), signal, source, frame => {
           cursor = frame.cursor || cursor;
           onFrame(frame);
-        });
+        }, strictSource);
         if (signal.aborted || read.terminal) return;
         failures += 1;
         onConnectionChange('reconnecting', 'Deployment observation disconnected; reconnecting', () => uiText("workspace.runtime.deployment.disconnected"));
@@ -887,7 +895,7 @@ export class RavenrootRuntimeClient {
     }
   }
 
-  async #readDeploymentStream(reader, signal, source, onFrame) {
+  async #readDeploymentStream(reader, signal, source, onFrame, strictSource) {
     const decoder = new TextDecoder();
     let buffer = '';
     let retryDelay = this.retryDelayMs;
@@ -910,6 +918,9 @@ export class RavenrootRuntimeClient {
         }
         if (!parsed.data) continue;
         const payload = JSON.parse(parsed.data);
+        if (strictSource && ['deploymentId', 'graphVersion', 'incarnationId'].some(key => payload[key] !== source[key])) {
+          throw runtimeClientValidationError('Deployment observation frame changed or omitted its exact source identity');
+        }
         const type = parsed.type === 'execution' ? 'execution'
           : parsed.type === 'source-gap' ? 'gap'
             : parsed.type === 'source-invalidated' ? 'invalidated' : parsed.type;
@@ -1680,9 +1691,13 @@ export class RavenrootRuntimeClient {
       body: JSON.stringify({ expectedRevision, resolution }) });
   }
 
-  async #json(path, options) {
+  async #json(path, options, initialAdmissionCheck) {
     if (!this.fetchImpl) throw runtimeClientValidationError('Fetch API is not supported by this browser');
     const credential = await this.#requestCredential();
+    // Only initial deployment admission supplies this guard. Credentials may resolve after the
+    // observer disconnected; no asynchronous boundary may separate this check from fetch.
+    if (initialAdmissionCheck && !initialAdmissionCheck())
+      throw productError('workspace.run.observationFailed', new Error('OBSERVATION_NOT_CONFIRMED'));
     const method = options.method || 'GET';
     let response;
     try {
@@ -1791,6 +1806,18 @@ export class RavenrootRuntimeClient {
     for (const connection of this.deploymentConnections) connection.abort();
     this.deploymentConnections.clear();
   }
+}
+
+/** Closed source-only observation contract; credentials never form part of this value. */
+export function validateDeploymentObservationSource(source) {
+  if (!source || typeof source !== 'object' || Array.isArray(source) || source.kind !== 'deployment'
+      || Object.keys(source).length !== 4
+      || !['deploymentId', 'incarnationId', 'graphVersion'].every(key =>
+        typeof source[key] === 'string' && source[key].trim() === source[key]
+          && source[key].length > 0 && source[key].length <= 256)) {
+    throw runtimeClientValidationError('Deployment observation requires an exact closed source identity');
+  }
+  return Object.freeze({ ...source });
 }
 
 export function validateDeploymentViewEnvelope(value, expectedDeploymentId = '') {

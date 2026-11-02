@@ -61,8 +61,7 @@ class GraalVmProgramRuntimeCompletionOrderingTest {
             supervisor.releaseTerminate = new CountDownLatch(1);
             supervisor.releaseReap = new CountDownLatch(1);
             var admission = new RecordingAdmission();
-            admission.beforeClose = () -> assertTrue(supervisor.cleanupFinished,
-                    "registration must remain until the shared cleanup attempt settles");
+            admission.beforeClose = () -> admission.closedBeforeCleanup = !supervisor.cleanupFinished;
             var future = runtime(supervisor).execute(admission, request()).toCompletableFuture();
             awaitBarrier(supervisor.awaitEntered);
             var cancelled = new CompletableFuture<Boolean>();
@@ -91,6 +90,8 @@ class GraalVmProgramRuntimeCompletionOrderingTest {
             assertFalse(future.completeExceptionally(new IOException("late failure")));
             assertEquals(1, supervisor.terminations.get());
             assertEquals(1, supervisor.closes.get());
+            assertFalse(admission.closedBeforeCleanup,
+                    "registration must remain until the shared cleanup attempt settles");
             assertEquals(1, admission.closes.get());
         }
     }
@@ -246,6 +247,7 @@ class GraalVmProgramRuntimeCompletionOrderingTest {
         volatile RuntimeException registrationFailure;
         volatile Thread closeThread;
         volatile Runnable beforeClose = () -> { };
+        volatile boolean closedBeforeCleanup;
         final GeneratedArtifact artifact = new GeneratedArtifact("ordering-artifact", "javascript",
                 ProgramArtifactDigest.canonical("javascript", "() => 'result'"), "() => 'result'",
                 ArtifactState.ACTIVE, 1, Instant.now(), Instant.now(), Map.of());

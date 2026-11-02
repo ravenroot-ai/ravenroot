@@ -8450,7 +8450,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'file',
   '',
   '',
-  '7ff4016e93d11fc32d88ba79c8545f83ba873af8433ffaa870b27ae8d03cded4',
+  '09c6ae706b22fc76bc4aaa0a4384be8f3014408ce1c893d13e5745f9a7e96eed',
   1),
  ('ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmRuntimeConfiguration.java',
   'file',

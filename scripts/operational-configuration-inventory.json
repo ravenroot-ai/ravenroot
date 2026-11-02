@@ -553181,6 +553181,21 @@
       "rationale": "#604 test_reindented_valid_yaml_checkout_cannot_disappear_from_both_counts uses '20' as deterministic checkout routing mutation-test data, including unsupported YAML layouts and compensating fake refs."
     },
     {
+      "id": "oc-12528c601b8a8b94188c",
+      "path": "scripts/tests/test_check_dependabot_routing.py",
+      "line": 189,
+      "symbol": "test_valid_yaml_flow_step_cannot_hide_an_unbound_checkout",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "'observable supported step layout'",
+      "expressionDigest": "e73ea9c9ac62adcff301fcd1badb12ea7a40e4c62458d95cf30cacf92a5dcb26",
+      "evidenceDigest": "4d0025cd258c4e5162f70b5fe8199c10641840b41fd09aec8eb07be6cd65a7f9",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "#604 test_valid_yaml_flow_step_cannot_hide_an_unbound_checkout uses \"'observable supported step layout'\" as a valid-YAML flow-style checkout mutation fixture proving an unsupported unbound action cannot disappear from the security checker."
+    },
+    {
       "id": "oc-973d75d911d95415ecc8",
       "path": "scripts/tests/test_check_docs_site.py",
       "line": 19,
@@ -691379,6 +691394,7 @@
     "4cf8bd75fb63a207fd9ff26656bd7b2d9bf418aac9f7ee0d85ccedcdc6958c88": "'\"/v1/graph-artifacts/{graphId}/{version}/import\"',",
     "4cf9f4d9a749d5434d7798613f19c8db4eee58746dddd0b2e6a999826150906e": "private static final Set<String> LIMIT_KEYS = Set.of(\"maxRequestBytes\", \"maxResponseBytes\", \"maxWebSocketMessageBytes\", \"maxWebSocketFragments\", \"maxQueuedWebSocketSends\", \"maxConcurrentOperations\", \"maxConcurrentPerTenant\", \"maxDecompressionRatio\", \"maxDeadlineMs\", \"maxWebSocketLifetimeMs\", \"maxWebSocketIdleMs\");",
     "4cfdf47b6f264de99da4b0420e27753d38b563acec44778661122007b2ef933c": "if compose.count(f\"{environment}: ${{{environment}:-}}\") != 1:",
+    "4d0025cd258c4e5162f70b5fe8199c10641840b41fd09aec8eb07be6cd65a7f9": "with self.assertRaisesRegex(RoutingPolicyError, 'observable supported step layout'):",
     "4d0414383faa5d324746b0207abc94a99d45d30f18a822d2a5bd5170b9ea9e88": "assert_compose_limits \"$TEMP_DIR/compose-whitespace.json\" \" \" not-a-number",
     "4d07d9528a3757df602960cb548e762671d32a251222587c470068512feef5cd": "} int lapOf(String joinNodeId) { return laps.getOrDefault(joinNodeId, 0);",
     "4d0d1956be4065745adc76c980fa67dd74e1857d947855e19bbb22272977bb06": "\"class RuntimeLimitConfigurationTest {\\n\"",
@@ -1389108,6 +1389124,27 @@
             "status": "retained",
             "classification": "protocol-or-format-invariant",
             "rationale": "#604 check_checkout_bindings atom '\"actions/checkout\"' is fixed workflow-parser framing, exact candidate-routing vocabulary, or fail-closed diagnostic text. It does not configure runtime or operator capacity."
+          }
+        }
+      ]
+    },
+    {
+      "id": "issue-604-valid-flow-checkout-fixture",
+      "issue": "#604",
+      "sourceRevision": "a2f9f37cc028c035bc5e7a91277852e7404e35d0",
+      "targetRevision": "a2f9f37cc028c035bc5e7a91277852e7404e35d0",
+      "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+      "sourceInventoryDigest": "cf6eed1a909c820381352a1b90cbc2d0d0dec390547fbda677a9b53d980e52d7",
+      "targetCandidateDigest": "284572b9f7699ac1655dc32198d673d110260209db2d9b8bc3947fb26c6af5fa",
+      "mappings": [],
+      "retirements": [],
+      "additions": [
+        {
+          "id": "oc-12528c601b8a8b94188c",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "#604 test_valid_yaml_flow_step_cannot_hide_an_unbound_checkout uses \"'observable supported step layout'\" as a valid-YAML flow-style checkout mutation fixture proving an unsupported unbound action cannot disappear from the security checker."
           }
         }
       ]

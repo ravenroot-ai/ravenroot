@@ -168,11 +168,13 @@ test('native monitor reads bounded real persistent histories, visits and retry a
     const original = await page.evaluate(() => window.ravenroot.activeDocument().deploymentRun);
     const mutations = []; page.on('request', request => { if (request.method() === 'POST' && request.url().includes('/v1/deployments')) mutations.push(request.url()); });
     await page.locator('#btn-history').click();
+    await page.locator('.doc-history-dialog[open] .doc-history-information > summary').click();
     await expect(page.locator('.doc-history-draft').filter({ visible: true })).toContainText('Monitoring shows the pinned deployment');
     await page.getByRole('button', { name: 'Return to graph', exact: true }).click();
     await page.locator('#btn-modify').click(); await page.evaluate(() => { window.cy.getElementById('end').select(); });
     const name = page.locator('#node-editor input[name="name"]'); await name.fill('Draft only end'); await name.press('Tab');
     await page.locator('#btn-history').click();
+    await page.locator('.doc-history-dialog[open] .doc-history-information > summary').click();
     await expect(page.locator('.doc-history-draft').filter({ visible: true })).toContainText('Your draft differs from this deployment');
     const current = page.locator('.doc-history-dialog[open] .doc-history');
     const business = current.locator('.history-page').filter({ has: page.getByRole('heading', { name: 'Business histories', exact: true }) });

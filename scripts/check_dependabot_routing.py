@@ -8,6 +8,11 @@ import re
 import sys
 from pathlib import Path
 
+try:
+    import yaml
+except ModuleNotFoundError as exc:
+    raise SystemExit("Dependabot routing verification requires PyYAML for python3") from exc
+
 
 ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_UPDATES = {
@@ -93,65 +98,65 @@ def check_pinned_workflow(name: str, contents: str) -> None:
         )
 
 
-def workflow_jobs(contents: str) -> dict[str, str]:
-    """Read the repository's block-style job declarations, refusing duplicate identities."""
-    if "\njobs:\n" not in contents:
-        raise RoutingPolicyError("workflow has no observable jobs mapping")
-    body = contents.split("\njobs:\n", 1)[1]
-    matches = list(re.finditer(r"(?m)^  ([A-Za-z0-9_-]+):\n", body))
-    jobs = {match.group(1): body[match.start():matches[index + 1].start()
-            if index + 1 < len(matches) else None] for index, match in enumerate(matches)}
-    if len(jobs) != len(matches):
-        raise RoutingPolicyError("workflow job identities must be unique")
-    return jobs
+class WorkflowLoader(yaml.BaseLoader):
+    """Decode workflow scalars as strings and reject ambiguous mapping declarations."""
+
+    def compose_node(self, parent, index):
+        event = self.peek_event()
+        if event.anchor is not None or event.tag is not None:
+            raise RoutingPolicyError("workflow aliases, anchors and explicit tags are unsupported")
+        return super().compose_node(parent, index)
+
+    def construct_mapping(self, node, deep=False):
+        fields = {}
+        for key, value in node.value:
+            if not isinstance(key, yaml.ScalarNode):
+                raise RoutingPolicyError("workflow mapping keys must be scalars")
+            name = key.value.casefold()
+            if name == "<<" or name in fields:
+                raise RoutingPolicyError(f"merged or duplicate workflow key {key.value!r}")
+            if name in ("ref", "candidate_ref") and key.value != name:
+                raise RoutingPolicyError(f"unsupported candidate input spelling {key.value!r}")
+            if name == "uses":
+                # Keep the reviewed block layout. Check decoded keys first so that quoting
+                # or escaping the entire declaration cannot conceal an executable action.
+                if (key.value != "uses" or key.style or node.flow_style
+                        or key.start_mark.column not in (4, 8)
+                        or not isinstance(value, yaml.ScalarNode) or value.style
+                        or value.start_mark.line != key.start_mark.line
+                        or not re.fullmatch(r"[-A-Za-z0-9_./@]+", value.value)):
+                    raise RoutingPolicyError("unsupported action declaration")
+            fields[name] = self.construct_object(value, deep=deep)
+        return fields
 
 
-def own_input(block: str, mapping_indent: int, name: str) -> str | None:
-    """Return one input from this block's own with mapping, never another step or env."""
-    lines = block.splitlines()
-    starts = [index for index, line in enumerate(lines)
-              if line == " " * mapping_indent + "with:"]
-    if len(starts) != 1:
-        return None
-    values = []
-    for line in lines[starts[0] + 1:]:
-        if not line.strip() or line.lstrip().startswith("#"):
-            continue
-        if len(line) - len(line.lstrip()) <= mapping_indent:
-            break
-        match = re.fullmatch(" " * (mapping_indent + 2) + re.escape(name) + r":\s*(.+)", line)
-        if match:
-            values.append(scalar(match.group(1)))
-    return values[0] if len(values) == 1 else None
-
-
-def check_checkout_bindings(contents: str, expected_ref: str, context: str) -> None:
-    """Bind every actual checkout step to its own ref, using the supported block layout.
-
-    A candidate_ref field, shell string, sibling step, or unrelated with mapping cannot supply
-    a checkout's missing input. Unknown checkout layouts fail closed rather than being ignored.
-    """
-    observed = 0
-    for job, block in workflow_jobs(contents).items():
-        starts = list(re.finditer(r"(?m)^      - ", block))
-        for index, start in enumerate(starts):
-            step = block[start.start():starts[index + 1].start() if index + 1 < len(starts) else None]
-            actions = re.findall(r"(?m)^(?:      - |        )uses: (actions/checkout@[^\s]+)(?: +#.*)?$", step)
-            if not actions:
+def check_checkout_bindings(contents: str, expected_ref: str, context: str) -> dict:
+    """Verify every executable checkout against its own decoded step inputs."""
+    layout_error = f"every {context} checkout must use an observable supported step layout"
+    try:
+        workflow = yaml.load(contents, Loader=WorkflowLoader)
+    except (RoutingPolicyError, yaml.YAMLError) as exc:
+        raise RoutingPolicyError(f"{layout_error}: {exc}") from exc
+    jobs = workflow.get("jobs") if isinstance(workflow, dict) else None
+    if not isinstance(jobs, dict):
+        raise RoutingPolicyError(layout_error)
+    observed = False
+    for name, job in jobs.items():
+        if not isinstance(job, dict) or not isinstance(job.get("steps", []), list):
+            raise RoutingPolicyError(layout_error)
+        for step in job.get("steps", []):
+            if not isinstance(step, dict):
+                raise RoutingPolicyError(layout_error)
+            action = step.get("uses", "").partition("@")[0].casefold()
+            if action != "actions/checkout" and not action.startswith("actions/checkout/"):
                 continue
-            observed += len(actions)
-            if len(actions) != 1 or own_input(step, 8, "ref") != expected_ref:
-                raise RoutingPolicyError(f"every {context} checkout must use its own candidate ref ({job})")
-    # This detector deliberately does not share the observer's indentation or step grammar.
-    # Quoted, flow-style, reindented, or otherwise unsupported checkout references must be
-    # refused, never disappear from both sides of an equality. Extra references in comments or
-    # shell examples also fail closed until their source layout receives explicit review.
-    declared = contents.count("actions/checkout")
-    declared_uses = len(re.findall(r"(?<![\w-])['\"]?uses['\"]?\s*:", contents))
-    supported_uses = len(re.findall(
-        r"(?m)^(?:    |      - |        )uses: [-A-Za-z0-9_./@]+(?: +#.*)?$", contents))
-    if not observed or observed != declared or declared_uses != supported_uses:
-        raise RoutingPolicyError(f"every {context} checkout must use an observable supported step layout")
+            observed = True
+            inputs = step.get("with")
+            if not isinstance(inputs, dict) or inputs.get("ref") != expected_ref:
+                raise RoutingPolicyError(f"every {context} checkout must use its own candidate ref ({name})")
+    if not observed:
+        raise RoutingPolicyError(layout_error)
+    return jobs
 
 
 def check_secretless(contents: str) -> None:
@@ -185,10 +190,12 @@ def check_ci_workflow(contents: str) -> None:
     for fragment in required:
         if fragment not in contents:
             raise RoutingPolicyError(f"ordinary CI routing contract is missing: {fragment}")
-    check_checkout_bindings(contents, "${{ inputs.merge_sha || github.sha }}", "ordinary CI")
-    caller = workflow_jobs(contents).get("full-configurator", "")
-    if not re.search(r"(?m)^    uses: \./\.github/workflows/configurator\.yml$", caller) \
-            or own_input(caller, 4, "candidate_ref") != "${{ inputs.merge_sha || github.sha }}":
+    expected_ref = "${{ inputs.merge_sha || github.sha }}"
+    jobs = check_checkout_bindings(contents, expected_ref, "ordinary CI")
+    caller = jobs.get("full-configurator", {})
+    inputs = caller.get("with")
+    if (caller.get("uses") != "./.github/workflows/configurator.yml"
+            or not isinstance(inputs, dict) or inputs.get("candidate_ref") != expected_ref):
         raise RoutingPolicyError("reusable Configurator must receive the exact routed candidate ref")
 
 

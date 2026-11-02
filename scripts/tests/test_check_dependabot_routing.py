@@ -188,3 +188,39 @@ class FlowStyleCheckoutStepTest(unittest.TestCase):
         flow = '      - {uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1, with: {ref: "${{ github.sha }}"}}\n'
         with self.assertRaisesRegex(RoutingPolicyError, 'observable supported step layout'):
             check_ci_workflow(ci[:start] + flow + ci[end:])
+
+
+class EncodedCheckoutStepTest(unittest.TestCase):
+    encoded_action = r'"u\u0073es": "actions/\u0063heckout@3d3c42e5aac5ba805825da76410c181273ba90b1"'
+
+    def test_ordinary_checkout_with_encoded_key_and_action_cannot_hide_missing_or_wrong_ref(self):
+        ci = (ROOT / '.github/workflows/ci.yml').read_text()
+        start = ci.index('      - name: Check out repository\n', ci.index('  docs-site:\n'))
+        end = ci.index('      - name:', start + 1)
+        for inputs in ('', '        with:\n          ref: ${{ github.sha }}\n'):
+            with self.subTest(inputs=inputs), self.assertRaises(RoutingPolicyError):
+                check_ci_workflow(ci[:start] + '      - ' + self.encoded_action + '\n' + inputs + ci[end:])
+
+    def test_encoded_checkout_after_bound_configurator_checkout_cannot_reset_workspace(self):
+        workflow = (ROOT / '.github/workflows/configurator.yml').read_text()
+        position = workflow.index('      - name: Set up Java\n')
+        extra = '      - ' + self.encoded_action + '\n        with:\n          ref: ${{ github.sha }}\n'
+        with self.assertRaises(RoutingPolicyError):
+            check_configurator_workflow(workflow[:position] + extra + workflow[position:])
+
+    def test_duplicate_decoded_ref_and_alias_layouts_fail_closed(self):
+        workflow = (ROOT / '.github/workflows/configurator.yml').read_text()
+        ref = '          ref: ${{ inputs.candidate_ref || github.sha }}'
+        for replacement in (ref + '\n          "r\\u0065f": ${{ github.sha }}',
+                            ref.replace('ref: ', 'ref: &candidate '),
+                            ref.replace('ref: ', 'ref: *candidate ')):
+            with self.subTest(replacement=replacement), self.assertRaises(RoutingPolicyError):
+                check_configurator_workflow(workflow.replace(ref, replacement, 1))
+
+    def test_checkout_repository_spelling_cannot_hide_wrong_ref(self):
+        workflow = (ROOT / '.github/workflows/configurator.yml').read_text()
+        for repository in ('Actions/Checkout', 'actions/checkout/.'):
+            changed = workflow.replace('actions/checkout@', repository + '@', 1)
+            changed = changed.replace('ref: ${{ inputs.candidate_ref || github.sha }}', 'ref: ${{ github.sha }}', 1)
+            with self.subTest(repository=repository), self.assertRaisesRegex(RoutingPolicyError, 'its own candidate ref'):
+                check_configurator_workflow(changed)

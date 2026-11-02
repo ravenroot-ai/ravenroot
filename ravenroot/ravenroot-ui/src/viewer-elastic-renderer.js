@@ -3,6 +3,7 @@ import * as d3 from 'd3';
 import { edgeFlowWidth, formatRuntimeTime } from './monitoring-runtime-state.js';
 import { createElasticVisualGroupRenderer } from './visual-group-elastic-renderer.js';
 import { uiText } from './ui-text.js';
+import { getRendererPalette } from './theme-palette.js';
 
 function requiredElement(value, name) {
   if (!(value instanceof Element)) throw productError("workspace.error.viewer.elastic.renderer.is.required", new TypeError(`${name} is required.`), { value1: name });
@@ -122,8 +123,10 @@ export function mountD3ElasticRenderer({
       .translate(initialTransform.x, initialTransform.y).scale(initialTransform.k));
   }
 
+  const completedFlowColor = palette?.edgeType?.completed || getRendererPalette('light').edgeType.completed;
+  const activeFlowColor = palette?.selection || getRendererPalette('light').selection;
   const defs = root.insert('defs', ':first-child');
-  [...new Set(links.map(link => link.color))].forEach(color => {
+  [...new Set([...links.map(link => link.color), completedFlowColor, activeFlowColor])].forEach(color => {
     defs.append('marker')
       .attr('id', markerId(markerKey, color))
       .attr('viewBox', '0 -5 10 10')
@@ -236,8 +239,12 @@ export function mountD3ElasticRenderer({
     y: d3.mean(nodes, node => finite(node.y, 0)) ?? viewportHeight / 2,
   };
 
+  const flowColor = link => link.flow?.recent > 0 ? activeFlowColor
+    : link.flow?.count > 0 ? completedFlowColor : link.color;
   const paintGeometry = () => {
     edgeSelection.attr('d', arcPath)
+      .attr('stroke', flowColor)
+      .attr('marker-end', link => `url(#${markerId(markerKey, flowColor(link))})`)
       .attr('stroke-width', link => link.flow?.count > 0 && !link.flow?.recent ? 3 : edgeFlowWidth(link.flow?.recent || 0))
       .attr('opacity', link => {
         const distance = Math.hypot(link.target.x - link.source.x, link.target.y - link.source.y);
@@ -438,7 +445,10 @@ export function mountD3ElasticRenderer({
       if (!link || destroyed) return;
       link.flow = flow;
       const selection = edgeSelection.filter(candidate => runtimeIdentity(candidate) === edgeId);
-      selection.interrupt('flow').attr('stroke-width', flow.count > 0 && !flow.recent ? 3 : edgeFlowWidth(flow.recent))
+      selection.interrupt('flow')
+        .attr('stroke', flowColor(link))
+        .attr('marker-end', `url(#${markerId(markerKey, flowColor(link))})`)
+        .attr('stroke-width', flow.count > 0 && !flow.recent ? 3 : edgeFlowWidth(flow.recent))
         .attr('opacity', flow.recent > 0 ? 1 : .82)
         .classed('d3-edge--active', flow.recent > 0);
       if (!reducedMotion && flow.recent > 0) {

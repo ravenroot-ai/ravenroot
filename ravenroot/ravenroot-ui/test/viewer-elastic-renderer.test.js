@@ -231,7 +231,15 @@ describe('shared D3 Elastic renderer', () => {
       { reducedMotion: true });
     expect(Number(svg.querySelector('.d3-edges path').getAttribute('stroke-width'))).toBeGreaterThan(1.8);
     expect(svg.querySelector('marker').getAttribute('markerWidth')).toBe('6');
-    expect(svg.querySelector('.d3-edges path').getAttribute('stroke-dasharray')).toBeNull();
+    const edge = svg.querySelector('.d3-edges path');
+    expect(edge.getAttribute('stroke-dasharray')).toBeNull();
+    expect(edge.getAttribute('stroke')).toBe('#0969da');
+    renderer.updateEdgeFlow('e1', { recent: 0, count: 9 }, { reducedMotion: true });
+    expect(edge.getAttribute('stroke')).toBe('#238636');
+    const marker = document.querySelector(edge.getAttribute('marker-end').slice(4, -1));
+    expect(marker.querySelector('path').getAttribute('fill')).toBe('#238636');
+    renderer.resetRuntime();
+    expect(edge.getAttribute('stroke')).toBe('#fff');
     renderer.destroy();
   });
 

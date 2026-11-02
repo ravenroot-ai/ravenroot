@@ -178,8 +178,8 @@ async function openGraph(page, xml, name) {
 }
 
 // Listener READY precedes initial START admission. Use this only when a test needs the
-// accepted initial identities and the application's execution projection, not for lifecycle tests.
-async function expectInitialTraversalProjected(page, documentId) {
+// accepted deployment admission identities, not for lifecycle tests.
+async function expectInitialAdmissionBound(page, documentId) {
   await expect.poll(() => page.evaluate(id => {
     const owner = window.ravenroot.workspace.find(id), run = owner?.deploymentRun;
     return { processInstanceId: run?.processInstanceId, traversalId: run?.traversalId,
@@ -189,8 +189,7 @@ async function expectInitialTraversalProjected(page, documentId) {
   }, documentId)).toEqual({
     processInstanceId: '10000000-0000-0000-0000-000000000001',
     traversalId: '20000000-0000-0000-0000-000000000002',
-    projectedProcessInstanceId: '10000000-0000-0000-0000-000000000001',
-    projectedTraversalId: '20000000-0000-0000-0000-000000000002', pinMatches: true,
+    projectedProcessInstanceId: null, projectedTraversalId: null, pinMatches: false,
   });
 }
 
@@ -635,7 +634,7 @@ test('an ambiguous start becomes UNKNOWN until observation proves the listener s
  * LISTENING and the canvas stayed blank for as long as the source ran. The document now matches on
  * the deployment its session reports, which is the one identity it can hold in advance.
  */
-test('a listening deployment retains all actual traversal metadata without repainting its mutable draft', async ({ page }) => {
+test('a listening deployment paints all actual traversals on its unchanged originating graph', async ({ page }) => {
   await stubRuntime(page, { sourceTraffic: { nodeIds: ['source', 'end'], admissions: 6 } });
   await page.goto('/');
   await openGraph(page, sourceGraph('external.consume'), 'listening.graphml');
@@ -646,7 +645,7 @@ test('a listening deployment retains all actual traversal metadata without repai
   await page.locator('#btn-run').click();
   await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Ready');
   expect((await initialResponse).status()).toBe(202);
-  await expectInitialTraversalProjected(page, await page.evaluate(() => window.ravenroot.activeDocument().id));
+  await expectInitialAdmissionBound(page, await page.evaluate(() => window.ravenroot.activeDocument().id));
 
   const painted = () => page.evaluate(() => {
     const document_ = window.ravenroot.activeDocument();
@@ -666,9 +665,9 @@ test('a listening deployment retains all actual traversal metadata without repai
   await expect.poll(async () => (await painted()).traversals).toBeGreaterThanOrEqual(6);
   const report = await painted();
   expect(report.deploymentId, 'the document holds the deployment, not an execution').toBeTruthy();
-  expect(report.boundExecutionId, 'the initial traversal remains a separate explicit identity').toBe('20000000-0000-0000-0000-000000000002');
-  expect(report.source, 'deployment events never repaint the mutable draft').toBe('idle');
-  expect(report.end, 'the pinned monitor owns deployment highlights').toBe('idle');
+  expect(report.boundExecutionId, 'the initial traversal stays in the deployment binding, outside one-shot reconciliation').toBeNull();
+  expect(report.source, 'matching source events paint the unchanged deployed graph').toBe('completed');
+  expect(report.end, 'each matching node receives its runtime highlight').toBe('completed');
 });
 
 /**
@@ -753,7 +752,7 @@ test('known continuation stays with its originating bound document through focus
       return [run.processInstanceId, run.traversalId];
     }, originId)).toEqual([null, null]);
   } finally { releaseInitialBody(); }
-  await expectInitialTraversalProjected(page, originId);
+  await expectInitialAdmissionBound(page, originId);
   const original = await page.evaluate(() => ({ id: window.ravenroot.activeDocument().id,
     binding: { ...window.ravenroot.activeDocument().deploymentRun } }));
   expect(original.id).toBe(originId);

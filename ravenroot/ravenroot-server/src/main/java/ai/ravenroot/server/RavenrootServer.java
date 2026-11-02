@@ -4455,6 +4455,14 @@ public final class RavenrootServer implements AutoCloseable {
                     fail(exchange, httpContext, ErrorCode.UNKNOWN_RESOURCE);
                     return;
                 }
+                String include = query.get("include");
+                if (include != null && !INCLUDE_DIAGNOSTICS.equals(include)) {
+                    fail(exchange, httpContext, ErrorCode.INVALID_REQUEST); return;
+                }
+                if (INCLUDE_DIAGNOSTICS.equals(include)) {
+                    // Content requires native execution-read authority in addition to observation.
+                    authorizedApplication.localDeployment(context, deploymentId);
+                }
                 streamDeploymentEvents(exchange, httpContext, context,
                         deploymentId, incarnationId, graphVersion);
                 return;
@@ -4821,13 +4829,27 @@ public final class RavenrootServer implements AutoCloseable {
             requireCurrentDeploymentSource(
                     httpContext.applicationContext(current), binding);
             String cursor = deploymentCursors.issue(binding, event.sequence());
-            String body = deploymentExecutionJson(binding, event);
+            if (INCLUDE_DIAGNOSTICS.equals(query(exchange).get("include"))) {
+                authorizedApplication.localDeployment(httpContext.applicationContext(current), binding.deploymentId());
+            }
+            String body = INCLUDE_DIAGNOSTICS.equals(query(exchange).get("include"))
+                    ? deploymentDiagnosticJson(binding, event) : deploymentExecutionJson(binding, event);
             output.write(("id: " + cursor + "\nevent: execution\ndata: " + body + "\n\n")
                     .getBytes(StandardCharsets.UTF_8));
             output.flush();
             sent = event.sequence();
         }
         return Math.max(sent, batch.latestSequence());
+    }
+
+    // Native author observation may request the same bounded diagnostics as /v1/events.
+    // Embed observation keeps its separate, content-free projection.
+    static String deploymentDiagnosticJson(DeploymentObservationCursorStore.Binding binding,
+                                           ai.ravenroot.api.application.ExecutionEvent event) {
+        return "{\"type\":\"execution\",\"deploymentId\":\"" + escape(binding.deploymentId())
+                + "\",\"incarnationId\":\"" + escape(binding.incarnationId())
+                + "\",\"graphVersion\":\"" + escape(binding.graphVersion())
+                + "\",\"event\":" + ExecutionEventWireJson.legacyLive(event) + "}";
     }
 
     static String deploymentExecutionJson(DeploymentObservationCursorStore.Binding binding,

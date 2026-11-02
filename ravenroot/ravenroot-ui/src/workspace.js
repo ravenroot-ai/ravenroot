@@ -407,7 +407,7 @@ export function documentForRuntimeEvent(workspace, event, streamScope) {
     // keeps proving it after the author edits the document the session is not running.
     const listening = streamTenant !== undefined ? workspace.documents.filter(
       doc => doc.tenantId === streamTenant && (sourceSessionOwnsDeployment(doc, deploymentId)
-        || doc.deploymentRun?.deploymentId === deploymentId && doc.deploymentRun?.graphVersion === event.graphVersion),
+        || deploymentRunOwnsEvent(doc, event)),
     ) : [];
     // A deployment claim is useful only while it is unique in this workspace. Two open documents
     // claiming the same deployment are an ambiguity, not a reason to choose whichever was opened
@@ -453,6 +453,16 @@ export function retireSourceSessionProcessBindings(document_) {
   document_?.sourceSession?.retiredProcessOwners?.clear();
 }
 
+// Durable runtime events carry the server registration identity. Older process-local
+// producers carry the user-facing deployment id. Both require the pinned graph version.
+export function deploymentRunOwnsEvent(document_, event) {
+  const binding = document_?.deploymentRun;
+  return Boolean(binding && event.deploymentId && binding.graphVersion
+    && binding.graphVersion === event.graphVersion
+    && (binding.deploymentId === event.deploymentId
+      || binding.registrationIdentity === event.deploymentId));
+}
+
 function sourceSessionOwnsDeployment(document_, deploymentId) {
   const session = document_?.sourceSession;
   return Boolean(session?.sessionId && session.deploymentId === deploymentId
@@ -484,8 +494,7 @@ function rememberSourceProcessOwner(document_, event, streamTenant) {
   if (!processInstanceId || !graphVersion || streamTenant === undefined
       || document_?.tenantId !== streamTenant
       || !(sourceSessionOwnsDeployment(document_, event.deploymentId)
-        || document_.deploymentRun?.deploymentId === event.deploymentId
-          && document_.deploymentRun.graphVersion === graphVersion)) return;
+        || deploymentRunOwnsEvent(document_, event))) return;
   const owners = session.processOwners;
   session.retiredProcessOwners.delete(processInstanceId);
   owners.delete(processInstanceId);
@@ -493,7 +502,7 @@ function rememberSourceProcessOwner(document_, event, streamTenant) {
     tenantId: streamTenant,
     graphVersion,
     originTraversalId: event.traversalId || event.executionId,
-    deploymentBindingToken: document_.deploymentRun?.deploymentId === event.deploymentId ? deploymentProcessBindingToken(document_.deploymentRun) : null,
+    deploymentBindingToken: deploymentRunOwnsEvent(document_, event) ? deploymentProcessBindingToken(document_.deploymentRun) : null,
     runtimeIncarnationId: document_.deploymentRun?.incarnationId || null,
     documentIncarnation: document_.incarnation,
     deploymentId: event.deploymentId,
@@ -537,7 +546,7 @@ function rememberedSourceProcessDecision(workspace, event, streamTenant) {
       && document_.tenantId === owner.tenantId
       && (owner.deploymentBindingToken
         ? deploymentProcessBindingToken(document_.deploymentRun) === owner.deploymentBindingToken
-          && document_.deploymentRun.deploymentId === owner.deploymentId
+          && deploymentRunOwnsEvent(document_, owner)
           && document_.deploymentRun.graphVersion === owner.graphVersion
           && document_.deploymentRun.incarnationId === owner.runtimeIncarnationId
         : sourceSessionOwnsDeployment(document_, owner.deploymentId)

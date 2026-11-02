@@ -64,7 +64,7 @@ let requests;
 let capabilityResponse;
 let catalogResponse;
 let executionContext;
-let deployments, contextDeployments;
+let deployments, contextDeployments, durableTasks;
 const PID = '10000000-0000-0000-0000-000000000001', TID = '20000000-0000-0000-0000-000000000002';
 
 function task(id, generation, status = 'WAITING') {
@@ -87,7 +87,7 @@ function startService() {
   service = createServer(async (request, response) => {
     if (respondWithSuccessfulGraphInspection(request, response, { origin: UI_ORIGIN })) return;
     const headers = { 'Access-Control-Allow-Origin': UI_ORIGIN, Vary: 'Origin',
-      'Access-Control-Allow-Headers': 'authorization,content-type,x-ravenroot-deployment-incarnation,x-ravenroot-graph-version,x-ravenroot-registration-identity',
+      'Access-Control-Allow-Headers': 'authorization,content-type,x-ravenroot-deployment-incarnation,x-ravenroot-graph-version,x-ravenroot-registration-identity,idempotency-key,x-ravenroot-expected-generation',
       'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' };
     if (request.method === 'OPTIONS') { response.writeHead(204, headers).end(); return; }
     const url = new URL(request.url, SERVICE_ORIGIN);
@@ -103,8 +103,10 @@ function startService() {
       const graph = Buffer.concat(chunks), id = url.searchParams.get('id');
       const status = { deploymentId: id, tenantId: 'tenant', state: 'REGISTERED', sourceCount: 0,
         graphVersion: createHash('sha256').update(graph).digest('hex'), runtimeIncarnationId: `runtime-${id}`,
-        scope: 'LOCAL_PROCESS', diagnostic: null, continuity: 'PROCESS_LOCAL', deploymentRevision: null,
-        desiredState: null, observedState: null, recoveryFailure: null, context: executionContext.graphVersion };
+        scope: 'LOCAL_PROCESS', diagnostic: null, continuity: durableTasks ? 'DURABLE' : 'PROCESS_LOCAL',
+        registrationIdentity: durableTasks ? `registration-${id}` : null, deploymentRevision: durableTasks ? 1 : null,
+        desiredState: durableTasks ? 'RUNNING' : null, observedState: durableTasks ? 'REGISTERED' : null,
+        deploymentGeneration: durableTasks ? 1 : null, recoveryFailure: null, context: executionContext.graphVersion };
       deployments.set(id, status); contextDeployments.set(executionContext.graphVersion, status);
       return json(response, 200, status, headers);
     }
@@ -117,6 +119,7 @@ function startService() {
             || request.headers['x-ravenroot-graph-version'] !== status.graphVersion)
           return json(response, 409, { error: 'binding changed' }, headers);
         status.state = 'READY';
+        if (durableTasks) return json(response, 200, { outcome: 'TERMINAL', commandId: 'start-1', generation: 1 }, headers);
       }
       if (action === 'view') return json(response, 200, { viewerSourceVersion: '1',
         source: { kind: 'deployment', deploymentId: status.deploymentId, graphVersion: status.graphVersion,
@@ -141,7 +144,9 @@ function startService() {
           || (attentionMode === 'offline-graph-b' && contextB)) {
         request.socket.destroy(); return;
       }
-      let live = attentionMode === 'empty-graph-b' && contextB ? []
+      let live = (durableTasks && !url.searchParams.has('taskId')
+        && ![...deployments.values()].some(status => status.registrationIdentity === deploymentId))
+        || attentionMode === 'empty-graph-b' && contextB ? []
         : tasks.filter(entry => ['WAITING', 'ESCALATED'].includes(entry.status)).map(entry => ({ ...entry,
           graphVersion: requestedGraph || entry.graphVersion, deploymentId: deploymentId || entry.deploymentId,
           processInstanceId: url.searchParams.get('processInstanceId') || entry.processInstanceId }));
@@ -223,7 +228,7 @@ async function runAndSelect(page, graphVersion = executionContext.graphVersion) 
   await expect.poll(() => page.evaluate(() => Boolean(window.ravenroot.activeDocument().deploymentRun?.traversalId))).toBe(true);
   const deployed = contextDeployments.get(graphVersion);
   expect(deployed).toBeDefined();
-  await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().execution.graphVersion))
+  await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().humanTasks.graphVersion))
     .toBe(deployed.graphVersion);
   await page.evaluate(() => {
     window.ravenroot.activeDocument().cy.getElementById('human-confirmation').emit('tap');
@@ -342,7 +347,7 @@ test.beforeEach(async () => {
   tasks = [task('task-1', 1, 'ESCALATED'), task('task-2', 2)];
   decisionMode = 'normal';
   attentionMode = 'normal';
-  requests = []; deployments = new Map(); contextDeployments = new Map();
+  requests = []; deployments = new Map(); contextDeployments = new Map(); durableTasks = false;
   capabilityResponse = { ...CAPABILITY };
   catalogResponse = [HUMAN_TASK];
   executionContext = { processInstanceId: 'process-v1', graphVersion: 'graph-v1' };
@@ -466,6 +471,9 @@ test('attention survives Design and Monitoring renderer changes with a pulsing n
   }).toBe(true);
 
   await page.locator('#btn-monitoring').click();
+  await expect(page.locator('.doc-elastic-host.active')).toBeVisible();
+  await page.locator('#btn-design').click();
+  await page.locator('#btn-history').click();
   await expect(page.locator('.doc-history-dialog')).toBeVisible();
   await expect(page.locator('.doc-history-attention')).toContainText('2 actionable tasks · 1 escalated');
   await expect(page.locator('.doc-history-review-tasks')).toBeInViewport();
@@ -751,11 +759,11 @@ test('keyboard focus, screen-reader structure and reduced motion remain usable',
   await expect.poll(() => page.evaluate(() => {
     const node = window.ravenroot.activeDocument().cy.getElementById('human-confirmation');
     return { label: node.renderedStyle('label'), borderStyle: node.renderedStyle('border-style'),
-      underlayOpacity: Number(node.renderedStyle('underlay-opacity')) };
+      underlayOpacity: Number(node.style('underlay-opacity')) };
   })).toMatchObject({ label: expect.stringContaining('⚑ 2 · ▲ 1'),
     borderStyle: 'double', underlayOpacity: expect.any(Number) });
   await expect.poll(() => page.evaluate(() => Number(window.ravenroot.activeDocument().cy
-    .getElementById('human-confirmation').renderedStyle('underlay-opacity')))).toBeGreaterThan(0);
+    .getElementById('human-confirmation').style('underlay-opacity')))).toBeGreaterThan(0);
   if (evidenceDirectory) {
     await page.screenshot({ path: `${evidenceDirectory}/human-task-attention-unselected-desktop.png`,
       fullPage: true });
@@ -784,4 +792,40 @@ test('one-shot Test retains the Elastic attention carrier across renderer change
   await expect(page.locator('.human-task-status')).toContainText('2 actionable tasks');
   await page.locator('#btn-design').click();
   await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().cy.getElementById('human-confirmation').renderedStyle('label'))).toBe('Human task\n⚑ 2 · ▲ 1');
+});
+
+
+test('durable Run reconnects task attention and blinking after reload without another START', async ({ page }) => {
+  test.setTimeout(60000);
+  durableTasks = true;
+  await connectAndCreate(page);
+  page.once('dialog', dialog => dialog.accept());
+  await page.locator('#btn-run').click();
+  await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().deploymentRun?.traversalId)).toBe(TID);
+  await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().cy
+    .getElementById('human-confirmation').data('humanTaskPending'))).toBe(2);
+  await page.evaluate(() => { window.ravenroot.activeDocument().cy.getElementById('human-confirmation').emit('tap'); });
+  await expect(page.locator('[data-human-task-id="task-1"]')).toBeVisible();
+  await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().cy
+    .getElementById('human-confirmation').style('underlay-opacity')), { intervals: [100] }).toBe('0.45');
+  await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().cy
+    .getElementById('human-confirmation').style('underlay-opacity')), { intervals: [100] }).toBe('0.32');
+  const starts = requests.filter(value => value.endsWith('/initial-start')).length;
+  await page.evaluate(() => window.ravenroot.flushWorkspacePersistence());
+  await page.reload();
+  await page.locator('#service-url').fill(SERVICE_ORIGIN);
+  page.once('dialog', dialog => dialog.accept());
+  await page.locator('#service-url').press('Tab');
+  await expect.poll(() => page.evaluate(() => window.ravenroot?.activeDocument()?.cy
+    ?.getElementById('human-confirmation').data('humanTaskPending'))).toBe(2);
+  await page.evaluate(() => { window.ravenroot.activeDocument().cy.getElementById('human-confirmation').emit('tap'); });
+  await expect(page.locator('[data-human-task-id="task-1"]')).toBeVisible();
+  expect(requests.filter(value => value.endsWith('/initial-start')).length).toBe(starts);
+  const header = page.locator('.doc-pane--active .doc-pane-header');
+  const badge = await header.locator('.doc-run-binding').boundingBox();
+  const maximize = await header.locator('.doc-pane-maximize').boundingBox();
+  expect(badge.x + badge.width).toBeLessThanOrEqual(maximize.x);
+  const toolbar = await page.locator('.graph-interaction-tools').boundingBox();
+  const headerBox = await header.boundingBox();
+  expect(toolbar.y).toBeGreaterThanOrEqual(headerBox.y + headerBox.height);
 });

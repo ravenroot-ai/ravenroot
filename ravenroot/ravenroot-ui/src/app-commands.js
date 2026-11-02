@@ -185,6 +185,9 @@ export function createAppCommands(actions, { t = uiText } = {}) {
       isEnabled: context => authoring(context) && context.editable && !context.hasJoinSemanticsMarker,
     },
 
+    { id: 'view.deploymentHistory', group: 'graph-view', order: 5,
+      placements: ['menu.view', 'toolbar.view'], execute: actions.openHistory,
+      isEnabled: context => context.tenantAuthority && context.hasDeploymentHistory },
     { id: 'view.fit', group: 'graph-view', order: 10,
       placements: ['menu.view', 'toolbar.view', 'toolbar.canvas', 'help'], execute: actions.fit,
       isEnabled: viewportIdle, shortcuts: [global({ key: 'f' })] },
@@ -264,6 +267,11 @@ export function createAppCommands(actions, { t = uiText } = {}) {
       placements: ['menu.run', 'toolbar.primary', 'help'], execute: actions.run,
       isEnabled: context => context.editable && context.tenantAuthority
         && (!context.running || context.executionUnknown === true),
+    },
+    { id: 'run.newDeployment', group: 'execution', order: 25,
+      placements: ['menu.run'], execute: actions.runNewDeployment,
+      isEnabled: context => Boolean(context.editable && context.tenantAuthority
+        && context.hasOriginDeployment && !context.running),
     },
     { id: 'run.pause', group: 'execution', order: 30,
       placements: ['menu.run', 'toolbar.primary', 'help'], execute: actions.pause,

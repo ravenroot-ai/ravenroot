@@ -155,17 +155,6 @@ export function createViewerStylesheet(themeOrPalette = 'dark', mode = 'cyto',
           'background-fit': 'none', 'background-clip': 'none' },
       })),
     ] : []),
-    { selector: 'node[humanTaskPending > 0]', style: {
-      'underlay-color': palette.focus, 'underlay-opacity': 0.22, 'underlay-padding': 9,
-      'border-style': 'double', 'border-width': 4,
-    } },
-    { selector: 'node[humanTaskEscalated > 0]', style: {
-      'underlay-color': node.error, 'underlay-opacity': 0.32, 'underlay-padding': 11,
-      'border-style': 'double', 'border-width': 5,
-    } },
-    { selector: 'node.human-task-pulse[humanTaskPending > 0]', style: {
-      'underlay-opacity': 0.45, 'underlay-padding': 15,
-    } },
     { selector: 'node[?bypassed], node[runtimeState="bypassed"]', style: {
       'border-style': 'dashed', 'border-color': node.system, 'border-width': 2.5,
     } },
@@ -261,6 +250,18 @@ export function createViewerStylesheet(themeOrPalette = 'dark', mode = 'cyto',
       'line-color': palette.trace, 'target-arrow-color': palette.trace, width: 3.5,
     } },
     { selector: 'edge:selected.dim', style: { opacity: 1 } },
+    // Human decisions remain prominent over runtime, selection and cursor styles.
+    { selector: 'node[humanTaskPending > 0]', style: {
+      'underlay-color': palette.focus, 'underlay-opacity': 0.22, 'underlay-padding': 9,
+      'border-style': 'double', 'border-width': 4,
+    } },
+    { selector: 'node[humanTaskEscalated > 0]', style: {
+      'underlay-color': node.error, 'underlay-opacity': 0.32, 'underlay-padding': 11,
+      'border-style': 'double', 'border-width': 5,
+    } },
+    { selector: 'node.human-task-pulse[humanTaskPending > 0]', style: {
+      'underlay-opacity': 0.45, 'underlay-padding': 15,
+    } },
     ...(mode === 'n8n' ? [
       { selector: 'edge', style: {
         'curve-style': 'taxi', 'taxi-direction': 'auto',

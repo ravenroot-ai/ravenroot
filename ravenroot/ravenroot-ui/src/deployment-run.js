@@ -49,7 +49,7 @@ export async function graphVersionOf(graphMl) {
  * Restoration calls no mutation here: only an explicit Run enters this function.
  */
 export function runOriginDeployment(owner, { client, serviceUrl, tenantId, graphMl, inputJson,
-  persist, isCurrent, pin = graphVersionOf, onPhase = () => {}, randomId, attachment = null }) {
+  persist, isCurrent, pin = graphVersionOf, onPhase = () => {}, onView = async () => {}, randomId, attachment = null }) {
   const existing = flights.get(owner);
   if (existing) return existing.task;
   const incarnation = owner.incarnation;
@@ -57,7 +57,8 @@ export function runOriginDeployment(owner, { client, serviceUrl, tenantId, graph
   owner.deploymentRun = intent;
   const control = { intent, status: null, stopRequested: false, task: null };
   flights.set(owner, control);
-  const publishStatus = status => { control.status = status; owner.deploymentRunStatus = status.state; onPhase(owner, intent); };
+  const publishStatus = status => { control.status = status; owner.deploymentRunStatus = status.state; owner.deploymentRunLastObservedState = status.state;
+    owner.deploymentRunSourceCount = status.sourceCount; onPhase(owner, intent); };
   const interrupted = status => ({ intent, status, view: null, initial: null, stoppedBeforeInitial: true });
   const current = () => owner.incarnation === incarnation && owner.deploymentRun === intent && isCurrent(owner, client)
     && intent.serviceUrl === serviceUrl && intent.tenantId === tenantId;
@@ -73,8 +74,15 @@ export function runOriginDeployment(owner, { client, serviceUrl, tenantId, graph
       catch (error) {
         if (error?.status !== 404) throw error;
         check();
-        if (intent.registrationIdentity) status = await client.restoreDeployment(intent.deploymentId, { registrationIdentity: intent.registrationIdentity, graphVersion: intent.graphVersion });
-        else {
+        if (intent.registrationIdentity) {
+          try {
+            status = await client.restoreDeployment(intent.deploymentId, {
+              registrationIdentity: intent.registrationIdentity, graphVersion: intent.graphVersion });
+          } catch (restoreError) {
+            if (restoreError?.status === 404) throw productError('workspace.run.restoreUnavailable', new Error('Saved deployment could not be restored', { cause: restoreError }));
+            throw restoreError;
+          }
+        } else {
           if (!intent.registrationAllowed || intent.incarnationId || intent.processInstanceId) throw failure('ATTACHED_DEPLOYMENT_NOT_FOUND');
           status = await client.registerDeployment(intent.deploymentId, intent.graphMl);
         }
@@ -131,6 +139,10 @@ export function runOriginDeployment(owner, { client, serviceUrl, tenantId, graph
         throw failure('DEPLOYMENT_INCARNATION_CHANGED');
       if (!rebound) intent.incarnationId = view.source.incarnationId;
       intent.phase = rebound ? 'RECONCILE' : 'READY'; await save();
+      if (control.stopRequested) return interrupted(status);
+      // Establish the deployment stream before START: hosted executions do not publish to
+      // the one-shot execution stream, and a fresh deployment subscription starts at now.
+      await onView(view); check();
       if (control.stopRequested) return interrupted(status);
       if (intent.processInstanceId && !rebound) return { intent, status, view, initial: null };
       // Saved admission identities require read-only marker reconciliation. An intent that never
@@ -206,7 +218,7 @@ export function stopOriginDeployment(owner, { client, isCurrent, reason }) {
     try { status = verify(await client.deployment(binding.deploymentId)); }
     catch (error) {
       if (error?.status !== 404) throw error;
-      check(); owner.deploymentRunStatus = 'STOPPED'; return true;
+      check(); owner.deploymentRunStatus = 'STOPPED'; owner.deploymentRunLastObservedState = 'STOPPED'; return true;
     }
     // The finite status identity exists before a definition/view is opened. A cold registration
     // must be stoppable without activating it merely to obtain a viewer projection.
@@ -234,12 +246,12 @@ export function stopOriginDeployment(owner, { client, isCurrent, reason }) {
       try { await client.stopDeployment(binding.deploymentId, command); }
       catch (error) {
         if (error?.status !== 404) throw error;
-        check(); owner.deploymentRunStatus = 'STOPPED'; return true;
+        check(); owner.deploymentRunStatus = 'STOPPED'; owner.deploymentRunLastObservedState = 'STOPPED'; return true;
       }
       check();
     }
     const observed = verify(await client.deployment(binding.deploymentId));
-    owner.deploymentRunStatus = observed.state;
+    owner.deploymentRunStatus = observed.state; owner.deploymentRunLastObservedState = observed.state;
     if (observed.state !== 'STOPPED') return false;
     return true;
   })();
@@ -257,12 +269,16 @@ export async function observeOriginDeployment(owner, { client, isCurrent }) {
   try { status = await client.deployment(binding.deploymentId); }
   catch (error) {
     if (error?.status !== 404 || !current() || !binding.incarnationId) throw error;
-    owner.deploymentRunStatus = 'STOPPED'; return true;
+    owner.deploymentRunStatus = 'STOPPED'; owner.deploymentRunLastObservedState = 'STOPPED'; owner.deploymentRunObservedSource = null; return true;
   }
   if (!current() || status.deploymentId !== binding.deploymentId || status.tenantId !== binding.tenantId
       || status.graphVersion !== binding.graphVersion
       || binding.registrationIdentity && status.registrationIdentity !== binding.registrationIdentity
       || !binding.registrationIdentity && binding.incarnationId && status.runtimeIncarnationId !== binding.incarnationId)
     throw failure('OBSERVATION_BINDING_CHANGED');
-  owner.deploymentRunStatus = status.state; return true;
+  owner.deploymentRunStatus = status.state; owner.deploymentRunLastObservedState = status.state;
+  owner.deploymentRunSourceCount = status.sourceCount;
+  owner.deploymentRunObservedSource = { deploymentId: binding.deploymentId, graphVersion: binding.graphVersion,
+    incarnationId: status.runtimeIncarnationId || binding.incarnationId };
+  return true;
 }

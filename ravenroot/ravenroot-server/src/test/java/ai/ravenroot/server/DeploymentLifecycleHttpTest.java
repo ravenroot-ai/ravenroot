@@ -486,6 +486,11 @@ class DeploymentLifecycleHttpTest {
                 "configured fallback", null, null, null, "engine", null, 1, null, null, null);
 
         String nativeJson = RavenrootServer.deploymentExecutionJson(binding, event);
+        String diagnosticJson = RavenrootServer.deploymentDiagnosticJson(binding, event);
+        assertTrue(diagnosticJson.contains("\"processInstanceId\":\"" + event.processInstanceId()), diagnosticJson);
+        assertTrue(diagnosticJson.contains("\"invocationId\":\"" + event.invocationId()), diagnosticJson);
+        assertFalse(diagnosticJson.contains("\"detail\":"), diagnosticJson);
+        assertFalse(nativeJson.contains("\"message\":"), nativeJson);
         var embedSerializer = ai.ravenroot.server.embed.EmbedBrowserHttpHandler.class
                 .getDeclaredMethod("executionJson", DeploymentObservationCursorStore.Binding.class,
                         ai.ravenroot.api.application.ExecutionEvent.class);
@@ -496,6 +501,42 @@ class DeploymentLifecycleHttpTest {
         assertTrue(nativeJson.contains("\"fallback\":true"), nativeJson);
         assertTrue(embedJson.contains("\"type\":\"NODE_DEFAULTED\""), embedJson);
         assertTrue(embedJson.contains("\"fallback\":true"), embedJson);
+    }
+
+    @Test
+    void nativeDeploymentDiagnosticsDeliverHostedLogOutputAndIdentities() throws Exception {
+        try (var fixture = new Fixture(false, null, true)) {
+            String graph = NO_SOURCE_GRAPH.replace("<graph id=", "<key id=\"behavior\" for=\"node\" attr.name=\"behavior\" attr.type=\"string\"/><graph id=")
+                    .replace("<edge source=\"start\" target=\"end\"/>",
+                            "<node id=\"log\"><data key=\"kind\">BEHAVIOR</data><data key=\"behavior\">log</data></node><edge source=\"start\" target=\"log\"/><edge source=\"log\" target=\"end\"/>");
+            var registered = fixture.request("POST", "/v1/deployments?id=diagnostic", graph, "tenant-a");
+            assertEquals(200, registered.statusCode(), registered.body());
+            String incarnation = field(registered.body(), "runtimeIncarnationId"), version = field(registered.body(), "graphVersion");
+            assertState(fixture.request("POST", "/v1/deployments/diagnostic/start", "", "tenant-a"), "READY");
+            var stream = fixture.stream("/v1/deployments/diagnostic/events?graphVersion=" + version + "&include=diagnostics", "tenant-a", incarnation);
+            assertEquals(200, stream.statusCode());
+            try (var reader = new java.io.BufferedReader(new java.io.InputStreamReader(stream.body()))) {
+                assertEquals("event: lifecycle", reader.readLine());
+                reader.readLine();
+                String body = "{\"incarnationId\":\"" + incarnation + "\",\"graphVersion\":\"" + version
+                        + "\",\"requestId\":\"diagnostic-start\",\"input\":\"retained log fixture\"}";
+                var accepted = fixture.request("POST", "/v1/deployments/diagnostic/initial-start", body, "tenant-a");
+                assertEquals(202, accepted.statusCode(), accepted.body());
+                String output = CompletableFuture.supplyAsync(() -> {
+                    try {
+                        String line;
+                        while ((line = reader.readLine()) != null) {
+                            if (line.startsWith("data: ") && line.contains("\"output\":")) return line;
+                        }
+                        return "";
+                    } catch (java.io.IOException failure) { throw new java.io.UncheckedIOException(failure); }
+                }).get(10, TimeUnit.SECONDS);
+                assertTrue(output.contains("retained log fixture"), output);
+                assertTrue(output.contains(field(accepted.body(), "processInstanceId")), output);
+                assertTrue(output.contains(field(accepted.body(), "traversalId")), output);
+                assertFalse(output.contains("\"detail\":"), output);
+            }
+        }
     }
 
     private static String terminalData(java.io.BufferedReader reader) throws Exception {
@@ -796,7 +837,7 @@ class DeploymentLifecycleHttpTest {
                 @Override public String sdkContract() { return NodeSdk.CONTRACT; }
                 @Override public List<NodeBehavior> behaviors() { return List.of(behavior); }
             };
-            BehaviorRegistry behaviors = NodePackages.register(new BehaviorRegistry(), nodePackage);
+            BehaviorRegistry behaviors = NodePackages.register(custody ? BehaviorRegistry.standard() : new BehaviorRegistry(), nodePackage);
             engine = new PekkoExecutionEngine("deployment-lifecycle-http");
             application = new DefaultRavenrootApplication(engine, new ExecutionMonitor(), behaviors,
                     new InMemoryArtifactRegistry(), new DisabledProgramRuntime(),

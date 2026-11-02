@@ -108,7 +108,7 @@ export class RuntimeRequestError extends Error {
     const where = status == null ? `${method} ${route}` : `HTTP ${status} ${method} ${route}`;
     const hint = status == null
       ? ' -- check the runtime service address, its network reachability, or whether it allows this origin'
-      : status === 404
+      : status === 404 && !code
         ? ' -- check the runtime service address: the request reached a server but not an API route'
         : '';
     super(`${reason} (${where})${hint}`);
@@ -116,11 +116,11 @@ export class RuntimeRequestError extends Error {
     Object.defineProperty(this, 'uiMessageKey', { value: 'workspace.runtime.request.failure', enumerable: false });
     Object.defineProperty(this, 'uiMessageParams', { get: () => ({ reason: uiReasonKey ? uiText(uiReasonKey) : reason, where,
       hint: status == null ? uiText('workspace.runtime.request.networkHint')
-        : status === 404 ? uiText('workspace.runtime.request.routeHint') : '' }) });
+        : status === 404 && !code ? uiText('workspace.runtime.request.routeHint') : '' }) });
     withUiMessage(this, uiMessage('workspace.runtime.request.failure', {
       reason: uiReasonKey ? uiMessage(uiReasonKey) : reason, where,
       hint: status == null ? uiMessage('workspace.runtime.request.networkHint')
-        : status === 404 ? uiMessage('workspace.runtime.request.routeHint') : '',
+        : status === 404 && !code ? uiMessage('workspace.runtime.request.routeHint') : '',
     }));
     this.status = status;
     this.method = method;
@@ -793,22 +793,23 @@ export class RavenrootRuntimeClient {
    * Credentials never enter the URL and the server remains responsible for filtering before a
    * frame is queued or serialized.
    */
-  connectDeploymentView(envelope, onFrame, onConnectionChange = () => {}) {
+  connectDeploymentView(envelope, onFrame, onConnectionChange = () => {}, { diagnostics = false } = {}) {
     const view = validateDeploymentViewEnvelope(envelope);
     const controller = new AbortController();
     this.deploymentConnections.add(controller);
-    void this.#consumeDeploymentEvents(view, controller.signal, onFrame, onConnectionChange)
+    void this.#consumeDeploymentEvents(view, controller.signal, onFrame, onConnectionChange, diagnostics)
       .finally(() => this.deploymentConnections.delete(controller));
     return () => controller.abort();
   }
 
-  async #consumeDeploymentEvents(view, signal, onFrame, onConnectionChange) {
+  async #consumeDeploymentEvents(view, signal, onFrame, onConnectionChange, diagnostics) {
     let failures = 0;
     let cursor = '';
     while (!signal.aborted && failures <= this.maxRetries) {
       const source = view.source;
       const path = `/v1/deployments/${encodeURIComponent(source.deploymentId)}/events`
-        + `?graphVersion=${encodeURIComponent(source.graphVersion)}`;
+        + `?graphVersion=${encodeURIComponent(source.graphVersion)}`
+        + (diagnostics ? '&include=diagnostics' : '');
       try {
         const credential = await this.#requestCredential();
         if (signal.aborted) return;
@@ -1799,6 +1800,10 @@ export function deploymentExecutionEvent(payload) {
   return {
     type: value?.type,
     executionId: value?.executionId ?? value?.traversalId,
+    ...Object.fromEntries(['processInstanceId', 'traversalId', 'invocationId', 'attemptId',
+      'engineId', 'sequence', 'processingDuration', 'message', 'messageRedacted', 'messageTruncated',
+      'output', 'outputRedacted', 'outputTruncated'].filter(key => Object.hasOwn(value || {}, key))
+      .map(key => [key, value[key]])),
     nodeId: value?.nodeId ?? null,
     edgeId: value?.edgeId ?? null,
     activeInstances: Number(value?.activeInstances) || 0,

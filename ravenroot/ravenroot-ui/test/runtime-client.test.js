@@ -2448,10 +2448,21 @@ describe('deployment viewer client', () => {
       activeInstances: 2, publicReason: 'IllegalStateException',
       payload: 'DO-NOT-LEAK', detail: 'DO-NOT-LEAK', secret: 'DO-NOT-LEAK',
     } })).toEqual({
-      type: 'NODE_FAILED', executionId: 'execution-1', nodeId: 'worker', edgeId: null,
+      type: 'NODE_FAILED', executionId: 'execution-1', traversalId: 'execution-1', nodeId: 'worker', edgeId: null,
       activeInstances: 2, inFlightArrivals: 0, fallback: false, occurredAt: null,
       publicReason: 'IllegalStateException', description: '',
     });
+  });
+
+  it('preserves native bounded log diagnostics and causal identities without raw payloads', () => {
+    expect(deploymentExecutionEvent({ event: { type: 'NODE_COMPLETED', executionId: 't1',
+      traversalId: 't1', processInstanceId: 'p1', invocationId: 'i1', attemptId: 'a1',
+      output: 'workflow log', outputRedacted: false, outputTruncated: false,
+      payload: 'private', detail: 'private' } })).toMatchObject({
+      traversalId: 't1', processInstanceId: 'p1', invocationId: 'i1', attemptId: 'a1',
+      output: 'workflow log', outputRedacted: false, outputTruncated: false });
+    expect(deploymentExecutionEvent({ event: { payload: 'private', detail: 'private' } }))
+      .not.toHaveProperty('payload');
   });
 
   it('retains the server fallback bit in the closed execution projection', () => {
@@ -2507,4 +2518,11 @@ describe('deployment viewer client', () => {
     expect(changes.some(([status]) => status === 'connected')).toBe(true);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
+});
+
+it('does not misdiagnose a structured missing execution as a missing API route', () => {
+  const missing = new RuntimeRequestError('unknown execution', { status: 404, method: 'GET', path: '/v1/executions/old', code: 'UNKNOWN_EXECUTION' });
+  expect(missing.message).not.toContain('not an API route');
+  expect(missing.uiMessageParams.hint).toBe('');
+  expect(new RuntimeRequestError('not found', { status: 404, method: 'GET', path: '/wrong-prefix' }).message).toContain('not an API route');
 });

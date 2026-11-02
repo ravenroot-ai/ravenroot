@@ -556726,6 +556726,66 @@
       "rationale": "scripts/tests/test_ci_topology.py::test_actual_ordered_commands_match_declared_support_scope atom 'RAVENROOT_ENGINE' is scanner-recognized test-only input, expected evidence, or assertion vocabulary; it configures no production runtime setting. Reconfirmed against current dev source during #604, preserving the reviewed #598 CI contract."
     },
     {
+      "id": "oc-ce91c23d0c6985c37e49",
+      "path": "scripts/tests/test_ci_topology.py",
+      "line": 283,
+      "symbol": "test_complete_dispatch_targets_each_exact_lane_from_its_own_source",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "','",
+      "expressionDigest": "ee1bf10803fab3db749102debee45c50b168cb979bedc0ac2203a840cbd1f412",
+      "evidenceDigest": "b40d1a9f856ac0859d1fc4b9da322135a22beec96b114e045a7bfaeed35fb58e",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "#604 complete-scheduler regression uses \"','\" in test_complete_dispatch_targets_each_exact_lane_from_its_own_source to assert the exact integration allowlist and parsing of its source declaration; this is deterministic test data."
+    },
+    {
+      "id": "oc-f8f5fa50fa0ab41ac29f",
+      "path": "scripts/tests/test_ci_topology.py",
+      "line": 283,
+      "symbol": "test_complete_dispatch_targets_each_exact_lane_from_its_own_source",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "'dev'",
+      "expressionDigest": "9823cc5a2b92adfc0629ef1daa0eab9ab0689232288fa4915a0bf4d35ebba9fc",
+      "evidenceDigest": "b40d1a9f856ac0859d1fc4b9da322135a22beec96b114e045a7bfaeed35fb58e",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "#604 complete-scheduler regression uses \"'dev'\" in test_complete_dispatch_targets_each_exact_lane_from_its_own_source to assert the exact integration allowlist and parsing of its source declaration; this is deterministic test data."
+    },
+    {
+      "id": "oc-d126f4d947f4189e910b",
+      "path": "scripts/tests/test_ci_topology.py",
+      "line": 283,
+      "symbol": "test_complete_dispatch_targets_each_exact_lane_from_its_own_source",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "'release/0.8'",
+      "expressionDigest": "12937ad353ab6f5f93cd72e7f04e79231d352fdefc7c3122e5c49b899df76475",
+      "evidenceDigest": "b40d1a9f856ac0859d1fc4b9da322135a22beec96b114e045a7bfaeed35fb58e",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "#604 complete-scheduler regression uses \"'release/0.8'\" in test_complete_dispatch_targets_each_exact_lane_from_its_own_source to assert the exact integration allowlist and parsing of its source declaration; this is deterministic test data."
+    },
+    {
+      "id": "oc-3f12e8d2f840c7e9c391",
+      "path": "scripts/tests/test_ci_topology.py",
+      "line": 283,
+      "symbol": "test_complete_dispatch_targets_each_exact_lane_from_its_own_source",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "1",
+      "expressionDigest": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "evidenceDigest": "b40d1a9f856ac0859d1fc4b9da322135a22beec96b114e045a7bfaeed35fb58e",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "#604 complete-scheduler regression uses '1' in test_complete_dispatch_targets_each_exact_lane_from_its_own_source to assert the exact integration allowlist and parsing of its source declaration; this is deterministic test data."
+    },
+    {
       "id": "oc-e14099d44dad2f32e33a",
       "path": "scripts/tests/test_classify_main_change.py",
       "line": 32,
@@ -695949,6 +696009,7 @@
     "b3eed7e27d511c256f5b6ac6c8b39f26b5a73d73b635ec526cb37e8bb85d53bd": "value: {{ include \"ravenroot.graphLimitValue\" .Values.rateLimit.tenantBurst }}",
     "b3f80f57b45ecb09d1e1fc5dfd4a2282a8cdd388f99730aa56516dc157630243": "const siblingRoots = [...container.children] .filter(child => child.classList?.contains('graph-selection-overlay'));",
     "b40cfb0609310884716b5a87e532520565515424866d9ce275ab1d3dca25104b": "} private static byte[] encode(int magic, Writer writer) { try { var bytes = new ByteArrayOutputStream() { @Override public synchronized void write(int value) { if (count == MAX_BYTES) throw new IllegalArgumentException(\"runner state quota exceeded\");",
+    "b40d1a9f856ac0859d1fc4b9da322135a22beec96b114e045a7bfaeed35fb58e": "self.assertEqual([lane.strip() for lane in lanes.group(1).split(',')], ['dev', 'release/0.8'])",
     "b4128202232a9cf5c69f6175964c90e9680023e40ff75e763c881691daf740f3": "const priority = ['failed', 'active', 'fallback', 'bypassed', 'completed'];",
     "b414ee9e6812a74d40083dffdcfbfe615475f1b2fc1f352aea837574c6081c6b": "expected = \"interaction WebSocket source family is incomplete, unpartitioned, or unsupported\"",
     "b4160cbe731af2085101bfbfd34aa93fa5033436cec334e6bca122d4c5296af9": "- name: RAVENROOT_GRAPH_AUTHORING_CREDENTIAL_MODE",
@@ -1388739,6 +1388800,51 @@
             "status": "retained",
             "classification": "test-fixture",
             "rationale": "scripts/tests/test_impact_plan.py::test_required_jobs_cannot_be_omitted_or_forged atom \"'release/0.8'\" is scanner-recognized test-only input, expected evidence, or assertion vocabulary; it configures no production runtime setting. Reconfirmed against current dev source during #604, preserving the reviewed #598 CI contract."
+          }
+        }
+      ]
+    },
+    {
+      "id": "issue-604-complete-dev-scheduler",
+      "issue": "#604",
+      "sourceRevision": "8393f05cf17e57f76e78fbc9d64c7d5d2439c966",
+      "targetRevision": "8d1982517d1dea5b73b23ddc5b22f52315362894",
+      "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+      "sourceInventoryDigest": "2a060de718f01685f4c4eb5602ab9291aaa7c0e9b3ec33aade0a995c7243466e",
+      "targetCandidateDigest": "434702d73fc56a0e54eec3b9759fe42a2c08d63a33f1668ec86636d7999fb78c",
+      "mappings": [],
+      "retirements": [],
+      "additions": [
+        {
+          "id": "oc-3f12e8d2f840c7e9c391",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "#604 complete-scheduler regression uses '1' in test_complete_dispatch_targets_each_exact_lane_from_its_own_source to assert the exact integration allowlist and parsing of its source declaration; this is deterministic test data."
+          }
+        },
+        {
+          "id": "oc-ce91c23d0c6985c37e49",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "#604 complete-scheduler regression uses \"','\" in test_complete_dispatch_targets_each_exact_lane_from_its_own_source to assert the exact integration allowlist and parsing of its source declaration; this is deterministic test data."
+          }
+        },
+        {
+          "id": "oc-d126f4d947f4189e910b",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "#604 complete-scheduler regression uses \"'release/0.8'\" in test_complete_dispatch_targets_each_exact_lane_from_its_own_source to assert the exact integration allowlist and parsing of its source declaration; this is deterministic test data."
+          }
+        },
+        {
+          "id": "oc-f8f5fa50fa0ab41ac29f",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "#604 complete-scheduler regression uses \"'dev'\" in test_complete_dispatch_targets_each_exact_lane_from_its_own_source to assert the exact integration allowlist and parsing of its source declaration; this is deterministic test data."
           }
         }
       ]

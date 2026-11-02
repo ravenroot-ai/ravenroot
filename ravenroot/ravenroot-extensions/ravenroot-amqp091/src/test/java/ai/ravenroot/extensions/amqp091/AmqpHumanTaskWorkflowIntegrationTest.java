@@ -481,6 +481,8 @@ class AmqpHumanTaskWorkflowIntegrationTest {
     private static final String SCRIPTED_NAME = "ravenroot-amqp-test-" + UUID.randomUUID();
     private static final CommandResult PRESENT = new CommandResult(0, SCRIPTED_NAME);
     private static final CommandResult ABSENT = new CommandResult(0, "");
+    private static final CommandResult IN_PROGRESS = new CommandResult(1,
+            "Error response from daemon: removal of container " + SCRIPTED_NAME + " is already in progress");
 
     private static void runCleanupScript(CommandResult... results) throws Exception {
         var steps = new ArrayDeque<>(List.of(results));
@@ -506,6 +508,8 @@ class AmqpHumanTaskWorkflowIntegrationTest {
         runCleanupScript(TIMED_OUT, PRESENT, PRESENT, ABSENT);
         runCleanupScript(TIMED_OUT, PRESENT,
                 new CommandResult(1, "Error response from daemon: No such container: " + SCRIPTED_NAME), ABSENT);
+        runCleanupScript(IN_PROGRESS, ABSENT);
+        runCleanupScript(IN_PROGRESS, PRESENT, IN_PROGRESS, ABSENT);
     }
 
     @Test
@@ -518,6 +522,22 @@ class AmqpHumanTaskWorkflowIntegrationTest {
                 () -> runCleanupScript(new CommandResult(1, "permission denied"), ABSENT)).getMessage().contains("permission denied"));
         assertTrue(assertThrows(IllegalStateException.class,
                 () -> runCleanupScript(PRESENT, new CommandResult(0, "other"))).getMessage().contains("unexpected container"));
+        assertTrue(assertThrows(IllegalStateException.class,
+                () -> runCleanupScript(IN_PROGRESS, PRESENT, IN_PROGRESS, PRESENT))
+                .getMessage().contains("left the test container"));
+        assertTrue(assertThrows(IllegalStateException.class, () -> runCleanupScript(new CommandResult(1,
+                "Error response from daemon: removal of container " + SCRIPTED_NAME + "-foreign is already in progress"),
+                ABSENT)).getMessage().contains("-foreign"));
+        assertTrue(assertThrows(IllegalStateException.class, () -> runCleanupScript(new CommandResult(1,
+                IN_PROGRESS.output() + "\npermission denied"), ABSENT)).getMessage().contains("permission denied"));
+        assertTrue(assertThrows(IllegalStateException.class, () -> runCleanupScript(IN_PROGRESS, TIMED_OUT))
+                .getMessage().contains("verification failed"));
+        assertTrue(assertThrows(IllegalStateException.class,
+                () -> runCleanupScript(IN_PROGRESS, new CommandResult(1, "Docker daemon unavailable")))
+                .getMessage().contains("verification failed"));
+        assertTrue(assertThrows(IllegalStateException.class,
+                () -> runCleanupScript(IN_PROGRESS, new CommandResult(0, "other")))
+                .getMessage().contains("unexpected container"));
     }
 
     @Test
@@ -644,7 +664,9 @@ class AmqpHumanTaskWorkflowIntegrationTest {
                             "--filter", "name=^/" + name + "$", "--format", "{{.Names}}");
                     requireSuccess(listed, "RabbitMQ cleanup verification");
                     if (!removed.equals(TIMED_OUT) && !removed.output().equals(
-                            "Error response from daemon: No such container: " + name)) {
+                            "Error response from daemon: No such container: " + name)
+                            && !removed.output().equals("Error response from daemon: removal of container "
+                                    + name + " is already in progress")) {
                         requireSuccess(removed, "RabbitMQ cleanup");
                     }
                     if (listed.output().isEmpty()) return;

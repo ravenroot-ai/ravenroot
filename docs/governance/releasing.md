@@ -142,16 +142,21 @@ context, and `scripts/ci_required.py` refuses any other workflow that defines `c
 
 ## Full-tier critical path and required checks
 
-Measured across several recent `merge_group` and dispatched `full` runs, `full-backend-tests` is the
-full tier's critical path by a wide margin: 20 to 30 minutes against a run whose other regression jobs
-finish inside roughly 15 minutes of `full-preflight`. `full-regression` and the container smoke test
-that follows it wait on `full-backend-tests` regardless of how quickly everything else finishes, so
-this job's duration is effectively the full tier's wall clock; shortening it is tracked separately and
-is not addressed here.
+Historical `merge_group` and dispatched `full` samples showed `full-backend-tests` taking 20 to 30
+minutes while other regression jobs finished within roughly 15 minutes of `full-preflight`.
+`full-regression` and the container smoke test wait for backend and Python contracts, so the
+critical path depends on the workload and complete run evidence.
+
+In [dispatched run 41372331107](https://github.com/ravenroot-ai/ravenroot/actions/runs/41372331107),
+`full-python-contracts` succeeded in 58m27s, including setup and cleanup. The ordinary Java reactor
+reported 28m12s, but the backend job then failed a structural fixture check before its explicit
+native-acceptance phase executed. That run therefore supplies no completed backend/native duration.
+The Python job has a bounded 90-minute timeout to retain headroom for its required checks.
+These are individual observations; compare complete runs before identifying a current critical path.
 
 The end-to-end suite is sharded across `E2E_SHARDS` (`scripts/ci_required.py`) parallel runners
-specifically so it does not add its own ~29-minute single-runner cost to that critical path. Sampled
-shard durations:
+to reduce the approximately 29-minute single-runner cost observed in the historical workload.
+Historical shard durations:
 
 | Run | Shard 1 | Shard 2 | Shard 3 | Shard 4 | Spread |
 |---|---|---|---|---|---|
@@ -162,11 +167,9 @@ shard durations:
 | dispatched, issue 455 | 4.9m | 6.1m | 5.1m | 4.6m | 89s |
 | dispatched, issue 446 | 4.4m | 5.9m | 5.2m | 5.9m | 94s |
 
-The spread between the fastest and slowest shard is consistently a minute or two on a roughly
-five-minute job, and the whole `full-ui-e2e` phase always completes well before `full-backend-tests`
-does. A duration-aware rebalance of the shards would not shorten a run that this job already
-dominates, so the even four-way split is kept as it is; this is reported as satisfied by the numbers
-above rather than changed.
+In these samples, the shard spread was roughly one or two minutes on five-minute jobs, and
+`full-ui-e2e` completed before backend tests. The even four-way split is retained; this historical
+table does not establish which job dominates the current pipeline.
 
 No repository ruleset needs to change for the work in this section. `dev`'s protected-branch ruleset
 requires the single `ci-required` context, published by the pull request's own event, by the merge

@@ -2256,12 +2256,12 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as location:
             root = Path(location)
             authority, entries, candidates, details = self.route_table_authority_fixture(root)
-            self.assertEqual(128, len(details))
+            self.assertEqual(130, len(details))
             self.assertEqual(
-                {'methods': 141, 'path': 128, 'summary': 480, 'successStatuses': 132},
+                {'methods': 143, 'path': 130, 'summary': 482, 'successStatuses': 135},
                 {role: len(ids) for role, ids in authority["candidateIdsByRole"].items()},
             )
-            self.assertEqual(881, len(entries))
+            self.assertEqual(890, len(entries))
             self.assertEqual([], self.route_table_errors(root, authority, entries, candidates))
             self.assertEqual({
                 "StableEdgeId.MAX_UTF8_BYTES": 8192,
@@ -4675,7 +4675,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             document = {"entries": list(entries.values()), "retiredEntries": [],
                         "migrationHistory": []}
             self.assertIn(
-                "| Retained published contract descriptions | 480 |",
+                "| Retained published contract descriptions | 482 |",
                 audit.render_report(document),
             )
             deferred = copy.deepcopy(document)
@@ -4683,7 +4683,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                              if entry["classification"] == "published-contract-description")
             published.update(status="deferred", followUp="#225")
             self.assertIn(
-                "| Retained published contract descriptions | 479 |",
+                "| Retained published contract descriptions | 481 |",
                 audit.render_report(deferred),
             )
         self.assertIn(

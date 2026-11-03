@@ -647,6 +647,25 @@ public interface RavenrootApplication extends AutoCloseable {
     }
 
     /**
+     * Durably offers input to an enabled named SOURCE on an existing durable registration.
+     * No deployment is started or resumed; uncertain admission is retried with the same request id.
+     * @param security authenticated security identity
+     * @param deploymentId tenant-scoped local deployment alias
+     * @param registrationIdentity exact stable durable registration identity
+     * @param incarnationId exact current physical runtime incarnation
+     * @param graphVersion exact immutable deployed graph digest
+     * @param sourceNodeId enabled named SOURCE; no arbitrary node or START substitution
+     * @param requestId bounded caller-owned idempotency token, bound to the authenticated actor
+     * @param input bounded structured input retained unchanged on replay
+     * @return durable acceptance, duplicate, refusal or uncertain custody requiring reconciliation
+     */
+    default ai.ravenroot.api.deployment.IngressReceipt triggerLocalDeploymentSource(
+            SecurityContext security, String deploymentId, String registrationIdentity, String incarnationId, String graphVersion,
+            String sourceNodeId, String requestId, ai.ravenroot.api.payload.PayloadValue input) {
+        return new ai.ravenroot.api.deployment.IngressReceipt.Refused("Deployment source triggers are unavailable");
+    }
+
+    /**
      * Accepts or reconciles the one initial START of an exact deployment binding with bounded input.
      * A retry or a distinct request ID cannot replace the original work. Requires a store supporting
      * permanent initial-START admission; refusal must happen before effects when unavailable.

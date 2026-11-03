@@ -1187,6 +1187,29 @@ public final class AuthorizedRavenrootApplication {
                 requireText(incarnationId, "incarnation id"), requireText(graphVersion, "graph version"), requireText(requestId, "request id"));
     }
 
+    /**
+     * Durably offers input to an enabled named SOURCE on an existing durable registration.
+     * No deployment is started or resumed; uncertain admission is retried with the same request id.
+     * @param context authenticated request context
+     * @param deploymentId tenant-scoped local deployment alias
+     * @param registrationIdentity exact stable durable registration identity
+     * @param incarnationId exact current physical runtime incarnation
+     * @param graphVersion exact immutable deployed graph digest
+     * @param sourceNodeId enabled named SOURCE; no arbitrary node or START substitution
+     * @param requestId bounded caller-owned idempotency token, bound to the authenticated actor
+     * @param input bounded structured input retained unchanged on replay
+     * @return durable acceptance, duplicate, refusal or uncertain custody requiring reconciliation
+     */
+    public ai.ravenroot.api.deployment.IngressReceipt triggerLocalDeploymentSource(RequestContext context,
+            String deploymentId, String registrationIdentity, String incarnationId, String graphVersion, String sourceNodeId,
+            String requestId, ai.ravenroot.api.payload.PayloadValue input) {
+        require(context, AuthorizationAction.EXECUTION_START, collection("deployments", context));
+        return delegate.triggerLocalDeploymentSource(SecurityContext.of(context),
+                requireText(deploymentId, "deployment id"), requireText(registrationIdentity, "registration identity"), requireText(incarnationId, "incarnation id"),
+                requireText(graphVersion, "graph version"), requireText(sourceNodeId, "source node id"),
+                requireText(requestId, "request id"), java.util.Objects.requireNonNull(input, "input"));
+    }
+
     /** Starts or reconciles initial START under ordinary execution authorization.
  * @param context authenticated request identity supplying the tenant and action authority
  * @param deploymentId logical deployment identity; a new incarnation does not change it
@@ -1196,6 +1219,8 @@ public final class AuthorizedRavenrootApplication {
  * @param input actual bounded ingress or workflow input to select; no implicit envelope is invented
  * @return authoritative initial START admission or reconciliation with its original process and traversal identities
  */
+
+
     public EmbedDeploymentStart startLocalDeploymentExecution(RequestContext context,
             String deploymentId, String incarnationId, String graphVersion, String requestId,
             ai.ravenroot.api.payload.PayloadValue input) {

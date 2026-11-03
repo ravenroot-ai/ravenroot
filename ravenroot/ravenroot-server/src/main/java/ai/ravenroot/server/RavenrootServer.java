@@ -4461,6 +4461,32 @@ public final class RavenrootServer implements AutoCloseable {
                         + ",\"traversalId\":" + (result.traversalId() == null ? "null" : "\"" + result.traversalId() + "\"") + "}");
                 return;
             }
+            if (segments.length == 3 && "trigger".equals(segments[2])) {
+                if (!method(exchange, httpContext, "POST")) return;
+                var body = strictJsonMap(boundedBody(exchange, payloadLimits.maxEncodedBytes()),
+                        java.util.Set.of("registrationIdentity", "incarnationId", "graphVersion", "sourceNodeId", "requestId", "input"));
+                if (!(body.entries().get("registrationIdentity") instanceof PayloadValue.TextValue registration)
+                        || !(body.entries().get("incarnationId") instanceof PayloadValue.TextValue incarnation)
+                        || !(body.entries().get("graphVersion") instanceof PayloadValue.TextValue version)
+                        || !(body.entries().get("sourceNodeId") instanceof PayloadValue.TextValue source)
+                        || !(body.entries().get("requestId") instanceof PayloadValue.TextValue request)
+                        || !body.entries().containsKey("input")) {
+                    fail(exchange, httpContext, ErrorCode.INVALID_REQUEST); return;
+                }
+                var receipt = authorizedApplication.triggerLocalDeploymentSource(context, deploymentId,
+                        registration.value(), incarnation.value(), version.value(), source.value(), request.value(), body.entries().get("input"));
+                String outcome = switch (receipt) {
+                    case ai.ravenroot.api.deployment.IngressReceipt.DurablyCommitted ignored -> "ACCEPTED";
+                    case ai.ravenroot.api.deployment.IngressReceipt.Duplicate ignored -> "DUPLICATE";
+                    case ai.ravenroot.api.deployment.IngressReceipt.Ambiguous ignored -> "RECONCILE";
+                    default -> "REFUSED";
+                };
+                int code = switch (outcome) { case "ACCEPTED" -> 202; case "DUPLICATE" -> 200;
+                    case "RECONCILE" -> 503; default -> 409; };
+                json(exchange, code, "{\"outcome\":\"" + outcome + "\",\"requestId\":\"" + escape(request.value()) + "\"}");
+                return;
+            }
+
             if (segments.length == 3 && "initial-start".equals(segments[2])) {
                 if ("GET".equals(exchange.getRequestMethod())) {
                     var fields = new java.util.LinkedHashMap<>(query);

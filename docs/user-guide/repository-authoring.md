@@ -37,3 +37,14 @@ Reopening a source that already has local edits, a running save or a refused sav
 A refused save shows a visible accessible message above the editor and retains your unsaved edits. On a conflict, reopen the managed draft and review changes before reapplying edits. An imported document cannot overwrite an existing filename without its revision: choose a new filename or open the managed document and reapply the changes. For authorization failures, authenticate with permission before retrying.
 
 A legacy divergent draft still numbered like its release needs deliberate reconciliation: download/back up all work, review the diff, explicitly discard to the released baseline, create the successor, then reapply the protected edits. Never discard before protecting work.
+
+**Propose release review** shows the existing preparation/result dialog immediately. It proposes the
+saved repository candidate; unsaved local edits and undo history remain intact. The review link stays
+available if optional automation is refused or its acknowledgement is uncertain. **Retry
+acknowledgement** repeats the same operation identity. Reopening the same candidate/proposal after a
+browser reload also retains that identity.
+
+The dialog observes the reviewed source for at most one minute. It reports release/publication only
+for the requested exact graph identity, version and saved GraphML, rather than a newer draft or
+another version. “Queued” confirms durable input custody only. If completion is not observed, follow
+the review link. Closing the dialog ends browser reads and timers without cancelling accepted work.

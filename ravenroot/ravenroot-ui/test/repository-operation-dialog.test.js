@@ -18,3 +18,13 @@ it('shows the created or reused review link without implying publication', () =>
   expect(document.querySelector('a').href).toContain('/pull/9');
   expect(document.querySelector('[role=status]').textContent).toContain('existing release review');
 });
+
+it('keeps queued and uncertain admission distinct from publication and aborts observation on close', async () => {
+  const feedback = open(); feedback.success({ url: 'https://example.test/review', reused: false });
+  feedback.automationQueued(); expect(document.querySelector('[role=status]').textContent).toContain('queued');
+  expect(document.querySelector('[role=status]').textContent).not.toContain('published');
+  const retry = vi.fn(); feedback.reconcile(retry);
+  const button = [...document.querySelectorAll('button')].find(value => value.textContent.includes('Retry'));
+  expect(button.hidden).toBe(false); button.click(); await Promise.resolve(); expect(retry).toHaveBeenCalledOnce();
+  document.querySelector('button').click(); expect(feedback.signal.aborted).toBe(true);
+});

@@ -15,7 +15,17 @@ public record GraphAuthoringConfiguration(
         CredentialMode credentialMode, String credentialReference, String appId,
         String installationId, Map<String, String> tenantNamespaces, URI artifactBase,
         String artifactCatalogPath, int maxDocumentBytes, int pageSize, Duration requestTimeout,
+        int retryLimit, ReleaseAutomationPolicy releaseAutomation) {
+
+    public GraphAuthoringConfiguration(
+        Mode mode, Provider provider, String repositoryOwner, String repositoryName,
+        String graphDirectory, String draftBranch, String releaseBranch, URI apiBase,
+        CredentialMode credentialMode, String credentialReference, String appId,
+        String installationId, Map<String, String> tenantNamespaces, URI artifactBase,
+        String artifactCatalogPath, int maxDocumentBytes, int pageSize, Duration requestTimeout,
         int retryLimit) {
+        this(mode, provider, repositoryOwner, repositoryName, graphDirectory, draftBranch, releaseBranch, apiBase, credentialMode, credentialReference, appId, installationId, tenantNamespaces, artifactBase, artifactCatalogPath, maxDocumentBytes, pageSize, requestTimeout, retryLimit, ReleaseAutomationPolicy.disabled());
+    }
 
     public enum Mode { LOCAL, GIT }
     public enum Provider { NONE, GITHUB, GITLAB }
@@ -35,6 +45,9 @@ public record GraphAuthoringConfiguration(
         releaseBranch = text(releaseBranch);
         Objects.requireNonNull(apiBase, "apiBase");
         Objects.requireNonNull(credentialMode, "credentialMode");
+        Objects.requireNonNull(releaseAutomation, "releaseAutomation");
+        if (releaseAutomation.enabled() && (mode != Mode.GIT || provider != Provider.GITHUB))
+            throw new IllegalArgumentException("Release automation requires GitHub authoring");
         credentialReference = text(credentialReference);
         appId = text(appId);
         installationId = text(installationId);
@@ -132,6 +145,9 @@ public record GraphAuthoringConfiguration(
     public static GraphAuthoringConfiguration fromEnvironment(Map<String, String> environment) {
         Objects.requireNonNull(environment, "environment");
         Mode mode = enumValue(environment, "RAVENROOT_GRAPH_AUTHORING_MODE", Mode.class, Mode.LOCAL);
+        ReleaseAutomationPolicy automation = ReleaseAutomationPolicy.fromEnvironment(environment);
+        if (mode == Mode.LOCAL && automation.enabled())
+            throw new IllegalArgumentException("Release automation requires GitHub authoring");
         if (mode == Mode.LOCAL) return local();
         Provider provider = enumValue(environment, "RAVENROOT_GRAPH_AUTHORING_PROVIDER", Provider.class, Provider.GITHUB);
         String project = provider == Provider.GITLAB ? required(environment, "RAVENROOT_GRAPH_AUTHORING_GITLAB_PROJECT") : "";
@@ -157,7 +173,7 @@ public record GraphAuthoringConfiguration(
                 integer(environment, "RAVENROOT_GRAPH_AUTHORING_MAX_DOCUMENT_BYTES", 10 * 1024 * 1024),
                 integer(environment, "RAVENROOT_GRAPH_AUTHORING_PAGE_SIZE", 50),
                 Duration.ofMillis(integer(environment, "RAVENROOT_GRAPH_AUTHORING_REQUEST_TIMEOUT_MILLIS", 15_000)),
-                integer(environment, "RAVENROOT_GRAPH_AUTHORING_RETRY_LIMIT", 1));
+                integer(environment, "RAVENROOT_GRAPH_AUTHORING_RETRY_LIMIT", 1), automation);
     }
 
     /** Whether immutable publication storage is configured independently of source authoring. */
@@ -180,11 +196,13 @@ public record GraphAuthoringConfiguration(
     }
 
     public Map<String, Object> capabilities() {
-        return Map.of("mode", mode.name().toLowerCase(Locale.ROOT),
+        var result = new LinkedHashMap<String,Object>(Map.of("mode", mode.name().toLowerCase(Locale.ROOT),
                 "provider", provider == Provider.NONE ? "none" : provider.name().toLowerCase(Locale.ROOT),
                 "repositoryDisplay", mode == Mode.GIT ? project() : "",
                 "releaseBranch", mode == Mode.GIT ? releaseBranch : "",
-                "maxDocumentBytes", maxDocumentBytes);
+                "maxDocumentBytes", maxDocumentBytes));
+        if (releaseAutomation.enabled()) result.put("releaseAutomation", releaseAutomation.capabilities());
+        return Map.copyOf(result);
     }
 
     private static Map<String, String> tenantNamespaces(String encoded) {

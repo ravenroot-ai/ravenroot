@@ -29,6 +29,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
@@ -659,6 +660,114 @@ class GithubAuthoringRepositoryTest {
         }
     }
 
+    @Test
+    void existingReviewSurvivesTargetAdvancementWithoutDuplicatingPull() {
+        var github = new ScriptedGithub();
+        try (var repository = repository(github, (tenant, graph, version, source, bytes) -> "absent")) {
+            var saved = repository.save(ALICE, new GraphAuthoringRepository.SaveRequest(
+                    "orders.graphml", graph("one"), EMPTY, "review-base-key-000001"))
+                    .toCompletableFuture().join();
+            var first = repository.proposeRelease(ALICE, new GraphAuthoringRepository.MutationRequest(
+                    "orders.graphml", "", saved.summary().revision(), "review-base-key-000002"))
+                    .toCompletableFuture().join();
+            // Another graph reaches main. The existing PR still reports its original base SHA.
+            String root = github.refs.get("main");
+            github.commits.put(ScriptedGithub.sha(99), github.commits.get(root));
+            github.refs.put("main", ScriptedGithub.sha(99));
+            var current = repository.open(ALICE, "orders.graphml", false).toCompletableFuture().join();
+            var reused = repository.proposeRelease(ALICE, new GraphAuthoringRepository.MutationRequest(
+                    "orders.graphml", "", current.summary().revision(), "review-base-key-000003"))
+                    .toCompletableFuture().join();
+            assertTrue(reused.reused());
+            assertEquals(first.url(), reused.url());
+            assertEquals(1, github.pullCount());
+            assertEquals(ScriptedGithub.sha(99), reused.releaseHead());
+        }
+    }
+
+    @Test
+    void existingReviewStillRefusesWrongRepositoryOrTargetAndConcurrentTargetMovement() {
+        for (String fault : List.of("repository", "target", "concurrent")) {
+            var github = new ScriptedGithub();
+            try (var repository = repository(github, (tenant, graph, version, source, bytes) -> "absent")) {
+                var saved = repository.save(ALICE, new GraphAuthoringRepository.SaveRequest(
+                        "orders.graphml", graph("one"), EMPTY, "review-guard-key-000001"))
+                        .toCompletableFuture().join();
+                repository.proposeRelease(ALICE, new GraphAuthoringRepository.MutationRequest(
+                        "orders.graphml", "", saved.summary().revision(), "review-guard-key-000002"))
+                        .toCompletableFuture().join();
+                if (fault.equals("repository")) github.pullRepository = "other/graphs";
+                if (fault.equals("target")) github.pullTargetBranch = "other";
+                if (fault.equals("concurrent")) github.beforePullList = () -> {
+                    String current = github.refs.get("main");
+                    github.commits.put(ScriptedGithub.sha(99), github.commits.get(current));
+                    github.refs.put("main", ScriptedGithub.sha(99));
+                };
+                assertFailure(GraphAuthoringException.Failure.CONFLICT, () -> repository.proposeRelease(
+                        ALICE, new GraphAuthoringRepository.MutationRequest("orders.graphml", "",
+                                saved.summary().revision(), "review-guard-key-000003"))
+                        .toCompletableFuture().join());
+                assertEquals(1, github.pullCount());
+            }
+        }
+    }
+
+    @Test
+    void createdReviewsMustHaveExactRepositoryAndBranchIdentities() {
+        for (String fault : List.of("repository", "target")) {
+            var github = new ScriptedGithub();
+            if (fault.equals("repository")) github.pullRepository = "other/graphs";
+            else github.pullTargetBranch = "other";
+            try (var repository = repository(github, (tenant, graph, version, source, bytes) -> "absent")) {
+                var saved = repository.save(ALICE, new GraphAuthoringRepository.SaveRequest("orders.graphml", graph("one"), EMPTY, "created-guard-key-0001")).toCompletableFuture().join();
+                assertFailure(GraphAuthoringException.Failure.CONFLICT, () -> repository.proposeRelease(ALICE,
+                        new GraphAuthoringRepository.MutationRequest("orders.graphml", "", saved.summary().revision(), "created-guard-key-0002")).toCompletableFuture().join());
+            }
+        }
+    }
+
+    @Test
+    void isolatedAutomationPromotesOnlyTheRequestedDocumentFromCurrentMainAndLabelsItsReview() {
+        var github = new ScriptedGithub();
+        var env = new HashMap<>(environment());
+        env.put("RAVENROOT_GRAPH_RELEASE_AUTOMATION", """
+            {"label":"graph:auto","deploymentId":"ci","registrationIdentity":"11111111-1111-1111-1111-111111111111",
+             "graphVersion":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","sourceNodeId":"schedule"}
+            """);
+        try (var repository = new GithubAuthoringRepository(GraphAuthoringConfiguration.fromEnvironment(env),
+                ignored -> Optional.of(new SecretValue("pat".toCharArray())),
+                (tenant, graph, version, source, bytes) -> "absent", ignored -> {}, github, Clock.systemUTC())) {
+            repository.save(ALICE, new GraphAuthoringRepository.SaveRequest("orders.graphml", graph("one"),
+                    EMPTY, "isolated-key-000000001")).toCompletableFuture().join();
+            repository.save(ALICE, new GraphAuthoringRepository.SaveRequest("other.graphml", graph("other"),
+                    EMPTY, "isolated-key-000000002")).toCompletableFuture().join();
+            String originalDraft = github.refs.get("draft/customers-a"), main = github.refs.get("main");
+            var current = repository.open(ALICE, "orders.graphml", false).toCompletableFuture().join();
+            var request = new GraphAuthoringRepository.MutationRequest("orders.graphml", "",
+                    current.summary().revision(), "isolated-key-000000003");
+            github.loseLabel = true;
+            var first = repository.proposeRelease(ALICE, request).toCompletableFuture().join();
+            assertFalse(first.reused());
+            var pull = github.pulls.getFirst();
+            assertNotEquals("draft/customers-a", pull.headBranch);
+            var candidate = github.commits.get(github.refs.get(pull.headBranch));
+            assertEquals(main, candidate.parent);
+            assertEquals(Set.of("graphs/customers/a/orders.graphml"), candidate.files.keySet());
+            assertEquals(originalDraft, github.refs.get("draft/customers-a"));
+            assertEquals(List.of(Map.of("name", "graph:auto")), github.labels.values().iterator().next());
+            var reused = repository.proposeRelease(ALICE, new GraphAuthoringRepository.MutationRequest(
+                    "orders.graphml", "", current.summary().revision(), "isolated-key-000000004"))
+                    .toCompletableFuture().join();
+            assertTrue(reused.reused());
+            assertEquals(first.url(), reused.url());
+            assertEquals(1, github.pullCount());
+            github.afterLabel = () -> github.external("graphs/customers/a/orders.graphml", github.commits.get(github.refs.get("draft/customers-a")).files.get("graphs/customers/a/orders.graphml"));
+            assertFailure(GraphAuthoringException.Failure.CONFLICT, () -> repository.proposeRelease(ALICE,
+                    new GraphAuthoringRepository.MutationRequest("orders.graphml", "", current.summary().revision(), "isolated-key-000000005")).toCompletableFuture().join());
+            assertEquals(1, github.pullCount());
+        }
+    }
+
     private static String commit(String revision) {
         return revision.substring(0, revision.indexOf(':'));
     }
@@ -736,10 +845,17 @@ class GithubAuthoringRepositoryTest {
         private final Map<String, Map<String, String>> modes = new HashMap<>();
         private final Map<String, byte[]> blobs = new HashMap<>();
         private final Map<String, Delta> trees = new HashMap<>();
+        private final Map<String,String> commitTrees = new HashMap<>();
+        private final Map<String,List<Object>> labels = new HashMap<>();
         private final List<Pull> pulls = new ArrayList<>();
         private String failPath;
         private boolean losePatch;
         private boolean losePull;
+        private boolean loseLabel;
+        private Runnable afterLabel;
+        private Runnable beforePullList;
+        private String pullRepository = "platform/graphs";
+        private String pullTargetBranch;
         private Runnable beforePatch;
         private long refCreations;
         private long refMutations;
@@ -966,7 +1082,7 @@ class GithubAuthoringRepositoryTest {
                         200,
                         Map.of(
                                 "tree",
-                                Map.of("sha", "tree-" + id),
+                                Map.of("sha", commitTrees.getOrDefault(id, "tree-" + id)),
                                 "parents",
                                 commit.parent.isBlank()
                                         ? List.of()
@@ -977,6 +1093,11 @@ class GithubAuthoringRepositoryTest {
                         java.net.URLDecoder.decode(
                                 path.substring((api + "/git/trees/").length()),
                                 StandardCharsets.UTF_8);
+                if (!id.startsWith("tree-")) {
+                    String actual = id;
+                    id = commitTrees.entrySet().stream().filter(e -> e.getValue().equals(actual))
+                            .map(e -> "tree-" + e.getKey()).findFirst().orElse(id);
+                }
                 if (!id.startsWith("tree-") || id.length() < 45) return response(404, Map.of());
                 String commitId = id.substring(5, 45);
                 Commit commit = commits.get(commitId);
@@ -1049,7 +1170,7 @@ class GithubAuthoringRepositoryTest {
             if ("POST".equals(method) && path.equals(api + "/git/trees")) {
                 Map<String, Object> body = map(decoded);
                 Map<String, Object> entry = map(((List<?>) body.get("tree")).getFirst());
-                String id = sha(sequence.incrementAndGet());
+                String id = digest(PayloadJson.writeJava(body, JSON));
                 Object blob = entry.get("sha");
                 trees.put(
                         id,
@@ -1073,6 +1194,7 @@ class GithubAuthoringRepositoryTest {
                 }
                 String id = sha(sequence.incrementAndGet());
                 commits.put(id, new Commit(parent, string(body, "message"), Map.copyOf(files)));
+                commitTrees.put(id, tree);
                 var nextModes = new HashMap<>(modes.getOrDefault(parent, Map.of()));
                 Delta delta = trees.get(tree);
                 if (delta != null) {
@@ -1124,7 +1246,21 @@ class GithubAuthoringRepositoryTest {
                 return response(
                         200, history.subList(start, Math.min(start + size, history.size())));
             }
+            if (path.startsWith(api + "/issues/") && path.endsWith("/labels")) {
+                if (method.equals("POST")) labels.put(path, ((List<?>)map(decoded).get("labels")).stream()
+                        .map(x -> (Object)Map.of("name", x)).toList());
+                if (method.equals("POST")) {
+                    if (afterLabel != null) { Runnable action = afterLabel; afterLabel = null; action.run(); }
+                    if (loseLabel) { loseLabel = false; return response(503, Map.of()); }
+                }
+                return response(200, labels.getOrDefault(path, List.of()));
+            }
             if ("GET".equals(method) && path.equals(api + "/pulls")) {
+                if (beforePullList != null) {
+                    Runnable action = beforePullList;
+                    beforePullList = null;
+                    action.run();
+                }
                 String head = parameter(query, "head");
                 int colon = head.indexOf(':');
                 String headBranch = colon < 0 ? head : head.substring(colon + 1);
@@ -1141,13 +1277,16 @@ class GithubAuthoringRepositoryTest {
             }
             if ("POST".equals(method) && path.equals(api + "/pulls")) {
                 Map<String, Object> body = map(decoded);
+                if (pulls.stream().anyMatch(pull -> pull.headBranch.equals(string(body, "head"))
+                        && pull.baseBranch.equals(string(body, "base"))))
+                    return response(422, Map.of("message", "A pull request already exists"));
                 var pull =
                         new Pull(
                                 "https://github.example.test/platform/graphs/pull/"
                                         + (pulls.size() + 1),
                                 string(body, "head"),
                                 string(body, "base"),
-                                string(body, "body"));
+                                string(body, "body"), refs.get(string(body, "base")));
                 pulls.add(pull);
                 return response(201, pullResponse(pull, refs));
             }
@@ -1236,16 +1375,20 @@ class GithubAuthoringRepositoryTest {
             }
         }
 
-        private static Map<String, Object> pullResponse(Pull pull, Map<String, String> refs) {
+        private Map<String, Object> pullResponse(Pull pull, Map<String, String> refs) {
             return Map.of(
                     "html_url",
                     pull.url,
                     "body",
                     pull.body,
+                    "state", "open",
+                    "number", Long.parseLong(pull.url.substring(pull.url.lastIndexOf('/') + 1)),
                     "head",
-                    Map.of("sha", refs.get(pull.headBranch)),
+                    Map.of("sha", refs.get(pull.headBranch), "ref", pull.headBranch,
+                            "repo", Map.of("full_name", pullRepository)),
                     "base",
-                    Map.of("sha", refs.get(pull.baseBranch)));
+                    Map.of("sha", pull.baseSha, "ref", pullTargetBranch == null ? pull.baseBranch : pullTargetBranch,
+                            "repo", Map.of("full_name", pullRepository)));
         }
 
         @Override
@@ -1315,7 +1458,7 @@ class GithubAuthoringRepositoryTest {
 
         private record Delta(String path, byte[] value) {}
 
-        private record Pull(String url, String headBranch, String baseBranch, String body) {}
+        private record Pull(String url, String headBranch, String baseBranch, String body, String baseSha) {}
 
         private record Response(int status, byte[] body) {}
     }

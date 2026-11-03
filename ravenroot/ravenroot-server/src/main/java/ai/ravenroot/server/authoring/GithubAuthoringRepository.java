@@ -646,28 +646,32 @@ public final class GithubAuthoringRepository implements GraphAuthoringRepository
                         new byte[0]);
         IdempotencyEntry prior =
                 beginIdempotency(actor, request.idempotencyKey(), "release", fingerprint);
-        if (prior != null && prior.result() instanceof ReleaseProposal proposal) return proposal;
+        // A cached acknowledgement cannot bypass current review/ref identity checks.
         State state = state(actor, request.documentId());
         requireExpected(request.expected(), state.revision());
-        String head = ref(draftBranch(actor), false);
         String base = ref(configuration.releaseBranch(), false);
+        String headBranch = configuration.releaseAutomation().enabled()
+                ? isolatedReviewBranch(actor, request, state, base, fingerprint) : draftBranch(actor);
+        String head = ref(headBranch, false);
         requireExpected(request.expected(), state(actor, request.documentId()).revision());
         if (head.equals(base)) throw failure(GraphAuthoringException.Failure.CONFLICT);
         String queryPath =
                 "/repos/"
                         + repository()
                         + "/pulls?state=open&head="
-                        + query(configuration.repositoryOwner() + ":" + draftBranch(actor))
+                        + query(configuration.repositoryOwner() + ":" + headBranch)
                         + "&base="
                         + query(configuration.releaseBranch())
                         + "&per_page=20";
         String marker = "Ravenroot-Authoring-Request: " + fingerprint;
         Response existing = request("GET", queryPath, null, Set.of(200));
         Object decoded = json(existing.body());
-        Map<String, Object> matching = matchingPull(decoded, head, base, null);
+        Map<String, Object> matching = matchingPull(decoded, head, headBranch, null);
         if (matching != null) {
-            requireProposalState(actor, request.documentId(), request.expected(), head, base);
+            requireProposalState(actor, request.documentId(), request.expected(), head, base, headBranch);
             Map<String, Object> pull = matching;
+            markAutomatedReview(pull);
+            requireProposalState(actor, request.documentId(), request.expected(), head, base, headBranch);
             ReleaseProposal proposal =
                     new ReleaseProposal(string(pull, "html_url"), head, base, true);
             completeIdempotency(actor, request.idempotencyKey(), "release", fingerprint, proposal);
@@ -678,7 +682,7 @@ public final class GithubAuthoringRepository implements GraphAuthoringRepository
                         "title",
                         "Release graph changes for " + actor.tenantId(),
                         "head",
-                        draftBranch(actor),
+                        headBranch,
                         "base",
                         configuration.releaseBranch(),
                         "body",
@@ -693,9 +697,11 @@ public final class GithubAuthoringRepository implements GraphAuthoringRepository
                             jsonBytes(body),
                             Set.of(201));
             Map<String, Object> pull = object(json(created.body()));
-            requirePullState(pull, head, base);
+            requirePullState(pull, head, base, headBranch);
             if (!string(pull, "body").contains(marker)) throw unavailable();
-            requireProposalState(actor, request.documentId(), request.expected(), head, base);
+            requireProposalState(actor, request.documentId(), request.expected(), head, base, headBranch);
+            markAutomatedReview(pull);
+            requireProposalState(actor, request.documentId(), request.expected(), head, base, headBranch);
             ReleaseProposal proposal =
                     new ReleaseProposal(string(pull, "html_url"), head, base, false);
             completeIdempotency(actor, request.idempotencyKey(), "release", fingerprint, proposal);
@@ -703,9 +709,11 @@ public final class GithubAuthoringRepository implements GraphAuthoringRepository
         } catch (GraphAuthoringException failure) {
             if (failure.failure() != GraphAuthoringException.Failure.UNAVAILABLE) throw failure;
             Response reconciled = request("GET", queryPath, null, Set.of(200));
-            Map<String, Object> pull = matchingPull(json(reconciled.body()), head, base, marker);
+            Map<String, Object> pull = matchingPull(json(reconciled.body()), head, headBranch, marker);
             if (pull == null) throw failure;
-            requireProposalState(actor, request.documentId(), request.expected(), head, base);
+            requireProposalState(actor, request.documentId(), request.expected(), head, base, headBranch);
+            markAutomatedReview(pull);
+            requireProposalState(actor, request.documentId(), request.expected(), head, base, headBranch);
             ReleaseProposal proposal =
                     new ReleaseProposal(string(pull, "html_url"), head, base, true);
             completeIdempotency(actor, request.idempotencyKey(), "release", fingerprint, proposal);
@@ -714,21 +722,84 @@ public final class GithubAuthoringRepository implements GraphAuthoringRepository
     }
 
     private void requireProposalState(
-            Actor actor, String documentId, Revision expected, String head, String base) {
+            Actor actor, String documentId, Revision expected, String head, String base, String headBranch) {
         requireExpected(expected, state(actor, documentId).revision());
-        if (!head.equals(ref(draftBranch(actor), false))
+        if (!head.equals(ref(headBranch, false))
                 || !base.equals(ref(configuration.releaseBranch(), false))) {
             throw failure(GraphAuthoringException.Failure.CONFLICT);
         }
     }
 
-    private static Map<String, Object> matchingPull(
-            Object decoded, String head, String base, String marker) {
+    private String isolatedReviewBranch(Actor actor, MutationRequest request, State state,
+            String base, String fingerprint) {
+        if (state.draft() == null) throw failure(GraphAuthoringException.Failure.CONFLICT);
+        admission.accept(state.draft().bytes());
+        String branch = "review/" + digest(actor.tenantId() + "\n" + request.documentId()).substring(0, 16)
+                + "-" + digest(base + "\n" + state.draft().blobSha()).substring(0, 24);
+        String api = "/repos/" + repository();
+        Map<String,Object> parent = object(json(request("GET", api + "/git/commits/" + path(base), null, Set.of(200)).body()));
+        String tree = string(object(parent.get("tree")), "sha");
+        Map<String,Object> entry = Map.of("path", documentPath(actor, request.documentId()),
+                "mode", "100644", "type", "blob", "sha", state.draft().blobSha());
+        Map<String,Object> candidateTree = object(json(request("POST", api + "/git/trees",
+                jsonBytes(Map.of("base_tree", tree, "tree", List.of(entry))), Set.of(201)).body()));
+        String treeSha = string(candidateTree, "sha");
+        if (tree.equals(treeSha)) throw failure(GraphAuthoringException.Failure.CONFLICT);
+        String head = ref(branch, true);
+        if (head == null) {
+            var commit = object(json(request("POST", api + "/git/commits", jsonBytes(Map.of(
+                    "message", commitMessage("release", actor, request.idempotencyKey(), fingerprint),
+                    "tree", treeSha, "parents", List.of(base))), Set.of(201)).body()));
+            requireExpected(request.expected(), state(actor, request.documentId()).revision());
+            if (!base.equals(ref(configuration.releaseBranch(), false)))
+                throw failure(GraphAuthoringException.Failure.CONFLICT);
+            try { request("POST", api + "/git/refs", jsonBytes(Map.of("ref", "refs/heads/" + branch,
+                    "sha", string(commit, "sha"))), Set.of(201, 422)); }
+            catch (GraphAuthoringException uncertain) {
+                if (uncertain.failure() != GraphAuthoringException.Failure.UNAVAILABLE) throw uncertain;
+            }
+            head = ref(branch, false);
+        }
+        Map<String,Object> pinned = object(json(request("GET", api + "/git/commits/" + path(head), null, Set.of(200)).body()));
+        List<?> parents = pinned.get("parents") instanceof List<?> values ? values : List.of();
+        if (!treeSha.equals(string(object(pinned.get("tree")), "sha")) || parents.size() != 1
+                || !base.equals(string(object(parents.getFirst()), "sha")))
+            throw failure(GraphAuthoringException.Failure.CONFLICT);
+        return branch;
+    }
+
+    private void markAutomatedReview(Map<String,Object> pull) {
+        if (!configuration.releaseAutomation().enabled()) return;
+        Object number = pull.get("number");
+        if (!(number instanceof Number value) || value.longValue() <= 0
+                || value.doubleValue() != value.longValue()) throw unavailable();
+        String api = "/repos/" + repository() + "/issues/" + value.longValue() + "/labels";
+        String label = configuration.releaseAutomation().label();
+        try { request("POST", api, jsonBytes(Map.of("labels", List.of(label))), Set.of(200)); }
+        catch (GraphAuthoringException uncertain) {
+            if (uncertain.failure() != GraphAuthoringException.Failure.UNAVAILABLE) throw uncertain;
+            Object observed = json(request("GET", api, null, Set.of(200)).body());
+            if (!(observed instanceof List<?> labels) || labels.stream().noneMatch(x ->
+                    label.equals(string(object(x), "name")))) throw uncertain;
+        }
+    }
+
+    private Map<String, Object> matchingPull(
+            Object decoded, String head, String headBranch, String marker) {
         if (!(decoded instanceof List<?> values)) throw unavailable();
         for (Object value : values) {
             Map<String, Object> pull = object(value);
-            if (head.equals(string(object(pull.get("head")), "sha"))
-                    && base.equals(string(object(pull.get("base")), "sha"))
+            // GitHub retains the base SHA observed when a PR was created. It is not the
+            // current target ref. Bind an existing review to its repository/branches and exact
+            // source head; requireProposalState still fences both current refs and the document.
+            Map<String, Object> source = object(pull.get("head"));
+            Map<String, Object> target = object(pull.get("base"));
+            if ("open".equals(string(pull, "state"))
+                    && head.equals(string(source, "sha"))
+                    && headBranch.equals(string(source, "ref"))
+                    && configuration.releaseBranch().equals(string(target, "ref"))
+                    && repository().equals(string(object(source.get("repo")), "full_name"))
+                    && repository().equals(string(object(target.get("repo")), "full_name"))
                     && (marker == null || string(pull, "body").contains(marker))) return pull;
         }
         return null;
@@ -1339,8 +1410,9 @@ public final class GithubAuthoringRepository implements GraphAuthoringRepository
         if (!actual.equals(expected)) throw failure(GraphAuthoringException.Failure.CONFLICT);
     }
 
-    private static void requirePullState(Map<String, Object> pull, String head, String base) {
-        if (!head.equals(string(object(pull.get("head")), "sha"))
+    private void requirePullState(Map<String, Object> pull, String head, String base, String headBranch) {
+        if (matchingPull(List.of(pull), head, headBranch, null) == null
+                || !head.equals(string(object(pull.get("head")), "sha"))
                 || !base.equals(string(object(pull.get("base")), "sha"))) {
             throw failure(GraphAuthoringException.Failure.CONFLICT);
         }

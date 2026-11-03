@@ -52,6 +52,20 @@ function validatePublishedArtifacts(value) {
   })) });
 }
 
+function releaseAutomationCapability(value) {
+  if (value === undefined) return null;
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+      || Object.keys(value).sort().join(',') !== 'deploymentId,graphVersion,mode,registrationIdentity,sourceNodeId'
+      || value.mode !== 'isolated-automerge' || typeof value.deploymentId !== 'string'
+      || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value.deploymentId)
+      || typeof value.registrationIdentity !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value.registrationIdentity)
+      || typeof value.graphVersion !== 'string' || !/^[0-9a-f]{64}$/.test(value.graphVersion)
+      || typeof value.sourceNodeId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value.sourceNodeId))
+    throw productError('repository.review.bindingChanged', new Error('Invalid release automation binding.'));
+  return Object.freeze({ mode: value.mode, deploymentId: value.deploymentId,
+    registrationIdentity: value.registrationIdentity, graphVersion: value.graphVersion, sourceNodeId: value.sourceNodeId });
+}
+
 export function validateGraphAuthoringCapability(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)
       || !['local', 'git'].includes(value.mode)
@@ -69,6 +83,7 @@ export function validateGraphAuthoringCapability(value) {
     repositoryDisplay: typeof value.repositoryDisplay === 'string' ? value.repositoryDisplay : '',
     releaseBranch: typeof value.releaseBranch === 'string' ? value.releaseBranch : '',
     maxDocumentBytes: Number.isSafeInteger(value.maxDocumentBytes) ? value.maxDocumentBytes : null,
+    releaseAutomation: releaseAutomationCapability(value.releaseAutomation),
   });
 }
 
@@ -88,8 +103,8 @@ export class GraphAuthoringClient {
   }
 
   list(cursor = '') { return this.#json(`/v1/graph-authoring${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`); }
-  open(documentId, source = 'draft') {
-    return this.#json(`/v1/graph-authoring/${encodeURIComponent(documentId)}?source=${encodeURIComponent(source)}`);
+  open(documentId, source = 'draft', options = {}) {
+    return this.#json(`/v1/graph-authoring/${encodeURIComponent(documentId)}?source=${encodeURIComponent(source)}`, options);
   }
   history(documentId, cursor = '') {
     return this.#json(`/v1/graph-authoring/${encodeURIComponent(documentId)}/history${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`);
@@ -122,6 +137,29 @@ export class GraphAuthoringClient {
   release(documentId, revision, idempotencyKey = crypto.randomUUID()) {
     return this.#json(`/v1/graph-authoring/${encodeURIComponent(documentId)}/release`,
       { method: 'POST', headers: this.#mutationHeaders(revision, idempotencyKey) });
+  }
+  async triggerAutomation(binding, requestId, input = { requestType: 'release-request' }) {
+    releaseAutomationCapability(binding);
+    requiredText(requestId, 'request id');
+    const id = encodeURIComponent(binding.deploymentId);
+    const deployment = await this.#json(`/v1/deployments/${id}`);
+    if (deployment.registrationIdentity !== binding.registrationIdentity || deployment.graphVersion !== binding.graphVersion
+        || deployment.desiredState !== 'RUNNING' || deployment.observedState !== 'READY') {
+      throw productError('repository.review.bindingChanged', new Error('Release automation binding changed.'));
+    }
+    let receipt;
+    try { receipt = await this.#json(`/v1/deployments/${id}/trigger`, { method: 'POST', reconcile: true,
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+        registrationIdentity: binding.registrationIdentity, incarnationId: deployment.runtimeIncarnationId, graphVersion: binding.graphVersion,
+        sourceNodeId: binding.sourceNodeId, requestId, input,
+      }) });
+    } catch (error) {
+      if (error.status && error.status < 500) throw error;
+      return { outcome: 'RECONCILE', requestId };
+    }
+    if (receipt?.requestId !== requestId || !['ACCEPTED', 'DUPLICATE', 'REFUSED', 'RECONCILE'].includes(receipt?.outcome))
+      return { outcome: 'RECONCILE', requestId };
+    return receipt;
   }
   async artifacts() { return validatePublishedArtifacts(await this.#json('/v1/graph-artifacts')); }
   importArtifact(graphId, releaseVersion, expectedSha256, expectedArtifactRef) {
@@ -159,6 +197,8 @@ export class GraphAuthoringClient {
     await invalidateRejectedCredential(response, this.credentialProvider, credential);
     if (options.empty && response.status === 204) return null;
     const value = await response.json().catch(() => ({}));
+    if (options.reconcile && [409, 503].includes(response.status)
+        && ['REFUSED', 'RECONCILE'].includes(value.outcome)) return value;
     if (!response.ok) throw value.error ? Object.assign(new Error(value.error), { status: response.status, code: value.error })
       : productError('workspace.graphAuthoring.requestFailed', new Error(`Graph authoring request failed (${response.status})`), { status: response.status });
     return value;

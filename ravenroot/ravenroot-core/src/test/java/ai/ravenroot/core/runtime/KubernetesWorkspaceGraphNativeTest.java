@@ -49,11 +49,13 @@ class KubernetesWorkspaceGraphNativeTest {
         var originalRegistration = RunnerJson.registration("example-tenant", RunnerJson.map(((List<?>) tenant.get("runners")).getFirst()));
         var registration = new RunnerRegistration(originalRegistration.protocolVersion(), originalRegistration.tenantId(),
                 originalRegistration.runnerId(), "kubernetes-pod-v1", originalRegistration.labels(), originalRegistration.capabilities());
+        // A smaller own-period CPU budget needs less delivered CPU for positive proof in constrained CI;
+        // it does not guarantee host CPU availability. The separate native boundary remains at 500m.
         var profiles = ((List<?>) tenant.get("workspaceProfiles")).stream()
                 .map(value -> RunnerJson.workspaceProfile("example-tenant", RunnerJson.map(value)))
                 .map(profile -> new WorkspaceProfile(profile.reference(), scope, lifecycle, profile.runnerPool(),
                         profile.runtimeProfile(), profile.policy(), profile.capacity(), Duration.ZERO, profile.completionPolicy(),
-                        profile.allowedAgents(), profile.fleetLimits(), 500, WorkspaceProfile.Driver.KUBERNETES)).toList();
+                        profile.allowedAgents(), profile.fleetLimits(), 100, WorkspaceProfile.Driver.KUBERNETES)).toList();
         var settings = new KubernetesRunnerConfiguration(Path.of(System.getProperty("ravenroot.kubernetes.kubectl", "/usr/local/bin/kubectl")),
                 Path.of(kubeconfig), "native-test", "ravenroot-446", "ravenroot-fixed-ext4", "agent", "", Map.of(), Duration.ofMinutes(2), 1,
                 System.getProperty("ravenroot.kubernetes.networkControlHost"));

@@ -122,18 +122,19 @@ class KubernetesAcceptanceFixtureTest(unittest.TestCase):
         spec = importlib.util.spec_from_file_location("native_attestation", fixture.ROOT / "docs/examples/governed-runner/kubernetes_attestation.py")
         attester = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(attester)
-        for positive in (True, False):
+        for millicores, positive in itertools.product((100, 500), (True, False)):
             observations = itertools.count()
             ticks = itertools.count()
             def read(path):
                 if path.name == "memory.max":
                     return "134217728"
                 if path.name == "cpu.max":
-                    return "50000 100000"
+                    return f"{millicores * 100} 100000"
                 return "nr_throttled " + str(int(positive and next(observations) >= 3))
-            with patch.object(attester.pathlib.Path, "read_text", autospec=True, side_effect=read), \
+            with self.subTest(millicores=millicores, positive=positive), \
+                    patch.object(attester.pathlib.Path, "read_text", autospec=True, side_effect=read), \
                     patch.object(attester.time, "monotonic", side_effect=lambda: next(ticks) / 10), \
-                    patch.dict(attester.os.environ, {"RAVENROOT_MEMORY_LIMIT_BYTES": "134217728", "RAVENROOT_CPU_MILLICORES": "500"}):
+                    patch.dict(attester.os.environ, {"RAVENROOT_MEMORY_LIMIT_BYTES": "134217728", "RAVENROOT_CPU_MILLICORES": str(millicores)}):
                 if positive:
                     self.assertTrue(attester.cgroups()["cpuThrottlingObserved"])
                 else:
@@ -399,6 +400,32 @@ class KubernetesAcceptanceFixtureTest(unittest.TestCase):
                 fixture.run()
             self.assertEqual(1, sum(call.args[0][:2] == ["minikube", "start"] for call in run.call_args_list))
             self.assertEqual(["minikube", "delete"], run.call_args.args[0][:2])
+
+
+    def test_native_cpu_fixture_keeps_real_boundary_positive_proof_and_zero_skip_gates(self):
+        required = {
+            "ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/runtime/KubernetesWorkspaceGraphNativeTest.java":
+                ("profile.allowedAgents(), profile.fleetLimits(), 100, WorkspaceProfile.Driver.KUBERNETES",),
+            "ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/runner/KubernetesPodRunnerNativeTest.java":
+                ("500, WorkspaceProfile.Driver.KUBERNETES",),
+            "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runner/KubernetesPodRunner.java":
+                ("RunnerFleetLimits.from(capacity), 500, WorkspaceProfile.Driver.KUBERNETES",),
+            "docs/examples/governed-runner/kubernetes_attestation.py":
+                ("end = time.monotonic() + 10", 'raise RuntimeError("positive CPU throttling evidence is missing")'),
+            "scripts/fixtures/kubernetes_runner_acceptance.py":
+                ('"ai.ravenroot.core.runner.KubernetesPodRunnerNativeTest": 1',
+                 '"ai.ravenroot.core.runtime.KubernetesWorkspaceGraphNativeTest": 4', '"skipped": "0"'),
+        }
+        sources = {path: (fixture.ROOT / path).read_text() for path in required}
+        def verify(observed):
+            for path, markers in required.items():
+                for marker in markers:
+                    self.assertEqual(1, observed[path].count(marker), (path, marker))
+        verify(sources)
+        for path, markers in required.items():
+            for marker in markers:
+                with self.subTest(path=path, removed=marker), self.assertRaises(AssertionError):
+                    verify(dict(sources, **{path: sources[path].replace(marker, "")}))
 
 
 if __name__ == "__main__":

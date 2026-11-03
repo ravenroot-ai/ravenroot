@@ -13041,7 +13041,7 @@ INTERACTION_WEBSOCKET_FILE_PROOFS = {'ravenroot/ravenroot-server/src/main/java/a
  'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionWebSocketServer.java': 'a5a4d9c8f5ece7bb562e83e3a20ce792ef96c0d6794d9676eb9a544cc5a51886',
  'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionProtocol.java': '4f719d5bf41335dd52dca43e444c18ccd03e730e48a4b0350a9d6108e317a2d2',
  'scripts/publish_environment_reference.py': 'c42ed0efa122eee0018fa119846a3fbfde2e6e459494795a37370caa2160e718',
- 'scripts/tests/test_publish_environment_reference.py': 'f5a915f1ff9f18f57f629feb1f2c1265f1de14200857b128e6b2c2fe58b206ee',
+ 'scripts/tests/test_publish_environment_reference.py': '30c28704e85f9d2fde948070938d193cbeef9d3d0ec3735cc2878f8a19a578ef',
  'ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/interaction/InteractionWebSocketConfigurationTest.java': '7563c54e2cbab0dcaca696fbc7457fbe712ab78c9bf5112750ebf93d4d9d71de',
  'ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/RavenrootServerInteractionLifecycleTest.java': '7073eb7ae8dc4a0b5da058ed74dfaf31698e10f1eb261ef8a6ad448f6a542e3f'}
 

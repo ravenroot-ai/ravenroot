@@ -1529399,6 +1529399,18 @@
           }
         }
       ]
+    },
+    {
+      "id": "issue-606-attempt3-published-report-count-fixture-v1",
+      "issue": "#606",
+      "sourceRevision": "4854d7d0c9f3f932e34ff8f23cb7f7fe2b53aa6e",
+      "targetRevision": "b72e877ae281b908f8126db996a8f18e5dd7b661",
+      "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+      "sourceInventoryDigest": "53e9bc2a8621b780cb97bb9a0a6b01065af8d93e96d05162c5c69c9581f7d199",
+      "targetCandidateDigest": "99b3c75d7d4023bfb617b0e9444114d479611b16f19f2788b1a6b02d9bdcffa3",
+      "mappings": [],
+      "retirements": [],
+      "additions": []
     }
   ],
   "semanticReviewHistory": [

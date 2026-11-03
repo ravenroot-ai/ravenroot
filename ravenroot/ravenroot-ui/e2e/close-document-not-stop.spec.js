@@ -229,8 +229,6 @@ test('Stop and Close uses the captured origin even after focus moves to another 
     // Document here serializes its graph/viewer/DOM and can prevent the pending Stop from settling.
     // The console event only orders the test's release; it grants no runtime/lifecycle authority.
     const entered = page.waitForEvent('console', message => message.text() === 'origin-close-observer-entered');
-    const observed = page.waitForResponse(read => read.request().method() === 'GET'
-      && new URL(read.url()).pathname === `/v1/deployments/${binding.deploymentId}`);
     const closed = expect.poll(() => page.evaluate(id => {
       console.debug('origin-close-observer-entered');
       return Boolean(window.ravenroot.workspace.find(id));
@@ -239,7 +237,10 @@ test('Stop and Close uses the captured origin even after focus moves to another 
     await Promise.all([closed, (async () => {
       await entered;
       body.resolve();
-      expect((await (await observed).json()).state).toBe('STOPPED');
+      // A complete identity-verified STOPPED receipt is authoritative; no fallback GET is needed.
+      expect(await response.json()).toMatchObject({ state: 'STOPPED',
+        deploymentId: binding.deploymentId, graphVersion: binding.graphVersion,
+        runtimeIncarnationId: binding.incarnationId });
     })()]);
   } finally { body.resolve(); }
   expect(await page.evaluate(() => window.ravenroot.workspace.activeId)).toBe(other);

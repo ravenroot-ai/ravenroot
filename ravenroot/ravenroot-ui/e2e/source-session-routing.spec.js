@@ -1,3 +1,4 @@
+import { keepMockDeploymentStreamsOpen } from './deployment-run-fixture.mjs';
 import { keepAuthenticationInMemory } from './memory-only-auth.mjs';
 import { createHash } from 'node:crypto';
 import { expect, test } from '@playwright/test';
@@ -87,8 +88,11 @@ function durableHumanTaskReentryStream(deploymentId) {
 }
 
 async function stubRuntime(page, { sourceResponder, sourceTraffic, workspaceTenant = 'tenant-authenticated',
-  configurationResponder, eventResponder } = {}) {
-  const sourceCalls = [], executionCalls = [], configurationCalls = [], eventCalls = [];
+  configurationResponder, eventResponder, legacyAfterAdmission = false } = {}) {
+  await keepMockDeploymentStreamsOpen(page);
+  const sourceCalls = [], executionCalls = [], configurationCalls = [], eventCalls = [], deploymentCalls = [];
+  let nativeUnavailable = false, admitted;
+  const admissionIssued = new Promise(resolve => { admitted = resolve; });
   let status = null, graphVersion = null, tenant = workspaceTenant;
   let announceSession;
   const startedSession = new Promise(resolve => { announceSession = resolve; });
@@ -105,6 +109,7 @@ async function stubRuntime(page, { sourceResponder, sourceTraffic, workspaceTena
   await page.route('**/v1/node-types', route => route.fulfill({ json: JSON.parse(SOURCE_CATALOG) }));
   await page.route('**/v1/events**', async route => {
     eventCalls.push({ headers: route.request().headers() });
+    if (legacyAfterAdmission) await admissionIssued;
     const routed = { fulfill: options => route.fulfill({ ...options, body: wire(options.body) }) };
     if (eventResponder) { await eventResponder({ route: routed, eventCalls, startedSession }); return; }
     if (!sourceTraffic) { await route.fulfill({ status: 204, body: '' }); return; }
@@ -121,6 +126,7 @@ async function stubRuntime(page, { sourceResponder, sourceTraffic, workspaceTena
   await page.route('**/v1/deployments**', async route => {
     const request = route.request(), url = new URL(request.url()), parts = url.pathname.split('/').filter(Boolean);
     const id = url.searchParams.get('id') || parts[2], action = parts[3];
+    deploymentCalls.push({ id, action, method: request.method(), body: request.postData() });
     if (request.method() === 'POST' && !action) {
       graphVersion = createHash('sha256').update(request.postData()).digest('hex');
       status = { deploymentId: id, tenantId: tenant, graphVersion, runtimeIncarnationId: 'runtime-original',
@@ -130,12 +136,21 @@ async function stubRuntime(page, { sourceResponder, sourceTraffic, workspaceTena
       await route.fulfill({ json: status }); return;
     }
     if (!status || status.deploymentId !== id) { await route.fulfill({ status: 404, body: '' }); return; }
+    if (action === 'events') {
+      if (nativeUnavailable) { await route.fulfill({ status: 503, body: '' }); return; }
+      await route.fulfill({ contentType: 'text/event-stream', body: `event: lifecycle\ndata: ${JSON.stringify({ type: 'lifecycle', deploymentId: id, graphVersion, incarnationId: status.runtimeIncarnationId, lifecycle: status.state, cursor: 'c'.repeat(43) })}\n\n` }); return;
+    }
     if (action === 'view') {
       await route.fulfill({ json: { viewerSourceVersion: '1', source: { kind: 'deployment', deploymentId: id,
         graphVersion, incarnationId: status.runtimeIncarnationId }, lifecycle: status.state,
         projection: { viewerContractVersion: '1.0', nodes: [], edges: [] } } }); return;
     }
     if (action === 'initial-start') {
+      if (legacyAfterAdmission) {
+        nativeUnavailable = true;
+        await page.evaluate(() => window.__interruptMockDeploymentObservation());
+        admitted();
+      }
       const body = request.postDataJSON();
       await route.fulfill({ status: 202, json: { outcome: 'ACCEPTED', requestId: body.requestId,
         processInstanceId: '10000000-0000-0000-0000-000000000001', traversalId: '20000000-0000-0000-0000-000000000002' } }); return;
@@ -167,7 +182,7 @@ async function stubRuntime(page, { sourceResponder, sourceTraffic, workspaceTena
     if (action === 'stop') status.state = 'STOPPED';
     await route.fulfill({ json: status });
   });
-  return { sourceCalls, executionCalls, configurationCalls, eventCalls };
+  return { sourceCalls, executionCalls, configurationCalls, eventCalls, deploymentCalls };
 }
 
 async function openGraph(page, xml, name) {
@@ -178,8 +193,8 @@ async function openGraph(page, xml, name) {
 }
 
 // Listener READY precedes initial START admission. Use this only when a test needs the
-// accepted initial identities and the application's execution projection, not for lifecycle tests.
-async function expectInitialTraversalProjected(page, documentId) {
+// accepted deployment admission identities, not for lifecycle tests.
+async function expectInitialAdmissionBound(page, documentId) {
   await expect.poll(() => page.evaluate(id => {
     const owner = window.ravenroot.workspace.find(id), run = owner?.deploymentRun;
     return { processInstanceId: run?.processInstanceId, traversalId: run?.traversalId,
@@ -189,8 +204,7 @@ async function expectInitialTraversalProjected(page, documentId) {
   }, documentId)).toEqual({
     processInstanceId: '10000000-0000-0000-0000-000000000001',
     traversalId: '20000000-0000-0000-0000-000000000002',
-    projectedProcessInstanceId: '10000000-0000-0000-0000-000000000001',
-    projectedTraversalId: '20000000-0000-0000-0000-000000000002', pinMatches: true,
+    projectedProcessInstanceId: null, projectedTraversalId: null, pinMatches: false,
   });
 }
 
@@ -206,7 +220,7 @@ test('Run binds an effective SOURCE deployment with one initial START and Test s
   }));
   await page.locator('#btn-run').click();
   await expect(confirmation).resolves.toMatch(/deployment|START/i);
-  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Ready');
+  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Listening');
   await expect(page.locator('.doc-pane--active .doc-run-binding')).toHaveAttribute('role', 'status');
   await expect(page.locator('#btn-stop')).toBeEnabled();
   await expect(page.locator('#btn-pause')).toBeDisabled();
@@ -236,7 +250,7 @@ test('source Human Task re-entry and a second AMQP message stay in one listening
 
   page.once('dialog', dialog => dialog.accept());
   await page.locator('#btn-run').click();
-  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Ready');
+  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Listening');
   await expect(page.locator('#activity-log')).toContainText('resolved-message-1');
   await expect(page.locator('#activity-log')).toContainText('amqp-message-2');
 
@@ -286,6 +300,7 @@ test('re-authentication holds a source frame until workspace authority can deliv
   });
   let deploymentId;
   const calls = await stubRuntime(page, {
+    legacyAfterAdmission: true,
     configurationResponder: async ({ route, configurationCalls }) => {
       if (configurationCalls.length === 2) {
         announceReauthentication();
@@ -330,7 +345,7 @@ test('re-authentication holds a source frame until workspace authority can deliv
   await openGraph(page, sourceGraph('external.consume'), 'source-authority-race.graphml');
   page.once('dialog', dialog => dialog.accept());
   await page.locator('#btn-run').click();
-  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Ready');
+  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Listening');
   releaseInitialTraffic();
   await expect.poll(() => page.evaluate(
     () => window.ravenroot.activeDocument().execution.events.length)).toBe(2);
@@ -382,37 +397,117 @@ test('Run binds a deployment and initial START even without an effective SOURCE'
 test('a delayed failed start updates its owning background document and is recoverable', async ({ page }) => {
   let releaseStart;
   const startGate = new Promise(resolve => { releaseStart = resolve; });
-  await stubRuntime(page, {
-    sourceResponder: async ({ route, request }) => {
+  let starts = 0;
+  const calls = await stubRuntime(page, {
+    sourceResponder: async ({ route, request, sessionId }) => {
       if (request.method() === 'POST') {
-        await startGate;
-        await route.fulfill({
-          status: 500, contentType: 'application/problem+json',
-          body: JSON.stringify({ title: 'Source startup failed', status: 500 }),
-        });
+        starts += 1;
+        if (starts === 1) {
+          await startGate;
+          await route.fulfill({
+            status: 500, contentType: 'application/problem+json',
+            body: JSON.stringify({ title: 'Source startup failed', status: 500 }),
+          });
+        } else {
+          await route.fulfill({ status: 202, body: JSON.stringify({ sessionId,
+            state: 'LISTENING', sourceCount: 1, scope: 'LOCAL_PROCESS' }) });
+        }
         return;
       }
-      await route.fulfill({ status: 404, body: '' });
+      await route.fulfill(starts >= 2 ? { status: 200, body: JSON.stringify({ sessionId,
+        state: 'LISTENING', sourceCount: 1, scope: 'LOCAL_PROCESS' }) } : { status: 404, body: '' });
     },
+  });
+  await page.addInitScript(() => {
+    const failedWrites = new WeakSet();
+    const put = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (value, ...args) {
+      if (this.name === 'tenant-workspaces' && value?.documents?.some(
+        document_ => document_.name === 'delayed.graphml' && document_.deploymentRun?.phase === 'FAILED')) {
+        failedWrites.add(this.transaction);
+      }
+      return put.call(this, value, ...args);
+    };
+    const complete = Object.getOwnPropertyDescriptor(IDBTransaction.prototype, 'oncomplete');
+    Object.defineProperty(IDBTransaction.prototype, 'oncomplete', {
+      ...complete,
+      set(callback) {
+        complete.set.call(this, function (event) {
+          if (failedWrites.has(this) && !window.__failedRunWriteHeld) {
+            // The real write has committed. Hold only its completion notification so activation
+            // occurs before the real command unwinds, without manufacturing a runtime state.
+            window.__failedRunWriteHeld = true;
+            window.__releaseFailedRunWrite = () => callback.call(this, event);
+          } else callback.call(this, event);
+        });
+      },
+    });
   });
   await page.goto('/');
   await openGraph(page, sourceGraph('external.consume'), 'delayed.graphml');
-  const ownerId = await page.evaluate(() => window.ravenroot.documents().find(
-    document_ => document_.name === 'delayed.graphml').id);
+  await page.locator('#execution-payload').fill('original retry input');
+  const ownerId = await page.evaluate(() => window.ravenroot.activeDocument().id);
 
   page.once('dialog', dialog => dialog.accept());
   await page.locator('#btn-run').click();
-  await expect.poll(() => page.evaluate(() => window.ravenroot.documents().find(
-    document_ => document_.name === 'delayed.graphml').deploymentRunOperation)).toBe('ACTIVATING');
+  await expect.poll(() => page.evaluate(id => window.ravenroot.workspace.find(
+    id).deploymentRunOperation, ownerId)).toBe('ACTIVATING');
   await page.evaluate(() => window.ravenroot.openDocument({ name: 'other.graphml' }));
+  const sibling = await page.evaluate(() => {
+    const owner = window.ravenroot.activeDocument();
+    return { id: owner.id, incarnation: owner.incarnation, graph: JSON.stringify(owner.graph),
+      executionId: owner.execution.executionId, binding: owner.deploymentRun ?? null };
+  });
   releaseStart();
 
-  await expect.poll(() => page.evaluate(id => window.ravenroot.documents().find(
-    document_ => document_.id === id).deploymentRunStatus, ownerId)).toBe('FAILED');
+  await expect.poll(() => page.evaluate(() => window.__failedRunWriteHeld)).toBe(true);
+  const failedIntent = await page.evaluate(id => {
+    const owner = window.ravenroot.workspace.find(id);
+    return { intent: { ...owner.deploymentRun }, status: owner.deploymentRunStatus,
+      pending: Boolean(owner.execution.commandFlight) };
+  }, ownerId);
+  expect(failedIntent.status).toBe('FAILED');
+  expect(failedIntent.intent.phase).toBe('FAILED');
+  expect(failedIntent.pending).toBe(true);
+  expect(await page.evaluate(() => window.ravenroot.workspace.activeId)).toBe(sibling.id);
   await page.evaluate(id => window.ravenroot.activateDocument(id), ownerId);
   await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Failed');
+  await expect(page.locator('#btn-run')).toBeDisabled();
+  await page.evaluate(() => window.__releaseFailedRunWrite());
+  await expect.poll(() => page.evaluate(id => {
+    const owner = window.ravenroot.workspace.find(id);
+    return { pending: Boolean(owner.execution.commandFlight), operation: owner.deploymentRunOperation };
+  }, ownerId)).toEqual({ pending: false, operation: null });
   await expect(page.locator('#btn-run')).toBeEnabled();
   await expect(page.locator('#btn-play')).toBeEnabled();
+
+  await page.locator('#execution-payload').fill('edited after failed delivery');
+  page.once('dialog', dialog => dialog.accept());
+  await page.locator('#btn-run').click();
+  await expect.poll(() => page.evaluate(id => {
+    const owner = window.ravenroot.workspace.find(id);
+    return { phase: owner.deploymentRun.phase, pending: Boolean(owner.execution.commandFlight),
+      process: owner.deploymentRun.processInstanceId, traversal: owner.deploymentRun.traversalId };
+  }, ownerId)).toEqual({ phase: 'READY', pending: false,
+    process: '10000000-0000-0000-0000-000000000001', traversal: '20000000-0000-0000-0000-000000000002' });
+  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Listening');
+  const recovered = await page.evaluate(id => ({ ...window.ravenroot.workspace.find(id).deploymentRun }), ownerId);
+  for (const field of ['deploymentId', 'activationRequestId', 'initialStartRequestId', 'graphVersion',
+    'incarnationId', 'inputJson', 'graphMl']) expect(recovered[field]).toBe(failedIntent.intent[field]);
+  expect(calls.deploymentCalls.filter(call => call.method === 'POST' && !call.action)).toHaveLength(1);
+  expect(calls.sourceCalls.filter(call => call.action === 'start')).toHaveLength(2);
+  expect(calls.deploymentCalls.filter(call => call.action === 'events')).toHaveLength(1);
+  const initial = calls.deploymentCalls.filter(call => call.action === 'initial-start');
+  expect(initial).toHaveLength(1);
+  expect(initial[0].id).toBe(failedIntent.intent.deploymentId);
+  expect(JSON.parse(initial[0].body)).toMatchObject({ requestId: failedIntent.intent.initialStartRequestId,
+    graphVersion: failedIntent.intent.graphVersion, incarnationId: failedIntent.intent.incarnationId,
+    input: JSON.parse(failedIntent.intent.inputJson) });
+  expect(await page.evaluate(id => {
+    const owner = window.ravenroot.workspace.find(id);
+    return { id: owner.id, incarnation: owner.incarnation, graph: JSON.stringify(owner.graph),
+      executionId: owner.execution.executionId, binding: owner.deploymentRun ?? null };
+  }, sibling.id)).toEqual(sibling);
 });
 
 test('Stop requested while start is pending waits for registration and leaves no listener', async ({ page }) => {
@@ -512,7 +607,7 @@ test('closing the owner cannot cancel a Stop already queued behind its pending s
   expect(deletedSessionIds).toHaveLength(1);
 });
 
-test('an authoritative observation 404 recovers STARTING to stopped', async ({ page }) => {
+test('an absent observation leaves STARTING unavailable until explicit recovery', async ({ page }) => {
   await stubRuntime(page, {
     sourceResponder: async ({ route, request, sessionId }) => {
       if (request.method() === 'POST') {
@@ -530,9 +625,9 @@ test('an authoritative observation 404 recovers STARTING to stopped', async ({ p
 
   page.once('dialog', dialog => dialog.accept());
   await page.locator('#btn-run').click();
-  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Stopped');
+  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('State unavailable');
   await expect(page.locator('#btn-run')).toBeEnabled();
-  await expect(page.locator('#btn-play')).toBeEnabled();
+  await expect(page.locator('#btn-play')).toBeDisabled();
 });
 
 test('an authoritative stop 404 recovers STOPPING to stopped', async ({ page }) => {
@@ -554,14 +649,14 @@ test('an authoritative stop 404 recovers STOPPING to stopped', async ({ page }) 
 
   page.once('dialog', dialog => dialog.accept());
   await page.locator('#btn-run').click();
-  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Ready');
+  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Listening');
   await page.locator('#btn-stop').click();
   await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Stopped');
   await expect(page.locator('#btn-run')).toBeEnabled();
   await expect(page.locator('#btn-play')).toBeEnabled();
 });
 
-test('an ambiguous stop restores the last honest state and keeps observing without allowing Run', async ({ page }) => {
+test('an ambiguous stop keeps observing and permits only bound Run recovery', async ({ page }) => {
   let releaseObservation;
   const observationGate = new Promise(resolve => { releaseObservation = resolve; });
   let stopAttempted = false;
@@ -585,15 +680,15 @@ test('an ambiguous stop restores the last honest state and keeps observing witho
 
   page.once('dialog', dialog => dialog.accept());
   await page.locator('#btn-run').click();
-  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Ready');
+  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Listening');
   await page.locator('#btn-stop').click();
   await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('State unavailable');
   await expect(page.locator('#btn-stop')).toBeEnabled();
-  await expect(page.locator('#btn-run')).toBeDisabled();
+  await expect(page.locator('#btn-run')).toBeEnabled();
   await expect(page.locator('#btn-play')).toBeDisabled();
 
   releaseObservation();
-  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Ready');
+  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Listening');
 });
 
 test('an ambiguous start becomes UNKNOWN until observation proves the listener state', async ({ page }) => {
@@ -620,11 +715,11 @@ test('an ambiguous start becomes UNKNOWN until observation proves the listener s
   await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('State unavailable');
   await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('State unavailable');
   await expect(page.locator('#btn-stop')).toBeEnabled();
-  await expect(page.locator('#btn-run')).toBeDisabled();
+  await expect(page.locator('#btn-run')).toBeEnabled();
   await expect(page.locator('#btn-play')).toBeDisabled();
 
   releaseObservation();
-  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Ready');
+  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Listening');
 });
 
 /**
@@ -635,8 +730,8 @@ test('an ambiguous start becomes UNKNOWN until observation proves the listener s
  * LISTENING and the canvas stayed blank for as long as the source ran. The document now matches on
  * the deployment its session reports, which is the one identity it can hold in advance.
  */
-test('a listening deployment retains all actual traversal metadata without repainting its mutable draft', async ({ page }) => {
-  await stubRuntime(page, { sourceTraffic: { nodeIds: ['source', 'end'], admissions: 6 } });
+test('a listening deployment paints all actual traversals on its unchanged originating graph', async ({ page }) => {
+  await stubRuntime(page, { sourceTraffic: { nodeIds: ['source', 'end'], admissions: 6 }, legacyAfterAdmission: true });
   await page.goto('/');
   await openGraph(page, sourceGraph('external.consume'), 'listening.graphml');
 
@@ -644,9 +739,9 @@ test('a listening deployment retains all actual traversal metadata without repai
     && new URL(response.url()).pathname.endsWith('/initial-start'));
   page.once('dialog', dialog => dialog.accept());
   await page.locator('#btn-run').click();
-  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Ready');
+  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Listening');
   expect((await initialResponse).status()).toBe(202);
-  await expectInitialTraversalProjected(page, await page.evaluate(() => window.ravenroot.activeDocument().id));
+  await expectInitialAdmissionBound(page, await page.evaluate(() => window.ravenroot.activeDocument().id));
 
   const painted = () => page.evaluate(() => {
     const document_ = window.ravenroot.activeDocument();
@@ -666,9 +761,9 @@ test('a listening deployment retains all actual traversal metadata without repai
   await expect.poll(async () => (await painted()).traversals).toBeGreaterThanOrEqual(6);
   const report = await painted();
   expect(report.deploymentId, 'the document holds the deployment, not an execution').toBeTruthy();
-  expect(report.boundExecutionId, 'the initial traversal remains a separate explicit identity').toBe('20000000-0000-0000-0000-000000000002');
-  expect(report.source, 'deployment events never repaint the mutable draft').toBe('idle');
-  expect(report.end, 'the pinned monitor owns deployment highlights').toBe('idle');
+  expect(report.boundExecutionId, 'the initial traversal stays in the deployment binding, outside one-shot reconciliation').toBeNull();
+  expect(report.source, 'matching source events paint the unchanged deployed graph').toBe('completed');
+  expect(report.end, 'each matching node receives its runtime highlight').toBe('completed');
 });
 
 /**
@@ -691,7 +786,7 @@ test('another deployment traffic is still dropped rather than painted on whichev
 
     page.once('dialog', dialog => dialog.accept());
     await page.locator('#btn-run').click();
-    await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Ready');
+    await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Listening');
 
     await page.waitForTimeout(1_500);
     expect(await page.evaluate(() => window.ravenroot.activeDocument().cy
@@ -727,7 +822,7 @@ test('known continuation stays with its originating bound document through focus
   });
   let release;
   const gate = new Promise(resolve => { release = resolve; });
-  await stubRuntime(page, { eventResponder: async ({ route, startedSession }) => {
+  await stubRuntime(page, { legacyAfterAdmission: true, eventResponder: async ({ route, startedSession }) => {
     const id = await startedSession; await gate;
     await route.fulfill({ status: 200, contentType: 'text/event-stream', body: durableHumanTaskReentryStream(id) });
   } });
@@ -737,7 +832,7 @@ test('known continuation stays with its originating bound document through focus
   const initialResponse = page.waitForResponse(response => response.request().method() === 'POST'
     && new URL(response.url()).pathname.endsWith('/initial-start'));
   page.once('dialog', dialog => dialog.accept()); await page.locator('#btn-run').click();
-  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Ready');
+  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Listening');
   const response = await initialResponse;
   expect(response.status()).toBe(202);
   const accepted = await response.json();
@@ -753,7 +848,7 @@ test('known continuation stays with its originating bound document through focus
       return [run.processInstanceId, run.traversalId];
     }, originId)).toEqual([null, null]);
   } finally { releaseInitialBody(); }
-  await expectInitialTraversalProjected(page, originId);
+  await expectInitialAdmissionBound(page, originId);
   const original = await page.evaluate(() => ({ id: window.ravenroot.activeDocument().id,
     binding: { ...window.ravenroot.activeDocument().deploymentRun } }));
   expect(original.id).toBe(originId);

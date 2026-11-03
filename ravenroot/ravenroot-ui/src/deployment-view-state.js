@@ -88,7 +88,7 @@ export function applyDeploymentViewFrame(state, frame) {
   const runtimeDeployment = `${state.binding.deploymentId}:${state.binding.processInstanceId || '*'}`;
   bindMonitoringRuntimeStateToDeployment(state.runtime, runtimeDeployment);
   const runtimeEvent = { ...event, deploymentId: runtimeDeployment,
-    processInstanceId: frame.processInstanceId || state.binding.processInstanceId || 'deployment',
+    processInstanceId: frame.processInstanceId || event.processInstanceId || state.binding.processInstanceId || 'deployment',
     graphVersion: frame.graphVersion, streamSequence: event.sequence || state.seen.size };
   observeNodeActivity(state.runtime, runtimeEvent);
   observeEdgeTraversal(state.runtime, runtimeEvent);

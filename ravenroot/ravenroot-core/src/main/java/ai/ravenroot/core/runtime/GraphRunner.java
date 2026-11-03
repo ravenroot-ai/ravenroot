@@ -1229,7 +1229,8 @@ public final class GraphRunner implements AutoCloseable {
         if (!entry.scope().graphVersion().equals(graphVersion) || !entry.scope().deploymentId().equals(deploymentId)
                 || !entry.processInstanceId().equals(recorder.processInstanceId()) || !entry.scope().tenantId().equals(recorder.tenantId()))
             throw new IllegalArgumentException("retained SOURCE scope mismatch");
-        if (entry.cause() == ai.ravenroot.api.correlation.CorrelatedTraversal.Cause.DERIVED_CONTEXT) {
+        if (entry.cause() == ai.ravenroot.api.correlation.CorrelatedTraversal.Cause.DERIVED_CONTEXT
+                || entry.cause() == ai.ravenroot.api.correlation.CorrelatedTraversal.Cause.EXPLICIT_START) {
             if (entry.checkpoint() != null) return CompletableFuture.failedFuture(new RetainedEntryPendingException());
             @SuppressWarnings("unchecked") var attributes = (Map<String, Object>) ai.ravenroot.api.payload.PayloadJson.read(entry.attributes().bytes(), limits.payload()).toJava();
             return executeStartingAt(entry.identity(), entry.processInstanceId(), entry.traversalId(), entry.entryNodeId(), null,

@@ -4,6 +4,35 @@
 
 `POST /v1/executions` accepts `mode=test` or `mode=run`; Test is the HTTP default. Acceptance returns HTTP 202 and an execution ID. Test preserves traversal visibility while bypassing behavior effects. Run dispatches real behavior and therefore requires every relevant adapter, credential, tool, and egress policy to be usable.
 
+## Native deployment observation
+
+The editor observes hosted traversals through
+`GET /v1/deployments/{id}/events?graphVersion=...&include=diagnostics`, with the captured
+`X-Ravenroot-Deployment-Incarnation` header. The optional diagnostics selector adds the same
+bounded author message, trusted Log output, and process/traversal/invocation identifiers as the
+native execution stream. It requires execution-read authority in addition to deployment observation;
+authority and the captured deployment binding are rechecked before each event. Raw diagnostic
+`detail` and arbitrary execution payloads are excluded. The default stream and embedded viewer
+retain their content-free projection. This live channel does not recover historical output that
+was not retained.
+
+The first lifecycle frame contains the exact deployment, graph version and incarnation, together
+with an opaque `cursor`. A first attachment starts at the live tail. A reconnect sends that cursor
+in `Last-Event-ID`; its lifecycle handshake anchors the resolved replay position before delivering
+backlog. Retention gaps, foreign or expired cursors remain explicit failures. Credentials travel in
+headers, never in the URL. The observation source and lifecycle do not require a usable drawing;
+the full drawing endpoint keeps its separate projection validation.
+
+The editor waits for a matching READY or DEGRADED lifecycle handshake before initial START. A
+connection notification, retry, timeout or missing drawing does not establish observation. A
+10-second observation deadline leaves the deployment's actual lifecycle intact and retains its
+saved execution request for an explicit **Run** retry. Disconnecting revokes admission confirmation;
+only another valid handshake restores it. Stop and document retirement cancel pending admission.
+
+Completing the initial START traversal does not stop a deployment or its listening sources.
+The editor displays the deployment lifecycle separately. Durable Human Task attention is scoped
+by the registration identity and graph version, rather than by the deployment's public alias.
+
 ## Control transitions
 
 | Operation | Contract |

@@ -29,6 +29,9 @@ const settleRouting = page => page.evaluate(() => new Promise(resolve =>
 
 async function openRoutingGraph(page) {
   await page.goto('/');
+  await expect.poll(() => page.evaluate(() => {
+    try { return window.ravenroot?.graphDocumentByteLimit(); } catch { return null; }
+  })).toBe(10 * 1024 * 1024);
   await page.evaluate(xml => window.ravenroot.replaceActiveDocumentFromText(xml, 'routing.graphml'),
     ROUTING_GRAPHML);
   await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument()?.graph?.nodes

@@ -135,7 +135,8 @@ public final class OpenApiSpecGenerator {
         if (isHumanTaskCapabilityCompletion(route, method)) {
             entry.append(jsonRequestBody("HumanTaskCapabilityCompletion"));
         }
-        if ("POST".equals(method) && "/v1/deployments/{id}/initial-start".equals(route.path())) entry.append(jsonRequestBody("InitialStartRequest"));
+        if ("POST".equals(method) && ("/v1/deployments/{id}/initial-start".equals(route.path())
+                || "/v1/deployments/{id}/executions".equals(route.path()))) entry.append(jsonRequestBody("InitialStartRequest"));
         if ("/v1/deployments/{id}/restore".equals(route.path())) entry.append(jsonRequestBody("DeploymentRestoreRequest"));
         if ("/v1/correlation/preview".equals(route.path())) entry.append(jsonRequestBody("CorrelationPreviewRequest"));
         if ("/v1/embed/executions".equals(route.path())) entry.append(jsonRequestBody("EmbedInitialStartRequest"));
@@ -150,6 +151,12 @@ public final class OpenApiSpecGenerator {
         if ("/v1/graph-authoring-webhooks".equals(route.path())) {
             for (int status : new int[] {400, 403, 404, 405, 413, 415, 429, 503})
                 responses.add("          \"" + status + "\": {\"description\": \"provider delivery refused\"}");
+        }
+        if ("/v1/deployments/{id}/executions".equals(route.path())) {
+            responses.add("          \"503\": {\"description\": \"Admission is uncertain; retry the same requestId and input to reconcile.\", \"content\": {\"application/json\": {\"schema\": {\"$ref\": \"#/components/schemas/InitialStartResponse\"}}}}");
+        }
+        if ("/v1/deployments/{id}/view".equals(route.path())) {
+            responses.add("          \"503\": {\"description\": \"Known deployment definition or projection is unavailable; execution admission remains independent.\"}");
         }
         entry.append(String.join(",\n", dedupeByKey(responses)));
         entry.append("\n        }\n");
@@ -256,6 +263,13 @@ public final class OpenApiSpecGenerator {
                 parameters.add("          {\"name\":\"" + field + "\",\"in\":\"query\",\"required\":true,\"schema\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":"
                         + (field.equals("requestId") ? 128 : 256) + "}}");
         }
+        if ("/v1/deployments/{id}/source".equals(route.path())) {
+            for (String field : java.util.List.of("incarnationId", "graphVersion"))
+                parameters.add("          {\"name\":\"" + field + "\",\"in\":\"query\",\"required\":true,\"schema\":{\"type\":\"string\",\"minLength\":1}}");
+        }
+        if ("/v1/deployments/{id}/view".equals(route.path())) {
+            parameters.add("          {\"name\":\"layout\",\"in\":\"query\",\"required\":false,\"description\":\"reset rebuilds an ephemeral drawing only; source, version and deployment remain unchanged.\",\"schema\":{\"type\":\"string\",\"enum\":[\"saved\",\"reset\"],\"default\":\"saved\"}}");
+        }
         if ("POST".equals(method) && (route.path().equals("/v1/deployments/{id}/stop") || route.path().equals("/v1/deployments/{id}/start"))) {
             parameters.add(deploymentHeader("X-Ravenroot-Deployment-Incarnation", "string",
                     "Optional exact runtime binding; supplied together with graph version. Required for an identity-fenced Start or Stop."));
@@ -334,7 +348,8 @@ public final class OpenApiSpecGenerator {
 
     private static boolean isDeploymentCommand(RouteDescriptor route, String method) {
         return ("POST".equals(method) && route.path().startsWith("/v1/deployments/{id}/")
-                && !route.path().endsWith("/initial-start") && !route.path().endsWith("/restore"))
+                && !route.path().endsWith("/initial-start") && !route.path().endsWith("/restore")
+                && !route.path().endsWith("/executions"))
                 || ("DELETE".equals(method) && "/v1/deployments/{id}".equals(route.path()));
     }
 
@@ -398,7 +413,10 @@ public final class OpenApiSpecGenerator {
             schema = "LocalDeploymentStatus";
         } else if ("/v1/correlation/preview".equals(route.path())) {
             schema = "CorrelationPreviewResponse";
-        } else if ("/v1/deployments/{id}/initial-start".equals(route.path()) || "/v1/embed/executions".equals(route.path())) {
+        } else if ("/v1/deployments/{id}/source".equals(route.path())) {
+            schema = "DeploymentSubmittedSource";
+        } else if ("/v1/deployments/{id}/initial-start".equals(route.path())
+                || "/v1/deployments/{id}/executions".equals(route.path()) || "/v1/embed/executions".equals(route.path())) {
             schema = "InitialStartResponse";
         } else if ("/v1/deployments/{id}/history".equals(route.path()) || "/v1/embed/history".equals(route.path())) {
             schema = "DeploymentHistoryPage";

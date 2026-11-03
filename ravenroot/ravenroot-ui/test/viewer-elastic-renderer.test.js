@@ -231,7 +231,15 @@ describe('shared D3 Elastic renderer', () => {
       { reducedMotion: true });
     expect(Number(svg.querySelector('.d3-edges path').getAttribute('stroke-width'))).toBeGreaterThan(1.8);
     expect(svg.querySelector('marker').getAttribute('markerWidth')).toBe('6');
-    expect(svg.querySelector('.d3-edges path').getAttribute('stroke-dasharray')).toBeNull();
+    const edge = svg.querySelector('.d3-edges path');
+    expect(edge.getAttribute('stroke-dasharray')).toBeNull();
+    expect(edge.getAttribute('stroke')).toBe('#0969da');
+    renderer.updateEdgeFlow('e1', { recent: 0, count: 9 }, { reducedMotion: true });
+    expect(edge.getAttribute('stroke')).toBe('#238636');
+    const marker = document.querySelector(edge.getAttribute('marker-end').slice(4, -1));
+    expect(marker.querySelector('path').getAttribute('fill')).toBe('#238636');
+    renderer.resetRuntime();
+    expect(edge.getAttribute('stroke')).toBe('#fff');
     renderer.destroy();
   });
 
@@ -397,6 +405,31 @@ describe('shared D3 Elastic renderer', () => {
     expect(body).toContain(".transition().duration(180)");
     expect(body).not.toContain('.restart()');
     expect(body).not.toMatch(/alpha\(\s*[\d.]/);
+  });
+
+  it('keeps one-shot observation defaults while an explicit missing deployment state clears observation', () => {
+    document.body.innerHTML = '<svg id="elastic"></svg>';
+    const { nodes, links } = monitoringSettleGraph();
+    const renderer = mountD3ElasticRenderer({ svg: document.querySelector('#elastic'), nodes, links,
+      width: 900, height: 500, palette: {} });
+    renderer.simulation.stop();
+    const source = readFileSync(resolvePath(import.meta.dirname, '..', 'src', 'app.js'), 'utf8');
+    const start = source.indexOf('function updateD3RuntimeNode(');
+    const next = source.indexOf('\nfunction ', start + 1);
+    const body = source.slice(start, next === -1 ? undefined : next);
+    const update = new Function('elasticRendererFor', 'rendererSessions', 'runtimeColor', 'runtimeNodeLabel',
+      `${body}; return updateD3RuntimeNode;`)(() => renderer, { isLive: () => true },
+      () => '#123456', () => 'Runtime node');
+    const owner = { cy: { getElementById: () => ({}) } };
+    try {
+      update(owner, 'n0', 2, 'active', 3);
+      expect(renderer.nodes[0]).toMatchObject({ runtimeObserved: true, runtimeState: 'active', instances: 2, arrivals: 3 });
+      update(owner, 'n0', 0, 'idle', 0, { runtimeObserved: false });
+      expect(renderer.nodes[0]).toMatchObject({ runtimeObserved: false, runtimeState: 'idle', instances: 0, arrivals: 0 });
+      update(owner, 'n0', 0, 'completed', 0, { type: 'NODE_COMPLETED', occurredAt: '2026-11-02T00:00:00Z' });
+      expect(renderer.nodes[0]).toMatchObject({ runtimeObserved: true, runtimeState: 'completed',
+        lastEventType: 'NODE_COMPLETED', lastOccurredAt: '2026-11-02T00:00:00Z' });
+    } finally { renderer.destroy(); }
   });
 
   it('clears a previous run in place without reheating, moving a settled graph or resetting the viewport', () => {

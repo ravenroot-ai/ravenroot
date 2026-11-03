@@ -151,6 +151,15 @@ describe('Human Task capability and attention projection', () => {
       deploymentId: 'd7', graphVersion: null } })).toBeNull();
   });
 
+  it('recovers durable deployment task ownership on reload and respects explicit selection', () => {
+    const deploymentRun = { deploymentId: 'run-alias', registrationIdentity: 'durable-id', graphVersion: 'v1' };
+    expect(humanTaskContext({ deploymentRun, humanTasks: {} })).toEqual({ deploymentId: 'durable-id', graphVersion: 'v1' });
+    expect(humanTaskContext({ deploymentRun, humanTasks: { deploymentId: 'run-alias', graphVersion: 'v1' } }))
+      .toEqual({ deploymentId: 'durable-id', graphVersion: 'v1' });
+    expect(humanTaskContext({ deploymentRun, humanTasks: { deploymentId: 'other', registrationIdentity: 'other-id', graphVersion: 'v2' } }))
+      .toEqual({ deploymentId: 'other-id', graphVersion: 'v2' });
+  });
+
   it('persists the effective page origin when the runtime uses its same-origin default', () => {
     expect(humanTaskServiceOrigin('', 'http://127.0.0.1:51492')).toBe('http://127.0.0.1:51492');
     expect(humanTaskServiceOrigin('https://runtime.example/base', 'https://editor.example'))

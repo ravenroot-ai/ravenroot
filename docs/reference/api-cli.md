@@ -98,6 +98,32 @@ observes the permanent marker under deployment observation authority. It never a
 returns retained input. A retained marker returns `DUPLICATE` and its original identities; an absent
 marker or stale binding returns `REFUSED`. Reads carry `Cache-Control: private, no-store`.
 
+A separate `POST /v1/deployments/{id}/executions` explicitly admits another START on the
+same pinned deployment. It accepts the same binding/input fields and returns the same outcome
+shape, but each new request ID owns an independent process/traversal. Retry the saved request ID
+and input after an ambiguous response; do not generate a replacement request. This operation
+requires execution-start authority and durable entry custody. It does not change the original
+initial-START marker. Its retry evidence follows the configured retained business-history policy.
+
+`GET /v1/deployments/{id}/source?incarnationId=...&graphVersion=...` returns the complete,
+immutable submitted GraphML as `graphMlBase64`, together with the exact binding. It requires
+`GRAPH_READ` and `DEPLOYMENT_OBSERVE`, returns 409 for a changed binding and 404 for an unknown
+tenant-scoped deployment, and carries `Cache-Control: private, no-store`. It reads retained
+submission bytes, including on a cold registration, without opening sources, contacting Git,
+resolving credentials or executing START. The operational console exposes **Open source version**,
+**Create draft from version**, and **Download GraphML**. A draft is independent and has no runtime
+association or repository revision; opening or exporting the source never changes the deployment.
+
+Deployment drawing is independent of execution admission. `GET /v1/deployments/{id}/view`
+returns `renderingStatus` (`SAVED`, automatic fallback `DEGRADED`, or explicitly `REBUILT`).
+`?layout=reset` discards saved positions/groups for the response and generates separated positions
+from the retained immutable workflow. It changes no workflow bytes, graph version, deployment,
+execution or admission marker. The editor offers this as **Rebuild drawing** with confirmation.
+A known deployment whose definition or projection is unavailable returns HTTP 503 with
+`DEFINITION_UNAVAILABLE` or `PROJECTION_UNAVAILABLE`; unknown tenant-scoped identifiers return
+404. A drawing failure cannot prevent an independently authorized execution. Missing executable
+definitions cannot be reconstructed from a picture and remain an explicit recovery error.
+
 Durable deployment status includes an opaque `registrationIdentity`, retained independently of the
 runtime `incarnationId`. After a server restart, the process-local hosted projection may be absent
 while the durable registration remains. On a later explicit Run the editor uses
@@ -380,4 +406,4 @@ No GraphML request body is needed. `GRAPH_WRITE` is required. A `200` response i
 
 An identical successful request identity reconciles the same result. Reuse with changed expected state is refused. A competing request, stale draft/release/publication token, existing successor, legacy divergent same-version draft, absent release, inconsistent metadata or maximum authored version receives `409 CONFLICT`; protect local edits and reopen current state. A missing draft with valid release can create vN+1. An initial unreleased v1 cannot increment. Unsupported capability returns `501 UNSUPPORTED_PROVIDER`, denied authorization `403 FORBIDDEN`, and incomplete revision headers `400 INVALID_REQUEST`. Publication observations remain mandatory even though release, independently of publication, makes vN immutable. This operation never publishes or deploys.
 
-Changed saves still representing released vN are refused. Back up legacy divergent vN edits before explicit discard/reconciliation, create vN+1, then reapply protected edits. Explicit discard restores released content but retains an already assigned successor version. Repository inventory `GET /v1/graph-authoring?cursor=<nextCursor>` is authenticated and tenant scoped; continue until `nextCursor` is empty.
+A changed save based on released vN creates draft vN+1 in the same revision-checked write; unchanged saves retain vN and an existing successor keeps its assigned version. Back up legacy divergent vN edits before explicit discard/reconciliation, create vN+1, then reapply protected edits. Explicit discard restores released content but retains an already assigned successor version. Repository inventory `GET /v1/graph-authoring?cursor=<nextCursor>` is authenticated and tenant scoped; continue until `nextCursor` is empty.

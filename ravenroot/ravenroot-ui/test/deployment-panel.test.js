@@ -311,6 +311,54 @@ describe('registering from the active document', () => {
 });
 
 describe('row actions', () => {
+  it.each(['open', 'draft', 'download'])('retrieves the pinned complete source for %s without lifecycle writes', async action => {
+    const entry = { ...DURABLE_READY, registrationIdentity: 'registration', runtimeIncarnationId: 'runtime' };
+    const source = { deploymentId: entry.deploymentId, incarnationId: 'runtime', graphVersion: entry.graphVersion, graphMl: '<graphml/>' };
+    const client = stubClient({ deployments: vi.fn(async () => [entry]), deploymentSource: vi.fn(async () => source) });
+    const onDeploymentSource = vi.fn();
+    const panel = createDeploymentsWindow({ dialog, client, onDeploymentSource, pollMs: 0 });
+    await panel.refresh();
+    field('deployment-list').querySelector(`[data-source-action="${action}"]`).click();
+    await vi.waitFor(() => expect(onDeploymentSource).toHaveBeenCalledWith(source, action));
+    expect(client.deploymentSource).toHaveBeenCalledWith({ deploymentId: entry.deploymentId, incarnationId: 'runtime', graphVersion: entry.graphVersion });
+    expect(client.registerDeployment).not.toHaveBeenCalled();
+    expect(client.startDeployment).not.toHaveBeenCalled();
+    expect(client.stopDeployment).not.toHaveBeenCalled();
+    panel.destroy();
+  });
+
+  it('rebuilds only after confirmation without lifecycle mutation', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const client = stubClient({ deployments: vi.fn(async () => [READY]) });
+    const onOpenDeployment = vi.fn(async () => {});
+    const panel = createDeploymentsWindow({ dialog, client, onOpenDeployment, pollMs: 0 });
+    await panel.refresh();
+    field('deployment-list').querySelector('[data-deployment-rebuild="orders-v3"]').click();
+    await vi.waitFor(() => expect(onOpenDeployment).toHaveBeenCalledWith('orders-v3', client, true));
+    expect(client.startDeployment).not.toHaveBeenCalled();
+    expect(client.registerDeployment).not.toHaveBeenCalled();
+    panel.destroy(); confirm.mockRestore();
+  });
+  it('retries a lost new-execution response with its saved key and input', async () => {
+    localStorage.clear();
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const prompt = vi.spyOn(window, 'prompt').mockReturnValue('{"test":true}');
+    const entry = { ...DURABLE_READY, registrationIdentity: 'registration', runtimeIncarnationId: 'runtime' };
+    const client = stubClient({ deployments: vi.fn(async () => [entry]), deployment: vi.fn(async () => entry),
+      newDeploymentExecution: vi.fn().mockRejectedValueOnce(new Error('response lost')).mockResolvedValue({ processInstanceId: 'process' }) });
+    const panel = createDeploymentsWindow({ dialog, client, onOpenDeployment: async () => {}, pollMs: 0 });
+    await panel.refresh();
+    field('deployment-list').querySelector('[data-deployment-execute="orders-v3"]').click();
+    await vi.waitFor(() => expect(field('deployment-status').textContent).toContain('response lost'));
+    const original = client.newDeploymentExecution.mock.calls[0][1];
+    field('deployment-list').querySelector('[data-deployment-execute="orders-v3"]').click();
+    await vi.waitFor(() => expect(client.newDeploymentExecution).toHaveBeenCalledTimes(2));
+    expect(client.newDeploymentExecution.mock.calls[1][1]).toEqual(original);
+    expect(original.input).toEqual({ test: true });
+    expect(confirm).toHaveBeenCalledTimes(1);
+    panel.destroy(); confirm.mockRestore(); prompt.mockRestore(); localStorage.clear();
+  });
+
   it('opens a deployment in a separate read-only canvas without invoking lifecycle controls', async () => {
     const client = stubClient({ deployments: vi.fn(async () => [READY]) });
     const onOpenDeployment = vi.fn(async () => {});
@@ -318,7 +366,7 @@ describe('row actions', () => {
     await window_.refresh();
 
     field('deployment-list').querySelector('[data-deployment-view="orders-v3"]').click();
-    await vi.waitFor(() => expect(onOpenDeployment).toHaveBeenCalledWith('orders-v3', client));
+    await vi.waitFor(() => expect(onOpenDeployment).toHaveBeenCalledWith('orders-v3', client, false));
 
     expect(client.startDeployment).not.toHaveBeenCalled();
     expect(client.stopDeployment).not.toHaveBeenCalled();

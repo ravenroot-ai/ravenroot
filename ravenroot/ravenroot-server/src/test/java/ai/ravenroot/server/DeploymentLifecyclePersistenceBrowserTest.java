@@ -190,7 +190,8 @@ class DeploymentLifecyclePersistenceBrowserTest {
             throw new IllegalStateException("the installed Playwright binary is required for the real harness");
         }
         var builder = new ProcessBuilder(executable.toString(), "test",
-                "--config=playwright.deployment-persistence.config.js")
+                "--config=playwright.deployment-persistence.config.js",
+                "e2e/deployment-persistence-real/durable-deployment-lifecycle.spec.js")
                 .directory(ui.toFile()).redirectErrorStream(true)
                 .redirectOutput(output.resolve("playwright-driver.log").toFile());
         builder.environment().put("RAVENROOT_DEPLOYMENT_PERSISTENCE_ORIGIN", origin);

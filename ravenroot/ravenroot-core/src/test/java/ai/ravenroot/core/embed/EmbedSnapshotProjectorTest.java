@@ -34,6 +34,51 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class EmbedSnapshotProjectorTest {
 
     @Test
+    void deploymentViewAcceptsNumericStringLayoutWithoutChangingDefinition() {
+        var properties = Map.<String, Object>of("layoutX", "230", "layoutY", "-12.5",
+                "layoutWidth", "192.4", "layoutHeight", "52");
+        var definition = new GraphDefinition(List.of(
+                new GraphNode("start", ai.ravenroot.core.graph.NodeKind.START, null, properties),
+                GraphNode.end("end")), List.of(GraphEdge.to("start", "end")));
+        String digest = GraphVersionSnapshot.submission(definition).canonicalHash();
+        var projection = EmbedSnapshotProjector.projectDefinition(definition, "retained",
+                digest, digest, EmbedProjectionBudget.DEFAULTS);
+        var start = projection.nodes().stream().filter(node -> node.id().equals("start")).findFirst().orElseThrow();
+        assertEquals(new EmbedGraphProjection.Layout(230, -12.5, 192.4, 52), start.layout());
+        assertEquals(digest, GraphVersionSnapshot.submission(definition).canonicalHash());
+        assertEquals(properties, definition.nodes().stream()
+                .filter(node -> node.id().equals("start")).findFirst().orElseThrow().properties());
+    }
+
+    @Test
+    void stringLayoutStillRejectsInvalidNonFiniteAndOversizedValues() {
+        for (String x : List.of("invalid", "NaN", "Infinity", "1e309", "1000001")) {
+            var definition = new GraphDefinition(List.of(
+                    new GraphNode("start", ai.ravenroot.core.graph.NodeKind.START, null,
+                            Map.of("layoutX", x, "layoutY", "0", "layoutWidth", "84", "layoutHeight", "84")),
+                    GraphNode.end("end")), List.of(GraphEdge.to("start", "end")));
+            org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class,
+                    () -> EmbedSnapshotProjector.projectDefinition(definition, "retained",
+                            "version", "digest", EmbedProjectionBudget.DEFAULTS));
+        }
+    }
+
+    @Test
+    void rebuildingDropsBrokenPresentationButPreservesIdentityAndWorkflow() {
+        var definition = new GraphDefinition(List.of(new GraphNode("start", ai.ravenroot.core.graph.NodeKind.START,
+                null, Map.of("layoutX", "NaN", "layoutWidth", "broken", "credential", "hidden")),
+                GraphNode.end("end")), List.of(GraphEdge.to("start", "end")));
+        String digest = GraphVersionSnapshot.submission(definition).canonicalHash();
+        var rebuilt = EmbedSnapshotProjector.rebuildDefinition(definition, "retained", digest, digest, EmbedProjectionBudget.DEFAULTS);
+        assertEquals(List.of("end", "start"), rebuilt.nodes().stream().map(EmbedGraphProjection.Node::id).toList());
+        assertEquals(1, rebuilt.edges().size());
+        assertTrue(rebuilt.nodes().stream().allMatch(node -> node.layout() != null));
+        assertEquals(2, rebuilt.nodes().stream().map(EmbedGraphProjection.Node::layout).distinct().count());
+        assertEquals(digest, GraphVersionSnapshot.submission(definition).canonicalHash());
+        assertTrue(!rebuilt.toJson().contains("hidden"));
+    }
+
+    @Test
     void approvedEditorVisualSemanticsAreComputedWithoutCopyingPropertyBags() {
         var definition = new GraphDefinition(List.of(
                 new GraphNode("start", ai.ravenroot.core.graph.NodeKind.START, null),

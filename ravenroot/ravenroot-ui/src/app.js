@@ -1,3 +1,8 @@
+import { createDeploymentObservationBarrier } from './deployment-observation.js';
+import { repositoryOperationDialog } from './repository-operation-dialog.js';
+import { readSavedDeploymentView } from './saved-deployment-view.js';
+import { requireHistorySource } from './deployment-history-model.js';
+import { deploymentGraphSignature } from './deployment-graph-match.js';
 import { createDeploymentHistoryMonitor } from './embed-viewer-entry.js';
 import { mountCorrelationPreview } from './correlation-authoring.js';
 import { runOriginDeployment, persistedDeploymentRun, boundDeploymentNeedsCloseDecision, stopOriginDeployment, deploymentRunIsPending, observeOriginDeployment } from './deployment-run.js';
@@ -288,6 +293,7 @@ import {
   documentIsEditable,
   detachExecution,
   documentForRuntimeEvent,
+  deploymentRunOwnsEvent,
   forkDocumentRecord,
   hasUnsavedWork,
   retireSourceSessionProcessBindings,
@@ -664,17 +670,6 @@ function createStylesheet(palette = rendererPalette) {
     shape: 'roundrectangle', 'background-color': surface['human-task'],
     'border-color': node['human-task'], 'border-width': 2.5,
   }},
-  { selector: 'node[humanTaskPending > 0]', style: {
-    'underlay-color': palette.focus, 'underlay-opacity': 0.22, 'underlay-padding': 9,
-    'border-style': 'double', 'border-width': 4,
-  }},
-  { selector: 'node[humanTaskEscalated > 0]', style: {
-    'underlay-color': node.error, 'underlay-opacity': 0.32, 'underlay-padding': 11,
-    'border-style': 'double', 'border-width': 5,
-  }},
-  { selector: 'node.human-task-pulse[humanTaskPending > 0]', style: {
-    'underlay-opacity': 0.45, 'underlay-padding': 15,
-  }},
   // The node the author switched off. Last of the node-type rules on purpose — it has to beat
   // every `node[nodeType=…]` border above it, because "this does not run" outranks "this is an agent"
   // for a reader scanning the drawing, and the surface colour is left alone so the node's identity is
@@ -755,6 +750,13 @@ function createStylesheet(palette = rendererPalette) {
     'line-color': edge.callback, 'target-arrow-color': edge.callback,
     width: 2, color: edge.callback,
   }},
+  { selector: 'edge[runtimeCount > 0]', style: {
+    'line-color': edge.completed, 'target-arrow-color': edge.completed, width: 3,
+  }},
+  { selector: 'edge[?runtimeActive]', style: {
+    'line-color': palette.selection, 'target-arrow-color': palette.selection,
+    'underlay-color': palette.selection, 'underlay-opacity': .16, 'underlay-padding': 4,
+  }},
   // Preserve the edge's own width, colour and dash semantics and project selection around them.
   // The padded underlay is deliberately not colour-only: its extra silhouette remains legible on
   // dense graphs, at different zoom levels and for `continueP`, whose normal line is already wide.
@@ -805,6 +807,18 @@ function createStylesheet(palette = rendererPalette) {
   // Hover/search/trace dimming must not make the selected edge disappear. Its native semantic
   // styling still wins; only the visibility of the selection affordance is restored.
   { selector: 'edge:selected.dim', style: { opacity: 1 }},
+  // Pending human decisions stay visible while selected or under the graph cursor.
+  { selector: 'node[humanTaskPending > 0]', style: {
+    'underlay-color': palette.focus, 'underlay-opacity': 0.22, 'underlay-padding': 9,
+    'border-style': 'double', 'border-width': 4,
+  }},
+  { selector: 'node[humanTaskEscalated > 0]', style: {
+    'underlay-color': node.error, 'underlay-opacity': 0.32, 'underlay-padding': 11,
+    'border-style': 'double', 'border-width': 5,
+  }},
+  { selector: 'node.human-task-pulse[humanTaskPending > 0]', style: {
+    'underlay-opacity': 0.45, 'underlay-padding': 15,
+  }},
   ];
 }
 
@@ -839,6 +853,7 @@ const SESSION_ONLY_RUNTIME_EVENT_SCOPE = Object.freeze({ tenantId: null });
 
 function beginWorkspaceAuthority(client, state = 'pending') {
   workspace.documents.forEach(retireDocumentHistory);
+  workspace.documents.forEach(retireOriginDeploymentView);
   startupImportController?.runtimePending();
   workspaceAuthority = Object.freeze({ state, client, scope: null,
     generation: workspaceAuthority.generation + 1 });
@@ -1033,6 +1048,10 @@ async function switchWorkspacePersistence(configuration, client) {
       if (restored.activeDocumentId && workspace.activeId !== restored.activeDocumentId) {
         activateDocument(restored.activeDocumentId);
       }
+      clearActivity();
+      addActivityMessage(uiMessage('workspace.notice.editor.6'), uiMessage('workspace.notice.workspaceRestored', {
+        count: restored.documents.length, name: graphDisplayName || '',
+      }));
       if (restored.recoveredStaleSelection) workspacePersistenceReason += uiText("workspace.app.the.stale.selection.was.repaired");
     } else {
       openDocument({ tenantId: nextScope.tenantId });
@@ -1134,6 +1153,7 @@ let humanTaskController = null;
 let humanTaskControllerOwner = null;
 let humanTaskDecisionDialog = null;
 let humanTaskPulseTimer = null;
+let humanTaskPulseOwner = null;
 let humanTaskRecoveryGeneration = 0;
 const HUMAN_TASK_SELECTION_KEY = 'ravenroot.human-task.selection.v1';
 
@@ -1196,14 +1216,18 @@ function currentHumanTaskCapability() {
 function stopHumanTaskPulse() {
   if (humanTaskPulseTimer != null) clearInterval(humanTaskPulseTimer);
   humanTaskPulseTimer = null;
+  humanTaskPulseOwner = null;
   cy?.nodes('.human-task-pulse').removeClass('human-task-pulse');
   elasticRendererFor(workspace.active)?.nodeSelection?.classed('human-task-pulse', false);
 }
 
 function syncHumanTaskPulse(owner) {
-  stopHumanTaskPulse();
   if (owner !== workspace.active || !owner?.cy?.nodes('[humanTaskPending > 0]').length
-      || globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+      || globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return stopHumanTaskPulse();
+  // Attention polling must not reset the off phase before it becomes visible.
+  if (humanTaskPulseTimer != null && humanTaskPulseOwner === owner) return;
+  stopHumanTaskPulse();
+  humanTaskPulseOwner = owner;
   const counts = owner.humanTasks?.projection?.nodeCounts || new Map();
   let on = true;
   owner.cy.nodes('[humanTaskPending > 0]').addClass('human-task-pulse');
@@ -1215,7 +1239,7 @@ function syncHumanTaskPulse(owner) {
     on = !on;
     owner.cy.nodes('[humanTaskPending > 0]').toggleClass('human-task-pulse', on);
     elasticRendererFor(owner)?.nodeSelection
-      ?.filter(item => (counts.get(item.id)?.pending || 0) > 0)
+      ?.filter(item => (owner.humanTasks?.projection?.nodeCounts?.get(item.id)?.pending || 0) > 0)
       .classed('human-task-pulse', on);
   }, 900);
 }
@@ -1227,6 +1251,7 @@ function applyHumanTaskProjection(owner) {
     const attention = counts.get(node.id()) || { pending: 0, escalated: 0 };
     node.data('humanTaskPending', attention.pending);
     node.data('humanTaskEscalated', attention.escalated);
+    applyRuntimeVisual(node, owner);
     node.data('label', `${NODE_ICONS[node.data('nodeType')] || '• '}${runtimeNodeLabel(node)}`);
     if (isN8nFamilyLayout(owner.visualStyle)) {
       node.style({ label: runtimeNodeLabel(node), 'text-wrap': attention.pending ? 'wrap' : 'none',
@@ -3135,13 +3160,20 @@ function syncPaneHeaders() {
 
     let runBinding = header.querySelector('.doc-run-binding');
     if (document_.deploymentRun) {
-      if (!runBinding) { runBinding = document.createElement('span'); runBinding.className = 'doc-run-binding'; runBinding.setAttribute('role', 'status'); runBinding.setAttribute('aria-live', 'polite'); header.append(runBinding); }
-      runBinding.textContent = uiText('workspace.run.attached', { deploymentId: document_.deploymentRun.deploymentId,
-        version: shortId(document_.deploymentRun.graphVersion) })
+      if (!runBinding) { runBinding = document.createElement('span'); runBinding.className = 'doc-run-binding'; runBinding.setAttribute('role', 'status'); runBinding.setAttribute('aria-live', 'polite'); header.insertBefore(runBinding, header.querySelector('.doc-pane-maximize')); }
+      runBinding.textContent = document_.deploymentRun.deploymentId
         + (document_.deploymentRunStatus ? ` — ${uiText('workspace.run.runtimeState', { state: uiText(({ REGISTERED: 'workspace.run.state.REGISTERED', STARTING: 'workspace.run.state.STARTING', READY: 'workspace.run.state.READY', DEGRADED: 'workspace.run.state.DEGRADED', STOPPING: 'workspace.run.state.STOPPING', STOPPED: 'workspace.run.state.STOPPED', FAILED: 'workspace.run.state.FAILED', UNKNOWN: 'workspace.run.state.UNKNOWN' })[document_.deploymentRunStatus]) })}` : '');
+      if (document_.deploymentRunStatus === 'READY' && document_.deploymentRunSourceCount > 0) {
+        runBinding.textContent = `${document_.deploymentRun.deploymentId} — ${uiText('workspace.run.listening', { count: document_.deploymentRunSourceCount })}`;
+      }
       runBinding.textContent += document_.deploymentRunStopPending ? ` — ${uiText('workspace.run.stopRequested')}` : '';
       runBinding.textContent += document_.deploymentRunOperation === 'ACTIVATING' && !document_.deploymentRunStopPending ? ` — ${uiText('workspace.run.activating')}` : '';
-      runBinding.title = uiText('workspace.run.draftSeparate');
+      runBinding.title = `${runBinding.textContent} · ${shortId(document_.deploymentRun.graphVersion)}\n${uiText('workspace.run.draftSeparate')}`;
+      const identity = document.createElement('span'); identity.className = 'doc-run-id';
+      identity.textContent = document_.deploymentRun.deploymentId;
+      const status = document.createElement('span'); status.className = 'doc-run-state';
+      status.textContent = runBinding.textContent.slice(identity.textContent.length);
+      runBinding.replaceChildren(identity, status);
       pane.dataset.deploymentId = document_.deploymentRun.deploymentId;
       pane.dataset.deploymentVersion = document_.deploymentRun.graphVersion || '';
       pane.dataset.deploymentRunPhase = document_.deploymentRun.phase;
@@ -3717,15 +3749,60 @@ function openDocument({ name = defaultDocumentName(), displayName, graph = null,
   }
   syncActiveDocumentChrome();
   scheduleProgramGraphReadiness(document_);
+  observeDocumentDeployment(document_);
   if (presentation?.renderMode === 'monitoring') reconcileActiveRenderModeRenderer();
   scheduleWorkspacePersistence();
   return document_.id;
 }
 
-async function openDeploymentDocument(deploymentId, client = runtimeClient) {
+function paintDocumentDeploymentView(owner, state) {
+  const cleared = !state.nodeStates.size
+    || owner.cy.nodes().some(node => node.data('runtimeObserved') && !state.nodeStates.has(node.id()));
+  applyDeploymentViewStateToRenderer(owner.cy, state);
+  owner.execution.monitoringFlow = state.runtime;
+  if (cleared) applyVisualStyle(owner.visualStyle, owner.cy, owner, { preserveEdgeGeometry: true });
+  owner.cy.nodes().forEach(node => {
+    const view = state.nodeStates.get(node.id());
+    node.data('instances', view?.instances || 0);
+    node.data('arrivals', view?.arrivals || 0);
+    if (view) applyRuntimeVisual(node, owner);
+    updateD3RuntimeNode(owner, node.id(), view?.instances || 0, view?.state || 'idle', view?.arrivals || 0,
+      { runtimeObserved: Boolean(view) });
+  });
+  owner.cy.edges().forEach(edge => updateRuntimeEdge(owner, edge.id()));
+  if (owner === workspace.active) drawingModelController?.scheduleRefresh(owner.id);
+}
+
+function openDeploymentSourceDocument(source, action) {
+  // i18n-audit-exempt: authored-content - The filename identifies the immutable deployment version.
+  const filename = `${source.deploymentId}-${source.graphVersion.slice(0, 12)}.graphml`;
+  if (action === 'download') {
+    dispatchDocumentDownload({ xml: source.graphMlBytes || source.graphMl, filename });
+    return;
+  }
+  const graph = parsePreparedGraph(source.graphMl, filename, { maxBytes: currentGraphDocumentByteLimit() });
+  const id = openDocument({ name: filename, graph,
+    mode: action === 'draft' ? DOCUMENT_MODES.DRAFT : DOCUMENT_MODES.DEPLOYED,
+    provenance: { originMode: DOCUMENT_MODES.DEPLOYED, sourceGraphVersion: source.graphVersion },
+  });
+  const owner = workspace.find(id);
+  if (action === 'open') owner.deploymentSource = source;
+  else if (action === 'draft') setModifyMode(true);
+  addActivityMessage(uiMessage('workspace.notice.deployment'), uiMessage('workspace.deployment.source.opened', {
+    version: shortId(source.graphVersion), deploymentId: source.deploymentId }), 'completed');
+  scheduleWorkspacePersistence();
+  return id;
+}
+
+async function openDeploymentDocument(deploymentId, client = runtimeClient, rebuild = false) {
   if (!client) throw productError("workspace.error.app.connect.to.a.ravenroot.service.before.opening.a.deployment", new Error('Connect to a Ravenroot service before opening a deployment.'));
-  const envelope = await client.deploymentView(deploymentId);
+  const [envelope, status] = await Promise.all([client.deploymentView(deploymentId, { rebuild }), client.deployment(deploymentId)]);
+  if (status.graphVersion !== envelope.source.graphVersion || status.runtimeIncarnationId !== envelope.source.incarnationId)
+    throw productError('history.sourceChanged', new Error('Deployment changed during view opening'));
   const graph = deploymentProjectionDocument(envelope);
+  graph.viewerBinding = Object.freeze({ ...graph.viewerBinding, registrationIdentity: status.registrationIdentity });
+  if (['REBUILT', 'DEGRADED'].includes(envelope.renderingStatus))
+    addActivityMessage(uiMessage('workspace.notice.deployment'), uiMessage('workspace.deployment.renderingDegraded'));
   const id = openDocument({
     // i18n-audit-exempt: authored-content - Document filenames are persisted stable identities.
     name: `${deploymentId}.deployment`,
@@ -3745,10 +3822,24 @@ async function openDeploymentDocument(deploymentId, client = runtimeClient) {
   });
   const owner = workspace.find(id);
   if (!owner) throw productError("workspace.error.app.the.deployment.canvas.could.not.be.created", new Error('The deployment canvas could not be created.'));
-  const state = createDeploymentViewState({ ...graph.viewerBinding, lifecycle: envelope.lifecycle });
+  attachDeploymentDocument(owner, envelope, client);
+  setModifyMode(false);
+  syncActiveDocumentChrome();
+  scheduleWorkspacePersistence();
+  return id;
+}
+
+function attachDeploymentDocument(owner, envelope, client) {
+  owner.deploymentView?.disconnect?.();
+  const deploymentId = envelope.source.deploymentId;
+  const state = createDeploymentViewState({ ...owner.graph.viewerBinding, lifecycle: envelope.lifecycle });
+  const authority = workspaceAuthority, incarnation = owner.incarnation;
+  const current = () => workspace.find(owner.id) === owner && owner.incarnation === incarnation
+    && runtimeClient === client && workspaceAuthority === authority && tenantAuthorityAllows(owner, client);
   const repaint = frame => {
+    if (!current()) return;
     const result = applyDeploymentViewFrame(state, frame);
-    if (owner.cy) applyDeploymentViewStateToRenderer(owner.cy, state);
+    if (owner.cy) paintDocumentDeploymentView(owner, state);
     syncPaneHeaders();
     if (workspace.active === owner) {
       addActivityMessage(uiMessage("workspace.notice.deployment"), result.reason === 'execution' ? uiMessage("workspace.notice.observed.on", { type: frame.event.type, deploymentId: deploymentId }) : uiMessage("workspace.notice.deployment.2", { deploymentId: deploymentId, detail2: state.continuity.toLowerCase() }),
@@ -3756,6 +3847,7 @@ async function openDeploymentDocument(deploymentId, client = runtimeClient) {
     }
   };
   const disconnect = client.connectDeploymentView(envelope, repaint, (connectionState, message, renderMessage) => {
+    if (!current()) return;
     if (connectionState === 'revoked') {
       resetDeploymentViewRuntime(state, 'DETACHED', 'AUTHORITY_CHANGED');
     } else if (connectionState === 'error') {
@@ -3764,17 +3856,41 @@ async function openDeploymentDocument(deploymentId, client = runtimeClient) {
       state.continuity = connectionState === 'connected' ? 'LIVE'
         : connectionState === 'reconnecting' ? 'RECONNECTING' : connectionState.toUpperCase();
     }
-    if (owner.cy) applyDeploymentViewStateToRenderer(owner.cy, state);
+    if (owner.cy) paintDocumentDeploymentView(owner, state);
     syncPaneHeaders();
     if (workspace.active === owner) addActivityMessage(uiMessage("workspace.notice.deployment.3"), renderMessage ? uiComputed(renderMessage) : message,
       ['error', 'revoked'].includes(connectionState) ? 'failed' : 'completed');
   });
   owner.deploymentView = { envelope, state, disconnect };
-  applyDeploymentViewStateToRenderer(owner.cy, state);
+  paintDocumentDeploymentView(owner, state);
   syncPaneHeaders();
-  setModifyMode(false);
-  syncActiveDocumentChrome();
-  return id;
+}
+
+async function reconnectSavedDeploymentView(owner, client = runtimeClient) {
+  if (owner.graph?.format !== 'deployment' || owner.deploymentRun || !tenantAuthorityAllows(owner, client)) return;
+  const binding = owner.graph.viewerBinding;
+  if (!binding?.registrationIdentity) return;
+  const authority = workspaceAuthority, incarnation = owner.incarnation;
+  const current = () => workspace.find(owner.id) === owner && owner.incarnation === incarnation
+    && runtimeClient === client && workspaceAuthority === authority && tenantAuthorityAllows(owner, client);
+  owner.deploymentView?.disconnect?.();
+  owner.graph.lifecycle = 'UNKNOWN';
+  try {
+    const envelope = await readSavedDeploymentView(client, binding);
+    if (!current()) return;
+    owner.graph.viewerBinding = Object.freeze({ ...envelope.source, registrationIdentity: binding.registrationIdentity });
+    owner.graph.lifecycle = envelope.lifecycle;
+    attachDeploymentDocument(owner, envelope, client);
+    scheduleWorkspacePersistence();
+  } catch (error) {
+    if (!current()) return;
+    const state = createDeploymentViewState(binding);
+    resetDeploymentViewRuntime(state, 'UNAVAILABLE', 'OBSERVATION_ENDED');
+    owner.deploymentView = { state, disconnect: () => {} };
+    paintDocumentDeploymentView(owner, state); syncPaneHeaders();
+    addActivityMessage(uiMessage('workspace.notice.deployment'), uiMessage('workspace.deployment.restoreFailed', {
+      deploymentId: binding.deploymentId, reason: uiErrorMessage(error) }), 'failed');
+  }
 }
 
 function forkActiveDocument() {
@@ -3954,6 +4070,7 @@ function teardownDocument(target) {
   target.sourceSession.pollController = null;
   retireSourceSessionProcessBindings(target);
   target.deploymentView?.disconnect?.();
+  retireOriginDeploymentView(target);
   target.deploymentView = null;
   // Renderer ownership is per document: close retires this target's callbacks and host without
   // touching any visible sibling, whether or not the target owns the shared chrome.
@@ -4807,7 +4924,7 @@ function registerCytoscapeRenderer(owner, target = owner?.cy) {
 }
 
 function destroyDocumentRenderer(owner, reason = 'destroyed') {
-  if (['closed', 'replaced', 'destroyed'].includes(reason)) retireDocumentHistory(owner);
+  if (['closed', 'replaced', 'destroyed'].includes(reason)) { retireDocumentHistory(owner); retireOriginDeploymentView(owner); }
   owner?.visualGroupsRenderer?.destroy();
   if (owner) owner.visualGroupsRenderer = null;
   if (edgeGestureSession?.owner === owner) cancelEdgeGesture({ clearMessage: true });
@@ -6104,7 +6221,7 @@ function setRenderMode(name, { skipDraftGuard = false } = {}) {
   const incoming = ensureModeViewStates(owner)[semanticMode];
   owner.visualGroupState = structuredClone(incoming?.visualGroupState || owner.visualGroupState || {});
   if (semanticMode === 'design') {
-    reconcileDocumentHistory(owner);
+    retireDocumentHistory(owner);
     stopElasticRendering(owner, 'mode-restored');
     target.nodes().unlock();
     layoutMode = incoming?.layoutMode && incoming.layoutMode !== 'elastic'
@@ -6121,7 +6238,7 @@ function setRenderMode(name, { skipDraftGuard = false } = {}) {
     owner.layoutMode = 'elastic';
     restoreMonitoringView(owner);
     target.nodes().lock();
-    if (!reconcileDocumentHistory(owner)) startD3Elastic(owner, target, null, { startSimulation: false });
+    startD3Elastic(owner, target, null, { startSimulation: false });
   }
   syncPaneLayout();
   syncLayoutChrome(owner);
@@ -6199,6 +6316,7 @@ function refreshHistoryAttention(owner) {
   const summary = owner.historyDialog?.querySelector('.doc-history-attention');
   const button = owner.historyDialog?.querySelector('.doc-history-review-tasks');
   if (!summary || !button) return;
+  owner.historyMonitor?.setDeploymentStatus?.(owner.deploymentRunStatus || owner.graph?.viewerProjection?.lifecycle, owner.deploymentRunSourceCount);
   const state = owner.humanTasks?.projection;
   const total = state?.kind === 'ready' ? [...state.nodeCounts.values()].reduce((sum, row) => sum + row.pending, 0) : null;
   const escalated = state?.kind === 'ready' ? [...state.nodeCounts.values()].reduce((sum, row) => sum + row.escalated, 0) : 0;
@@ -6210,15 +6328,15 @@ function documentHistoryDraftNotice(owner) {
   if (owner.mode !== DOCUMENT_MODES.DRAFT) return uiText('history.deployedOnly');
   if (!owner.deploymentRun?.graphMl) return uiText('workspace.run.draftSeparate');
   try {
-    const current = serializeGraphML(graphForAuthorizedExecution(owner, canonicalGraphSnapshot(owner.graph)));
-    return uiText(current === owner.deploymentRun.graphMl ? 'history.draftMatches' : 'history.draftChanged');
+    return uiText(documentMatchesDeployment(owner) ? 'history.draftMatches' : 'history.draftChanged');
   } catch { return uiText('workspace.run.draftSeparate'); }
 }
 
-function reconcileDocumentHistory(owner) {
+function reconcileDocumentHistory(owner, { open = false } = {}) {
   if (owner !== workspace.active) return false;
-  const bound = owner?.deploymentRun || owner?.graph?.viewerBinding;
-  if (!bound?.deploymentId || !bound.graphVersion || !bound.incarnationId || owner.renderMode !== 'monitoring') {
+  if (!open && !owner.historyDialog?.open) return false;
+  const bound = owner?.deploymentRunObservedSource || owner?.deploymentRun || owner?.graph?.viewerBinding;
+  if (!bound?.deploymentId || !bound.graphVersion || !bound.incarnationId) {
     retireDocumentHistory(owner); return false;
   }
   const client = runtimeClient, authority = workspaceAuthority, incarnation = owner.incarnation;
@@ -6230,7 +6348,7 @@ function reconcileDocumentHistory(owner) {
     dialog.setAttribute('aria-label', uiText('history.title'));
     const bar = window.document.createElement('nav'); bar.className = 'doc-history-bar';
     const back = window.document.createElement('button'); back.type = 'button'; back.textContent = uiText('history.return');
-    const returnToGraph = () => { dialog.close(); if (workspace.active === owner) setRenderMode('design'); };
+    const returnToGraph = () => retireDocumentHistory(owner);
     back.addEventListener('click', returnToGraph);
     const notice = window.document.createElement('p'); notice.className = 'doc-history-draft'; notice.setAttribute('role', 'status');
     const attention = window.document.createElement('p'); attention.className = 'doc-history-attention'; attention.setAttribute('role', 'status');
@@ -6242,7 +6360,11 @@ function reconcileDocumentHistory(owner) {
       const node = nodeId && owner.cy.getElementById(nodeId);
       if (node?.length) { owner.cy.nodes().unselect(); node.select(); node.emit('tap'); }
     });
-    bar.append(back, notice, attention, reviewTasks);
+    const information = window.document.createElement('details'); information.className = 'doc-history-information';
+    const informationTitle = window.document.createElement('summary'); informationTitle.textContent = uiText('history.details');
+    information.append(informationTitle, notice);
+    const taskBar = window.document.createElement('div'); taskBar.className = 'doc-history-tasks'; taskBar.append(attention, reviewTasks);
+    bar.append(back, information, taskBar);
     dialog.addEventListener('cancel', event => { event.preventDefault(); returnToGraph(); });
     const container = window.document.createElement('section'); container.className = 'doc-history';
     dialog.append(bar, container); window.document.body.append(dialog);
@@ -6252,16 +6374,33 @@ function reconcileDocumentHistory(owner) {
     void client.deploymentView(bound.deploymentId).then(projection => {
       if (!current()) return;
       const source = projection.source;
-      if (source.deploymentId !== bound.deploymentId || source.incarnationId !== bound.incarnationId || source.graphVersion !== bound.graphVersion)
-        throw new Error('History source changed');
+      requireHistorySource(bound, source);
       owner.historyMonitor = createDeploymentHistoryMonitor({ container, projection, isCurrent: current,
-        read: (query, options) => client.deploymentHistory(source, query, options), theme: applicationTheme, t: uiText });
-    }).catch(() => {
+        read: (query, options) => client.deploymentHistory(source, query, options), theme: applicationTheme, t: uiText, title: owner.mode === DOCUMENT_MODES.DRAFT ? owner.displayName || owner.name : null });
+      refreshHistoryAttention(owner);
+    }).catch(error => {
       if (!current()) return;
-      const message = window.document.createElement('p'); message.textContent = uiText('history.failed');
+      const message = window.document.createElement('p'); message.textContent = uiText('history.viewFailed', { deploymentId: bound.deploymentId, reason: uiErrorReason(error) });
       const retry = window.document.createElement('button'); retry.type = 'button'; retry.textContent = uiText('history.retryView');
-      retry.addEventListener('click', () => { if (current()) { retireDocumentHistory(owner); reconcileDocumentHistory(owner); } });
+      retry.addEventListener('click', () => { if (current()) { retireDocumentHistory(owner); reconcileDocumentHistory(owner, { open: true }); } });
       container.replaceChildren(message, retry);
+      if (error?.code === 'HISTORY_SOURCE_CHANGED') {
+        const reconnect = window.document.createElement('button'); reconnect.type = 'button';
+        reconnect.textContent = uiText('history.openCurrent');
+        reconnect.addEventListener('click', async () => {
+          if (!current()) return;
+          reconnect.disabled = true;
+          try {
+            const id = await openDeploymentDocument(bound.deploymentId, client);
+            retireDocumentHistory(owner);
+            const opened = workspace.find(id);
+            if (opened === workspace.active) reconcileDocumentHistory(opened, { open: true });
+          } catch (failure) {
+            if (current()) message.textContent = uiText('history.viewFailed', { deploymentId: bound.deploymentId, reason: uiErrorReason(failure) });
+          } finally { reconnect.disabled = false; }
+        });
+        retry.hidden = true; container.append(reconnect);
+      }
     });
   }
   refreshHistoryAttention(owner);
@@ -6272,7 +6411,6 @@ function reconcileDocumentHistory(owner) {
 function reconcileActiveRenderModeRenderer() {
   const owner = workspace.active;
   if (!owner?.cy) return;
-  if (reconcileDocumentHistory(owner)) return;
   const kind = rendererFor(owner)?.kind;
   if (renderMode === 'monitoring' && kind !== 'elastic') {
     owner.layoutMode = 'elastic';
@@ -8656,8 +8794,15 @@ function renderWorkflowValidationAdvisory(ownerGraph, owner = workspace.active) 
 function ensureProgramReadinessChrome() {
   let button = document.getElementById('btn-program-approve');
   if (button) return;
-  const controls = document.querySelector('.runtime-controls');
-  if (!controls) return;
+  const bar = document.getElementById('workflowbar');
+  if (!bar) return;
+  const controls = document.createElement('div');
+  controls.className = 'program-readiness-controls';
+  controls.id = 'program-readiness-controls';
+  controls.setAttribute('role', 'group');
+  controls.setAttribute('aria-label', uiText('workspace.app.program.readiness.2'));
+  controls.hidden = true;
+  bar.append(controls);
   button = document.createElement('button');
   button.className = 'btn';
   button.id = 'btn-program-approve';
@@ -8672,7 +8817,7 @@ function ensureProgramReadinessChrome() {
   summary.setAttribute('role', 'status');
   summary.setAttribute('aria-live', 'polite');
   summary.hidden = true;
-  controls.append(button, summary);
+  controls.append(summary, button);
 }
 
 function syncProgramReadinessChrome(owner = workspace.active) {
@@ -8681,6 +8826,7 @@ function syncProgramReadinessChrome(owner = workspace.active) {
   const summary = document.getElementById('program-readiness-summary');
   if (!button || !summary) return;
   const nodes = programNodes(programGraph(owner));
+  document.getElementById('program-readiness-controls').hidden = !owner || !nodes.length;
   if (!owner || !nodes.length) {
     button.hidden = true;
     summary.hidden = true;
@@ -10414,7 +10560,7 @@ mmCanvas.addEventListener('blur', () => scheduleMinimap());
 // WORKFLOW EDITING & RUNTIME
 // ═══════════════════════════════════════════════════════════════
 
-function newWorkflow() {
+function newWorkflow({ announce = true } = {}) {
   if (!workspace.active) return openDocument();
   if (!confirmDiscardChanges()) return;
   setModifyMode(false);
@@ -10433,7 +10579,7 @@ function newWorkflow() {
   clearActivity();
   // The message must describe the START -> Do something -> {End, Error} shape that
   // createWorkflowDocument() actually builds.
-  addActivityMessage(uiMessage("workspace.notice.editor.6"), uiMessage("workspace.notice.minimal.start.do.something.end.error.workflow.created"), 'completed');
+  if (announce) addActivityMessage(uiMessage("workspace.notice.editor.6"), uiMessage("workspace.notice.minimal.start.do.something.end.error.workflow.created"), 'completed');
 }
 
 function createStartupImportPlaceholder() {
@@ -10613,6 +10759,8 @@ function markDocumentDownloaded(prepared, { announce = true } = {}) {
 }
 
 function downloadDocument(id) {
+  const source = workspace.find(id)?.deploymentSource;
+  if (source) { openDeploymentSourceDocument(source, 'download'); return true; }
   const prepared = prepareDocumentDownload(id);
   if (!prepared) return false;
   dispatchDocumentDownload(prepared);
@@ -10732,6 +10880,11 @@ function confirmDiscardChanges() {
 }
 
 function updateHistoryUi() {
+  const owner = workspace.active;
+  if (owner?.deploymentRun?.graphMl && !owner.execution.executionId && owner.cy?.nodes().some(node => node.data('runtimeObserved'))
+      && !documentMatchesDeployment(owner)) {
+    resetRuntimeState(owner, owner.cy, owner.graph, owner.layoutMode, owner.visualStyle);
+  }
   const state = editHistory.state();
   const presentationDirty = visualGroupPresentationIsDirty(workspace.active);
   const dirty = state.dirty || Boolean(activeAuthoring?.localChanges)
@@ -12162,6 +12315,8 @@ async function connectRuntime(atBoot = false) {
         runnerWindow?.setClient(connectedClient);
         void configureHumanTasks();
         workspace.documents.forEach(scheduleProgramGraphReadiness);
+        workspace.documents.forEach(observeDocumentDeployment);
+        workspace.documents.forEach(owner => { void reconnectSavedDeploymentView(owner, connectedClient); });
         void loadPersonalPalettes(connectedClient);
       } else if (scope?.failed) {
         failWorkspaceAuthority(connectedClient, authorityGeneration, workspacePersistenceReason);
@@ -12877,6 +13032,149 @@ async function presentRuntimeRefusal(owner, finding, title = uiMessage('workspac
   await focusRuntimeFinding(owner, finding);
 }
 
+const deploymentGraphMatches = new WeakMap();
+function documentMatchesDeployment(owner) {
+  const revision = owner.history.revision(), graphMl = owner.deploymentRun.graphMl;
+  const artifacts = programNodes(owner.graph).map(node => programReadiness(owner).phases.get(node.id)?.artifactId).join(':');
+  const cached = deploymentGraphMatches.get(owner);
+  if (cached?.graph === owner.graph && cached.revision === revision && cached.graphMl === graphMl && cached.artifacts === artifacts) return cached.matches;
+  try {
+    const pinned = cached?.graphMl === graphMl ? cached.pinned : deploymentGraphSignature(graphMl);
+    const matches = deploymentGraphSignature(serializeGraphML(graphForAuthorizedExecution(owner, canonicalGraphSnapshot(owner.graph)))) === pinned;
+    deploymentGraphMatches.set(owner, { graph: owner.graph, revision, graphMl, artifacts, pinned, matches });
+    return matches;
+  } catch { return false; }
+}
+
+function retireOriginDeploymentView(owner) {
+  owner?.originDeploymentView?.disconnect?.();
+  if (owner) owner.originDeploymentView = null;
+}
+
+function connectOriginDeploymentView(owner, client, envelope, { signal } = {}) {
+  const source = envelope.source, binding = owner.deploymentRun, authority = workspaceAuthority, incarnation = owner.incarnation;
+  if (!binding || source.deploymentId !== binding.deploymentId || source.graphVersion !== binding.graphVersion
+      || !tenantAuthorityAllows(owner, client)) return Promise.reject(productError('workspace.run.observationFailed', new Error('OBSERVATION_SOURCE_CHANGED')));
+  const old = owner.originDeploymentView;
+  if (old?.client === client && old.binding === binding && old.source.incarnationId === source.incarnationId
+      && (old.barrier?.pending || old.barrier?.canAdmit())) {
+    if (old.barrier.pending && signal) {
+      const cancel = () => old.barrier.retire();
+      if (signal.aborted) cancel();
+      else {
+        signal.addEventListener('abort', cancel, { once: true });
+        const release = () => signal.removeEventListener('abort', cancel);
+        old.ready.then(release, release);
+      }
+    }
+    return old.ready;
+  }
+  retireOriginDeploymentView(owner);
+  const state = createDeploymentViewState({ ...source, lifecycle: envelope.lifecycle });
+  const observation = { client, binding, source, state, ready: null, live: false, disconnect: null, barrier: null };
+  owner.originDeploymentView = observation;
+  const canvas = owner.cy, tenantId = owner.tenantId;
+  const ownsSource = () => workspace.find(owner.id) === owner && owner.incarnation === incarnation
+    && owner.originDeploymentView === observation && owner.deploymentRun === binding && owner.tenantId === tenantId
+    && source.deploymentId === state.binding.deploymentId && source.graphVersion === state.binding.graphVersion
+    && source.incarnationId === state.binding.incarnationId;
+  const current = () => ownsSource() && runtimeClient === client && workspaceAuthority === authority
+    && tenantAuthorityAllows(owner, client) && observation.barrier?.active !== false;
+  const ownsRenderer = () => ownsSource() && owner.cy === canvas && canvas && !canvas.destroyed();
+  const mayPaint = () => !(owner.execution.executionId && !owner.execution.finished.has(owner.execution.executionId))
+    && documentMatchesDeployment(owner);
+  // Ending observation may revoke stream authority. Clearing its own paint needs only captured
+  // presentation ownership; this predicate must never authorize an event or initial admission.
+  const publishReset = () => {
+    if (!state.nodeStates.size && !state.edgeStates.size && ownsRenderer() && mayPaint()) {
+      // A background Monitoring renderer is paused, but still owns its old flow decoration.
+      // Its reset is in-place and never reheats the simulation or accepts new runtime data.
+      elasticRendererFor(owner)?.resetRuntime?.({ idleStroke: runtimeColor('idle') });
+      paintDocumentDeploymentView(owner, state);
+    }
+  };
+  const barrier = createDeploymentObservationBarrier({ source, isCurrent: current, signal,
+    cancel: () => {
+      observation.live = false; observation.stopStream?.();
+      if (['LIVE', 'CONNECTING'].includes(state.continuity))
+        resetDeploymentViewRuntime(state, 'UNAVAILABLE', 'OBSERVATION_ENDED');
+      publishReset();
+    } });
+  observation.barrier = barrier; observation.ready = barrier.ready;
+  let paintQueued = false;
+  const paint = () => {
+    if (paintQueued) return;
+    paintQueued = true;
+    const renderer = owner.renderer;
+    scheduleFrame(() => {
+      paintQueued = false;
+      if (current() && ownsRenderer() && owner.renderer === renderer && mayPaint()) paintDocumentDeploymentView(owner, state);
+    });
+  };
+  observation.stopStream = client.connectDeploymentObservation(source, frame => {
+    if (!current()) return;
+    const result = applyDeploymentViewFrame(state, frame);
+    barrier.frame(frame, result);
+    if (!barrier.active || !result.accepted) return;
+    observation.live = !result.terminal && state.continuity === 'LIVE';
+    if (frame.type === 'execution') {
+      const event = { ...frame.event, graphVersion: frame.graphVersion,
+        deploymentId: binding.registrationIdentity || binding.deploymentId };
+      owner.execution.events.push(runtimeEventProjection(event));
+      if (owner.execution.events.length > RUNTIME_EVENT_TAIL) owner.execution.events.shift();
+      owner.historyMonitor?.notify?.(event);
+      if (owner === workspace.active) { appendActivityEvent(event); refreshAssistantContext(); }
+    }
+    paint();
+  }, connection => {
+    if (!current()) return;
+    barrier.connection(connection);
+    if (connection !== 'connected') observation.live = false;
+    if (['error', 'revoked'].includes(connection)) {
+      observation.live = false;
+      resetDeploymentViewRuntime(state, connection === 'revoked' ? 'DETACHED' : 'UNAVAILABLE'); publishReset();
+    }
+  }, { diagnostics: true });
+  observation.disconnect = () => { barrier.retire(); observation.stopStream(); };
+  return observation.ready;
+}
+
+const deploymentObservations = new WeakMap();
+function observeDocumentDeployment(owner) {
+  const client = runtimeClient, authority = workspaceAuthority, binding = owner?.deploymentRun;
+  if (!binding || !client || !tenantAuthorityAllows(owner, client)) return;
+  const previous = deploymentObservations.get(owner);
+  if (previous?.client === client && previous.binding === binding) return;
+  clearTimeout(previous?.timer);
+  const observation = { client, binding, timer: null };
+  deploymentObservations.set(owner, observation);
+  const current = () => workspace.find(owner.id) === owner && owner.deploymentRun === binding
+    && runtimeClient === client && workspaceAuthority === authority && tenantAuthorityAllows(owner, client)
+    && deploymentObservations.get(owner) === observation;
+  const read = async () => {
+    if (!current()) return;
+    if (!deploymentRunIsPending(owner) && !owner.deploymentRunStopPending) {
+      try {
+        await observeOriginDeployment(owner, { client, isCurrent: () => current()
+          && !deploymentRunIsPending(owner) && !owner.deploymentRunStopPending });
+        if (current() && !deploymentRunIsPending(owner) && !owner.deploymentRunStopPending) {
+          const source = owner.deploymentRunObservedSource;
+          if (source && ['READY', 'DEGRADED'].includes(owner.deploymentRunStatus)
+              && owner.originDeploymentView?.source.incarnationId !== source.incarnationId) {
+            const view = await client.deploymentView(binding.deploymentId);
+            if (current()) await connectOriginDeploymentView(owner, client, view);
+          } else if (owner.deploymentRunStatus === 'STOPPED') retireOriginDeploymentView(owner);
+        }
+      }
+      catch { if (current() && !deploymentRunIsPending(owner) && !owner.deploymentRunStopPending) owner.deploymentRunStatus = 'UNKNOWN'; }
+    }
+    if (!current()) return;
+    syncPaneHeaders(); refreshCommands();
+    observation.timer = setTimeout(read, 5000);
+  };
+  void read();
+}
+
 async function runCapturedDocumentDeployment(owner, client, { graphMl, payload, displayName, attachment }) {
   const authority = workspaceAuthority, scope = activeWorkspaceScope, persistenceGeneration = workspacePersistenceGeneration;
   const incarnation = owner.incarnation;
@@ -12895,7 +13193,8 @@ async function runCapturedDocumentDeployment(owner, client, { graphMl, payload, 
   let result;
   try { result = await runOriginDeployment(owner, { client, serviceUrl: scope?.serviceUrl || normalizedWorkspaceServiceUrl(client),
     tenantId: owner.tenantId, graphMl, inputJson: JSON.stringify(payload), attachment,
-    persist, isCurrent: current, onPhase: () => { syncPaneHeaders(); refreshCommands(); } }); }
+    persist, isCurrent: current, onObservation: (observation, options) => connectOriginDeploymentView(owner, client, observation, options),
+    onPhase: () => { syncPaneHeaders(); refreshCommands(); } }); }
   catch (error) {
     void observeOriginDeployment(owner, { client, isCurrent: current }).catch(() => {}).finally(() => {
       if (current()) { syncPaneHeaders(); refreshCommands(); }
@@ -12904,12 +13203,16 @@ async function runCapturedDocumentDeployment(owner, client, { graphMl, payload, 
   }
   if (!current()) return false;
   if (result.stoppedBeforeInitial) { syncPaneHeaders(); refreshCommands(); return true; }
-  owner.humanTasks.deploymentId = result.intent.deploymentId; owner.humanTasks.graphVersion = result.intent.graphVersion;
+  if (owner.deploymentRunMonitoringError) addActivityMessage(uiMessage('workspace.notice.deployment'),
+    uiMessage('workspace.deployment.monitoringUnavailable'), 'failed');
+  owner.humanTasks.deploymentId = result.intent.deploymentId;
+  owner.humanTasks.registrationIdentity = result.intent.registrationIdentity;
+  owner.humanTasks.graphVersion = result.intent.graphVersion;
   owner.provenance.deploymentId = result.intent.deploymentId; owner.provenance.sourceGraphVersion = result.intent.graphVersion;
-  if (result.intent.traversalId && owner.execution.executionId !== result.intent.traversalId) {
-    setDocumentExecution(owner, result.intent.traversalId, result.intent.graphVersion, client, result.intent.processInstanceId);
-    void reconcileTestCompletion(owner, result.intent.traversalId, client);
-  }
+  // Hosted initial START belongs to the deployment journal, not the one-shot result registry.
+  // Its permanent identity must never become an unresolved Test execution after a restart.
+  if (owner.execution.executionId === result.intent.traversalId) setDocumentExecution(owner, null, null);
+  observeDocumentDeployment(owner);
   void configureHumanTasks(owner); reconcileDocumentHistory(owner); owner.historyMonitor?.refresh?.();
   syncPaneHeaders(); scheduleWorkspacePersistence();
   if (owner === workspace.active) { refreshCommands(); addActivityMessage(uiMessage('workspace.run.ready'), uiMessage('workspace.run.attached', {
@@ -12917,7 +13220,22 @@ async function runCapturedDocumentDeployment(owner, client, { graphMl, payload, 
   return true;
 }
 
-async function playGraph(mode = 'test') {
+async function runAsNewDeployment({ owner = workspace.active, confirmed = false } = {}) {
+  if (owner !== workspace.active || !owner?.deploymentRun || !documentIsEditable(owner) || !tenantAuthorityAllows(owner)
+      || deploymentRunIsPending(owner) || owner.deploymentRunStopPending) return false;
+  captureActiveDocument();
+  // Keep the original document and its immutable association available for inspection.
+  // A separate draft is the explicit boundary for a new registration and initial START.
+  const graph = canonicalGraphSnapshot(owner.graph);
+  graph.nodeMap = Object.fromEntries(graph.nodes.map(node => [node.id, node]));
+  openDocument({ name: owner.name, graph, tenantId: owner.tenantId,
+    presentation: { ...visualGroupPresentation(owner), renderMode: owner.renderMode,
+      layoutMode: owner.layoutMode, visualStyle: owner.visualStyle,
+      designArrangement: owner.designArrangement, fontSize: owner.fontSize } });
+  return playGraph('run', { confirmed });
+}
+
+async function playGraph(mode = 'test', { confirmed = false } = {}) {
   const owner = workspace.active;
   const ownerGraph = graphData;
   if (!owner || !ownerGraph) return showInspectorMessage(uiText("workspace.notice.create.or.load.a.workflow.first.3"));
@@ -12995,7 +13313,7 @@ async function playGraph(mode = 'test') {
     }
   }
   const confirmation = uiText('workspace.run.confirmDeployment', { name: displayName });
-  if (mode === 'run' && !globalThis.confirm(confirmation)) {
+  if (mode === 'run' && !confirmed && !globalThis.confirm(confirmation)) {
     releaseExecutionCommand(flight);
     return;
   }
@@ -13011,14 +13329,24 @@ async function playGraph(mode = 'test') {
   }
 
   if (mode === 'run') {
+    let recoverMissingDeployment = false;
     try {
       await runCapturedDocumentDeployment(owner, executionClient, { graphMl, payload, displayName, attachment });
     } catch (error) {
       if (workspace.find(owner.id) === owner && owner === workspace.active) {
-        if (error?.finding) await presentRuntimeRefusal(owner, error.finding, uiMessage('workspace.app.execution.refused'));
+        if (error?.uiMessageKey === 'workspace.run.restoreUnavailable' && documentIsEditable(owner)
+            && tenantAuthorityAllows(owner, executionClient)) {
+          const binding = owner.deploymentRun;
+          recoverMissingDeployment = globalThis.confirm(uiText('workspace.run.recoverUnavailable', {
+            name: owner.displayName, deploymentId: binding.deploymentId,
+          })) && workspace.active === owner && owner.incarnation === originIncarnation
+            && owner.deploymentRun === binding && tenantAuthorityAllows(owner, executionClient);
+          if (!recoverMissingDeployment) addActivityMessage(uiMessage('workspace.run.failed'), uiErrorMessage(error), 'failed');
+        } else if (error?.finding) await presentRuntimeRefusal(owner, error.finding, uiMessage('workspace.app.execution.refused'));
         else addActivityMessage(uiMessage('workspace.run.failed'), uiErrorMessage(error), 'failed');
       }
     } finally { releaseExecutionCommand(flight); syncPaneHeaders(); refreshCommands(); }
+    if (recoverMissingDeployment) return runAsNewDeployment({ owner, confirmed: true });
     return;
   }
 
@@ -13074,6 +13402,8 @@ function handleRuntimeEvent(event, client = runtimeClient) {
   if (!streamScope) return;
   const target = documentForRuntimeEvent(workspace, event, streamScope);
   if (!target || !tenantAuthorityAllows(target, client)) return;
+  if (target.originDeploymentView?.live && (deploymentRunOwnsEvent(target, event)
+      || !event.deploymentId && target.sourceSession.processOwners.get(event.processInstanceId)?.deploymentBindingToken)) return;
   const isTerminal = event.type === 'EXECUTION_COMPLETED' || event.type === 'EXECUTION_FAILED'
     || event.type === 'EXECUTION_CANCELLED';
   const isActive = target === workspace.active;
@@ -13104,7 +13434,8 @@ function handleRuntimeEvent(event, client = runtimeClient) {
   if (event.type === 'EXECUTION_PAUSED') setExecutionPaused(target, true);
   if (event.type === 'EXECUTION_RESUMED') setExecutionPaused(target, false);
 
-  if (isTerminal) {
+  if (isTerminal && (target.execution.executionId === event.executionId
+      || target.execution.executionId === PENDING_EXECUTION)) {
     setExecutionPaused(target, false);
     const recoveredFromUnknown = target.execution.reconciliationState === 'unknown';
     settleReconciledExecution(target, event.executionId, target.execution.reconciliationClient,
@@ -13124,10 +13455,12 @@ function handleRuntimeEvent(event, client = runtimeClient) {
     }
   }
 
-  if (target.deploymentRun && (target.deploymentRun.deploymentId === event.deploymentId
-      || target.sourceSession.processOwners.get(event.processInstanceId)?.deploymentBindingToken)) {
-    target.historyMonitor?.notify?.(event); return;
-  }
+  const deploymentEvent = deploymentRunOwnsEvent(target, event)
+    || !event.deploymentId && Boolean(target.sourceSession.processOwners.get(event.processInstanceId)?.deploymentBindingToken);
+  if (deploymentEvent) target.historyMonitor?.notify?.(event);
+  // Never paint a pinned deployment onto a different edited draft. The deployed view remains
+  // available independently of the authoring document.
+  if (deploymentEvent && target.deploymentRun?.graphMl && !documentMatchesDeployment(target)) return;
 
   // Past this point the event paints nodes, and it paints them on the document that owns the run —
   // which is not necessarily the one on screen.
@@ -13138,7 +13471,7 @@ function handleRuntimeEvent(event, client = runtimeClient) {
     const knownEdgeIds = new Set((targetGraph?.edges || []).map(edge => edge.id));
     const observation = observeEdgeTraversal(target.execution.monitoringFlow, event, { knownEdgeIds });
     if (observation.changed) {
-      updateD3RuntimeEdge(target, observation.edgeId);
+      updateRuntimeEdge(target, observation.edgeId);
       if (isActive) {
         drawingModelController?.scheduleRefresh(target.id);
         const generation = target.execution.generation;
@@ -13301,6 +13634,9 @@ function resetRuntimeState(owner, targetCy, targetGraph, targetLayoutMode, targe
     if (owner === workspace.active) drawingModelController?.scheduleRefresh(owner.id);
     return;
   }
+  targetCy.edges().forEach(edge => {
+    edge.data({ runtimeActive: false, runtimeRecent: 0, runtimeCount: 0 });
+  });
   targetCy.nodes().forEach(node => {
     node.removeStyle('border-color border-width underlay-color underlay-opacity underlay-padding label');
     node.data('instances', 0);
@@ -13384,14 +13720,18 @@ function applyRuntimeVisual(node, owner = workspace.active) {
   const active = Number(node.data('instances')) || 0;
   node.data('label', `${NODE_ICONS[node.data('nodeType')] || '• '}${runtimeNodeLabel(node)}`);
   if (isN8nFamilyLayout()) node.style('label', runtimeNodeLabel(node));
+  const pending = Number(node.data('humanTaskPending')) > 0;
+  if (pending) node.removeStyle('underlay-color underlay-opacity underlay-padding');
   if (state === 'idle') return;
   const color = runtimeColor(state);
   node.style({
     'border-color': color,
     'border-width': state === 'active' ? 6 : 4,
-    'underlay-color': color,
-    'underlay-opacity': state === 'active' ? 0.28 : 0.12,
-    'underlay-padding': state === 'active' ? 12 + Math.min(active, 8) * 2 : 7,
+    ...(pending ? {} : {
+      'underlay-color': color,
+      'underlay-opacity': state === 'active' ? 0.28 : 0.12,
+      'underlay-padding': state === 'active' ? 12 + Math.min(active, 8) * 2 : 7,
+    }),
   });
   if (owner === workspace.active) drawingModelController?.scheduleRefresh(owner.id);
 }
@@ -13404,7 +13744,7 @@ function updateD3RuntimeNode(owner, nodeId, activeInstances, state, inFlightArri
   datum.instances = activeInstances;
   datum.arrivals = inFlightArrivals;
   datum.runtimeState = state;
-  datum.runtimeObserved = true;
+  datum.runtimeObserved = event.runtimeObserved !== false;
   datum.lastEventType = event.type || null;
   datum.lastOccurredAt = event.occurredAt || null;
   datum.processingDuration = event.processingDuration ?? null;
@@ -13434,41 +13774,45 @@ function updateD3RuntimeNode(owner, nodeId, activeInstances, state, inFlightArri
   renderer.updateNode?.(nodeId, datum);
 }
 
-function updateD3RuntimeEdge(owner, edgeId) {
+// The Design canvas owns runtime paint even when no elastic renderer is mounted.
+const runtimeEdgeTimers = new WeakMap();
+function updateRuntimeEdge(owner, edgeId) {
+  if (!owner?.cy || workspace.find(owner.id) !== owner) return;
+  const flow = edgeFlowSnapshot(owner.execution.monitoringFlow, edgeId);
+  const projection = groupProjection(owner);
+  const projected = projection?.edges.find(edge => edge.originalEdgeIds.includes(edgeId));
+  const visible = owner.cy.getElementById(projected?.id || edgeId);
+  visible.data('runtimeActive', flow.recent > 0);
+  visible.data('runtimeRecent', flow.recent);
+  visible.data('runtimeCount', flow.count);
   const renderer = elasticRendererFor(owner);
-  if (!renderer?.updateEdgeFlow || !rendererSessions.isLive(renderer.token)) return;
-  const paint = () => {
-    if (!rendererSessions.isLive(renderer.token)) return;
-    const flow = edgeFlowSnapshot(owner.execution.monitoringFlow, edgeId);
-    const remainingPulseMs = flow.expiresAt == null ? 0 : Math.max(0, flow.expiresAt - Date.now());
+  if (renderer?.updateEdgeFlow && rendererSessions.isLive(renderer.token)) {
     renderer.updateEdgeFlow(edgeId, flow, {
       reducedMotion: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true,
-      decayMs: remainingPulseMs || FLOW_PULSE_MS,
-      onDecay: flow.recent > 0 ? paint : null,
     });
-    const projection = groupProjection(owner);
-    const graphEdge = owner.graph?.edges?.find(edge => edge.id === edgeId);
-    const sourceGroup = graphEdge ? projection?.groupByNodeId.get(graphEdge.source) : null;
-    const targetGroup = graphEdge ? projection?.groupByNodeId.get(graphEdge.target) : null;
-    if (sourceGroup) paintVisibleGroupRuntime(owner, sourceGroup);
-    if (targetGroup && targetGroup !== sourceGroup) paintVisibleGroupRuntime(owner, targetGroup);
-    const projected = projection?.edges.find(edge => edge.originalEdgeIds.includes(edgeId));
-    if (projected && !elasticRendererFor(owner)?.elasticMount) {
-      const visible = owner.cy?.getElementById(projected.id);
-      visible?.data('runtimeActive', flow.recent > 0);
-      visible?.data('runtimeRecent', flow.recent);
-      visible?.data('runtimeCount', flow.count);
-    }
-    scheduleMinimap(owner);
-    if (owner === workspace.active) drawingModelController?.scheduleRefresh(owner.id);
-  };
-  paint();
+  }
+  let timers = runtimeEdgeTimers.get(owner);
+  if (!timers) { timers = new Map(); runtimeEdgeTimers.set(owner, timers); }
+  clearTimeout(timers.get(edgeId)); timers.delete(edgeId);
+  if (flow.recent > 0) {
+    timers.set(edgeId, setTimeout(() => {
+      timers.delete(edgeId);
+      updateRuntimeEdge(owner, edgeId);
+    }, Math.max(1, (flow.expiresAt || Date.now() + FLOW_PULSE_MS) - Date.now() + 1)));
+  }
+  const graphEdge = owner.graph?.edges?.find(edge => edge.id === edgeId);
+  const sourceGroup = graphEdge ? projection?.groupByNodeId.get(graphEdge.source) : null;
+  const targetGroup = graphEdge ? projection?.groupByNodeId.get(graphEdge.target) : null;
+  if (sourceGroup) paintVisibleGroupRuntime(owner, sourceGroup);
+  if (targetGroup && targetGroup !== sourceGroup) paintVisibleGroupRuntime(owner, targetGroup);
+  scheduleMinimap(owner);
+  if (owner === workspace.active) drawingModelController?.scheduleRefresh(owner.id);
 }
 
 function rehydrateD3RuntimeEdges(owner) {
   const renderer = elasticRendererFor(owner);
   if (!renderer?.links || !rendererSessions.isLive(renderer.token)) return;
-  renderer.links.forEach(link => updateD3RuntimeEdge(owner, link.id));
+  renderer.links.forEach(link => updateRuntimeEdge(owner, link.id));
 }
 
 // Process, traversal and invocation are not synonyms — a process is the long-lived instance,
@@ -13587,7 +13931,11 @@ function appendActivityEvent(event) {
   const hasNode = Boolean(event.nodeId);
   const instances = Number(event.activeInstances) || 0;
   const inFlight = Number(event.inFlightArrivals) || 0;
-  const detail = uiComputed(() => publicExecutionDescription(description, type, publicReason)
+  const activeOwner = workspace.active;
+  const initialCompleted = type === 'EXECUTION_COMPLETED'
+    && event.executionId === activeOwner?.deploymentRun?.traversalId;
+  const detail = uiComputed(() => (initialCompleted
+    ? uiText('workspace.run.initialCompleted') : publicExecutionDescription(description, type, publicReason))
     + (hasNode ? uiText('activity.event.counts', {
       instances, inFlight,
     }) : '')
@@ -15888,6 +16236,17 @@ function setGraphAuthoringAvailability(available) {
 }
 
 function applyAuthoringDocument(target, result, providerDocumentId = result.documentId) {
+  if (target.name !== providerDocumentId) {
+    target.name = providerDocumentId;
+    target.displayName = allocateDocumentDisplayName(providerDocumentId);
+    if (target === workspace.active) {
+      graphName = target.name;
+      graphDisplayName = target.displayName;
+      window.document.getElementById('graph-title').textContent = graphDisplayName;
+      window.document.title = uiText("workspace.app.value1.ravenroot.ui", { graphDisplayName });
+    }
+    syncDocumentSwitcher();
+  }
   target.authoring.providerDocumentId = providerDocumentId;
   target.authoring.revision = structuredClone(result.revision);
   target.authoring.graphId = result.graphId;
@@ -16180,7 +16539,11 @@ async function repositoryDelete() {
 
 async function repositoryRelease() {
   const target = workspace.active; const id = target?.authoring.providerDocumentId;
-  if (!gitAuthoringEnabled() || !id || !repositoryDocumentBindingIsCurrent(target)) return false;
+  if (!gitAuthoringEnabled() || !id || !repositoryDocumentBindingIsCurrent(target)
+      || target.authoring.releaseFlight || target.authoring.saveFlight) return false;
+  target.authoring.releaseFlight = true; refreshCommands();
+  repositoryNotice('');
+  const feedback = repositoryOperationDialog();
   const binding = repositoryOperationBinding(target);
   const { client } = binding;
   const reviewKey = repositoryReviewMessageKey(graphAuthoringCapability.provider);
@@ -16188,13 +16551,15 @@ async function repositoryRelease() {
     requireRepositoryOperationBinding(target, binding);
     const result = await client.release(id, binding.expected);
     requireRepositoryOperationBinding(target, binding);
+    feedback.success(result);
     const reviewType = uiMessage(reviewKey);
     addActivityMessage(uiMessage("workspace.notice.editor.23"), uiMessage("workspace.notice.graph.review", {
       detail1: uiMessage(result.reused ? "workspace.app.existing" : "workspace.app.new"),
       reviewType,
       url: result.url,
     }), 'completed'); return true;
-  } catch (error) { repositoryNotice(uiErrorReason(error) || uiText("workspace.notice.a.release.review.could.not.be.proposed")); return false; }
+  } catch (error) { feedback.failure(repositoryFailureMessage(error)); return false; }
+  finally { target.authoring.releaseFlight = false; refreshCommands(); }
 }
 
 async function publishedArtifacts() {
@@ -16349,10 +16714,12 @@ const commandActions = {
   setWorkspaceLayout: mode => setWorkspaceLayoutMode(mode),
   resetWorkspaceLayout: () => resetWorkspaceLayout(),
   setRenderMode: name => setRenderMode(name),
+  openHistory: () => reconcileDocumentHistory(workspace.active, { open: true }),
   render: () => renderActiveMode(),
   arrange: name => arrangeDesign(name),
   play: () => playGraph(),
   run: () => playGraph('run'),
+  runNewDeployment: runAsNewDeployment,
   pause: () => executionLifecycleCommand('pause'),
   resume: () => executionLifecycleCommand('resume'),
   cancel: () => executionLifecycleCommand('cancel'),
@@ -16375,8 +16742,10 @@ function commandContext() {
   const transientRunning = Boolean(activeExecutionId) && activeExecutionId !== PENDING_EXECUTION
     && !finishedExecutions.has(activeExecutionId);
   const sourceSessionActive = sourceSessionIsActive(activeSourceSession);
-  const boundDeploymentActive = boundDeploymentNeedsCloseDecision(workspace.active)
-    && !['STOPPED', 'FAILED'].includes(owner.deploymentRunStatus);
+  const boundDeploymentActive = deploymentRunIsPending(owner) || Boolean(owner?.deploymentRun
+    && (['STARTING', 'READY', 'DEGRADED', 'STOPPING'].includes(owner.deploymentRunStatus)
+      || owner.deploymentRunStatus === 'UNKNOWN'
+        && ['REGISTERED', 'STARTING', 'READY', 'DEGRADED', 'STOPPING'].includes(owner.deploymentRunLastObservedState)));
   const running = transientRunning || sourceSessionActive || deploymentRunIsPending(workspace.active)
     || owner?.deploymentRunStopPending || owner?.deploymentRunStatus === 'UNKNOWN';
   const selectedNodes = cy?.nodes(':selected');
@@ -16390,6 +16759,9 @@ function commandContext() {
     canGroupSelection: selectedReal.length >= 2 && ['none', 'valid'].includes(groupMetadata.status)
       && !selectedReal.some(id => groupedIds.has(id)),
     invalidGroupMetadata: ['invalid', 'future'].includes(groupMetadata.status),
+    hasOriginDeployment: Boolean(owner?.deploymentRun),
+    deploymentUnknown: owner?.deploymentRunStatus === 'UNKNOWN',
+    hasDeploymentHistory: Boolean((owner?.deploymentRun || owner?.graph?.viewerBinding)?.graphVersion),
     hasDocument: Boolean(workspace.active && graphData),
     authoringCapability: primaryPersistenceTarget(graphAuthoringCapability),
     gitAuthoring: graphAuthoringCapability.state === AUTHORING_CAPABILITY_STATE.GIT,
@@ -16397,7 +16769,10 @@ function commandContext() {
     repositoryReleasedSource: Boolean(activeAuthoring?.providerDocumentId && activeAuthoring?.draftDeleted),
     repositoryDraftAvailable: Boolean(activeAuthoring?.providerDocumentId && activeAuthoring?.draftDeleted
       && activeAuthoring?.successor),
-    authoringSaveFlight: Boolean(activeAuthoring?.saveFlight),
+    authoringSaveFlight: Boolean(activeAuthoring?.saveFlight || activeAuthoring?.releaseFlight),
+    repositorySuccessorVersion: activeAuthoring?.released && !activeAuthoring?.draftDeleted
+      && activeAuthoring?.releaseVersion === activeAuthoring?.releasedVersion && paneIsDirty(owner)
+      ? activeAuthoring.releaseVersion + 1 : null,
     hasOpenDocuments: workspace.size > 0,
     // Preserve every existing public format's command behavior. Only the new safe deployment
     // projection is excluded: it is an attachment, not a serializable or executable authoring graph.
@@ -16434,7 +16809,7 @@ function commandContext() {
     running,
     transientRunning,
     executionPaused: activeExecutionPaused,
-    executionCommandInFlight: activeExecutionCommandInFlight,
+    executionCommandInFlight: Boolean(owner?.execution.commandFlight),
     sourceSessionActive: sourceSessionActive || boundDeploymentActive,
     sourceSessionStopInFlight: Boolean(activeSourceSession?.stopPromise || owner?.deploymentRunStopPending),
     executionUnknown: activeExecutionReconciliation === 'unknown',
@@ -16451,7 +16826,9 @@ function executeCommand(id, invocation = {}) {
 
 function commandDisplayLabel(command, context) {
   if (context.gitAuthoring && command.id === 'file.open') return uiText('commands.file.open.repositoryLabel');
-  if (context.gitAuthoring && command.id === 'file.save') return uiText('commands.file.save.repositoryLabel');
+  if (context.gitAuthoring && command.id === 'file.save') return context.repositorySuccessorVersion
+    ? uiText('commands.file.save.successorLabel', { version: context.repositorySuccessorVersion })
+    : uiText('commands.file.save.repositoryLabel');
   if (context.repositoryReleasedSource && command.id === 'file.fork') return uiText('commands.file.fork.repositoryLabel');
   return command.label;
 }
@@ -17145,13 +17522,15 @@ deploymentsWindow = createDeploymentsWindow({
       authorityGeneration: workspaceAuthority.generation,
       graphMl: serializeGraphML(graphData), graph: canonicalGraphSnapshot(graphData), name: graphName };
   },
-  onOpenDeployment: (deploymentId, client) => openDeploymentDocument(deploymentId, client),
+  onOpenDeployment: (deploymentId, client, rebuild) => openDeploymentDocument(deploymentId, client, rebuild),
+  onDeploymentSource: openDeploymentSourceDocument,
   onRegistered: (deployment, source) => {
     const owner = workspace.find(source.documentId);
     if (!owner || owner.incarnation !== source.incarnation || !deployment.graphVersion
         || source.authorityGeneration !== workspaceAuthority.generation
         || !tenantAuthorityAllows(owner)) return;
     owner.humanTasks.deploymentId = deployment.deploymentId;
+    owner.humanTasks.registrationIdentity = deployment.registrationIdentity || null;
     owner.humanTasks.graphVersion = deployment.graphVersion;
     source.graph.nodeMap = Object.fromEntries(source.graph.nodes.map(node => [node.id, node]));
     const deployedId = openDocument({
@@ -17169,6 +17548,7 @@ deploymentsWindow = createDeploymentsWindow({
     });
     const deployed = workspace.find(deployedId);
     deployed.humanTasks.deploymentId = deployment.deploymentId;
+    deployed.humanTasks.registrationIdentity = deployment.registrationIdentity || null;
     deployed.humanTasks.graphVersion = deployment.graphVersion;
     void configureHumanTasks(deployed);
     scheduleWorkspacePersistence();
@@ -17177,6 +17557,7 @@ deploymentsWindow = createDeploymentsWindow({
     const owner = workspace.active;
     if (!owner || !tenantAuthorityAllows(owner)) return;
     owner.humanTasks.deploymentId = deployment.deploymentId;
+    owner.humanTasks.registrationIdentity = deployment.registrationIdentity || null;
     owner.humanTasks.graphVersion = deployment.graphVersion;
     void configureHumanTasks(owner);
   },
@@ -17440,6 +17821,7 @@ uiLocalization.subscribe(() => {
   renderNodeCatalog();
   renderPersonalPalettes();
   refreshLocalizedProgramPanels();
+  document.getElementById('program-readiness-controls')?.setAttribute('aria-label', uiText('workspace.app.program.readiness.2'));
   const programApproveButton = document.getElementById('btn-program-approve');
   if (programApproveButton) programApproveButton.textContent = uiText('workspace.app.approve.program.batch');
   renderSelectedHumanTasks();
@@ -17459,6 +17841,7 @@ uiLocalization.subscribe(() => {
   workspace.documents.forEach(owner => { owner.visualGroupsRenderer?.refreshLocale?.(); owner.historyMonitor?.refreshLocale?.();
     if (owner.historyDialog) { owner.historyDialog.setAttribute('aria-label', uiText('history.title'));
       owner.historyDialog.querySelector('.doc-history-bar button').textContent = uiText('history.return');
+      owner.historyDialog.querySelector('.doc-history-information summary').textContent = uiText('history.details');
       owner.historyDialog.querySelector('.doc-history-draft').textContent = documentHistoryDraftNotice(owner);
       owner.historyDialog.querySelector('.doc-history-review-tasks').textContent = uiText('workspace.run.reviewTasks'); refreshHistoryAttention(owner); }
   });
@@ -17557,7 +17940,7 @@ function bootApplication() {
   // presentation, repository identity or runtime activity added while waiting makes the import open
   // as a separate document instead.
   if (fileParam) createStartupImportPlaceholder();
-  else newWorkflow();
+  else newWorkflow({ announce: false });
   // Import from ?file= after validated configuration and workspace restoration. Supports .graphml,
   // .xml and Graphify .json without acquiring repository authoring identity.
   // Examples:

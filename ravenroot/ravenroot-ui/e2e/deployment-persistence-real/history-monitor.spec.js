@@ -64,14 +64,15 @@ test('native monitor reads bounded real persistent histories, visits and retry a
     if (lostView) { lostView = false; return route.fulfill({ status: 503, json: { error: 'TEMPORARILY_UNAVAILABLE' } }); }
     return route.continue();
   });
-  await page.locator('[data-menu="layout"]').click(); await page.getByRole('menuitemradio', { name: 'Monitoring', exact: true }).click();
+  await page.locator('#btn-history').click();
   if (CAP === 10) await page.getByRole('button', { name: 'Retry deployment view', exact: true }).click();
   const monitor = page.locator('.doc-history'); await expect(monitor).toBeVisible();
   const histories = monitor.locator('.history-page').filter({ has: page.getByRole('heading', { name: 'Business histories', exact: true }) });
   await expect(histories.locator('li')).toHaveCount(CAP);
   await expect(histories.locator('li button').first()).toContainText('same-file.csv');
   await expect(histories.locator('li button').first()).toContainText('operation-0000');
-  await expect(histories.locator('li button').first()).toContainText('AWAITING_EXTERNAL_EVENT');
+  await expect(histories.locator('li button').first().locator('.history-row-state')).toHaveAttribute('data-state', 'AWAITING_EXTERNAL_EVENT');
+  await expect(histories.locator('li button').first()).toContainText('Waiting for an external event');
   await histories.getByLabel('Exact application ID', { exact: true }).fill('operation-1999');
   await histories.getByLabel('Exact public reference', { exact: true }).fill('same-file.csv');
   await histories.getByRole('button', { name: 'Search histories', exact: true }).click();
@@ -80,12 +81,12 @@ test('native monitor reads bounded real persistent histories, visits and retry a
   await histories.getByRole('button', { name: 'Clear search', exact: true }).click();
   await expect(histories.locator('li')).toHaveCount(CAP);
   await expect(histories.locator('li button').first()).toContainText('operation-0000');
-  const firstBusiness = await histories.locator('li button').first().innerText();
+  const firstBusiness = await histories.locator('li button').first().getAttribute('aria-label');
   await histories.getByRole('button', { name: 'Next page' }).click();
-  await expect(histories.locator('li button').first()).not.toHaveText(firstBusiness);
+  await expect(histories.locator('li button').first()).not.toHaveAttribute('aria-label', firstBusiness);
   await expect(histories.locator('li button').first()).toContainText('same-file.csv');
   await histories.getByRole('button', { name: 'Previous page' }).click();
-  await expect(histories.locator('li button').first()).toHaveText(firstBusiness);
+  await expect(histories.locator('li button').first()).toHaveAttribute('aria-label', firstBusiness);
   await histories.locator('li button').first().click();
   const traversals = monitor.locator('.history-page').filter({ has: page.getByRole('heading', { name: 'Actual traversals', exact: true }) });
   await traversals.locator('li button').first().click();
@@ -147,7 +148,7 @@ test('native monitor reads bounded real persistent histories, visits and retry a
   writeFileSync(join(OUTPUT, `history-bounds-cap-${CAP}.json`), JSON.stringify({ seededHistories: 2000, workerVisits: 1000, workerAttempts: 2000, reopenedSqlite: CAP === 1, contrast, topology, dom, pages }, null, 2));
   await monitor.evaluate(node => { node.scrollTop = 0; });
   await page.screenshot({ path: join(OUTPUT, `history-monitor-cap-${CAP}.png`), fullPage: true });
-  await monitor.locator(':scope > details').nth(1).locator(':scope > summary').click();
+  await monitor.getByRole('button', { name: 'Traversal map', exact: true }).click();
   if (CAP === 1) { await traversals.getByRole('button', { name: 'Next page' }).click(); await traversals.locator('li button').first().click(); }
   else await traversals.locator('li button').nth(1).click();
   const repeated = monitor.locator('.history-traversal'); await expect(repeated).toHaveCount(2);
@@ -166,12 +167,14 @@ test('native monitor reads bounded real persistent histories, visits and retry a
     await page.locator('#btn-run').click(); await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument()?.deploymentRun?.traversalId)).toBeTruthy();
     const original = await page.evaluate(() => window.ravenroot.activeDocument().deploymentRun);
     const mutations = []; page.on('request', request => { if (request.method() === 'POST' && request.url().includes('/v1/deployments')) mutations.push(request.url()); });
-    await page.locator('[data-menu="layout"]').click(); await page.getByRole('menuitemradio', { name: 'Monitoring', exact: true }).click();
+    await page.locator('#btn-history').click();
+    await page.locator('.doc-history-dialog[open] .doc-history-information > summary').click();
     await expect(page.locator('.doc-history-draft').filter({ visible: true })).toContainText('Monitoring shows the pinned deployment');
     await page.getByRole('button', { name: 'Return to graph', exact: true }).click();
     await page.locator('#btn-modify').click(); await page.evaluate(() => { window.cy.getElementById('end').select(); });
     const name = page.locator('#node-editor input[name="name"]'); await name.fill('Draft only end'); await name.press('Tab');
-    await page.locator('[data-menu="layout"]').click(); await page.getByRole('menuitemradio', { name: 'Monitoring', exact: true }).click();
+    await page.locator('#btn-history').click();
+    await page.locator('.doc-history-dialog[open] .doc-history-information > summary').click();
     await expect(page.locator('.doc-history-draft').filter({ visible: true })).toContainText('Your draft differs from this deployment');
     const current = page.locator('.doc-history-dialog[open] .doc-history');
     const business = current.locator('.history-page').filter({ has: page.getByRole('heading', { name: 'Business histories', exact: true }) });

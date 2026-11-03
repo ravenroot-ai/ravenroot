@@ -38,6 +38,27 @@ class DeploymentReconcilerTest {
      * the deployment at all. That is what closes the window rather than merely narrowing it.</p>
      */
     @Test
+    void recoveryOfDrainFirstRemovalNeverTerminatesUnfinishedWork() {
+        var fixture = new CoordinatorFixture();
+        var target = fixture.deployment(TENANT, "retired-busy");
+        DeploymentId id = fixture.idOf(target);
+        var coordinator = fixture.coordinator("owner-a");
+        coordinator.submit(TENANT, id,
+                new LifecycleCommand.Start("s", 1, DeploymentRegistry.UpdateStrategy.STOP_FIRST),
+                GenerationExpectation.exactly(0));
+        target.inFlight(3);
+        target.drainOutlivesItsBound();
+        coordinator.submit(TENANT, id,
+                new LifecycleCommand.Undeploy("u", LifecycleCommand.Undeploy.Disposition.DRAIN_FIRST,
+                        "version retired"), GenerationExpectation.exactly(1));
+        var result = fixture.reconciler("owner-a", TENANT).reconcileHosted(TENANT, id);
+        assertInstanceOf(DeploymentReconcileOutcome.Failed.class, result);
+        assertEquals(3, target.observe().toCompletableFuture().join().inFlight());
+        assertTrue(target.calls().stream().noneMatch(call -> call.startsWith("terminateDomain")));
+        assertEquals(null, fixture.record(TENANT, id).tombstone());
+    }
+
+    @Test
     void aRehostedRuntimeIsConvergedEvenWhenThePreviousObservationWasCurrent() {
         var fixture = new CoordinatorFixture();
         var target = fixture.deployment(TENANT, "rehosted");

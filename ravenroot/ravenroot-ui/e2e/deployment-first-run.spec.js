@@ -43,3 +43,20 @@ test('quota failure refuses all deployment mutations with a visible reason', asy
   });
   await page.locator('#btn-run').click(); await expect(page.locator('#activity-log')).toContainText('Run needs a saved workspace association'); expect(backend.calls.filter(c => c.method === 'POST')).toHaveLength(0);
 });
+
+test('Run remains available to reconcile an unknown deployment after reload', async ({ page }) => {
+  const backend = await service(page); await boot(page); await page.locator('#btn-run').click();
+  await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().deploymentRun?.processInstanceId)).toBe(PID);
+  await page.evaluate(() => window.ravenroot.flushWorkspacePersistence());
+  let unavailable = true;
+  await page.route('**/v1/deployments/**', route => unavailable
+    ? route.fulfill({ status: 503, json: { error: 'temporarily unavailable' } }) : route.fallback());
+  await page.reload();
+  await expect.poll(() => page.evaluate(() => window.ravenroot?.activeDocument()?.deploymentRunStatus)).toBe('UNKNOWN');
+  await expect(page.locator('#btn-run')).toBeEnabled();
+  await expect(page.locator('#btn-play')).toBeDisabled();
+  unavailable = false;
+  await page.locator('#btn-run').click();
+  await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().deploymentRun?.phase)).toBe('READY');
+  expect(backend.calls.filter(c => c.action === 'initial-start')).toHaveLength(1);
+});

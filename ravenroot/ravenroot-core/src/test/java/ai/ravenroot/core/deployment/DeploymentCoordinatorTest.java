@@ -616,6 +616,28 @@ class DeploymentCoordinatorTest {
                 "evidence is current, so recovery does not re-drive a drain that is legitimately slow");
     }
 
+    @Test
+    void undeployDrainTimeoutRetainsWorkAndDoesNotTombstoneTheDeployment() {
+        var fixture = new CoordinatorFixture();
+        var target = fixture.deployment(TENANT, "unfinished-removal");
+        DeploymentId id = fixture.idOf(target);
+        var coordinator = fixture.coordinator("owner-a");
+        coordinator.submit(TENANT, id, new LifecycleCommand.Start("s", 1,
+                DeploymentRegistry.UpdateStrategy.STOP_FIRST), GenerationExpectation.exactly(0));
+        target.inFlight(4);
+        target.drainOutlivesItsBound();
+        var outcome = coordinator.submit(TENANT, id,
+                new LifecycleCommand.Undeploy("remove", LifecycleCommand.Undeploy.Disposition.DRAIN_FIRST,
+                        "version retired"), GenerationExpectation.exactly(1));
+        assertInstanceOf(DeploymentCommandOutcome.Failed.class, outcome);
+        var after = fixture.record(TENANT, id);
+        assertEquals(DesiredKind.REMOVED, after.desired().kind());
+        assertNull(after.tombstone());
+        assertEquals(4, target.observe().toCompletableFuture().join().inFlight());
+        assertFalse(target.effects().stream().anyMatch(effect -> effect.startsWith("terminateDomain")));
+        assertFalse(target.effects().stream().anyMatch(effect -> effect.startsWith("barrier")));
+    }
+
     /** A command for a deployment nobody created is a store answer, not a lifecycle answer. */
     @Test
     void aCommandForANonexistentDeploymentIsNotGivenALifecycleAnswer() {

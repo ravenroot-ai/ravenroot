@@ -75,7 +75,10 @@ export function persistedDocument(document_) {
     throw productError("workspace.error.workspace.persistence.workspace.document.graph.is.invalid", new TypeError('Workspace document graph is invalid'));
   }
   if (document_.graph.format === 'deployment' && !document_.deploymentRun) {
-    throw productError("workspace.error.workspace.persistence.live.deployment.attachments.are.session.only.workspace.documents", new TypeError('Live deployment attachments are session-only workspace documents'));
+    const binding = document_.graph.viewerBinding;
+    if (document_.mode !== 'deployed' || !binding
+        || ['deploymentId', 'graphVersion', 'incarnationId', 'registrationIdentity'].some(key => typeof binding[key] !== 'string' || !binding[key]))
+      throw productError('workspace.run.associationChanged', new TypeError('Invalid saved deployment view binding'));
   }
   if (document_.deploymentRun && document_.deploymentRun.tenantId !== tenantId) throw productError('workspace.run.associationChanged', new Error('RUN_TENANT_MISMATCH'));
   const graph = canonicalGraphSnapshot(document_.graph);
@@ -121,7 +124,7 @@ export function persistedDocument(document_) {
 
 export function workspaceSnapshot(scope, documents, activeDocumentId) {
   const storedDocuments = documents.filter(document_ => document_.tenantId === scope.tenantId
-      && (document_.graph?.format !== 'deployment' || document_.deploymentRun))
+      && (document_.graph?.format !== 'deployment' || document_.deploymentRun || document_.graph.viewerBinding?.registrationIdentity))
     .map(persistedDocument);
   return Object.freeze({
     key: scope.key,

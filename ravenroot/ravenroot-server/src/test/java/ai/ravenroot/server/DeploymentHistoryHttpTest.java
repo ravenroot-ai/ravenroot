@@ -38,6 +38,26 @@ class DeploymentHistoryHttpTest {
             </graphml>
             """;
 
+    @Test void explicitRunsAreIndependentAndRetryIsIdempotent() throws Exception {
+        try (var fixture = new Fixture()) {
+            var first = fixture.explicit("new-one", "tenant", fixture.binding.incarnationId());
+            assertEquals(202, first.statusCode(), first.body());
+            var repeated = fixture.explicit("new-one", "tenant", fixture.binding.incarnationId());
+            for (int attempt = 0; repeated.statusCode() == 503 && attempt < 100; attempt++) {
+                Thread.sleep(20);
+                repeated = fixture.explicit("new-one", "tenant", fixture.binding.incarnationId());
+            }
+            assertEquals(200, repeated.statusCode(), repeated.body());
+            assertEquals(text(object(first.body()), "processInstanceId"), text(object(repeated.body()), "processInstanceId"));
+            var second = fixture.explicit("new-two", "tenant", fixture.binding.incarnationId());
+            assertEquals(202, second.statusCode(), second.body());
+            assertNotEquals(text(object(first.body()), "processInstanceId"), text(object(second.body()), "processInstanceId"));
+            assertEquals(409, fixture.explicit("wrong", "tenant", "stale").statusCode());
+            assertEquals(409, fixture.explicit("foreign", "another", fixture.binding.incarnationId()).statusCode());
+            assertEquals(202, fixture.initial("original", "null").statusCode());
+        }
+    }
+
     @Test void thousandVisitsAreBoundedBeforeHttpSerializationAndSelectionsCannotBroadenScope() throws Exception {
         try (var fixture = new Fixture()) {
             var binding = fixture.binding;
@@ -324,6 +344,11 @@ class DeploymentHistoryHttpTest {
             return client.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + "/v1/deployments/document/initial-start?incarnationId=" + encode(incarnation)
                     + "&graphVersion=" + encode(binding.graphVersion()) + "&requestId=" + encode(id)))
                     .header("X-Test-Tenant", tenant).GET().build(), HttpResponse.BodyHandlers.ofString());
+        }
+        HttpResponse<String> explicit(String id, String tenant, String incarnation) throws Exception {
+            String body = "{\"incarnationId\":\"" + incarnation + "\",\"graphVersion\":\"" + binding.graphVersion() + "\",\"requestId\":\"" + id + "\",\"input\":null}";
+            return client.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + "/v1/deployments/document/executions"))
+                    .header("X-Test-Tenant", tenant).header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString(body)).build(), HttpResponse.BodyHandlers.ofString());
         }
         HttpResponse<String> initial(String id, String input) throws Exception {
             String body = "{\"incarnationId\":\"" + binding.incarnationId() + "\",\"graphVersion\":\"" + binding.graphVersion() + "\",\"requestId\":\"" + id + "\",\"input\":" + input + "}";

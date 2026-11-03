@@ -59,10 +59,12 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
+import java.util.ArrayDeque;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -445,18 +447,139 @@ class AmqpHumanTaskWorkflowIntegrationTest {
 
     private record CommandResult(int exitCode, String output) { }
 
-    private static CommandResult command(Duration timeout, String... command) throws Exception {
+    private static final CommandResult TIMED_OUT = new CommandResult(-1, "command timed out");
+
+    @FunctionalInterface
+    private interface DockerCommand {
+        CommandResult run(Duration timeout, String... arguments) throws IOException, InterruptedException;
+    }
+
+    private static CommandResult command(Duration timeout, String... command) throws IOException, InterruptedException {
         Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
-        if (!process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS)) {
-            process.destroyForcibly();
-            return new CommandResult(-1, "command timed out");
+        try (var output = process.getInputStream()) {
+            try {
+                if (!process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS)) return TIMED_OUT;
+                return new CommandResult(process.exitValue(),
+                        new String(output.readAllBytes(), StandardCharsets.UTF_8).strip());
+            } finally {
+                if (process.isAlive()) {
+                    // A client timeout leaves the daemon's operation ambiguous. Reap the CLI
+                    // before starting any verification, including when the waiter was interrupted.
+                    process.destroyForcibly().onExit().orTimeout(2, TimeUnit.SECONDS).join();
+                }
+            }
         }
-        return new CommandResult(process.exitValue(),
-                new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8).strip());
     }
 
     private static void requireSuccess(CommandResult result, String operation) {
-        if (result.exitCode() != 0) throw new IllegalStateException(operation + " failed: " + result.output());
+        if (result.exitCode() != 0) {
+            String output = result.output();
+            throw new IllegalStateException(operation + " failed: " + output.substring(0, Math.min(512, output.length())));
+        }
+    }
+
+    private static final String SCRIPTED_NAME = "ravenroot-amqp-test-" + UUID.randomUUID();
+    private static final CommandResult PRESENT = new CommandResult(0, SCRIPTED_NAME);
+    private static final CommandResult ABSENT = new CommandResult(0, "");
+    private static final CommandResult IN_PROGRESS = new CommandResult(1,
+            "Error response from daemon: removal of container " + SCRIPTED_NAME + " is already in progress");
+
+    private static void runCleanupScript(CommandResult... results) throws Exception {
+        var steps = new ArrayDeque<>(List.of(results));
+        try {
+            RabbitServer.removeContainer(SCRIPTED_NAME, (timeout, arguments) -> {
+                boolean removing = (results.length - steps.size()) % 2 == 0;
+                assertEquals(removing ? Duration.ofSeconds(10) : Duration.ofSeconds(5), timeout);
+                assertEquals(removing ? List.of("docker", "rm", "-f", SCRIPTED_NAME)
+                                : List.of("docker", "container", "ls", "-a", "--filter", "name=^/" + SCRIPTED_NAME + "$",
+                                        "--format", "{{.Names}}"),
+                        List.of(arguments));
+                return steps.removeFirst();
+            });
+        } finally {
+            assertTrue(steps.isEmpty(), "cleanup did not perform its expected checks");
+        }
+    }
+
+    @Test
+    void cleanupConfirmsOwnedContainerAbsenceAfterSuccessTimeoutOrConcurrentRemoval() throws Exception {
+        runCleanupScript(PRESENT, ABSENT);
+        runCleanupScript(TIMED_OUT, ABSENT);
+        runCleanupScript(TIMED_OUT, PRESENT, PRESENT, ABSENT);
+        runCleanupScript(TIMED_OUT, PRESENT,
+                new CommandResult(1, "Error response from daemon: No such container: " + SCRIPTED_NAME), ABSENT);
+        runCleanupScript(IN_PROGRESS, ABSENT);
+        runCleanupScript(IN_PROGRESS, PRESENT, IN_PROGRESS, ABSENT);
+    }
+
+    @Test
+    void cleanupRejectsPersistentPresenceFailedVerificationAndUnrelatedErrors() {
+        assertTrue(assertThrows(IllegalStateException.class,
+                () -> runCleanupScript(TIMED_OUT, PRESENT, TIMED_OUT, PRESENT)).getMessage().contains("left the test container"));
+        assertTrue(assertThrows(IllegalStateException.class, () -> runCleanupScript(PRESENT, TIMED_OUT))
+                .getMessage().contains("verification failed"));
+        assertTrue(assertThrows(IllegalStateException.class,
+                () -> runCleanupScript(new CommandResult(1, "permission denied"), ABSENT)).getMessage().contains("permission denied"));
+        assertTrue(assertThrows(IllegalStateException.class,
+                () -> runCleanupScript(PRESENT, new CommandResult(0, "other"))).getMessage().contains("unexpected container"));
+        assertTrue(assertThrows(IllegalStateException.class,
+                () -> runCleanupScript(IN_PROGRESS, PRESENT, IN_PROGRESS, PRESENT))
+                .getMessage().contains("left the test container"));
+        assertTrue(assertThrows(IllegalStateException.class, () -> runCleanupScript(new CommandResult(1,
+                "Error response from daemon: removal of container " + SCRIPTED_NAME + "-foreign is already in progress"),
+                ABSENT)).getMessage().contains("-foreign"));
+        assertTrue(assertThrows(IllegalStateException.class, () -> runCleanupScript(new CommandResult(1,
+                IN_PROGRESS.output() + "\npermission denied"), ABSENT)).getMessage().contains("permission denied"));
+        assertTrue(assertThrows(IllegalStateException.class, () -> runCleanupScript(IN_PROGRESS, TIMED_OUT))
+                .getMessage().contains("verification failed"));
+        assertTrue(assertThrows(IllegalStateException.class,
+                () -> runCleanupScript(IN_PROGRESS, new CommandResult(1, "Docker daemon unavailable")))
+                .getMessage().contains("verification failed"));
+        assertTrue(assertThrows(IllegalStateException.class,
+                () -> runCleanupScript(IN_PROGRESS, new CommandResult(0, "other")))
+                .getMessage().contains("unexpected container"));
+    }
+
+    @Test
+    void cleanupRestoresInterruptionAfterCheckingTheContainer() throws Exception {
+        int[] calls = {0};
+        try {
+            Thread.currentThread().interrupt();
+            RabbitServer.removeContainer(SCRIPTED_NAME, (timeout, arguments) -> {
+                assertFalse(Thread.currentThread().isInterrupted());
+                return switch (++calls[0]) {
+                    case 1 -> throw new InterruptedException();
+                    case 2 -> {
+                        assertEquals("container", arguments[1]);
+                        yield ABSENT;
+                    }
+                    default -> throw new AssertionError("cleanup exceeded its bound");
+                };
+            });
+            assertEquals(2, calls[0]);
+            assertTrue(Thread.currentThread().isInterrupted());
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    @Test
+    void readinessRollbackRetainsStartupAndCleanupFailures() {
+        var commands = new ArrayDeque<>(List.of("run", "port", "rm", "container"));
+        Exception failure = assertThrows(IllegalStateException.class, () ->
+                RabbitServer.start(SCRIPTED_NAME, (timeout, arguments) -> {
+                    assertEquals(commands.removeFirst(), arguments[1]);
+                    return switch (arguments[1]) {
+                        case "run", "rm" -> PRESENT;
+                        case "port" -> new CommandResult(1, "port unavailable");
+                        case "container" -> TIMED_OUT;
+                        default -> throw new AssertionError("unexpected Docker command");
+                    };
+                }));
+        assertTrue(commands.isEmpty());
+        assertTrue(failure.getMessage().contains("port unavailable"));
+        assertEquals(1, failure.getSuppressed().length);
+        assertTrue(failure.getSuppressed()[0].getMessage().contains("cleanup verification failed"));
     }
 
     private static final class RabbitServer implements AutoCloseable {
@@ -467,13 +590,16 @@ class AmqpHumanTaskWorkflowIntegrationTest {
         int port() { return port; }
 
         static RabbitServer start() throws Exception {
-            String name = "ravenroot-amqp-test-" + UUID.randomUUID();
-            CommandResult started = command(Duration.ofSeconds(30), "docker", "run", "-d", "--rm",
+            return start("ravenroot-amqp-test-" + UUID.randomUUID(), AmqpHumanTaskWorkflowIntegrationTest::command);
+        }
+
+        private static RabbitServer start(String name, DockerCommand docker) throws Exception {
+            CommandResult started = docker.run(Duration.ofSeconds(30), "docker", "run", "-d", "--rm",
                     "--name", name, "-e", "RABBITMQ_DEFAULT_USER=" + USER, "-e",
                     "RABBITMQ_DEFAULT_PASS=" + PASSWORD, "-p", "127.0.0.1::5672", IMAGE);
             requireSuccess(started, "RabbitMQ start");
             try {
-                CommandResult mapped = command(Duration.ofSeconds(10), "docker", "port", name, "5672/tcp");
+                CommandResult mapped = docker.run(Duration.ofSeconds(10), "docker", "port", name, "5672/tcp");
                 requireSuccess(mapped, "RabbitMQ port discovery");
                 int port = Integer.parseInt(mapped.output().substring(mapped.output().lastIndexOf(':') + 1));
                 RabbitServer server = new RabbitServer(name, port);
@@ -484,7 +610,12 @@ class AmqpHumanTaskWorkflowIntegrationTest {
                 }
                 throw new IllegalStateException("RabbitMQ did not become ready");
             } catch (Exception failure) {
-                command(Duration.ofSeconds(10), "docker", "rm", "-f", name);
+                if (failure instanceof InterruptedException) Thread.currentThread().interrupt();
+                try {
+                    removeContainer(name, docker);
+                } catch (Exception cleanupFailure) {
+                    failure.addSuppressed(cleanupFailure);
+                }
                 throw failure;
             }
         }
@@ -515,8 +646,41 @@ class AmqpHumanTaskWorkflowIntegrationTest {
         }
 
         @Override public void close() throws Exception {
-            requireSuccess(command(Duration.ofSeconds(10), "docker", "rm", "-f", name),
-                    "RabbitMQ cleanup");
+            removeContainer(name, AmqpHumanTaskWorkflowIntegrationTest::command);
+        }
+
+        private static void removeContainer(String name, DockerCommand docker) throws Exception {
+            boolean interrupted = Thread.interrupted();
+            try {
+                for (int attempt = 1; attempt <= 2; attempt++) {
+                    CommandResult removed;
+                    try {
+                        removed = docker.run(Duration.ofSeconds(10), "docker", "rm", "-f", name);
+                    } catch (InterruptedException failure) {
+                        interrupted = true;
+                        removed = TIMED_OUT; // The daemon may already have accepted the request.
+                    }
+                    CommandResult listed = docker.run(Duration.ofSeconds(5), "docker", "container", "ls", "-a",
+                            "--filter", "name=^/" + name + "$", "--format", "{{.Names}}");
+                    requireSuccess(listed, "RabbitMQ cleanup verification");
+                    if (!removed.equals(TIMED_OUT) && !removed.output().equals(
+                            "Error response from daemon: No such container: " + name)
+                            && !removed.output().equals("Error response from daemon: removal of container "
+                                    + name + " is already in progress")) {
+                        requireSuccess(removed, "RabbitMQ cleanup");
+                    }
+                    if (listed.output().isEmpty()) return;
+                    if (!listed.output().equals(name)) {
+                        throw new IllegalStateException("RabbitMQ cleanup returned an unexpected container name");
+                    }
+                }
+                throw new IllegalStateException("RabbitMQ cleanup left the test container present: " + name);
+            } catch (InterruptedException failure) {
+                interrupted = true;
+                throw failure;
+            } finally {
+                if (interrupted) Thread.currentThread().interrupt();
+            }
         }
     }
 

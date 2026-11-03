@@ -1,14 +1,23 @@
 import { createBoundHistoryReader, createHistoryPager } from './deployment-history-model.js';
-import { uiText } from './ui-text.js';
+import { uiText, uiDateTime } from './ui-text.js';
 
 /** Shared read-only native/embed history surface. Every list is one replaceable server page. */
 export function createDeploymentHistoryMonitor({ container, projection, read, viewerFactory,
-  isCurrent = () => true, theme = 'dark', t = uiText, localization = null }) {
+  isCurrent = () => true, theme = 'dark', t = uiText, localization = null, title = null }) {
   const document = container.ownerDocument;
   const reader = createBoundHistoryReader({ source: projection.source, read, isCurrent });
   const pagers = new Set(), previews = new Map();
   let initialized = false, initialization = null;
   let destroyed = false, limit = 1, selectionEpoch = 0, selectionKind = null, selectedSections = [];
+  let activePreview = null, presentation = 'graph', deploymentStatus = projection.lifecycle, deploymentSources;
+  const nodeNames = new Map((projection.projection?.nodes || []).map(node => [node.id, node.label || node.id]));
+  const short = value => typeof value === 'string' && value.length > 24 ? `${value.slice(0, 8)}…${value.slice(-4)}` : value;
+  const time = value => value && Number.isFinite(Date.parse(value))
+    ? uiDateTime(new Date(value), { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : t('history.unknown');
+  const stateKeys = { COMPLETED: 'history.state.completed', FAILED: 'history.state.failed', RUNNING: 'history.state.running',
+    AWAITING_EXTERNAL_EVENT: 'history.state.awaiting', WAITING: 'history.state.waiting', CANCELLED: 'history.state.cancelled',
+    OPEN: 'history.state.open', CLOSED: 'history.state.closed', READY: 'history.state.ready', STOPPED: 'history.state.stopped' };
+  const stateLabel = value => stateKeys[value] ? t(stateKeys[value]) : value || t('history.unknown');
   const localizedArguments = new WeakMap(), rowArguments = new WeakMap();
   const localize = (node, key, args = {}) => { node.textContent = t(key, args); node.dataset.historyText = key; localizedArguments.set(node, args); return node; };
   const element = (tag, text, className) => {
@@ -22,15 +31,54 @@ export function createDeploymentHistoryMonitor({ container, projection, read, vi
     })); return node;
   };
   container.classList.add('deployment-history');
-  const header = element('header'), status = element('p', '', 'history-status');
+  const header = element('header', null, 'history-header'), status = element('p', '', 'history-status');
   status.setAttribute('role', 'status'); status.setAttribute('aria-live', 'polite');
-  header.append(localize(element('h2'), 'history.title'), localize(element('p'), 'history.pinned', {
-    deploymentId: projection.source.deploymentId, version: projection.source.graphVersion }), status);
-  const rootDisclosure = element('details'), rootSummary = localize(element('summary'), 'history.choose'); rootDisclosure.open = true;
-  const selectionDisclosure = element('details'), selectionSummary = localize(element('summary'), 'history.traversals'); selectionDisclosure.hidden = true;
-  const roots = element('section'), selections = element('section'), previewList = element('section');
-  rootDisclosure.append(rootSummary, roots); selectionDisclosure.append(selectionSummary, selections);
-  container.replaceChildren(header, rootDisclosure, selectionDisclosure, previewList);
+  const heading = element('div'), lifecycle = element('span', '', 'history-lifecycle');
+  const graphTitle = title ? element('h2', title) : localize(element('h2'), 'history.deployedGraph');
+  heading.append(localize(element('p', null, 'history-eyebrow'), 'history.title'), graphTitle);
+  const identity = localize(element('p', null, 'history-identity'), 'history.identity', {
+    deploymentId: short(projection.source.deploymentId), version: short(projection.source.graphVersion) });
+  identity.title = t('history.pinned', { deploymentId: projection.source.deploymentId, version: projection.source.graphVersion });
+  heading.append(identity); header.append(heading, lifecycle, status);
+  function setDeploymentStatus(value = deploymentStatus, sourceCount = deploymentSources) {
+    deploymentStatus = value; deploymentSources = sourceCount;
+    lifecycle.textContent = value === 'READY' && Number.isSafeInteger(sourceCount) && sourceCount > 0
+      ? t('history.listening', { count: sourceCount }) : t('history.lifecycle', { state: stateLabel(value) });
+    lifecycle.dataset.state = value || 'UNKNOWN';
+  }
+  setDeploymentStatus(projection.lifecycle);
+  const work = element('div', null, 'history-workspace'), rootDisclosure = element('aside', null, 'history-sidebar');
+  const main = element('div', null, 'history-main'), rootSummary = localize(element('h3', null, 'history-selection-title'), 'history.choose');
+  const selectionDisclosure = element('section', null, 'history-selection'), selectionSummary = localize(element('h3'), 'history.traversals'); selectionDisclosure.hidden = true;
+  const roots = element('section', null, 'history-roots'), selections = element('section', null, 'history-selections'), previewList = element('section', null, 'history-previews');
+  const views = element('nav', null, 'history-presentations'); views.setAttribute('aria-label', t('history.presentation'));
+  const graphMode = button('history.graphTimeline', () => setPresentation('graph'));
+  const mapMode = button('history.traversalMap', () => setPresentation('map'));
+  views.append(graphMode, mapMode);
+  const mapHint = localize(element('p', null, 'history-map-hint'), 'history.previewLimit');
+  const policyDetails = element('details', null, 'history-policy'), policy = element('p');
+  policyDetails.append(localize(element('summary'), 'history.details'), policy);
+  const empty = element('div', null, 'history-empty-stage');
+  empty.append(localize(element('h3'), 'history.choose'), localize(element('p'), 'history.chooseHelp'));
+  rootDisclosure.append(roots, policyDetails); selectionDisclosure.append(selectionSummary, selections);
+  main.append(rootSummary, views, mapHint, selectionDisclosure, empty, previewList); work.append(rootDisclosure, main);
+  container.replaceChildren(header, work);
+  function syncPreviews() {
+    empty.hidden = previews.size > 0;
+    for (const [key, state] of previews) state.root.hidden = presentation === 'graph' && key !== activePreview;
+    for (const control of container.querySelectorAll('[data-history-row-view]')) {
+      if (control.tagName !== 'BUTTON') continue;
+      const row = rowArguments.get(control);
+      if (row?.traversalId) control.setAttribute('aria-pressed', String(`${row.processInstanceId}:${row.traversalId}` === activePreview));
+    }
+  }
+  function setPresentation(value) {
+    presentation = value; container.dataset.historyPresentation = value;
+    graphMode.setAttribute('aria-pressed', String(value === 'graph')); mapMode.setAttribute('aria-pressed', String(value === 'map'));
+    mapHint.hidden = value !== 'map';
+    syncPreviews();
+  }
+  setPresentation('graph');
   const label = (view, row, compact = false) => {
     const identity = value => compact && typeof value === 'string' && value.length > 24 ? `${value.slice(0, 8)}…${value.slice(-4)}` : value;
     const unavailable = t('history.unknown');
@@ -46,7 +94,19 @@ export function createDeploymentHistoryMonitor({ container, projection, read, vi
       expected: ['COUNT', 'MANIFEST'].includes(row.expectation) ? row.expectedContributions : unavailable });
     return row.contributionId || row.invocationId || row.attemptId || row.nodeId || unavailable;
   };
-  const setRowLabel = (node, view, row) => { node.textContent = label(view, row, true); node.setAttribute('aria-label', label(view, row)); node.title = label(view, row); node.dataset.historyRowView = view; rowArguments.set(node, row); return node; };
+  const setRowLabel = (node, view, row) => {
+    node.replaceChildren();
+    if (view === 'histories' || ['traversals', 'uncorrelated-traversals', 'process-traversals'].includes(view)) {
+      const business = view === 'histories';
+      const name = business ? row.publicReference || t('history.businessFallback', { id: short(row.applicationCorrelationId) })
+        : t('history.entry', { node: nodeNames.get(row.entryNodeId) || row.entryNodeId || t('history.unknown') });
+      node.append(element('strong', name, 'history-row-title'), element('span', business ? short(row.applicationCorrelationId) : time(row.startedAt), 'history-row-meta'));
+      const badge = element('span', stateLabel(business ? row.state : row.status), 'history-row-state');
+      badge.dataset.state = (business ? row.state : row.status) || 'UNKNOWN'; node.append(badge);
+      if (!business) node.append(element('span', t('history.traversalIdentity', { id: short(row.traversalId), process: short(row.processInstanceId) }), 'history-row-meta history-row-identity'));
+    } else node.textContent = label(view, row, true);
+    node.setAttribute('aria-label', label(view, row)); node.title = label(view, row); node.dataset.historyRowView = view; rowArguments.set(node, row); return node;
+  };
   const labelElement = (tag, view, row) => setRowLabel(element(tag), view, row);
   const facts = row => {
     const list = element('dl');
@@ -74,8 +134,9 @@ export function createDeploymentHistoryMonitor({ container, projection, read, vi
     }
     return list;
   };
-  function section(parent, key, query, onSelect) {
-    const root = element('section', null, 'history-page'), title = localize(element('h3'), key);
+  function section(parent, key, query, onSelect, selectFirst = false) {
+    let selectedRow = null, firstSelection = false;
+    const root = element('section', null, 'history-page'), title = localize(element('h3'), key); root.dataset.historyView = query.view;
     const rows = element('ul'), message = element('p'), controls = element('nav');
     controls.setAttribute('aria-label', t(key)); controls.dataset.historyLabel = key;
     const pager = createHistoryPager({ reader, query, limit: query.view === 'activity' ? 1 : limit, onChange(state) {
@@ -87,7 +148,11 @@ export function createDeploymentHistoryMonitor({ container, projection, read, vi
           : !state.page?.items.length ? t('history.empty') : '';
       for (const row of state.page?.items || []) {
         const item = element('li');
-        if (onSelect) { const select = labelElement('button', query.view, row); select.type = 'button'; select.addEventListener('click', () => onSelect(row)); item.append(select);
+        if (onSelect) { const select = labelElement('button', query.view, row); select.type = 'button'; select.addEventListener('click', () => {
+          selectedRow = row.applicationCorrelationId || row.traversalId || row.invocationId || row.attemptId;
+          rows.querySelectorAll('button').forEach(button => button.setAttribute('aria-pressed', String(button === select)));
+          Promise.resolve(onSelect(row)).catch(error => { if (!destroyed && error?.name !== 'AbortError') status.textContent = t('history.failed'); });
+        }); select.setAttribute('aria-pressed', String(selectedRow != null && selectedRow === (row.applicationCorrelationId || row.traversalId || row.invocationId || row.attemptId))); item.append(select);
           const details = element('details'); details.append(localize(element('summary'), 'history.details'), facts(row)); item.append(details); }
         else if (query.view === 'join-members') {
           item.append(localize(element('strong'), row.received ? 'history.member.received' : 'history.member.missing', { id: row.contributionId }));
@@ -98,6 +163,11 @@ export function createDeploymentHistoryMonitor({ container, projection, read, vi
       }
       previous.disabled = state.busy || !state.hasPrevious; next.disabled = state.busy || !state.hasNext;
       refresh.disabled = state.busy;
+      syncPreviews();
+      if (selectFirst && !firstSelection && !state.busy && state.page?.items.length) {
+        firstSelection = true;
+        queueMicrotask(() => { if (!destroyed && root.isConnected) rows.querySelector('li button')?.click(); });
+      }
     }});
     const previous = button('history.previous', () => pager.previous()), next = button('history.next', () => pager.next()), refresh = button('history.refresh', () => pager.refresh());
     controls.append(previous, next, refresh); root.append(title, message, rows, controls); parent.append(root); pagers.add(pager);
@@ -110,12 +180,15 @@ export function createDeploymentHistoryMonitor({ container, projection, read, vi
     delete rootSummary.dataset.historyText; rootDisclosure.open = false; selectionDisclosure.hidden = false; selectionDisclosure.open = true;
     for (const state of [...previews.values()]) state.retire();
     for (const old of selectedSections) old.destroy(); selectedSections = [];
-    selectedSections.push(section(selections, 'history.traversals', { view: 'traversals', applicationCorrelationId: row.applicationCorrelationId }, openTraversal));
-    selectedSections.push(section(selections, 'history.joins', { view: 'joins', applicationCorrelationId: row.applicationCorrelationId }, round => {
+    selectedSections.push(section(selections, 'history.traversals', { view: 'traversals', applicationCorrelationId: row.applicationCorrelationId }, openTraversal, true));
+    const joinDisclosure = element('details', null, 'history-join-disclosure'); joinDisclosure.append(localize(element('summary'), 'history.joins')); selections.append(joinDisclosure);
+    selectedSections.push(section(joinDisclosure, 'history.joins', { view: 'joins', applicationCorrelationId: row.applicationCorrelationId }, round => {
       const existing = selectedSections.find(item => item.members); existing?.destroy();
-      const members = section(selections, 'history.members', { view: 'join-members', applicationCorrelationId: row.applicationCorrelationId,
+      const members = section(joinDisclosure, 'history.members', { view: 'join-members', applicationCorrelationId: row.applicationCorrelationId,
         nodeId: round.nodeId, roundId: round.roundId }); members.members = true; selectedSections = selectedSections.filter(item => item !== existing); selectedSections.push(members);
     }));
+    for (const disclosure of selections.querySelectorAll('.history-join-disclosure')) if (disclosure !== joinDisclosure) disclosure.remove();
+    syncPreviews();
   }
   function viewerShell(parent) {
     const scope = element('div', null, 'history-preview'); scope.dataset.viewerFocusScope = '';
@@ -131,26 +204,30 @@ export function createDeploymentHistoryMonitor({ container, projection, read, vi
     const minimap = element('canvas', null, 'embed-viewer-minimap'); minimap.dataset.viewerMinimap = ''; minimap.tabIndex = 0; minimap.setAttribute('role', 'application'); minimap.setAttribute('aria-label', t('embed.minimap.label')); minimap.dataset.historyLabel = 'embed.minimap.label';
     const state = element('p'); state.dataset.viewerStatus = ''; const metadata = element('p'); metadata.dataset.viewerMetadata = '';
     const alternative = element('ol'); alternative.dataset.viewerAlternative = '';
-    const contents = element('details'); contents.append(localize(element('summary'), 'embed.contents.label'), alternative);
+    const contents = element('details', null, 'history-graph-contents'); contents.append(localize(element('summary'), 'embed.contents.label'), alternative);
     const footer = element('footer'); footer.append(minimap, state, metadata);
     root.append(toolbar, canvas, footer, contents); scope.append(before, root, after); parent.append(scope); return { scope, root };
   }
   async function openTraversal(row) {
     const key = `${row.processInstanceId}:${row.traversalId}`;
-    setRowLabel(selectionSummary, 'traversals', row);
-    delete selectionSummary.dataset.historyText; selectionDisclosure.hidden = false; selectionDisclosure.open = false; rootDisclosure.open = false;
-    if (previews.has(key)) { previews.get(key).root.scrollIntoView({ block: 'nearest' }); return; }
-    if (previews.size >= 2) { status.textContent = t('history.previewLimit'); return; }
+    selectionDisclosure.hidden = false; selectionDisclosure.open = true; rootDisclosure.open = true;
+    if (previews.has(key)) { activePreview = key; syncPreviews(); return; }
+    if (previews.size >= 2) previews.values().next().value.retire();
+    activePreview = key;
     const root = element('article', null, 'history-traversal'); root.dataset.traversalId = row.traversalId;
-    const title = labelElement('h3', 'traversals', row), coverage = element('p'), inspector = element('aside', null, 'history-inspector');
+    const title = labelElement('h3', 'traversals', row), coverage = element('p', null, 'history-coverage'), inspector = element('aside', null, 'history-inspector');
     inspector.setAttribute('aria-label', t('history.inspect')); inspector.dataset.historyLabel = 'history.inspect'; inspector.append(element('p', t('history.selectNode')));
-    const coverageControls = element('nav');
+    const coverageControls = element('nav', null, 'history-coverage-controls');
     const state = { root, viewer: null, retired: false, mounted: false, epoch: selectionEpoch, coverageGeneration: 0, controller: new AbortController(), nodeRows: [], edgeRows: [], nodes: null, edges: null, inspectorPages: [], coverageFlights: new Set() };
     const scoped = { processInstanceId: row.processInstanceId, traversalId: row.traversalId };
-    const retire = () => { state.retired = true; state.coverageGeneration++; state.controller.abort(); state.viewer?.destroy(); for (const item of state.inspectorPages) item.destroy(); previews.delete(key); root.remove(); };
+    const retire = () => { state.retired = true; state.coverageGeneration++; state.controller.abort(); state.viewer?.destroy(); for (const item of state.inspectorPages) item.destroy(); previews.delete(key); root.remove();
+      if (activePreview === key) activePreview = [...previews.keys()].at(-1) || null; syncPreviews(); };
     state.retire = retire;
-    root.append(title, button('history.close', retire), coverage, coverageControls); previewList.append(root); previews.set(key, state);
-    const shell = viewerShell(root); root.append(inspector);
+    const previewHeader = element('header', null, 'history-traversal-heading'); previewHeader.append(title, button('history.close', retire));
+    root.append(previewHeader); previewList.append(root); previews.set(key, state); syncPreviews();
+    const shell = viewerShell(root);
+    const legend = element('p', null, 'history-legend'); legend.append(localize(element('span', null, 'history-legend-observed'), 'history.legend.observed'), localize(element('span', null, 'history-legend-unknown'), 'history.legend.unknown'));
+    root.append(legend, coverage, coverageControls, inspector);
     function updateNodeTotals() {
       if (!state.selectedNodeId || !state.nodeTotals) return;
       const row = state.nodeRows.find(item => item.nodeId === state.selectedNodeId);
@@ -160,7 +237,7 @@ export function createDeploymentHistoryMonitor({ container, projection, read, vi
     function inspect(nodeId) {
       if (state.retired) return;
       state.selectedNodeId = nodeId;
-      for (const old of state.inspectorPages) old.destroy(); state.inspectorPages = []; inspector.replaceChildren(element('h4', nodeId));
+      for (const old of state.inspectorPages) old.destroy(); state.inspectorPages = []; inspector.replaceChildren(element('h4', nodeNames.get(nodeId) || nodeId));
       state.nodeTotals = element('p'); state.nodeTotals.className = 'history-node-totals'; inspector.append(state.nodeTotals); updateNodeTotals();
       const visits = section(inspector, 'history.visits', { view: 'visits', ...scoped, nodeId }, visit => {
         for (const old of state.inspectorPages.slice(1)) old.destroy(); state.inspectorPages = state.inspectorPages.slice(0, 1);
@@ -225,7 +302,7 @@ export function createDeploymentHistoryMonitor({ container, projection, read, vi
     if (destroyed) return;
     const max = page.items[0]?.maxPageSize;
     if (!Number.isSafeInteger(max) || max < 1 || max > 1000) throw new TypeError('Invalid history policy');
-    limit = Math.min(10, max); initialized = true; retry.hidden = true; status.textContent = t('history.limit', { limit });
+    limit = Math.min(10, max); initialized = true; retry.hidden = true; status.textContent = ''; localize(policy, 'history.limit', { limit });
     const businesses = section(roots, 'history.business', { view: 'histories' }, chooseBusiness);
     const search = element('form', null, 'history-search');
     const field = key => {
@@ -264,10 +341,10 @@ export function createDeploymentHistoryMonitor({ container, projection, read, vi
     return initialization;
   }
   const ready = initialize();
-  return Object.freeze({ ready,
+  return Object.freeze({ ready, setDeploymentStatus,
     refresh() { if (!initialized) return initialize(); return Promise.all([...pagers].map(pager => pager.refresh().catch(() => {})).concat([...previews.values()].map(state => state.refreshCoverage().catch(() => {})))); },
     notify() { /* Reads remain explicit; a stream cannot silently drain history pages. */ },
-    refreshLocale() { for (const node of container.querySelectorAll('[data-history-text]')) node.textContent = t(node.dataset.historyText, localizedArguments.get(node) || {});
+    refreshLocale() { setDeploymentStatus(); for (const node of container.querySelectorAll('[data-history-text]')) node.textContent = t(node.dataset.historyText, localizedArguments.get(node) || {});
       for (const node of container.querySelectorAll('[data-history-row-view]')) setRowLabel(node, node.dataset.historyRowView, rowArguments.get(node));
       for (const node of container.querySelectorAll('[data-history-label]')) node.setAttribute('aria-label', t(node.dataset.historyLabel));
       for (const state of previews.values()) { state.viewer?.refreshLocale?.(); state.paint(); } },

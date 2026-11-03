@@ -1,9 +1,21 @@
+import { productError } from './product-error.js';
+
 const VIEWS = new Set(['policy', 'histories', 'traversals', 'uncorrelated-traversals', 'process-traversals',
   'nodes', 'edges', 'visits', 'attempts', 'parents', 'joins', 'join-members', 'activity']);
 const AVAILABILITY = new Set(['AVAILABLE', 'NOT_FOUND', 'EXPIRED', 'NOT_RECORDED', 'CAPTURE_DISABLED', 'NOT_RETAINED']);
 const abortFailure = () => new DOMException('History selection retired', 'AbortError');
 const sourceEqual = (a, b) => a?.kind === 'deployment' && b?.kind === 'deployment'
   && a.deploymentId === b.deploymentId && a.incarnationId === b.incarnationId && a.graphVersion === b.graphVersion;
+
+/** Never silently attach a history to a replacement runtime or graph version. */
+export function requireHistorySource(expected, actual) {
+  if (actual?.deploymentId !== expected?.deploymentId || actual?.incarnationId !== expected?.incarnationId
+      || actual?.graphVersion !== expected?.graphVersion) {
+    const error = productError('history.sourceChanged', new Error('History source changed'));
+    error.code = 'HISTORY_SOURCE_CHANGED';
+    throw error;
+  }
+}
 
 /** One captured source, one finite response budget, and no stale asynchronous publication. */
 export function createBoundHistoryReader({ source, read, isCurrent = () => true }) {

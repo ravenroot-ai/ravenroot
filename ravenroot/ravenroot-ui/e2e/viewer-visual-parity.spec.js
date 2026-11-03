@@ -52,6 +52,12 @@ async function stubViewerService(page) {
     if (url.pathname.endsWith('/view')) return route.fulfill({
       status: 200, contentType: 'application/json', body: JSON.stringify(envelope),
     });
+    if (url.pathname === '/v1/deployments/visual-parity') return route.fulfill({ json: {
+      deploymentId: 'visual-parity', state: 'READY', tenantId: 'local', sourceCount: 0,
+      graphVersion: 'graph-v1', runtimeIncarnationId: 'inc-visual', scope: 'LOCAL_PROCESS',
+      diagnostic: null, continuity: 'PROCESS_LOCAL', deploymentRevision: null,
+      desiredState: null, observedState: null, recoveryFailure: null,
+    } });
     if (url.pathname.endsWith('/events')) return route.fulfill({
       status: 200, contentType: 'text/event-stream', body:
         'event: source-gap\ndata: {"reason":"REPLAY_WINDOW_EXCEEDED"}\n\n',
@@ -190,14 +196,7 @@ const nativeCardSnapshot = (page, renderer) => page.evaluate(selectedRenderer =>
 }, renderer);
 
 async function openNativeElasticFixture(page) {
-  // #590 deployment Monitoring is the bounded history dialog. Keep this legacy renderer contract
-  // on an independent, read-only synthetic graph fixture with the identical authored topology.
-  // This is test data, not a product conversion or an assertion that safe deployment views can fork.
-  await page.evaluate(() => {
-    const graph = structuredClone(window.ravenroot.activeDocument().graph);
-    graph.format = 'graphml'; delete graph.viewerBinding;
-    window.ravenroot.openDocument({ name: 'elastic-renderer-contract.graphml', graph, mode: 'test' });
-  });
+  // Exercise the actual read-only deployment document, including its live renderer binding.
   await page.locator('#btn-monitoring').click();
 }
 

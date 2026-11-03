@@ -359,7 +359,7 @@ class DefaultRavenrootApplicationLocalDeploymentTest {
         var application = application(new SameThreadExecutionEngine(), monitor, new RecordingSourceBehavior());
         try {
             application.registerLocalDeployment(TENANT_A, "observed", graph(NO_SOURCE_GRAPH));
-            assertEquals(Optional.empty(), application.localDeploymentView("tenant-a", "observed"),
+            assertThrows(ai.ravenroot.api.application.DeploymentViewException.class, () -> application.localDeploymentView("tenant-a", "observed"),
                     "a cold registration has no successfully opened immutable definition yet");
             assertEquals(LocalDeploymentState.READY,
                     command(application.startLocalDeployment(TENANT_A, "observed")));
@@ -396,7 +396,7 @@ class DefaultRavenrootApplicationLocalDeploymentTest {
                     first.source().graphVersion(), ignored -> staleDeliveries.incrementAndGet());
             command(application.undeployLocalDeployment("tenant-a", "observed"));
             application.registerLocalDeployment(TENANT_A, "observed", graph(NO_SOURCE_GRAPH));
-            assertEquals(Optional.empty(), application.localDeploymentView("tenant-a", "observed"));
+            assertThrows(ai.ravenroot.api.application.DeploymentViewException.class, () -> application.localDeploymentView("tenant-a", "observed"));
             assertEquals(LocalDeploymentState.READY,
                     command(application.startLocalDeployment(TENANT_A, "observed")));
             var replacement = application.localDeploymentView("tenant-a", "observed").orElseThrow();
@@ -524,7 +524,7 @@ class DefaultRavenrootApplicationLocalDeploymentTest {
             assertTrue(entered.await(20, TimeUnit.SECONDS), "the first start must actually be in flight");
             assertEquals(LocalDeploymentState.STARTING,
                     application.localDeployment("tenant-a", "first-start").orElseThrow().state());
-            assertEquals(Optional.empty(), application.localDeploymentView("tenant-a", "first-start"),
+            assertThrows(ai.ravenroot.api.application.DeploymentViewException.class, () -> application.localDeploymentView("tenant-a", "first-start"),
                     "STARTING alone cannot publish a definition that has never reached READY");
 
             release.countDown();

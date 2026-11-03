@@ -49,6 +49,36 @@ class GitlabAuthoringRepositoryTest {
     private static final String DRAFT = "draft/customers-a";
 
     @Test
+    void changedSaveCreatesOneSuccessorAndNeverChangesReleasedBytes() {
+        var github = new Gitlab();
+        PublicationEvidence publication = (t, g, v, c, b) -> "absent";
+        try (var repository = repository(github, publication)) {
+            var created = repository.save(ALICE, new GraphAuthoringRepository.SaveRequest(
+                    "orders.graphml", graph("one"), EMPTY, "auto-create-key-000001")).toCompletableFuture().join();
+            github.merge();
+            var released = repository.open(ALICE, "orders.graphml", false).toCompletableFuture().join();
+            var request = new GraphAuthoringRepository.SaveRequest("orders.graphml", graph("two"),
+                    released.summary().revision(), "auto-successor-key-001");
+            var successor = repository.save(ALICE, request).toCompletableFuture().join();
+            assertEquals(2, successor.summary().releaseVersion());
+            assertFalse(successor.summary().published());
+            assertArrayEquals(successor.graphMl(), repository.save(ALICE, request).toCompletableFuture().join().graphMl());
+            try (var reopened = repository(github, publication)) {
+                var replay = reopened.save(ALICE, request).toCompletableFuture().join();
+                assertEquals(2, replay.summary().releaseVersion());
+                assertArrayEquals(successor.graphMl(), replay.graphMl());
+            }
+            var later = repository.save(ALICE, new GraphAuthoringRepository.SaveRequest(
+                    "orders.graphml", graph("three"), successor.summary().revision(), "auto-edit-key-000001")).toCompletableFuture().join();
+            assertEquals(2, later.summary().releaseVersion());
+            assertArrayEquals(created.graphMl(), repository.open(ALICE, "orders.graphml", true).toCompletableFuture().join().graphMl());
+            assertFailure(GraphAuthoringException.Failure.CONFLICT, () -> repository.save(BOB,
+                    new GraphAuthoringRepository.SaveRequest("orders.graphml", graph("competing"),
+                            released.summary().revision(), "auto-competing-key-001")).toCompletableFuture().join());
+        }
+    }
+
+    @Test
     void successorRecoversAcrossRestartWithoutAnotherIncrement() {
         var api = new Gitlab();
         var publication = new java.util.concurrent.atomic.AtomicReference<>("absent");

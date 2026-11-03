@@ -49,15 +49,16 @@ export async function graphVersionOf(graphMl) {
  * Restoration calls no mutation here: only an explicit Run enters this function.
  */
 export function runOriginDeployment(owner, { client, serviceUrl, tenantId, graphMl, inputJson,
-  persist, isCurrent, pin = graphVersionOf, onPhase = () => {}, randomId, attachment = null }) {
+  persist, isCurrent, pin = graphVersionOf, onPhase = () => {}, onView = async () => {}, onObservation, randomId, attachment = null }) {
   const existing = flights.get(owner);
   if (existing) return existing.task;
   const incarnation = owner.incarnation;
   const intent = owner.deploymentRun || createDeploymentRunIntent({ serviceUrl, tenantId, graphMl, inputJson, randomId, attachment });
   owner.deploymentRun = intent;
-  const control = { intent, status: null, stopRequested: false, task: null };
+  const control = { intent, status: null, stopRequested: false, task: null, observation: new AbortController() };
   flights.set(owner, control);
-  const publishStatus = status => { control.status = status; owner.deploymentRunStatus = status.state; onPhase(owner, intent); };
+  const publishStatus = status => { control.status = status; owner.deploymentRunStatus = status.state; owner.deploymentRunLastObservedState = status.state;
+    owner.deploymentRunSourceCount = status.sourceCount; onPhase(owner, intent); };
   const interrupted = status => ({ intent, status, view: null, initial: null, stoppedBeforeInitial: true });
   const current = () => owner.incarnation === incarnation && owner.deploymentRun === intent && isCurrent(owner, client)
     && intent.serviceUrl === serviceUrl && intent.tenantId === tenantId;
@@ -73,8 +74,15 @@ export function runOriginDeployment(owner, { client, serviceUrl, tenantId, graph
       catch (error) {
         if (error?.status !== 404) throw error;
         check();
-        if (intent.registrationIdentity) status = await client.restoreDeployment(intent.deploymentId, { registrationIdentity: intent.registrationIdentity, graphVersion: intent.graphVersion });
-        else {
+        if (intent.registrationIdentity) {
+          try {
+            status = await client.restoreDeployment(intent.deploymentId, {
+              registrationIdentity: intent.registrationIdentity, graphVersion: intent.graphVersion });
+          } catch (restoreError) {
+            if (restoreError?.status === 404) throw productError('workspace.run.restoreUnavailable', new Error('Saved deployment could not be restored', { cause: restoreError }));
+            throw restoreError;
+          }
+        } else {
           if (!intent.registrationAllowed || intent.incarnationId || intent.processInstanceId) throw failure('ATTACHED_DEPLOYMENT_NOT_FOUND');
           status = await client.registerDeployment(intent.deploymentId, intent.graphMl);
         }
@@ -122,37 +130,68 @@ export function runOriginDeployment(owner, { client, serviceUrl, tenantId, graph
         intent.phase = status.state === 'FAILED' ? 'FAILED' : 'RECONCILE'; await save();
         throw failure('ACTIVATION_NOT_READY');
       }
-      const view = await client.deploymentView(intent.deploymentId);
+      let view = null;
+      owner.deploymentRunMonitoringError = null;
+      try { view = await client.deploymentView(intent.deploymentId); }
+      catch (error) {
+        // A presentation failure is not an execution/admission failure.
+        owner.deploymentRunMonitoringError = error;
+      }
       if (control.stopRequested) return interrupted(status);
       check();
-      const rebound = Boolean(intent.incarnationId && intent.incarnationId !== view.source.incarnationId);
-      if (view.source.graphVersion !== intent.graphVersion || view.source.deploymentId !== intent.deploymentId
-          || rebound && !(intent.registrationIdentity && status.continuity === 'DURABLE' && status.registrationIdentity === intent.registrationIdentity))
+      const rebound = Boolean(intent.incarnationId && intent.incarnationId !== runtime);
+      if (view && (view.source.graphVersion !== intent.graphVersion
+          || view.source.deploymentId !== intent.deploymentId || view.source.incarnationId !== runtime))
         throw failure('DEPLOYMENT_INCARNATION_CHANGED');
-      if (!rebound) intent.incarnationId = view.source.incarnationId;
+      if (rebound && !(intent.registrationIdentity && status.continuity === 'DURABLE'
+          && status.registrationIdentity === intent.registrationIdentity)) throw failure('DEPLOYMENT_INCARNATION_CHANGED');
+      if (!rebound) intent.incarnationId = runtime;
       intent.phase = rebound ? 'RECONCILE' : 'READY'; await save();
+      if (view) {
+        try { await onView(view); }
+        catch (error) { owner.deploymentRunMonitoringError = error; }
+        check();
+      }
       if (control.stopRequested) return interrupted(status);
+      owner.deploymentRunObservationError = null;
+      let observation;
+      try {
+        const source = { kind: 'deployment', deploymentId: intent.deploymentId,
+          graphVersion: intent.graphVersion, incarnationId: runtime };
+        if (typeof onObservation !== 'function') throw failure('OBSERVATION_REQUIRED');
+        const observed = observation = await onObservation({ source, lifecycle: status.state }, { signal: control.observation.signal });
+        check();
+        if (control.stopRequested) return interrupted(status);
+        if (!observed?.canAdmit?.() || observed.source.deploymentId !== source.deploymentId
+            || observed.source.graphVersion !== source.graphVersion || observed.source.incarnationId !== source.incarnationId)
+          throw failure('OBSERVATION_NOT_CONFIRMED');
+      } catch (error) {
+        if (control.stopRequested) return interrupted(status);
+        owner.deploymentRunObservationError = error;
+        throw error;
+      }
       if (intent.processInstanceId && !rebound) return { intent, status, view, initial: null };
       // Saved admission identities require read-only marker reconciliation. An intent that never
       // received identities may finish its original admission on explicit Run; the permanent
       // marker atomically returns the original traversal if the earlier response was lost.
       const observingSavedAdmission = rebound && Boolean(intent.processInstanceId);
       const initial = observingSavedAdmission ? await client.reconcileInitialStartDeployment(intent.deploymentId, {
-        incarnationId: view.source.incarnationId, graphVersion: intent.graphVersion, requestId: intent.initialStartRequestId,
+        incarnationId: runtime, graphVersion: intent.graphVersion, requestId: intent.initialStartRequestId,
       }) : await client.initialStartDeployment(intent.deploymentId, {
-        incarnationId: view.source.incarnationId, graphVersion: intent.graphVersion, requestId: intent.initialStartRequestId,
+        incarnationId: runtime, graphVersion: intent.graphVersion, requestId: intent.initialStartRequestId,
         input: JSON.parse(intent.inputJson),
-      });
+      }, { canAdmit: () => current() && !control.stopRequested && observation.canAdmit() });
       check();
       if (observingSavedAdmission && initial.outcome !== 'DUPLICATE' || !['ACCEPTED', 'DUPLICATE'].includes(initial.outcome)) throw failure('INITIAL_START_UNRESOLVED');
       if (initial.requestId !== intent.initialStartRequestId
           || intent.processInstanceId && (intent.processInstanceId !== initial.processInstanceId || intent.traversalId !== initial.traversalId))
         throw failure('INITIAL_START_IDENTITY_CHANGED');
       intent.processInstanceId = initial.processInstanceId; intent.traversalId = initial.traversalId;
-      intent.incarnationId = view.source.incarnationId; intent.phase = 'READY'; await save();
+      intent.incarnationId = runtime; intent.phase = 'READY'; await save();
       return { intent, status, view, initial };
     } catch (error) {
-      if (current()) owner.deploymentRunStatus = control.status?.state === 'FAILED' ? 'FAILED' : 'UNKNOWN';
+      if (current()) owner.deploymentRunStatus = ['READY', 'DEGRADED', 'STOPPED', 'FAILED'].includes(control.status?.state)
+        ? control.status.state : 'UNKNOWN';
       if (current() && intent.phase !== 'FAILED') { intent.phase = 'RECONCILE'; await save(); }
       throw error;
     }
@@ -178,7 +217,7 @@ export function stopOriginDeployment(owner, { client, isCurrent, reason }) {
   if (existing) return existing;
   const binding = owner.deploymentRun, incarnation = owner.incarnation;
   const run = flights.get(owner);
-  if (run) run.stopRequested = true;
+  if (run) { run.stopRequested = true; run.observation.abort(); }
   owner.deploymentRunStopPending = true;
   const check = () => {
     if (!binding || owner.incarnation !== incarnation || owner.deploymentRun !== binding
@@ -206,7 +245,7 @@ export function stopOriginDeployment(owner, { client, isCurrent, reason }) {
     try { status = verify(await client.deployment(binding.deploymentId)); }
     catch (error) {
       if (error?.status !== 404) throw error;
-      check(); owner.deploymentRunStatus = 'STOPPED'; return true;
+      check(); owner.deploymentRunStatus = 'STOPPED'; owner.deploymentRunLastObservedState = 'STOPPED'; return true;
     }
     // The finite status identity exists before a definition/view is opened. A cold registration
     // must be stoppable without activating it merely to obtain a viewer projection.
@@ -231,15 +270,23 @@ export function stopOriginDeployment(owner, { client, isCurrent, reason }) {
         command.expectedGeneration = status.deploymentGeneration;
         command.reason = explanation.trim(); command.idempotencyKey = globalThis.crypto.randomUUID();
       }
-      try { await client.stopDeployment(binding.deploymentId, command); }
+      try {
+        const reply = await client.stopDeployment(binding.deploymentId, command);
+        check();
+        const stopped = reply?.status || reply;
+        if (stopped?.state === 'STOPPED' && verify(stopped).state === 'STOPPED') {
+          owner.deploymentRunStatus = 'STOPPED'; owner.deploymentRunLastObservedState = 'STOPPED';
+          return true;
+        }
+      }
       catch (error) {
         if (error?.status !== 404) throw error;
-        check(); owner.deploymentRunStatus = 'STOPPED'; return true;
+        check(); owner.deploymentRunStatus = 'STOPPED'; owner.deploymentRunLastObservedState = 'STOPPED'; return true;
       }
       check();
     }
     const observed = verify(await client.deployment(binding.deploymentId));
-    owner.deploymentRunStatus = observed.state;
+    owner.deploymentRunStatus = observed.state; owner.deploymentRunLastObservedState = observed.state;
     if (observed.state !== 'STOPPED') return false;
     return true;
   })();
@@ -257,12 +304,17 @@ export async function observeOriginDeployment(owner, { client, isCurrent }) {
   try { status = await client.deployment(binding.deploymentId); }
   catch (error) {
     if (error?.status !== 404 || !current() || !binding.incarnationId) throw error;
-    owner.deploymentRunStatus = 'STOPPED'; return true;
+    owner.deploymentRunStatus = owner.deploymentRunLastObservedState === 'STOPPED' ? 'STOPPED' : 'UNKNOWN';
+    owner.deploymentRunObservedSource = null; return true;
   }
   if (!current() || status.deploymentId !== binding.deploymentId || status.tenantId !== binding.tenantId
       || status.graphVersion !== binding.graphVersion
       || binding.registrationIdentity && status.registrationIdentity !== binding.registrationIdentity
       || !binding.registrationIdentity && binding.incarnationId && status.runtimeIncarnationId !== binding.incarnationId)
     throw failure('OBSERVATION_BINDING_CHANGED');
-  owner.deploymentRunStatus = status.state; return true;
+  owner.deploymentRunStatus = status.state; owner.deploymentRunLastObservedState = status.state;
+  owner.deploymentRunSourceCount = status.sourceCount;
+  owner.deploymentRunObservedSource = { deploymentId: binding.deploymentId, graphVersion: binding.graphVersion,
+    incarnationId: status.runtimeIncarnationId || binding.incarnationId };
+  return true;
 }

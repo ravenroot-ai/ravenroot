@@ -132,12 +132,12 @@ public final class PublishedGraphArtifactCatalog implements PublicationEvidence 
         this.configuration = Objects.requireNonNull(configuration, "configuration");
         this.client = Objects.requireNonNull(client, "client");
         this.network =
-                new OutboundHttpPolicy(
+                configuration.publicationEnabled() ? new OutboundHttpPolicy(
                         Set.of(configuration.artifactBase().getHost()),
                         configuration.requestTimeout(),
                         Set.of(port(configuration.artifactBase())),
                         1024,
-                        Math.max(JSON_LIMITS.maxEncodedBytes(), configuration.maxDocumentBytes()));
+                        Math.max(JSON_LIMITS.maxEncodedBytes(), configuration.maxDocumentBytes())) : null;
     }
 
     @Override
@@ -234,6 +234,8 @@ public final class PublishedGraphArtifactCatalog implements PublicationEvidence 
     }
 
     private List<Entry> entries() {
+        // An unconfigured publication store grants no publication or deployment authority.
+        if (!configuration.publicationEnabled()) return List.of();
         URI catalogUrl =
                 confined(configuration.artifactBase().resolve(configuration.artifactCatalogPath()));
         Object decoded =

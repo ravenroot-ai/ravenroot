@@ -808,7 +808,8 @@ test('proof-authorized read-only history exposes actual visits and keeps localiz
   const viewer = await readyViewer(page, '/deployment-history');
   await viewer.getByRole('button', { name: 'Retry history', exact: true }).click();
   const history = viewer.locator('[data-embed-history]');
-  await expect(history.getByRole('heading', { name: 'Deployment history', exact: true })).toBeVisible();
+  await expect(history.getByRole('heading', { name: 'Deployed graph', exact: true })).toBeVisible();
+  await expect(history.locator('.history-eyebrow')).toHaveText('Deployment history');
   const businesses = history.locator('.history-page').filter({ has: viewer.getByRole('heading', { name: 'Business histories', exact: true }) });
   const applicationId = await businesses.locator('li').first().locator('dt').filter({ hasText: /^applicationCorrelationId$/ })
     .evaluate(node => node.nextElementSibling.textContent);
@@ -832,7 +833,8 @@ test('proof-authorized read-only history exposes actual visits and keeps localiz
     expect(Object.keys(body).sort()).toEqual(['issuedAt', 'jti', 'nonce', 'query', 'signature']);
     expect(request.headers().authorization).toMatch(/^Bearer /); }
   await page.evaluate(catalog => window.postViewerLocale('en-XA', catalog), viewerCatalog('en-XA', '⟦H⟧'));
-  await expect(history.getByRole('heading', { name: '⟦H⟧Deployment history', exact: true })).toBeVisible();
+  await expect(history.getByRole('heading', { name: '⟦H⟧Deployed graph', exact: true })).toBeVisible();
+  await expect(history.locator('.history-eyebrow')).toHaveText('⟦H⟧Deployment history');
   await expect(inspector.getByRole('button', { name: '⟦H⟧Load captured content', exact: true })).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
   await page.locator('#viewer').evaluate(frame => { frame.style.width = '100%'; frame.style.height = '800px'; frame.width = '100%'; });

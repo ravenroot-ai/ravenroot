@@ -2,7 +2,48 @@ import { expect } from '@playwright/test';
 import { createHash } from 'node:crypto';
 export const PID = '10000000-0000-0000-0000-000000000001', TID = '20000000-0000-0000-0000-000000000002';
 export const deferred = () => { let resolve; const promise = new Promise(yes => { resolve = yes; }); return { promise, resolve }; };
+// route.fulfill supplies a finite body, whereas the production lifecycle stream stays open.
+// Preserve that transport contract for these stateful mocks without changing any server event.
+export async function keepMockDeploymentStreamsOpen(page) {
+  await page.addInitScript(() => {
+    if (window.__mockDeploymentStreamsOpen) return;
+    window.__mockDeploymentStreamsOpen = true;
+    const observers = new Set();
+    window.__interruptMockDeploymentObservation = () => {
+      for (const controller of observers) controller.error(new Error('Mock native observation unavailable'));
+      observers.clear();
+    };
+    const fetch = window.fetch.bind(window);
+    window.fetch = async (input, options = {}) => {
+      const response = await fetch(input, options);
+      const url = new URL(typeof input === 'string' ? input : input.url, location.href);
+      if (!/^\/v1\/deployments\/[^/]+\/events$/.test(url.pathname)
+          || !response.ok || !response.headers.get('content-type')?.includes('text/event-stream')) return response;
+      const reader = response.body.getReader();
+      const body = new ReadableStream({
+        async start(controller) {
+          observers.add(controller);
+          options.signal?.addEventListener('abort', () => {
+            observers.delete(controller);
+            reader.cancel().catch(() => {});
+            controller.error(new DOMException('Mock stream cancelled', 'AbortError'));
+          }, { once: true });
+          try {
+            while (!options.signal?.aborted) {
+              const { done, value } = await reader.read();
+              if (done) return; // Remain subscribed until the captured request is cancelled.
+              controller.enqueue(value);
+            }
+          } catch (error) { controller.error(error); }
+        },
+        cancel() { return reader.cancel(); },
+      });
+      return new Response(body, { status: response.status, headers: response.headers });
+    };
+  });
+}
 export async function deploymentService(page, { gate, lose, failStop = false, stopGate = null } = {}) {
+  await keepMockDeploymentStreamsOpen(page);
   const held = new Map(), calls = [], registered = deferred();
   await page.route('**/v1/configuration', route => route.fulfill({ json: { schemaVersion: 1, graphDocumentMaxBytes: 10485760, workspace: { tenantId: 'tenant' } } }));
   await page.route('**/v1/node-types', route => route.fulfill({ json: [{ behavior: 'external.consume', displayName: 'Source', category: 'Sources', description: '', visualType: 'actor',
@@ -30,6 +71,9 @@ export async function deploymentService(page, { gate, lose, failStop = false, st
       status.state = 'STOPPED';
     }
     if (action === 'start') { status.state = 'READY'; if (lose === 'activation' && calls.filter(c => c.action === 'start').length === 1) { await route.abort('failed'); return; } }
+    if (action === 'events') {
+      await route.fulfill({ contentType: 'text/event-stream', body: `event: lifecycle\ndata: ${JSON.stringify({ type: 'lifecycle', deploymentId: id, graphVersion: status.graphVersion, incarnationId: 'runtime-1', lifecycle: status.state, cursor: 'c'.repeat(43) })}\n\n` }); return;
+    }
     if (action === 'view') {
       await route.fulfill({ json: { viewerSourceVersion: '1', source: { kind: 'deployment', deploymentId: id, graphVersion: status.graphVersion, incarnationId: 'runtime-1' }, lifecycle: status.state,
         projection: { viewerContractVersion: '1.0', nodes: [{ id: 'start', kind: 'START', label: 'Start' }, { id: 'source', kind: 'BEHAVIOR', label: 'Source' }], edges: [{ id: 'edge', source: 'start', target: 'source' }] } } }); return;
@@ -40,4 +84,10 @@ export async function deploymentService(page, { gate, lose, failStop = false, st
     await route.fulfill({ json: status });
   });
   return { calls, held, registered: registered.promise };
+}
+
+/** Exercise legacy routing during a declared native-channel outage after admission. */
+export async function interruptMockDeploymentObservation(page) {
+  await page.route('**/v1/deployments/*/events?**', route => route.fulfill({ status: 503, body: '' }));
+  await page.evaluate(() => window.__interruptMockDeploymentObservation());
 }

@@ -30,7 +30,9 @@ async function snapshot(page) {
     selected: window.cy.nodes(':selected').map(node => node.id()),
     documents: window.ravenroot.documents().map(document_ => ({ id: document_.id,
       graphMl: window.ravenroot.serializeGraphML(document_.graph),
-      authoring: JSON.stringify(document_.authoring),
+      // An idle release flight is initially absent and becomes false after the first review.
+      // Compare that same idle state while retaining detection of any active flight or binding change.
+      authoring: JSON.stringify({ ...document_.authoring, releaseFlight: Boolean(document_.authoring.releaseFlight) }),
       revision: document_.history.revision(), dirty: document_.history.isDirty(),
       name: document_.name, displayName: document_.displayName,
     })),
@@ -76,7 +78,8 @@ for (const provider of ['github', 'gitlab']) for (const reused of [false, true])
     await page.goto('/');
     await expect(page.locator('html')).toHaveAttribute('lang', 'fr');
     await expect(page.locator('#btn-open')).toContainText('Open from repository');
-    await page.locator('#btn-open').click();
+    await page.locator('#menu-file').click();
+    await page.locator('#application-menu [data-command-id="file.open"]').click();
     const picker = page.getByRole('dialog', { name: 'Open from repository' });
     await expect(picker).toBeVisible();
     await picker.getByRole('button', { name: /authored.graphml · Editable draft v7/ }).click();
@@ -101,6 +104,11 @@ for (const provider of ['github', 'gitlab']) for (const reused of [false, true])
     const review = page.locator('#activity-log .activity-entry').filter({ hasText: opaqueUrl });
     const expected = locale => `${locale}[${locale}_${reused ? 'EXISTING' : 'NEW'}|${locale}_${provider === 'github' ? 'PULL' : 'MERGE'}|${opaqueUrl}]`;
     await expect(review.locator('.activity-detail')).toHaveText(expected('fr'));
+    const resultDialog = page.locator('.repository-operation-dialog');
+    await expect(resultDialog).toBeVisible();
+    await expect(resultDialog.getByRole('button', { name: 'Close', exact: true })).toBeEnabled();
+    await resultDialog.getByRole('button', { name: 'Close', exact: true }).click();
+    await expect(resultDialog).toHaveCount(0);
     await review.evaluate(element => { element.dataset.retainedProbe = 'same-row'; });
     const navigationCount = await page.evaluate(() => performance.getEntriesByType('navigation').length);
     for (const locale of ['de', 'fr']) {

@@ -3555,6 +3555,10 @@ def remap_declared_candidate_references(document: dict[str, object],
             if not isinstance(entry, dict):
                 continue
             remap_list(entry, "defaultEvidence")
+            if entry.get("graphAuthoringAuthority") == GRAPH_AUTHORING_AUTHORITY_ID:
+                evidence = entry.get("defaultEvidence")
+                if isinstance(evidence, list) and all(isinstance(value, str) for value in evidence):
+                    evidence.sort()
             binding = entry.get("bindingAuthority")
             if isinstance(binding, dict):
                 for field in ("environmentCandidateId", "propertyCandidateId"):
@@ -3789,7 +3793,7 @@ def remap_declared_candidate_references(document: dict[str, object],
 
     graph_authoring_authorities = document.get("graphAuthoringAuthorities")
     if isinstance(graph_authoring_authorities, dict):
-        for authority in graph_authoring_authorities.values():
+        for authority_id, authority in graph_authoring_authorities.items():
             if not isinstance(authority, dict):
                 continue
             remap_list(authority, "candidateIds")
@@ -3799,6 +3803,10 @@ def remap_declared_candidate_references(document: dict[str, object],
                         remap_list(row, "candidateIds")
                         if field == "contracts":
                             remap_list(row, "defaultEvidence")
+                            evidence = row.get("defaultEvidence")
+                            if authority_id == GRAPH_AUTHORING_AUTHORITY_ID and isinstance(evidence, list) \
+                                    and all(isinstance(value, str) for value in evidence):
+                                evidence.sort()
 
     domains = document.get("remediationDomains")
     domain_rows = domains.get("domains") if isinstance(domains, dict) else None
@@ -8256,7 +8264,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'file',
   '',
   '',
-  '157cb1046dce59a60d99e99c73cd6285e578f28bc7c148ac9392a63af14acee9',
+  '4362709d7bb460555de4291defdbae9eb1d83d0d64265c35f24b54b95a259dce',
   1),
  ('deploy/helm/ravenroot/values.yaml',
   'file',
@@ -8442,7 +8450,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'file',
   '',
   '',
-  '7ff4016e93d11fc32d88ba79c8545f83ba873af8433ffaa870b27ae8d03cded4',
+  '09c6ae706b22fc76bc4aaa0a4384be8f3014408ce1c893d13e5745f9a7e96eed',
   1),
  ('ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmRuntimeConfiguration.java',
   'file',
@@ -8520,7 +8528,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'file',
   '',
   '',
-  'eb77a1e6dafe5c76e7eb39d670c9419b89756e4f36d6ae90d1fa463b6a1da739',
+  '21ebe41b18a079e1c3b91df5648a62be859afcf9e3eb68971b46ac30009ec504',
   1),
  ('scripts/tests/test_program_authoring_platform_configuration.sh',
   'file',
@@ -11187,7 +11195,7 @@ PROGRAM_GITHUB_RETAINED_PARTITIONS = {'program.runtime.extension-parser-state': 
                                          'oc-9f6632280bd5f9ba3096',
                                          'oc-7e6b45de3e179c7b3d85',
                                          'oc-5b73e4544bd834e64749',
-                                         'oc-351a2899d8713a810f5b',
+                                         'oc-b6663a01a5d8b145dd81', 'oc-25b5dcce6cacf712878d',
                                          'oc-488bafb5cb7c8dbdc3b1',
                                          'oc-7531d78311d9fedec439',
                                          'oc-c70ddd4a4628b8e0e999',
@@ -14629,7 +14637,7 @@ ACTIVITY_CAPTURE_SOURCE_PROOFS = {
     ACTIVITY_CAPTURE_TEST_PATH: "bc0c980884dcac6cbef97bc3867efacbb44a0428de8bcfdd6c2c7866743c6046",
     ACTIVITY_CAPTURE_CARRIER_PATHS[0]: "5267de14045b1c0ad52de0d3518fcc9d66bfd782e6e4d1aeda03273c7535a127",
     ACTIVITY_CAPTURE_CARRIER_PATHS[1]: "545c8b57083051abbbfe60cb19e987925d2056f273bf7ccb9f163ca8ced3698c",
-    ACTIVITY_CAPTURE_CARRIER_PATHS[2]: "157cb1046dce59a60d99e99c73cd6285e578f28bc7c148ac9392a63af14acee9",
+    ACTIVITY_CAPTURE_CARRIER_PATHS[2]: "4362709d7bb460555de4291defdbae9eb1d83d0d64265c35f24b54b95a259dce",
     ACTIVITY_CAPTURE_CARRIER_PATHS[3]: "957882edc5e3ccaae07374755a85f9a8dea8c542eef117eacb1bbb2ecc1e491f",
 }
 ROUTE_TABLE_PATH = Path(
@@ -14649,22 +14657,22 @@ STABLE_EDGE_TEST_PATH = Path(
 STABLE_EDGE_WIRE_TEST_PATH = Path(
     "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/StableEdgeIdWireContractTest.java")
 ROUTE_BOUND_CANDIDATES = {
-    "oc-b8bb808d400c90eba8ac": ("StableEdgeId.MAX_UTF8_BYTES",),
-    "oc-47cfe80555710c9fc742":
+    "oc-854574b55aa79a2563fc": ("StableEdgeId.MAX_UTF8_BYTES",),
+    "oc-c64326cbcb8586048674":
         ("EdgeTraversalWireBudget.MAX_AUXILIARY_ESCAPED_VALUE_BYTES",),
-    "oc-bfdc21db625c28bcee2e": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
-    "oc-36030a80a0a8965d76f9": (
+    "oc-aec0fc642c8415612b59": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
+    "oc-657cda920c8a7f7cdd97": (
         "StableEdgeId.MAX_UTF8_BYTES",
         "EdgeTraversalWireBudget.MAX_AUXILIARY_ESCAPED_VALUE_BYTES",
     ),
-    "oc-871474e4aa410be6c41b": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
+    "oc-5ca2f25c9cd6474f65fc": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
 }
 ROUTE_BOUND_PATHS = {
-    "oc-b8bb808d400c90eba8ac": "/v1/events",
-    "oc-47cfe80555710c9fc742": "/v1/events",
-    "oc-bfdc21db625c28bcee2e": "/v1/events",
-    "oc-36030a80a0a8965d76f9": "/v1/events/recent",
-    "oc-871474e4aa410be6c41b": "/v1/events/recent",
+    "oc-854574b55aa79a2563fc": "/v1/events",
+    "oc-c64326cbcb8586048674": "/v1/events",
+    "oc-aec0fc642c8415612b59": "/v1/events",
+    "oc-657cda920c8a7f7cdd97": "/v1/events/recent",
+    "oc-5ca2f25c9cd6474f65fc": "/v1/events/recent",
 }
 
 
@@ -14863,7 +14871,7 @@ GRAPH_AUTHORING_RAW_KUBERNETES_PATH = Path("deploy/kubernetes/ravenroot.yaml")
 GRAPH_AUTHORING_PUBLISHER_PATH = Path("scripts/publish-graph-artifacts.py")
 
 GRAPH_AUTHORING_FILE_PROOFS = {
-    GRAPH_AUTHORING_PICKER_PATH: '25b917fddaa28b8c7ccef7e09f869e66036dc5f65b73636de99b1002fd340c90',
+    GRAPH_AUTHORING_PICKER_PATH: '89c086fbed7c513b61cd175a073bf2d72e0edfcca85a3640d503c330d47180ad',
     Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/AuthoringAdmission.java"): "e950a102a34193495486211b8acbad937d1fe8003af6cd8c5d977bf2dfce3db4",
     Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/AuthoringIndexReader.java"): "d980dc48fb9573dc43cd882d169d3eb47cf38afa653a2da67dfa01cd52709ced",
     Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/AuthoringRetry.java"): "bd6945a394d73b338a9a624b8727a8525e761b413f27078b40c44845b9e487bb",
@@ -14880,29 +14888,29 @@ GRAPH_AUTHORING_FILE_PROOFS = {
 
     GRAPH_AUTHORING_EMBEDDED_CONFIGURATION_PATH:
         "d7d057fb02ccb5ecd55fe469e94a4ea775cf0dc2f2a34011c71f2e028aec50fb",
-    Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GitlabAuthoringRepository.java"): 'b7ff74ed07093f93a1634055ff82dd41a7016680bcdf4413bcb0ae687ba73628',
+    Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GitlabAuthoringRepository.java"): 'e8fd1d84be088bfade72476d5281203519be7f4afad620654ffddbb2d4cf6eec',
     Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GraphAuthoringRepositories.java"): "6ac51219d9548e6ea592a851b184b543d587421124aa50b9065eb1577c4b2d4f",
     Path("docs/examples/graph-authoring/gitlab-ci.yml"): "d49fa1887422a5bf726ad2c55e08b9f29185438314b626d9fd7e5feeb9c268b7",
     GRAPH_AUTHORING_CONFIGURATION_PATH:
-        "2456dfb6352ec34dbbd3311ef90ef6fbeaa29f7e258d984acab5e9c743215d71",
+        "7946c8d06189f367928566be1e84464d399ea53762706f90c1372e0aafbbaf73",
     Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GraphAuthoringHttpApi.java"):
         '5be8b672b5eada05c4ea9bca39aeb4a82428cfb0adf12b2fe7f02a7985869ea7',
     Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/PublishedGraphArtifactHttpApi.java"):
         "f650313217b4c9c1269ebcec23da67ea74b3755b1e33e03f936fe19cf429cd1d",
     Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/PublishedGraphArtifactCatalog.java"):
-        "a1588ab33728397f16f714339795d92097089de3c5db8003b6019c54d32d1eb1",
+        "ca6dde21f69459583d52003afdceb915c9d37ebd11f225b207741a5e9425272d",
     Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/PublicationEvidence.java"):
         "e506cf232f2b304fe0329a9677d6c671fe7093bd96330b5d4b3c3aba39664c32",
     Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/BoundedHttpResponseBody.java"):
         "6fb605ab94be203f277359d51668ea9c7079406aaba61093805fe52828535aba",
     Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GithubAuthoringRepository.java"):
-        '864ae4859a29a06e1c6f910648ef766c80d24da22934e74366c086f4413d217d',
+        '6c323b8d88b19a34bf07065d287fec1f676776d13e19497fdc60314a3b47eb95',
     Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GithubTokenSource.java"):
         "5bfedea43db11109056bc7988e2eb23246568973d3eab7249ad6bd54fd0a4b0f",
     Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GraphReleaseMetadata.java"):
         "574b3bf8e2c5bb3761a3ed7d3cecce0fb720abbfc330dc319ae29f596e797df4",
     Path("ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/authoring/GraphAuthoringRepository.java"):
-        '6234d7d41aa2eb2f279367d61433b541deba2a155653a42ae35d328ac8022011',
+        'f87f4734c38584b7902dbb54a195ed7616a47d8eccfb0083408f4d69498a852f',
     Path("ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/GraphArtifactDependencies.java"):
         "c5d81882097df2bdb57ed362df71af1124027bb659bd6ac4ea4a429afd2485e2",
     Path("ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/GraphProgramDependency.java"):
@@ -14923,24 +14931,24 @@ GRAPH_AUTHORING_FILE_PROOFS = {
 # unrelated candidates retain their existing semantic authorities rather than being claimed by
 # graph authoring as a whole file.
 GRAPH_AUTHORING_SUPPORT_FILE_PROOFS = {
-    Path("ravenroot/ravenroot-ui/src/workspace.js"): "da49c3a2599df7e06bd5d251f84f3159c61b199bb368f179e628bdc6177b37ab",
-    Path("ravenroot/ravenroot-ui/src/workspace-persistence.js"): "6ecdca7d012248d46f3452ce41c4a347671f340e106399c7dadbb7e6ace7f921",
+    Path("ravenroot/ravenroot-ui/src/workspace.js"): "60a4a94f101fc97740f483e03f89e90ee9c47730557399543b3176f487c82cd8",
+    Path("ravenroot/ravenroot-ui/src/workspace-persistence.js"): "872be46e50fc3a9b4091799989a861b7bb789786deb99f813ba3d9e2522928d0",
     Path("ravenroot/ravenroot-ui/src/document-close-plan.js"): "b51b09fd522f5ebb27ee9b0bad667100122b6191a8b37d22daffd0af0336ead7",
-    Path("ravenroot/ravenroot-ui/test/workspace.test.js"): "a96f59730294ed6954ebc324c23d871585de2a772049a7cad2120307413d9cc6",
-    Path("ravenroot/ravenroot-ui/test/workspace-persistence.test.js"): "c1a8f3264720c5ba57f1a03cc0fa324d1c3e0011e9c2d58fb2293b489b4f773b",
+    Path("ravenroot/ravenroot-ui/test/workspace.test.js"): "b31f96126323ebb60c7a97d5d0209510b5518326e9985ce6620f9d4118970698",
+    Path("ravenroot/ravenroot-ui/test/workspace-persistence.test.js"): "487de769b69c53fc2cb01fad065becba263e798cb382b0fea40725e489b57e2d",
     Path("ravenroot/ravenroot-ui/test/document-close-plan.test.js"): "bf00fb125e359ca7bfc0cfbdf6a32f1226310b3a63746412565090dfff516403",
     Path("ravenroot/ravenroot-ui/src/credential-request.js"): "240501ee73c4068eabbd52540de39d4813b59f7a7c6d2a44bed297c33eb91c90",
     Path("ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/RavenrootApplication.java"):
-        "db2de1efcd02e5b3a4c3cae5704e71c92204507debede5a05770e0c2e19f83aa",
+        "dcfcb005f9c340a403f9e7cc975a5dc6c16d1f0e8f9ac13b3835b447c53bddb1",
     Path("ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/AuthorizedRavenrootApplication.java"):
-        "c6d1bc1f7cd673c360adadf41f3cc8413bb1a512869e75ce3f1d5d3ed1063d49",
+        "38834e3d36a02eff8d68a6702b9bacc389ac3def84336a2d60b3023c6f147337",
     Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/WireErrorCodes.java"):
         "71b0aa2cdfdbbd0964c1e4a4aae9c29e6736ad1be2ee9f4d27f868b61d5e7299",
 }
 GRAPH_AUTHORING_TEST_PROOFS = {
-    Path("ravenroot/ravenroot-ui/test/repository-picker.test.js"): 'da9806558b3759c4adaa407c763b776b0bf6cb62cb0c72de6e8efb98ff10f606',
-    Path("ravenroot/ravenroot-ui/e2e/managed-repository.spec.js"): '79106fe3a8e7baaecd26db8cca6bcb6091e1a962dd1a4b7b3e2f155f15a980d4',
-    Path("ravenroot/ravenroot-ui/e2e/activity-localization.spec.js"): '330eee9236cb1498466010ef2515c592885cdb68d72a080d9413f1948b9c010a',
+    Path("ravenroot/ravenroot-ui/test/repository-picker.test.js"): 'bdbdcec0431ce60bc55578cf6310f7d730ac17ff6bdc7d4aea176b1241872fb0',
+    Path("ravenroot/ravenroot-ui/e2e/managed-repository.spec.js"): 'ddab11e5f3b1c996f1bde26aa7480f5dcebe95905c52c144420a210a3fd1bfe9',
+    Path("ravenroot/ravenroot-ui/e2e/activity-localization.spec.js"): '420078563f5c9e1c3b0365828066c9a8df354a0c00d1e733f64ef2345a0612c4',
     Path("ravenroot/ravenroot-ui/e2e/startup-import.spec.js"): '4117b49e63dbb83c325650f1788f21ccb6bbcc80f86b7cbea71956475756eeb0',
     Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/AuthoringPublicationIndexTest.java"): "64bd2a9f1cd7a82af8442fa2be71a7e84833582ba6aee133dbe8ed395d475afd",
     Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/AuthoringReadBaselineTest.java"): "9cb70ae35e84149d70a87bd6c180b7a48775754dc988dfde8f788235e5ef553e",
@@ -14950,17 +14958,17 @@ GRAPH_AUTHORING_TEST_PROOFS = {
 
     GRAPH_AUTHORING_EMBEDDED_TEST_PATH:
         "67e7c7d8f9df192cfddf972b07730ca282a24b69ae5a31651c1ebe78a7fc62b2",
-    Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/GitlabAuthoringRepositoryTest.java"): '127b437c96b6124ca334605e7ee8190a4231b45602eb80b79b4666a75ceb99d7',
+    Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/GitlabAuthoringRepositoryTest.java"): 'bc352bae9f1fb6a1b130789c7d6c28ede65e6956cc6f1c08a97a4f5fecf395ef',
     Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/GraphAuthoringHttpIntegrationTest.java"):
         'e3ec4d1066f58f129d7fb558a471dc0e7965e5d8fd35b8fa87375af977d115ae',
     Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/GithubAuthoringRepositoryTest.java"):
-        '8a4b16f02a8d39abcac3066d7b9790246df58bb4ecbefa6c4182a45a51d1a5dc',
+        'a3a8096cf2a18d8c590b899422f1e1bffe2fb3c1d22e1094bf48a3661c584352',
     Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/GithubTokenSourceTest.java"):
         "523700c1d4dc5463e7df96b7ae0b0487690c2c868e4169800db060a9d462aeff",
     Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/BoundedHttpResponseBodyTest.java"):
         "8de6368ff8a8bfc6714b6ba993747c844966cfc870d2069467a3cc85f4f71edb",
     Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/GraphAuthoringConfigurationTest.java"):
-        "3ae7718b20c822c724caa7cf80cec8a6167ac824e3e27027fa413f78216cd309",
+        "f7fe4e9e407dd16d56aaccf220192d87c6d94907d985af4308e953577af88ee1",
     Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/PublishedGraphArtifactCatalogTest.java"):
         "327f6232c54a5373ea74c8535fa9c92d4685686a276620fb0e73093550e0cef9",
     Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/GraphReleaseMetadataTest.java"):
@@ -14970,7 +14978,7 @@ GRAPH_AUTHORING_TEST_PROOFS = {
     Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/runtime/GraphArtifactDependencyResolutionTest.java"):
         "b9af762c8ac692b000591000f6bf55061818c7013812a1693d67e17fcc0b9b0d",
     Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/runtime/DefaultRavenrootApplicationLocalDeploymentTest.java"):
-        "b8909a05f27112bee56feea07ab6a1114920125099902cb855df39918f00a674",
+        "4c20f118d272404245152758fe2ad131795cb24867df38971cbc27893f1be4e7",
     Path("ravenroot/ravenroot-ui/test/graph-authoring-client.test.js"):
         '4ae786a92b01fb6c2e56512019822ae49af443ddf5bcc53846b1353afb495ff7',
     Path("ravenroot/ravenroot-ui/test/authoring-capability.test.js"):
@@ -15058,15 +15066,15 @@ GRAPH_AUTHORING_UI_METHOD_PROOFS = {
     "gitAuthoringEnabled": "1c0ea27d91b3f1f53d75ac2a86bff96193784e1ac7c3b2411060d54f71189c00",
     "primaryPersistenceUnavailable": "342b4fa699e42b1d46930147387078f5799ff3380ef58baa3c39c92ae3d51a48",
     "setGraphAuthoringAvailability": "cc45311d49eb56cec124cf2a5932b8e2bc1bac23c179ea6e9f74253eaf3d1d59",
-    "applyAuthoringDocument": "2f2a30653589ff627153830fd8a2b41276d379fe229e71ff5f64e7180a20b62b",
+    "applyAuthoringDocument": "e8f4ad0229b75ac7e451a7e58da8e7c6d90cd156b7d81979f118f5181c77348a",
     "openRepositoryGraph": 'dfe5d91cf5dd0f5d5a31f876441830b26e9e2e0e7d6744cb72bbb5d452931d75',
     "saveRepositoryGraph": '0a66154234cccc41169d326bcd1b6a64f9481f8ad43d04a02c0804b9486e22c2',
     "repositoryHistory": "23a4f3610446b3e1e16e327b73f2401ad0dad4f27f614dbf423242059a914c8d",
     "repositoryDiscard": "1399bd3fda6a09e40903bd0b166d606c1e64fc7524d559390924f74c6faf7be6",
     "repositoryDelete": "12486c92d762174b9161c1ec5be9a3c77e54436f945bff7b673b2407507d8893",
-    "repositoryRelease": "a9b86fc3444a43d92970402b2c14b0d3d6d58a7e84ec1b235c281543829b20cc",
+    "repositoryRelease": "98c94cd0afc8d2a129a0047489564e1c36fad4a8239e610c54988204b0984478",
     "publishedArtifacts": "21ce0b20bfb0f6bb3bab951cc5662dd2d416788bf67684ca0bc749578b1a0637",
-    "connectRuntime": '710c799c350b3a4e52f5f6c81546824341c7a89fc1e1b6c29364a4776ae3401c',
+    "connectRuntime": '9d8c41966918060e48f83d576318a64a7a7156cca769df6802810e670ea1bf60',
     "createStartupImportPlaceholder": "9b194ed16409f284ecdbe713a9be041d8cc60982f90a84b5d6f016c886e6feef",
 
     "startupImportBinding": "d6eb1a9106def1e00965ade2a2c485b422e51be0fd13641e5a2caee60a454952",
@@ -15082,9 +15090,9 @@ GRAPH_AUTHORING_UI_METHOD_PROOFS = {
 # their existing classifications rather than being absorbed by the authoring cohort.
 GRAPH_AUTHORING_UI_SUPPORT_SPAN_PROOFS = {
     "paneIsDirty": "ceb8181d2effb12561ea1b26434ab5feb729eeddafbc4240ac942c65f80d9601",
-    "updateHistoryUi": "59437d046a615c053834b4b9d36f30fafba3312f00dd1c382cd410061f5011d6",
+    "updateHistoryUi": "11f1b9907d64e960b1d48f54910113ccf9920900d3da6ad739e8f38bacb50578",
     "completeReplaceActiveDocument": "c3ba35734683c8cd2fb6c22144b2cb577e1c0fd5ffec4625841f2ab1349d7724",
-    "bootApplication": '9a21d4cd04d3f43b387e7f0b97581629e29710b4b68dd7c9c3f422be1432e16d',
+    "bootApplication": '90cf9352e954968814a5f70304a62c7932554a1da3af2902da325ef6fe7eae03',
     "syncGraphModeLabel": 'a205d6a872ef979883261fb8c43ff376231456941c05321787ac53ef789faef9',
 }
 GRAPH_AUTHORING_UI_SPAN_PROOFS = {
@@ -15121,7 +15129,7 @@ GRAPH_AUTHORING_SETTINGS = (
     ("graph.authoring.github-app-id", "appId", "RAVENROOT_GRAPH_AUTHORING_GITHUB_APP_ID", "empty unless APP mode", "Positive decimal GitHub App identifier in APP mode."),
     ("graph.authoring.github-installation-id", "installationId", "RAVENROOT_GRAPH_AUTHORING_GITHUB_INSTALLATION_ID", "empty unless APP mode", "Positive decimal installation identifier in APP mode."),
     ("graph.authoring.tenant-namespaces", "tenantNamespaces", "RAVENROOT_GRAPH_AUTHORING_TENANT_NAMESPACES", "required in Git mode", "Explicit unique tenant=confined-directory mappings."),
-    ("graph.artifact.base-url", "artifactBase", "RAVENROOT_GRAPH_ARTIFACT_BASE_URL", "required in Git mode", "Absolute HTTPS base ending in slash."),
+    ("graph.artifact.base-url", "artifactBase", "RAVENROOT_GRAPH_ARTIFACT_BASE_URL", "unset disables publication storage", "When configured, absolute HTTPS base ending in slash; invalid configured storage fails closed."),
     ("graph.artifact.catalog-path", "artifactCatalogPath", "RAVENROOT_GRAPH_ARTIFACT_CATALOG_PATH", "catalog.json", "Confined relative catalog path."),
     ("graph.authoring.max-document-bytes", "maxDocumentBytes", "RAVENROOT_GRAPH_AUTHORING_MAX_DOCUMENT_BYTES", "10485760", "1..268435456 bytes; Git mode is capped at 104857600."),
     ("graph.authoring.page-size", "pageSize", "RAVENROOT_GRAPH_AUTHORING_PAGE_SIZE", "50", "1..200 entries."),
@@ -15390,8 +15398,13 @@ def graph_authoring_successor_boundary(sources: dict[Path, str], ui: str, routes
         if not includes(accepted, 'version = draftMetadata.releaseVersion();',
                         'version > releaseMetadata.releaseVersion() + 1',
                         'if (version == releaseMetadata.releaseVersion())',
-                        '!equivalent(submitted, state.draft().bytes(), graphId, version)',
-                        'new GraphReleaseMetadata.Rewritten(draftMetadata, state.draft().bytes())') \
+                        'state.draft() != null && equivalent(submitted, state.draft().bytes(), graphId, version)',
+                        'new GraphReleaseMetadata.Rewritten(draftMetadata, state.draft().bytes())',
+                        'equivalent(submitted, state.release().bytes(), graphId, version)',
+                        'new GraphReleaseMetadata.Rewritten(releaseMetadata, state.release().bytes())',
+                        'state.draft() != null && !MessageDigest.isEqual(state.draft().bytes(), state.release().bytes())',
+                        'if (version >= GraphReleaseMetadata.MAX_RELEASE_VERSION)',
+                        'version++;', 'GraphReleaseMetadata.assign(submitted, graphId, version)') \
                 or 'state.summary().published()' in accepted:
             return False
     if not includes(javascript("createRepositorySuccessor"),
@@ -15410,6 +15423,23 @@ def graph_authoring_successor_boundary(sources: dict[Path, str], ui: str, routes
     picker = normalized(sources[GRAPH_AUTHORING_PICKER_PATH])
     return includes(picker, "params.has('file')", "params.getAll('repositoryDocument').length !== 1",
                     "params.getAll('source').length > 1", "!['draft', 'release'].includes(source)")
+
+
+def graph_authoring_optional_publication_boundary(sources: dict[Path, str]) -> bool:
+    """Only absent publication storage disables reads; configured storage keeps validation."""
+    configuration = normalized(sources[GRAPH_AUTHORING_CONFIGURATION_PATH])
+    catalog = normalized(next(source for path, source in sources.items()
+                              if path.stem == "PublishedGraphArtifactCatalog"))
+    return all(normalized(fragment) in configuration for fragment in (
+        'if (!artifactBase.toString().isEmpty()) { requireHttps(artifactBase, "artifact base");',
+        'if (!artifactBase.getPath().endsWith("/"))',
+        'URI.create(environment.getOrDefault("RAVENROOT_GRAPH_ARTIFACT_BASE_URL", "").strip())',
+        'return mode == Mode.GIT && !artifactBase.toString().isEmpty();',
+    )) and all(normalized(fragment) in catalog for fragment in (
+        'configuration.publicationEnabled() ? new OutboundHttpPolicy(',
+        'if (!configuration.publicationEnabled()) return List.of();',
+        'confined(configuration.artifactBase().resolve(configuration.artifactCatalogPath()))',
+    ))
 
 
 def graph_authoring_authority_from_source(
@@ -15462,6 +15492,8 @@ def graph_authoring_authority_from_source(
         if digest != expected:
             return None
         ui_support_digests[method] = digest
+    if not graph_authoring_optional_publication_boundary(sources):
+        return None
     if not graph_authoring_managed_open_boundary(sources, ui):
         return None
     if not graph_authoring_successor_boundary(sources, ui, (root / GRAPH_AUTHORING_ROUTE_PATH).read_text(encoding="utf-8")):
@@ -16590,9 +16622,9 @@ def route_table_authority_errors(root: Path, authorities: object,
         return ["RouteTable.ALL is not the supported direct RouteDescriptor table"]
     partitions, details, source_candidates = parsed
     errors: list[str] = []
-    expected_counts = {"methods": 141, "path": 128, "summary": 480, "successStatuses": 132}
-    if len(details) != 128 or {role: len(ids) for role, ids in partitions.items()} != expected_counts:
-        errors.append("RouteTable authority no longer has the reviewed 128/881 positional shape")
+    expected_counts = {"methods": 143, "path": 130, "summary": 482, "successStatuses": 135}
+    if len(details) != 130 or {role: len(ids) for role, ids in partitions.items()} != expected_counts:
+        errors.append("RouteTable authority no longer has the reviewed 130/890 positional shape")
     recorded = authority["candidateIdsByRole"]
     if not isinstance(recorded, dict) or set(recorded) != set(expected_counts) \
             or any(recorded.get(role) != partitions[role] for role in expected_counts):

@@ -1421,9 +1421,15 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         interaction = audit.interaction_websocket_authority_from_source(ROOT, discovered)
         self.assertIsNotNone(program)
         self.assertIsNotNone(interaction)
-        # Issue #561 retires three display literals and adds one catalog key; READY and
-        # the empty protocol value retain their meanings through exact source migrations.
-        self.assertEqual(1237, len(program["candidateIds"]))
+        # #605 replaces the old runtime-controls selector with the workflowbar lookup and
+        # div construction in ensureProgramReadinessChrome: one retired atom, two new atoms.
+        self.assertEqual(1238, len(program["candidateIds"]))
+        mount_atoms = {(discovered[identifier].role, discovered[identifier].expression)
+                       for identifier in program["candidateIds"]
+                       if discovered[identifier].path == "ravenroot/ravenroot-ui/src/app.js"
+                       and discovered[identifier].symbol == "ensureProgramReadinessChrome"}
+        self.assertEqual({("bar", "'workflowbar'"), ("controls", "'div'"),
+                          ("summary", "'span'")}, mount_atoms)
         self.assertEqual(166, len(interaction["candidateIds"]))
         self.assertFalse(any(discovered[identifier].fixture for identifier in program["candidateIds"]))
         expected = {
@@ -2256,12 +2262,12 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as location:
             root = Path(location)
             authority, entries, candidates, details = self.route_table_authority_fixture(root)
-            self.assertEqual(128, len(details))
+            self.assertEqual(130, len(details))
             self.assertEqual(
-                {'methods': 141, 'path': 128, 'summary': 480, 'successStatuses': 132},
+                {'methods': 143, 'path': 130, 'summary': 482, 'successStatuses': 135},
                 {role: len(ids) for role, ids in authority["candidateIdsByRole"].items()},
             )
-            self.assertEqual(881, len(entries))
+            self.assertEqual(890, len(entries))
             self.assertEqual([], self.route_table_errors(root, authority, entries, candidates))
             self.assertEqual({
                 "StableEdgeId.MAX_UTF8_BYTES": 8192,
@@ -4675,7 +4681,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             document = {"entries": list(entries.values()), "retiredEntries": [],
                         "migrationHistory": []}
             self.assertIn(
-                "| Retained published contract descriptions | 480 |",
+                "| Retained published contract descriptions | 482 |",
                 audit.render_report(document),
             )
             deferred = copy.deepcopy(document)
@@ -4683,7 +4689,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                              if entry["classification"] == "published-contract-description")
             published.update(status="deferred", followUp="#225")
             self.assertIn(
-                "| Retained published contract descriptions | 479 |",
+                "| Retained published contract descriptions | 481 |",
                 audit.render_report(deferred),
             )
         self.assertIn(
@@ -6873,6 +6879,59 @@ class GraphAuthoringPolicyAuditTest(unittest.TestCase):
     def tearDownClass(cls) -> None:
         cls.temporary.cleanup()
 
+    def test_authoring_evidence_reorders_only_live_ids_and_retains_closed_membership(self) -> None:
+        evidence = ["oc-before-a", "oc-before-z", "oc-before-a"]
+        document = {
+            "entries": [
+                {"graphAuthoringAuthority": audit.GRAPH_AUTHORING_AUTHORITY_ID,
+                 "defaultEvidence": list(evidence)},
+                {"defaultEvidence": list(evidence)},
+            ],
+            "graphAuthoringAuthorities": {audit.GRAPH_AUTHORING_AUTHORITY_ID: {
+                "contracts": [{"defaultEvidence": list(evidence), "candidateIds": list(evidence)}],
+            }},
+            "semanticReviewHistory": [{"beforeMetadata": {"defaultEvidence": list(evidence)}}],
+        }
+        audit.remap_declared_candidate_references(document,
+            {"oc-before-a": "oc-after-z", "oc-before-z": "oc-after-a"})
+        canonical = ["oc-after-a", "oc-after-z", "oc-after-z"]
+        ordered = ["oc-after-z", "oc-after-a", "oc-after-z"]
+        self.assertEqual(canonical, document["entries"][0]["defaultEvidence"])
+        self.assertEqual(ordered, document["entries"][1]["defaultEvidence"])
+        contract = document["graphAuthoringAuthorities"][audit.GRAPH_AUTHORING_AUTHORITY_ID]["contracts"][0]
+        self.assertEqual(canonical, contract["defaultEvidence"])
+        self.assertEqual(ordered, contract["candidateIds"])
+        self.assertEqual(evidence, document["semanticReviewHistory"][0]["beforeMetadata"]["defaultEvidence"])
+        operator = next(row for row in self.entries.values() if row.get("classification") == "operator-configurable")
+        original = operator["defaultEvidence"]
+        for changed in (original + ["oc-foreign"], original[1:], original + original[:1]):
+            with self.subTest(evidence=changed):
+                entries = copy.deepcopy(self.entries)
+                entries[operator["id"]]["defaultEvidence"] = changed
+                audit.remap_declared_candidate_references({"entries": [entries[operator["id"]]]}, {})
+                self.assertTrue(audit.graph_authoring_authority_errors(self.root,
+                    {audit.GRAPH_AUTHORING_AUTHORITY_ID: self.authority}, entries, self.discovered))
+
+    def test_optional_publication_does_not_disable_configured_validation(self) -> None:
+        sources = {path: (self.root / path).read_text(encoding="utf-8")
+                   for path in audit.GRAPH_AUTHORING_FILE_PROOFS}
+        self.assertTrue(audit.graph_authoring_optional_publication_boundary(sources))
+        configuration = audit.GRAPH_AUTHORING_CONFIGURATION_PATH
+        catalog = next(path for path in sources if path.stem == "PublishedGraphArtifactCatalog")
+        for path, before, after in (
+            (configuration, 'requireHttps(artifactBase, "artifact base");', ';'),
+            (configuration, '!artifactBase.getPath().endsWith("/")', 'false'),
+            (configuration, 'return mode == Mode.GIT && !artifactBase.toString().isEmpty();', 'return false;'),
+            (catalog, 'if (!configuration.publicationEnabled()) return List.of();', 'return List.of();'),
+            (catalog, 'confined(configuration.artifactBase().resolve(configuration.artifactCatalogPath()))',
+             'configuration.artifactBase().resolve(configuration.artifactCatalogPath())'),
+        ):
+            with self.subTest(path=path, mutation=after):
+                original = sources[path]
+                self.assertEqual(1, original.count(before))
+                mutated = {**sources, path: original.replace(before, after, 1)}
+                self.assertFalse(audit.graph_authoring_optional_publication_boundary(mutated))
+
     def test_exact_boundary_closes_settings_routes_artifacts_ui_and_deployment_carriers(self) -> None:
         authority = self.authority
         self.assertEqual(len(audit.GRAPH_AUTHORING_SETTINGS) + len(audit.GRAPH_AUTHORING_WEBHOOK_SETTINGS), len(authority["contracts"]))
@@ -7063,6 +7122,11 @@ class GraphAuthoringPolicyAuditTest(unittest.TestCase):
                 (path, None, 'requireExpected(request.expected(), initial.revision());', ';'),
                 (path, None, 'draft.releaseVersion() != release.releaseVersion()', 'false'),
                 (path, None, 'version = draftMetadata.releaseVersion();', 'version = draftMetadata.releaseVersion() + 1;'),
+                (path, None, 'state.draft() != null && equivalent(submitted, state.draft().bytes(), graphId, version)', 'false'),
+                (path, None, 'equivalent(submitted, state.release().bytes(), graphId, version)', 'false'),
+                (path, None, 'state.draft() != null && !MessageDigest.isEqual(state.draft().bytes(), state.release().bytes())', 'false'),
+                (path, None, 'if (version >= GraphReleaseMetadata.MAX_RELEASE_VERSION)', 'if (false)'),
+                (path, None, 'version++;', 'version += 2;'),
                 (path, None, 'release.releaseVersion() >= GraphReleaseMetadata.MAX_RELEASE_VERSION', 'false'),
             ))
         for relative, method, before, after in mutations:

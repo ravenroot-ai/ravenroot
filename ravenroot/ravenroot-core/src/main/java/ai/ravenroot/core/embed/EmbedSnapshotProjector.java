@@ -178,6 +178,33 @@ public final class EmbedSnapshotProjector {
         return projection;
     }
 
+    /** Builds presentation only, ignoring saved layout without modifying the pinned definition. */
+    public static EmbedGraphProjection rebuildDefinition(GraphDefinition definition, String graphId,
+            String version, String digest, EmbedProjectionBudget budget) {
+        int columns = Math.max(1, (int) Math.ceil(Math.sqrt(definition.nodes().size())));
+        var position = new java.util.concurrent.atomic.AtomicInteger();
+        var nodes = definition.nodes().stream().map(node -> {
+            var properties = new java.util.LinkedHashMap<>(node.properties());
+            LAYOUT_KEYS.forEach(properties::remove);
+            int index = position.getAndIncrement();
+            properties.put("layoutX", (index % columns) * 320.0);
+            properties.put("layoutY", (index / columns) * 220.0);
+            properties.put("layoutWidth", 130.0);
+            properties.put("layoutHeight", 90.0);
+            for (String key : java.util.List.of("name", "classification")) {
+                Object value = properties.get(key);
+                if (value instanceof String text && text.length() > budget.maxIdentifierChars())
+                    properties.put(key, text.substring(0, budget.maxIdentifierChars()));
+            }
+            return new GraphNode(node.id(), node.kind(), node.behavior(), properties);
+        }).toList();
+        var graphProperties = new java.util.LinkedHashMap<>(definition.properties());
+        graphProperties.remove("ravenroot.designArrangement");
+        graphProperties.remove("ravenroot.ui.visualGroups");
+        var projected = new GraphDefinition(nodes, definition.edges(), graphProperties);
+        return projectDefinition(projected, null, graphId, version, digest, budget);
+    }
+
     private static String designArrangement(GraphDefinition definition) {
         Object value = definition.properties().get("ravenroot.designArrangement");
         if (!(value instanceof String text)) return null;
@@ -239,10 +266,22 @@ public final class EmbedSnapshotProjector {
     }
 
     private static double number(Object value) {
-        if (!(value instanceof Number number) || !Double.isFinite(number.doubleValue())) {
+        // GraphML authors may declare layout keys as string. Read those numeric
+        // values without changing the retained definition or its canonical identity.
+        double result;
+        if (value instanceof Number number) {
+            result = number.doubleValue();
+        } else if (value instanceof String text) {
+            try {
+                result = Double.parseDouble(text);
+            } catch (NumberFormatException invalid) {
+                throw new ProjectionInvalid();
+            }
+        } else {
             throw new ProjectionInvalid();
         }
-        return number.doubleValue();
+        if (!Double.isFinite(result)) throw new ProjectionInvalid();
+        return result;
     }
 
     private static void requireIdentifier(String value, EmbedProjectionBudget budget) {

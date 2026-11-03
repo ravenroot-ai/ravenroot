@@ -61,14 +61,14 @@ public record DeploymentEntryIntent(BusinessScope scope, UUID processInstanceId,
                 || entryNodeId.length() > 4096 || entryNodeId.codePoints().anyMatch(Character::isISOControl)
                 || !expiresAt.isAfter(acceptedAt) || !"application/json".equals(input.contentType())
                 || !"application/json".equals(attributes.contentType()) || (long) input.size() + attributes.size() > 64L * 1024 * 1024
-                || cause == CorrelatedTraversal.Cause.SOURCE_EVENT && !command.equals(ai.ravenroot.api.execution.NodeCommand.PROCESS)
-                || cause != CorrelatedTraversal.Cause.SOURCE_EVENT && cause != CorrelatedTraversal.Cause.DERIVED_CONTEXT)
+                || (cause == CorrelatedTraversal.Cause.SOURCE_EVENT || cause == CorrelatedTraversal.Cause.EXPLICIT_START) && !command.equals(ai.ravenroot.api.execution.NodeCommand.PROCESS)
+                || cause != CorrelatedTraversal.Cause.SOURCE_EVENT && cause != CorrelatedTraversal.Cause.EXPLICIT_START && cause != CorrelatedTraversal.Cause.DERIVED_CONTEXT)
             throw new IllegalArgumentException("invalid deployment entry custody");
         derivationReason = Objects.requireNonNullElse(derivationReason, "");
         if (derivationReason.length() > 500 || derivationReason.codePoints().anyMatch(Character::isISOControl)
                 || cause == CorrelatedTraversal.Cause.DERIVED_CONTEXT && (derivedFrom == null || derivationReason.isBlank()
                         || derivedFrom.processInstanceId().equals(processInstanceId) || derivedFrom.traversalId().equals(traversalId))
-                || cause == CorrelatedTraversal.Cause.SOURCE_EVENT && (derivedFrom != null || !derivationReason.isEmpty())
+                || (cause == CorrelatedTraversal.Cause.SOURCE_EVENT || cause == CorrelatedTraversal.Cause.EXPLICIT_START) && (derivedFrom != null || !derivationReason.isEmpty())
                 || derivedFrom != null && !scope.tenantId().equals(derivedFrom.security().tenantId()))
             throw new IllegalArgumentException("invalid entry derivation audit");
     }

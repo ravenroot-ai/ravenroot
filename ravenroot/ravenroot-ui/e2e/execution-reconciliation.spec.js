@@ -119,17 +119,23 @@ for (const [label, selectors] of [
     await page.locator('#btn-play').click();
     await expect(page.locator('#activity-summary')).toContainText('Status unknown', { timeout: 6_000 });
     runtime.delay();
-    await page.evaluate(clickSelectors => {
+    const secondClick = await page.evaluate(clickSelectors => {
       window.confirm = () => true;
-      clickSelectors.forEach(selector => document.querySelector(selector).click());
+      document.querySelector(clickSelectors[0]).click();
+      const control = document.querySelector(clickSelectors[1]);
+      const state = { pending: Boolean(window.ravenroot.workspace.find(
+        window.ravenroot.workspace.activeId).execution.commandFlight), disabled: control.disabled };
+      control.click();
+      return state;
     }, selectors);
+    expect(secondClick).toEqual({ pending: true, disabled: label === 'Test and Run' });
     await expect.poll(() => runtime.delayedLookups).toBe(1);
     expect(runtime.postCount).toBe(1);
     runtime.release();
     await expect.poll(() => runtime.postCount).toBe(2);
     await expect(page.locator('#activity-log .activity-title', {
       hasText: 'Execution status check already in progress',
-    })).toHaveCount(1);
+    })).toHaveCount(label === 'Test and Test' ? 1 : 0);
   });
 }
 

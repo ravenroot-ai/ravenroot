@@ -4381,9 +4381,42 @@ public final class RavenrootServer implements AutoCloseable {
                 deploymentJson(exchange, httpContext, 200, restored.orElseThrow(), durableDeploymentRecord(context.tenantId(), deploymentId).orElse(null));
                 return;
             }
+            if (segments.length == 3 && "source".equals(segments[2])) {
+                if (!method(exchange, httpContext, "GET")) return;
+                if (!query.keySet().equals(java.util.Set.of("incarnationId", "graphVersion"))
+                        || query.get("incarnationId").isBlank() || query.get("graphVersion").isBlank()) {
+                    fail(exchange, httpContext, ErrorCode.INVALID_REQUEST); return;
+                }
+                exchange.getResponseHeaders().set("Cache-Control", "private, no-store");
+                java.util.Optional<byte[]> source;
+                try {
+                    source = authorizedApplication.localDeploymentGraphMl(context, deploymentId,
+                            query.get("incarnationId"), query.get("graphVersion"));
+                } catch (IllegalArgumentException changed) {
+                    json(exchange, 409, "{\"code\":\"DEPLOYMENT_SOURCE_CHANGED\"}"); return;
+                }
+                if (source.isEmpty()) { fail(exchange, httpContext, ErrorCode.UNKNOWN_RESOURCE); return; }
+                json(exchange, 200, "{\"deploymentId\":\"" + escape(deploymentId)
+                        + "\",\"incarnationId\":\"" + escape(query.get("incarnationId"))
+                        + "\",\"graphVersion\":\"" + escape(query.get("graphVersion"))
+                        + "\",\"graphMlBase64\":\"" + java.util.Base64.getEncoder().encodeToString(source.orElseThrow()) + "\"}");
+                return;
+            }
             if (segments.length == 3 && "view".equals(segments[2])) {
                 if (!method(exchange, httpContext, "GET")) return;
-                var view = authorizedApplication.localDeploymentView(context, deploymentId);
+                java.util.Optional<ai.ravenroot.api.application.DeploymentViewerView> view;
+                String layout = query.getOrDefault("layout", "saved");
+                if (!java.util.Set.of("saved", "reset").contains(layout)) {
+                    fail(exchange, httpContext, ErrorCode.INVALID_REQUEST); return;
+                }
+                try {
+                    view = authorizedApplication.localDeploymentView(context, deploymentId, "reset".equals(layout));
+                } catch (ai.ravenroot.api.application.DeploymentViewException unavailable) {
+                    exchange.getResponseHeaders().set("Cache-Control", "private, no-store");
+                    json(exchange, 503, "{\"code\":\"" + unavailable.reason().name()
+                            + "\",\"message\":\"Deployment exists; its presentation is unavailable\",\"retryable\":true}");
+                    return;
+                }
                 if (view.isEmpty()) {
                     fail(exchange, httpContext, ErrorCode.UNKNOWN_RESOURCE);
                     return;
@@ -4404,6 +4437,28 @@ public final class RavenrootServer implements AutoCloseable {
                 var reader = authorizedApplication.deploymentHistory(context, source);
                 exchange.getResponseHeaders().set("Cache-Control", "private, no-store");
                 json(exchange, 200, request.read(reader, context.tenantId()));
+                return;
+            }
+            if (segments.length == 3 && "executions".equals(segments[2])) {
+                if (!method(exchange, httpContext, "POST")) return;
+                var body = strictJsonMap(boundedBody(exchange, payloadLimits.maxEncodedBytes()),
+                        java.util.Set.of("incarnationId", "graphVersion", "requestId", "input"));
+                if (!(body.entries().get("incarnationId") instanceof PayloadValue.TextValue incarnation)
+                        || !(body.entries().get("graphVersion") instanceof PayloadValue.TextValue version)
+                        || !(body.entries().get("requestId") instanceof PayloadValue.TextValue request)
+                        || !body.entries().containsKey("input")) {
+                    fail(exchange, httpContext, ErrorCode.INVALID_REQUEST); return;
+                }
+                var result = authorizedApplication.newLocalDeploymentExecution(context, deploymentId,
+                        incarnation.value(), version.value(), request.value(), body.entries().get("input"));
+                int response = switch (result.outcome()) {
+                    case ACCEPTED -> 202; case DUPLICATE -> 200; case REFUSED -> 409; case RECONCILE -> 503;
+                };
+                exchange.getResponseHeaders().set("Cache-Control", "private, no-store");
+                json(exchange, response, "{\"outcome\":\"" + result.outcome()
+                        + "\",\"requestId\":\"" + escape(result.requestId())
+                        + "\",\"processInstanceId\":" + (result.processInstanceId() == null ? "null" : "\"" + result.processInstanceId() + "\"")
+                        + ",\"traversalId\":" + (result.traversalId() == null ? "null" : "\"" + result.traversalId() + "\"") + "}");
                 return;
             }
             if (segments.length == 3 && "initial-start".equals(segments[2])) {
@@ -4454,6 +4509,14 @@ public final class RavenrootServer implements AutoCloseable {
                         || incarnationId == null || incarnationId.isBlank()) {
                     fail(exchange, httpContext, ErrorCode.UNKNOWN_RESOURCE);
                     return;
+                }
+                String include = query.get("include");
+                if (include != null && !INCLUDE_DIAGNOSTICS.equals(include)) {
+                    fail(exchange, httpContext, ErrorCode.INVALID_REQUEST); return;
+                }
+                if (INCLUDE_DIAGNOSTICS.equals(include)) {
+                    // Content requires native execution-read authority in addition to observation.
+                    authorizedApplication.localDeployment(context, deploymentId);
                 }
                 streamDeploymentEvents(exchange, httpContext, context,
                         deploymentId, incarnationId, graphVersion);
@@ -4702,9 +4765,9 @@ public final class RavenrootServer implements AutoCloseable {
                 fail(exchange, httpContext, ErrorCode.UNKNOWN_RESOURCE);
                 return;
             }
-            ai.ravenroot.api.application.DeploymentViewerView currentView;
+            ai.ravenroot.api.application.DeploymentObservation currentView;
             try {
-                currentView = currentDeploymentView(context, binding);
+                currentView = currentDeploymentObservation(context, binding);
             } catch (DeploymentSourceInvalidated changed) {
                 fail(exchange, httpContext, ErrorCode.UNKNOWN_RESOURCE);
                 return;
@@ -4716,12 +4779,10 @@ public final class RavenrootServer implements AutoCloseable {
                     writeSourceGap(output, binding, "REPLAY_WINDOW_EXCEEDED");
                     return;
                 }
-                writeLifecycle(output, binding, lifecycle);
-                long sent = sequence;
-                // A first attachment begins now, not at the oldest tenant event. Reconnects replay.
-                if (suppliedCursor == null || suppliedCursor.isBlank()) {
-                    sent = initial.latestSequence();
-                } else {
+                // First attachment skips the existing prefix; reconnects anchor before replay.
+                long sent = suppliedCursor == null || suppliedCursor.isBlank() ? initial.latestSequence() : sequence;
+                writeLifecycle(output, binding, lifecycle, deploymentCursors.issue(binding, sent));
+                if (suppliedCursor != null && !suppliedCursor.isBlank()) {
                     try {
                         sent = writeDeploymentBatch(
                                 output, exchange, httpContext, principal, binding, initial, sent);
@@ -4735,14 +4796,14 @@ public final class RavenrootServer implements AutoCloseable {
                     long waitMillis = Math.max(1, Math.min(1_000,
                             Duration.between(clock.instant(), revalidateAt).toMillis()));
                     wakeup.await(waitMillis);
-                    ai.ravenroot.api.application.DeploymentViewerView refreshed;
+                    ai.ravenroot.api.application.DeploymentObservation refreshed;
                     try {
                         revalidateAt = revalidateDeploymentStreamLease(
                                 exchange, httpContext, principal, binding);
                         // Keep source refresh in the same terminal-conversion boundary as lease
                         // revalidation. Undeploy may win after the helper's source check; a second
                         // lookup must still emit source-invalidated rather than escape as EOF.
-                        refreshed = currentDeploymentView(httpContext.applicationContext(), binding);
+                        refreshed = currentDeploymentObservation(httpContext.applicationContext(), binding);
                     } catch (AuthenticationException | ai.ravenroot.api.security.AuthorizationDeniedException ended) {
                         writeSourceInvalidated(output, binding, "AUTHORITY_CHANGED");
                         break;
@@ -4752,7 +4813,7 @@ public final class RavenrootServer implements AutoCloseable {
                     }
                     if (refreshed.lifecycle() != lifecycle) {
                         lifecycle = refreshed.lifecycle();
-                        writeLifecycle(output, binding, lifecycle);
+                        writeLifecycle(output, binding, lifecycle, deploymentCursors.issue(binding, sent));
                     }
                     var batch = authorizedApplication.localDeploymentEventsAfter(
                             httpContext.applicationContext(), deploymentId,
@@ -4821,13 +4882,27 @@ public final class RavenrootServer implements AutoCloseable {
             requireCurrentDeploymentSource(
                     httpContext.applicationContext(current), binding);
             String cursor = deploymentCursors.issue(binding, event.sequence());
-            String body = deploymentExecutionJson(binding, event);
+            if (INCLUDE_DIAGNOSTICS.equals(query(exchange).get("include"))) {
+                authorizedApplication.localDeployment(httpContext.applicationContext(current), binding.deploymentId());
+            }
+            String body = INCLUDE_DIAGNOSTICS.equals(query(exchange).get("include"))
+                    ? deploymentDiagnosticJson(binding, event) : deploymentExecutionJson(binding, event);
             output.write(("id: " + cursor + "\nevent: execution\ndata: " + body + "\n\n")
                     .getBytes(StandardCharsets.UTF_8));
             output.flush();
             sent = event.sequence();
         }
         return Math.max(sent, batch.latestSequence());
+    }
+
+    // Native author observation may request the same bounded diagnostics as /v1/events.
+    // Embed observation keeps its separate, content-free projection.
+    static String deploymentDiagnosticJson(DeploymentObservationCursorStore.Binding binding,
+                                           ai.ravenroot.api.application.ExecutionEvent event) {
+        return "{\"type\":\"execution\",\"deploymentId\":\"" + escape(binding.deploymentId())
+                + "\",\"incarnationId\":\"" + escape(binding.incarnationId())
+                + "\",\"graphVersion\":\"" + escape(binding.graphVersion())
+                + "\",\"event\":" + ExecutionEventWireJson.legacyLive(event) + "}";
     }
 
     static String deploymentExecutionJson(DeploymentObservationCursorStore.Binding binding,
@@ -4870,12 +4945,13 @@ public final class RavenrootServer implements AutoCloseable {
 
     private static void writeLifecycle(OutputStream output,
                                        DeploymentObservationCursorStore.Binding binding,
-                                       ai.ravenroot.api.application.LocalDeploymentState lifecycle)
+                                       ai.ravenroot.api.application.LocalDeploymentState lifecycle, String cursor)
             throws IOException {
         String body = "{\"type\":\"lifecycle\",\"deploymentId\":\""
                 + escape(binding.deploymentId()) + "\",\"incarnationId\":\""
                 + escape(binding.incarnationId()) + "\",\"graphVersion\":\""
-                + escape(binding.graphVersion()) + "\",\"lifecycle\":\"" + lifecycle + "\"}";
+                + escape(binding.graphVersion()) + "\",\"lifecycle\":\"" + lifecycle
+                + "\",\"cursor\":\"" + escape(cursor) + "\"}";
         output.write(("event: lifecycle\ndata: " + body + "\n\n").getBytes(StandardCharsets.UTF_8));
         output.flush();
     }
@@ -4908,15 +4984,16 @@ public final class RavenrootServer implements AutoCloseable {
     private void requireCurrentDeploymentSource(ai.ravenroot.api.security.RequestContext context,
                                                 DeploymentObservationCursorStore.Binding binding)
             throws AuthenticationException {
-        currentDeploymentView(context, binding);
+        currentDeploymentObservation(context, binding);
     }
 
-    private ai.ravenroot.api.application.DeploymentViewerView currentDeploymentView(
+    private ai.ravenroot.api.application.DeploymentObservation currentDeploymentObservation(
             ai.ravenroot.api.security.RequestContext context,
             DeploymentObservationCursorStore.Binding binding) {
-        var view = authorizedApplication.localDeploymentView(context, binding.deploymentId());
+        var view = authorizedApplication.localDeploymentObservation(context, binding.deploymentId());
         if (view.isEmpty()) throw new DeploymentSourceInvalidated("UNDEPLOYED");
-        if (!view.orElseThrow().source().incarnationId().equals(binding.incarnationId())
+        if (!view.orElseThrow().source().deploymentId().equals(binding.deploymentId())
+                || !view.orElseThrow().source().incarnationId().equals(binding.incarnationId())
                 || !view.orElseThrow().source().graphVersion().equals(binding.graphVersion())) {
             throw new DeploymentSourceInvalidated("VERSION_MISMATCH");
         }
@@ -4926,7 +5003,7 @@ public final class RavenrootServer implements AutoCloseable {
     private String deploymentInvalidationReason(ai.ravenroot.api.security.RequestContext context,
                                                 DeploymentObservationCursorStore.Binding binding) {
         try {
-            currentDeploymentView(context, binding);
+            currentDeploymentObservation(context, binding);
             // A batch can report SOURCE_CHANGED only when its captured record is no longer exact.
             // If a concurrent mutation restored the tuple before this diagnostic read, fail closed
             // as a version discontinuity rather than claiming an undeploy that is no longer true.

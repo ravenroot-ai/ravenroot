@@ -2,6 +2,11 @@
 
 Ravenroot keeps local-file authoring as its default. Set `RAVENROOT_GRAPH_AUTHORING_MODE=GIT` to let the workspace use a server-configured Git repository. The browser never chooses a repository, path, API endpoint, branch, credential, or tenant namespace. It receives only the operations and display metadata that the server enables.
 
+Git authoring does not require publication storage. With no `RAVENROOT_GRAPH_ARTIFACT_BASE_URL`,
+repository drafts and release reviews remain available, the published catalog is empty, and no
+graph gains publication or deployment authority. Configure the artifact base to enable verified
+publication. A configured but unavailable or invalid catalog still fails closed.
+
 ## Configure the source archive
 
 Git mode supports GitHub, GitHub Enterprise, GitLab.com and GitLab Self-Managed through a provider-neutral application port. Configure these values on the server:
@@ -23,7 +28,7 @@ Git mode supports GitHub, GitHub Enterprise, GitLab.com and GitLab Self-Managed 
 | `RAVENROOT_GRAPH_AUTHORING_CREDENTIAL_REFERENCE` | Required opaque server-side credential name resolving the PAT or App private key. It is never caller-selected or returned to the browser or logs. |
 | `RAVENROOT_GRAPH_AUTHORING_GITHUB_APP_ID` | Required only for `APP`; positive decimal App identifier of 1–20 digits. It is an identifier, not a credential. |
 | `RAVENROOT_GRAPH_AUTHORING_GITHUB_INSTALLATION_ID` | Required only for `APP`; positive decimal installation identifier of 1–20 digits. The installation token is restricted to the configured repository. |
-| `RAVENROOT_GRAPH_ARTIFACT_BASE_URL` | Required absolute HTTPS immutable-artifact base ending in `/`, without credentials, query, or fragment. Outbound access is confined to this origin. |
+| `RAVENROOT_GRAPH_ARTIFACT_BASE_URL` | Optional absolute HTTPS immutable-artifact base ending in `/`, without credentials, query, or fragment. Outbound access is confined to this origin. |
 | `RAVENROOT_GRAPH_ARTIFACT_CATALOG_PATH` | Confined relative immutable catalog snapshot path, default `catalog.json`; absolute, trailing, doubled, or `..` paths are refused. |
 | `RAVENROOT_GRAPH_AUTHORING_MAX_DOCUMENT_BYTES` | GraphML request, Git blob, and downloaded artifact ceiling. Default `10485760`; accepted Git-mode range 1–`104857600` bytes. |
 | `RAVENROOT_GRAPH_AUTHORING_PAGE_SIZE` | Document and history page size. Default `50`; accepted range 1–200 for GitHub, 1–100 for GitLab. |
@@ -80,7 +85,7 @@ as `RavenrootServerMain`.
 
 Every saved document carries graph-scoped `ravenroot.authoring.graphId` and `ravenroot.authoring.releaseVersion` metadata. The stable graph ID is separate from a runtime content digest. The positive authored release version is separate from GraphML schema versions and runtime aggregate versions. It is a canonical decimal integer from 1 through `9007199254740991`; leading zeroes, signs, fractions, exponents, and larger values are refused consistently by the browser, server, and publisher.
 
-Opening or saving never increments the authored version. Release is the immutability boundary, independently of publication: changed saves of released vN are refused until an explicit next-version operation creates draft vN+1. Further edits, no-op saves, historical content restoration and reverting to released content retain the assigned successor version. Explicit discard restores release content while retaining an already assigned successor version. Every mutation checks the observed draft ref, release ref, and publication token, then uses the provider concurrency mechanism described below (GitHub uses a non-force expected-parent update). A stale browser gets `409` and must reopen before retrying.
+Opening and unchanged saves never increment the authored version. Release is the immutability boundary, independently of publication: saving changed content from released vN creates draft vN+1 atomically with the changed content. An explicit next-version operation remains available to create the successor before editing. Further edits, no-op saves, historical content restoration and reverting to released content retain the assigned successor version. Explicit discard restores release content while retaining an already assigned successor version. Every mutation checks the observed draft ref, release ref, and publication token, then uses the provider concurrency mechanism described below (GitHub uses a non-force expected-parent update). A stale browser gets `409` and must reopen before retrying.
 
 A release action creates or reuses a pull request on GitHub or a merge request on GitLab from the tenant draft branch to the configured graph release branch. It grants no authority over Ravenroot's product repository or `main` branch. Deleting a draft removes the branch file while Git history remains the archive.
 

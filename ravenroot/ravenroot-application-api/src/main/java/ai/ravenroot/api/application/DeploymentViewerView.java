@@ -15,10 +15,23 @@ import java.util.Objects;
  * @param lifecycle lifecycle observed for the captured source
  * @param canonicalDigest digest binding the captured immutable graph definition
  * @param projection closed browser-safe graph projection
+ * @param renderingStatus saved, explicitly rebuilt, or automatically degraded presentation
  */
 public record DeploymentViewerView(String viewerSourceVersion, Source source,
                                    LocalDeploymentState lifecycle, String canonicalDigest,
-                                   EmbedGraphProjection projection) {
+                                   EmbedGraphProjection projection, String renderingStatus) {
+    /**
+     * Creates a view whose projection uses the saved presentation.
+     * @param version version of the deployment-view source contract
+     * @param source immutable logical and physical source identity
+     * @param lifecycle lifecycle observed for the captured source
+     * @param digest digest binding the captured immutable graph definition
+     * @param projection closed browser-safe graph projection
+     */
+    public DeploymentViewerView(String version, Source source, LocalDeploymentState lifecycle,
+            String digest, EmbedGraphProjection projection) {
+        this(version, source, lifecycle, digest, projection, "SAVED");
+    }
     /** Current version of the deployment-view source contract. */
     public static final String CURRENT_SOURCE_VERSION = "1";
 
@@ -32,6 +45,8 @@ public record DeploymentViewerView(String viewerSourceVersion, Source source,
         Objects.requireNonNull(lifecycle, "lifecycle");
         canonicalDigest = requireText(canonicalDigest, "canonicalDigest");
         Objects.requireNonNull(projection, "projection");
+        if (!java.util.Set.of("SAVED", "REBUILT", "DEGRADED").contains(renderingStatus))
+            throw new IllegalArgumentException("invalid rendering status");
         if (!source.deploymentId().equals(projection.graphId())
                 || !source.graphVersion().equals(projection.graphVersionId())
                 || !canonicalDigest.equals(projection.canonicalDigest())) {
@@ -79,6 +94,7 @@ public record DeploymentViewerView(String viewerSourceVersion, Source source,
                 + escape(source.incarnationId()) + "\",\"graphVersion\":\""
                 + escape(source.graphVersion()) + "\"},\"lifecycle\":\"" + lifecycle
                 + "\",\"canonicalDigest\":\"" + escape(canonicalDigest)
+                + "\",\"renderingStatus\":\"" + renderingStatus
                 + "\",\"projection\":" + projection.toJson() + "}";
     }
 

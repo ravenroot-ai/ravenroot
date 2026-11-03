@@ -834,14 +834,22 @@ public final class GitlabAuthoringRepository implements GraphAuthoringRepository
             version = submittedMetadata == null ? 1 : submittedMetadata.releaseVersion();
         }
         if (releaseMetadata != null) {
-            if (draftMetadata == null || version < releaseMetadata.releaseVersion()
+            if (version < releaseMetadata.releaseVersion()
                     || version > releaseMetadata.releaseVersion() + 1)
                 throw failure(GraphAuthoringException.Failure.CONFLICT);
             if (version == releaseMetadata.releaseVersion()) {
-                // An unchanged released draft is a true no-op, including its original XML bytes.
-                if (!equivalent(submitted, state.draft().bytes(), graphId, version))
+                if (state.draft() != null && equivalent(submitted, state.draft().bytes(), graphId, version))
+                    return new GraphReleaseMetadata.Rewritten(draftMetadata, state.draft().bytes());
+                if (equivalent(submitted, state.release().bytes(), graphId, version))
+                    return new GraphReleaseMetadata.Rewritten(releaseMetadata, state.release().bytes());
+                // Never silently promote a legacy divergent draft carrying the release identity.
+                if (state.draft() != null && !MessageDigest.isEqual(state.draft().bytes(), state.release().bytes()))
                     throw failure(GraphAuthoringException.Failure.CONFLICT);
-                return new GraphReleaseMetadata.Rewritten(draftMetadata, state.draft().bytes());
+                if (version >= GraphReleaseMetadata.MAX_RELEASE_VERSION)
+                    throw failure(GraphAuthoringException.Failure.CONFLICT);
+                // The expected revision fences creation and content in one repository commit.
+                // Publication status cannot make an already reviewed release mutable again.
+                version++;
             }
         }
         return GraphReleaseMetadata.assign(submitted, graphId, version);

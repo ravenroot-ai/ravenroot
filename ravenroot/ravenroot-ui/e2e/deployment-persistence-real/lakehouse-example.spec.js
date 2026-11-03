@@ -19,6 +19,8 @@ test('executed lakehouse shows concurrent filenames, four of six, reconnect and 
   await page.locator('[data-deployment-view="lakehouse-example"]').click();
   await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument()?.graph?.viewerBinding?.deploymentId)).toBe('lakehouse-example');
   await page.locator('[data-menu="layout"]').click(); await page.getByRole('menuitemradio', { name: 'Monitoring', exact: true }).click();
+  await expect(page.locator('.doc-history-dialog[open]')).toHaveCount(0);
+  await page.locator('#btn-history').click();
   const monitor = page.locator('.doc-history'); await expect(monitor).toBeVisible();
   const section = name => monitor.locator('.history-page').filter({ has: page.getByRole('heading', { name, exact: true }) });
   const histories = section('Business histories'); await expect(histories.locator('li')).toHaveCount(3);
@@ -26,6 +28,7 @@ test('executed lakehouse shows concurrent filenames, four of six, reconnect and 
   await expect(histories.getByRole('button', { name: /ingest-sales-v2/ })).toContainText('sales.csv');
   await page.screenshot({ path: join(OUTPUT, 'lakehouse-concurrent-ingestions.png'), fullPage: true });
   await histories.getByRole('button', { name: /ingest-sales-v1/ }).click();
+  await monitor.locator('.history-join-disclosure > summary').click();
   const rounds = section('Join rounds'); await expect(rounds).toContainText('4/6 contributions');
   await rounds.getByRole('button', { name: /six-partitions/ }).click();
   const members = section('Contributions'); await expect(members.locator('li')).toHaveCount(6);
@@ -36,7 +39,7 @@ test('executed lakehouse shows concurrent filenames, four of six, reconnect and 
   await members.screenshot({ path: join(OUTPUT, 'lakehouse-four-of-six-members.png') });
   const traversals = section('Actual traversals'); await expect(traversals.locator('li')).toHaveCount(5);
   await traversals.getByRole('button', { name: /Entry landing/ }).click();
-  let preview = monitor.locator('.history-traversal').first();
+  let preview = monitor.locator('.history-traversal:not([hidden])');
   await expect(preview.locator('[data-design-element="bronze"]')).toBeVisible();
   await preview.locator('[data-design-element="bronze"]').click();
   await expect(preview.locator('.history-inspector')).toContainText('Total visits 1');
@@ -47,10 +50,12 @@ test('executed lakehouse shows concurrent filenames, four of six, reconnect and 
   await page.screenshot({ path: join(OUTPUT, 'lakehouse-bronze-traversal.png'), fullPage: true });
   const release = await request.post(`${EXTERNAL}/release`); expect(release.status()).toBe(200);
   // Explicit bounded refresh after source reconnect; no page routes or store-shaped responses.
-  await monitor.locator(':scope > details').first().locator(':scope > summary').click();
   await histories.getByRole('button', { name: 'Refresh page', exact: true }).click();
-  await expect(histories.getByRole('button', { name: /ingest-sales-v1/ })).toContainText('COMPLETED', { timeout: 20_000 });
+  await expect(histories.getByRole('button', { name: /ingest-sales-v1/ }).locator('.history-row-state'))
+    .toHaveAttribute('data-state', 'COMPLETED', { timeout: 20_000 });
+  await expect(histories.getByRole('button', { name: /ingest-sales-v1/ })).toContainText('Completed');
   await histories.getByRole('button', { name: /ingest-sales-v1/ }).click();
+  await monitor.locator('.history-join-disclosure > summary').click();
   await expect(rounds).toContainText('6/6 contributions'); await expect(rounds).toContainText('DISPATCHED');
   await rounds.getByRole('button', { name: /six-partitions/ }).click();
   await expect(members.locator('li')).toHaveCount(6); await expect(members.locator('li').filter({ hasText: 'Expected and missing' })).toHaveCount(0);
@@ -59,7 +64,7 @@ test('executed lakehouse shows concurrent filenames, four of six, reconnect and 
   await members.screenshot({ path: join(OUTPUT, 'lakehouse-six-complete-members.png') });
   await expect(traversals.locator('li')).toHaveCount(8);
   await traversals.getByRole('button', { name: /Entry six-partitions/ }).click();
-  preview = monitor.locator('.history-traversal').first();
+  preview = monitor.locator('.history-traversal:not([hidden])');
   await preview.locator('[data-design-element="gold"]').click();
   await expect(preview.locator('.history-inspector')).toContainText('Total visits 1');
   await preview.locator('.history-page').filter({ has: page.getByRole('heading', { name: 'Visits', exact: true }) }).locator('li button').first().click();

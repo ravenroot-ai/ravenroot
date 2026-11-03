@@ -11,7 +11,7 @@ const graph = version => `<graphml xmlns="http://graphml.graphdrawing.org/xmlns"
 <graph id="orders" edgedefault="directed"><data key="gid">orders</data><data key="ver">${version}</data>
 <node id="start"><data key="kind">START</data></node></graph></graphml>`;
 
-async function setup(page, { initialVersion = 1, canWrite = true, supported = true, authenticated = false, legacy = false, configuration = {} } = {}) {
+async function setup(page, { initialVersion = 1, canWrite = true, supported = true, authenticated = false, legacy = false, automaticSuccessor = false, configuration = {} } = {}) {
   await keepAuthenticationInMemory(page);
   let version = initialVersion, draft = legacy ? graph(version).replace('id="start"', 'id="legacy"') : graph(version), revision = 1;
   const requests = [];
@@ -40,6 +40,9 @@ async function setup(page, { initialVersion = 1, canWrite = true, supported = tr
     }
     if (req.method() === 'PUT') {
       draft = req.postData(); revision++;
+      if (automaticSuccessor && version === 1 && draft !== graph(1)) {
+        version = 2; draft = draft.replace(/(<data key="ver">)1(<\/data>)/, '$12$2');
+      }
       return route.fulfill({ json: envelope('draft') });
     }
     if (url.pathname === '/v1/graph-authoring') return route.fulfill({ json: { items: [envelope('draft')], nextCursor: '' } });
@@ -196,7 +199,8 @@ async function addUnsavedNode(page, name = 'Unsaved sentinel') {
 }
 
 async function selectRepositorySource(page, source = 'draft') {
-  await page.locator('#btn-open').click();
+  await page.locator('#menu-file').click();
+  await page.locator('#application-menu [data-command-id="file.open"]').click();
   await page.getByRole('button', { name: source === 'draft'
     ? /orders.graphml · Editable draft/ : /orders.graphml · Read-only release/ }).click();
   await expect(page.getByRole('dialog')).toBeHidden();
@@ -599,4 +603,77 @@ for (const kind of ['dirty reopen', 'clean successor']) test(`pending first Run 
     expect(await page.evaluate(() => window.ravenroot.activeDocument().deploymentRun)).toBeNull();
     expect(backend.calls.filter(c => c.action === 'start' || c.action === 'initial-start')).toHaveLength(0);
   }
+});
+
+
+test('changed released draft advertises and saves one automatic successor', async ({ page }) => {
+  const requests = await setup(page, { automaticSuccessor: true });
+  await page.goto('/?repositoryDocument=orders.graphml&source=draft');
+  await expect(page.locator('#graph-mode-label')).toContainText('Repository draft · v1');
+  await addUnsavedNode(page, 'Successor edit');
+  await expect(page.locator('#btn-export')).toContainText('Save as draft v2');
+  await page.locator('#btn-export').click();
+  await expect(page.locator('#graph-mode-label')).toContainText('Repository draft · v2');
+  await expect(page.locator('#btn-export')).toContainText('Save draft to repository');
+  expect(requests.filter(request => request.method === 'PUT')).toHaveLength(1);
+  expect(requests.filter(request => request.path.endsWith('/versions'))).toHaveLength(0);
+  await addUnsavedNode(page, 'Another edit');
+  await expect(page.locator('#btn-export')).toContainText('Save draft to repository');
+});
+
+test('first repository save renames the active document and browser title immediately', async ({ page }) => {
+  const requests = await setup(page);
+  await page.route('**/v1/graph-authoring/orders.graphml', route => {
+    if (route.request().method() !== 'PUT') return route.fallback();
+    requests.push({ method: 'PUT' });
+    return route.fulfill({ json: { documentId: 'orders.graphml', graphId: 'orders',
+      releaseVersion: 1, released: false, published: false, draftDeleted: false,
+      revision: { draft: 'saved-draft', release: 'absent', publication: 'absent' },
+      graphMl: Buffer.from(graph(1)).toString('base64') } });
+  });
+  await page.goto('/');
+  await expect(page.locator('#btn-new')).toBeEnabled();
+  await page.locator('#btn-new').click();
+  await expect(page.locator('#graph-title')).toContainText('untitled');
+  page.once('dialog', dialog => dialog.accept('orders.graphml'));
+  await page.locator('#btn-export').click();
+  await expect.poll(() => requests.filter(r => r.method === 'PUT').length).toBe(1);
+  await expect(page.locator('#graph-title')).toHaveText('orders.graphml');
+  await expect(page).toHaveTitle('orders.graphml — Ravenroot UI');
+  expect(await page.evaluate(() => ({ name: window.ravenroot.workspace.active.name,
+    displayName: window.ravenroot.workspace.active.displayName,
+    documentId: window.ravenroot.workspace.active.authoring.providerDocumentId,
+    dirty: window.ravenroot.workspace.active.history.isDirty() })))
+    .toEqual({ name: 'orders.graphml', displayName: 'orders.graphml', documentId: 'orders.graphml', dirty: false });
+  await page.locator('#btn-export').click();
+  await expect.poll(() => requests.filter(r => r.method === 'PUT').length).toBe(2);
+  await expect(page.locator('#graph-title')).toHaveText('orders.graphml');
+});
+
+for (const outcome of ['success', 'failure']) test(`release review modal shows work before ${outcome} and retains the result`, async ({ page }) => {
+  await setup(page);
+  let finish;
+  const gate = new Promise(resolve => { finish = resolve; });
+  await page.route('**/v1/graph-authoring/orders.graphml/release', async route => {
+    await gate;
+    return route.fulfill(outcome === 'success'
+      ? { json: { reused: true, url: 'https://github.com/example/graphs/pull/9' } }
+      : { status: 409, json: { error: 'CONFLICT' } });
+  });
+  await page.goto('/?repositoryDocument=orders.graphml&source=draft');
+  await expect(page.locator('#graph-mode-label')).toContainText('Repository draft');
+  await page.getByRole('menuitem', { name: 'File', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Propose release review', exact: true }).click();
+  const dialog = page.locator('.repository-operation-dialog');
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('status')).toContainText('Preparing the release review');
+  await expect(dialog.getByRole('button', { name: 'Close', exact: true })).toBeDisabled();
+  finish();
+  await expect(dialog.getByRole('button', { name: 'Close', exact: true })).toBeEnabled();
+  if (outcome === 'success') {
+    await expect(dialog.getByRole('link', { name: 'Open review' })).toHaveAttribute('href', 'https://github.com/example/graphs/pull/9');
+    await expect(dialog.getByRole('status')).toContainText('existing release review');
+  } else await expect(dialog.getByRole('alert')).toContainText('Your edits are intact');
+  await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
 });

@@ -3573,25 +3573,60 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
 
     @Override
     public java.util.Optional<DeploymentViewerView> localDeploymentView(String tenantId, String deploymentId) {
+        return localDeploymentView(tenantId, deploymentId, false);
+    }
+
+    @Override
+    public java.util.Optional<DeploymentViewerView> localDeploymentView(String tenantId, String deploymentId, boolean rebuild) {
         var key = new LocalDeploymentKey(requireTenant(tenantId), requireLocalDeploymentId(deploymentId));
-        LocalDeploymentRecord record = localDeployments.get(key);
-        if (record == null || deployments.get(record.engineId()) != record.deployment()) {
-            return java.util.Optional.empty();
-        }
+        var record = localDeployments.get(key);
+        if (record == null) return java.util.Optional.empty();
+        if (deployments.get(record.engineId()) != record.deployment())
+            throw new ai.ravenroot.api.application.DeploymentViewException(
+                    ai.ravenroot.api.application.DeploymentViewException.Reason.DEFINITION_UNAVAILABLE);
+        var definition = record.deployment().immutableDefinition().orElseThrow(() ->
+                new ai.ravenroot.api.application.DeploymentViewException(
+                        ai.ravenroot.api.application.DeploymentViewException.Reason.DEFINITION_UNAVAILABLE));
+        String digest = GraphVersionSnapshot.submission(definition).canonicalHash();
+        String rendering = rebuild ? "REBUILT" : "SAVED";
+        ai.ravenroot.api.embed.EmbedGraphProjection projection;
         try {
-            var definition = record.deployment().immutableDefinition().orElse(null);
-            if (definition == null) return java.util.Optional.empty();
-            String digest = GraphVersionSnapshot.submission(definition).canonicalHash();
-            var projection = EmbedSnapshotProjector.projectDefinition(definition,
-                    record.deployment().visualGroupsMetadata().orElse(null), deploymentId,
-                    record.deployment().graphVersion(), digest, EmbedProjectionBudget.DEFAULTS);
-            return java.util.Optional.of(new DeploymentViewerView(DeploymentViewerView.CURRENT_SOURCE_VERSION,
-                    DeploymentViewerView.Source.deployment(deploymentId,
-                            record.deployment().incarnationId(), record.deployment().graphVersion()),
-                    localDeploymentStatus(deploymentId, record).state(), digest, projection));
-        } catch (RuntimeException unprojectable) {
-            return java.util.Optional.empty();
+            if (rebuild) {
+                projection = EmbedSnapshotProjector.rebuildDefinition(definition, deploymentId,
+                        record.graphHash(), digest, EmbedProjectionBudget.DEFAULTS);
+            } else {
+                try {
+                    projection = EmbedSnapshotProjector.projectDefinition(definition,
+                            record.deployment().visualGroupsMetadata().orElse(null), deploymentId,
+                            record.graphHash(), digest, EmbedProjectionBudget.DEFAULTS);
+                } catch (RuntimeException invalidPresentation) {
+                    rendering = "DEGRADED";
+                    projection = EmbedSnapshotProjector.rebuildDefinition(definition, deploymentId,
+                            record.graphHash(), digest, EmbedProjectionBudget.DEFAULTS);
+                }
+            }
+        } catch (RuntimeException unavailable) {
+            throw new ai.ravenroot.api.application.DeploymentViewException(
+                    ai.ravenroot.api.application.DeploymentViewException.Reason.PROJECTION_UNAVAILABLE);
         }
+        return java.util.Optional.of(new DeploymentViewerView(DeploymentViewerView.CURRENT_SOURCE_VERSION,
+                DeploymentViewerView.Source.deployment(deploymentId,
+                        record.deployment().incarnationId(), record.graphHash()),
+                localDeploymentStatus(deploymentId, record).state(), digest, projection, rendering));
+    }
+
+    @Override
+    public java.util.Optional<byte[]> localDeploymentGraphMl(String tenantId, String deploymentId,
+            String incarnationId, String graphVersion) {
+        var key = new LocalDeploymentKey(requireTenant(tenantId), requireLocalDeploymentId(deploymentId));
+        var record = localDeployments.get(key);
+        if (record == null) return java.util.Optional.empty();
+        if (!record.deployment().incarnationId().equals(incarnationId) || !record.graphHash().equals(graphVersion)
+                || deployments.get(record.engineId()) != record.deployment())
+            throw new IllegalArgumentException("deployment source binding changed");
+        byte[] source = record.deployment().immutableGraphMl();
+        if (localDeployments.get(key) != record) throw new IllegalArgumentException("deployment source binding changed");
+        return java.util.Optional.of(source);
     }
 
     @Override
@@ -3601,7 +3636,12 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                 .filter(key -> key.tenantId().equals(tenant))
                 .map(LocalDeploymentKey::deploymentId)
                 .sorted()
-                .map(id -> localDeploymentView(tenant, id))
+                .map(id -> {
+                    try { return localDeploymentView(tenant, id); }
+                    catch (ai.ravenroot.api.application.DeploymentViewException unavailable) {
+                        return java.util.Optional.<DeploymentViewerView>empty();
+                    }
+                })
                 .flatMap(java.util.Optional::stream)
                 .toList();
     }
@@ -3642,6 +3682,25 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         } catch (java.util.concurrent.ExecutionException | java.util.concurrent.TimeoutException unresolved) {
             return new EmbedDeploymentStart(EmbedDeploymentStart.Outcome.RECONCILE, requestId);
         }
+    }
+
+    @Override
+    public EmbedDeploymentStart newLocalDeploymentExecution(SecurityContext security, String deploymentId,
+            String incarnationId, String graphVersion, String requestId, ai.ravenroot.api.payload.PayloadValue input) {
+        java.util.Objects.requireNonNull(security);
+        java.util.Objects.requireNonNull(input);
+        ai.ravenroot.api.payload.PayloadLimits.DEFAULTS.enforce(input);
+        ai.ravenroot.api.payload.PayloadValue.requireNoReservedKeys(input);
+        if (requestId == null || !requestId.matches("[A-Za-z0-9][A-Za-z0-9._:-]{0,127}"))
+            throw new IllegalArgumentException("invalid execution request id");
+        var record = localDeployments.get(new LocalDeploymentKey(requireTenant(security.tenantId()),
+                requireLocalDeploymentId(deploymentId)));
+        if (record == null || deployments.get(record.engineId()) != record.deployment()
+                || !record.deployment().incarnationId().equals(incarnationId) || !record.graphHash().equals(graphVersion)
+                || executionStore == null || !executionStore.supports(StoreCapability.DURABLE)
+                || !executionStore.supports(StoreCapability.DEPLOYMENT_ENTRY_CUSTODY))
+            return new EmbedDeploymentStart(EmbedDeploymentStart.Outcome.REFUSED, requestId);
+        return record.deployment().newExecution(security, requestId, input);
     }
 
     @Override

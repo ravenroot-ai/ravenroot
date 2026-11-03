@@ -586891,121 +586891,129 @@
       "rationale": "Reviewed issue #446 atom 3 at scripts/tests/test_kubernetes_runner_acceptance.py#read: executable positive/negative contract input or assertion; no production authority."
     },
     {
-      "id": "oc-f7f53c7c5b8d80415fa6",
+      "id": "oc-1e739b648aab1e25444f",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 134,
+      "line": 135,
       "symbol": "read",
       "kind": "inline-script-operational",
       "role": "inline",
       "expression": "\"read_text\"",
       "expressionDigest": "f02835bf0ef3573e422540161c2161cd37c94fb2cf72870b40dc1555926c8478",
-      "evidenceDigest": "17c6c7842f48517bafe6e892e9cff0b160ba48957dac68722900f0993d7faf30",
+      "evidenceDigest": "80c18cb29116700037e2dff1b66170350eff1b4f6913cde2cff62b0e5389e399",
       "surface": "test-fixture",
       "status": "retained",
       "classification": "test-fixture",
       "remediationOwner": "#446",
-      "rationale": "Reviewed issue #446 atom \"read_text\" at scripts/tests/test_kubernetes_runner_acceptance.py#read: executable positive/negative contract input or assertion; no production authority."
+      "rationale": "Reviewed issue #446 atom \"read_text\" at scripts/tests/test_kubernetes_runner_acceptance.py#read: executable positive/negative contract input or assertion; no production authority.",
+      "identityMigration": {
+        "history": "issue-606-attempt4-native-cpu-fixture-v1",
+        "fromId": "oc-f7f53c7c5b8d80415fa6"
+      }
     },
     {
-      "id": "oc-e9c81e5e8dcf3df7ef0f",
+      "id": "oc-09b74c761e05e9cc15bb",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 136,
+      "line": 137,
       "symbol": "read",
       "kind": "environment-binding",
       "role": "RAVENROOT_CPU_MILLICORES",
       "expression": "RAVENROOT_CPU_MILLICORES",
       "expressionDigest": "0ffd219e522f6686b6905173801f1a9f385695235f79df40dcb4e24dceed8b96",
-      "evidenceDigest": "bd68908a5ae9069db085b5e834737b3bd57b98a7fe1bcf8f90d211de0a451076",
+      "evidenceDigest": "bd33332c65623acf82f33cac615e6dcc65e534b321bc674d70b3eeae1683a915",
       "surface": "test-fixture",
       "status": "retained",
       "classification": "test-fixture",
       "remediationOwner": "#446",
-      "rationale": "Reviewed issue #446 atom RAVENROOT_CPU_MILLICORES at scripts/tests/test_kubernetes_runner_acceptance.py#read: executable positive/negative contract input or assertion; no production authority."
+      "rationale": "Reviewed issue #446 atom RAVENROOT_CPU_MILLICORES at scripts/tests/test_kubernetes_runner_acceptance.py#read: executable positive/negative contract input or assertion; no production authority.",
+      "identityMigration": {
+        "history": "issue-606-attempt4-native-cpu-fixture-v1",
+        "fromId": "oc-e9c81e5e8dcf3df7ef0f"
+      }
     },
     {
-      "id": "oc-5b8401f87250fb1ce9e6",
+      "id": "oc-616e4b60250b7fd1742d",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 136,
+      "line": 137,
       "symbol": "read",
       "kind": "environment-binding",
       "role": "RAVENROOT_MEMORY_LIMIT_BYTES",
       "expression": "RAVENROOT_MEMORY_LIMIT_BYTES",
       "expressionDigest": "20378949fe6216e8b072f15f0a0944660009865280cc4fba2c843f92e49de37b",
-      "evidenceDigest": "bd68908a5ae9069db085b5e834737b3bd57b98a7fe1bcf8f90d211de0a451076",
+      "evidenceDigest": "bd33332c65623acf82f33cac615e6dcc65e534b321bc674d70b3eeae1683a915",
       "surface": "test-fixture",
       "status": "retained",
       "classification": "test-fixture",
       "remediationOwner": "#446",
-      "rationale": "Reviewed issue #446 atom RAVENROOT_MEMORY_LIMIT_BYTES at scripts/tests/test_kubernetes_runner_acceptance.py#read: executable positive/negative contract input or assertion; no production authority."
+      "rationale": "Reviewed issue #446 atom RAVENROOT_MEMORY_LIMIT_BYTES at scripts/tests/test_kubernetes_runner_acceptance.py#read: executable positive/negative contract input or assertion; no production authority.",
+      "identityMigration": {
+        "history": "issue-606-attempt4-native-cpu-fixture-v1",
+        "fromId": "oc-5b8401f87250fb1ce9e6"
+      }
     },
     {
-      "id": "oc-13440e89875c5f99220d",
+      "id": "oc-52712b830b59360140e5",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 136,
+      "line": 137,
       "symbol": "read",
       "kind": "inline-script-operational",
       "role": "inline",
       "expression": "\"134217728\"",
       "expressionDigest": "fde2266e7cb647e001572eaf1196f1aed528b77e43fb89c1e5be6a40f2eff10e",
-      "evidenceDigest": "bd68908a5ae9069db085b5e834737b3bd57b98a7fe1bcf8f90d211de0a451076",
+      "evidenceDigest": "bd33332c65623acf82f33cac615e6dcc65e534b321bc674d70b3eeae1683a915",
       "surface": "test-fixture",
       "status": "retained",
       "classification": "test-fixture",
       "remediationOwner": "#446",
-      "rationale": "Reviewed issue #446 atom \"134217728\" at scripts/tests/test_kubernetes_runner_acceptance.py#read: executable positive/negative contract input or assertion; no production authority."
+      "rationale": "Reviewed issue #446 atom \"134217728\" at scripts/tests/test_kubernetes_runner_acceptance.py#read: executable positive/negative contract input or assertion; no production authority.",
+      "identityMigration": {
+        "history": "issue-606-attempt4-native-cpu-fixture-v1",
+        "fromId": "oc-13440e89875c5f99220d"
+      }
     },
     {
-      "id": "oc-ee825194ebfb4bbc29d7",
+      "id": "oc-51640a7a92138d7b7b4e",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 136,
-      "symbol": "read",
-      "kind": "inline-script-operational",
-      "role": "inline",
-      "expression": "\"500\"",
-      "expressionDigest": "5ac95f46dcda9e6a85f4d281cd691aea7b00846d8f8612d198d396136e9c5140",
-      "evidenceDigest": "bd68908a5ae9069db085b5e834737b3bd57b98a7fe1bcf8f90d211de0a451076",
-      "surface": "test-fixture",
-      "status": "retained",
-      "classification": "test-fixture",
-      "remediationOwner": "#446",
-      "rationale": "Reviewed issue #446 atom \"500\" at scripts/tests/test_kubernetes_runner_acceptance.py#read: executable positive/negative contract input or assertion; no production authority."
-    },
-    {
-      "id": "oc-22bbf69e1b9ced8dde42",
-      "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 136,
+      "line": 137,
       "symbol": "read",
       "kind": "inline-script-operational",
       "role": "inline",
       "expression": "\"RAVENROOT_CPU_MILLICORES\"",
       "expressionDigest": "9fc5f2d22181a355c1edce6652fee4354703afe74997ecf47207f0f2afd7975c",
-      "evidenceDigest": "bd68908a5ae9069db085b5e834737b3bd57b98a7fe1bcf8f90d211de0a451076",
+      "evidenceDigest": "bd33332c65623acf82f33cac615e6dcc65e534b321bc674d70b3eeae1683a915",
       "surface": "test-fixture",
       "status": "retained",
       "classification": "test-fixture",
       "remediationOwner": "#446",
-      "rationale": "Reviewed issue #446 atom \"RAVENROOT_CPU_MILLICORES\" at scripts/tests/test_kubernetes_runner_acceptance.py#read: executable positive/negative contract input or assertion; no production authority."
+      "rationale": "Reviewed issue #446 atom \"RAVENROOT_CPU_MILLICORES\" at scripts/tests/test_kubernetes_runner_acceptance.py#read: executable positive/negative contract input or assertion; no production authority.",
+      "identityMigration": {
+        "history": "issue-606-attempt4-native-cpu-fixture-v1",
+        "fromId": "oc-22bbf69e1b9ced8dde42"
+      }
     },
     {
-      "id": "oc-d919421c67c6d602d8a6",
+      "id": "oc-957011b9653333a9dc17",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 136,
+      "line": 137,
       "symbol": "read",
       "kind": "inline-script-operational",
       "role": "inline",
       "expression": "\"RAVENROOT_MEMORY_LIMIT_BYTES\"",
       "expressionDigest": "b72cfaefba22bf863b29a306c04b9b195441aeb6daee0a4a3b6c7902f4e9e489",
-      "evidenceDigest": "bd68908a5ae9069db085b5e834737b3bd57b98a7fe1bcf8f90d211de0a451076",
+      "evidenceDigest": "bd33332c65623acf82f33cac615e6dcc65e534b321bc674d70b3eeae1683a915",
       "surface": "test-fixture",
       "status": "retained",
       "classification": "test-fixture",
       "remediationOwner": "#446",
-      "rationale": "Reviewed issue #446 atom \"RAVENROOT_MEMORY_LIMIT_BYTES\" at scripts/tests/test_kubernetes_runner_acceptance.py#read: executable positive/negative contract input or assertion; no production authority."
+      "rationale": "Reviewed issue #446 atom \"RAVENROOT_MEMORY_LIMIT_BYTES\" at scripts/tests/test_kubernetes_runner_acceptance.py#read: executable positive/negative contract input or assertion; no production authority.",
+      "identityMigration": {
+        "history": "issue-606-attempt4-native-cpu-fixture-v1",
+        "fromId": "oc-d919421c67c6d602d8a6"
+      }
     },
     {
       "id": "oc-98a06460049e6c498536",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 138,
+      "line": 139,
       "symbol": "read",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587021,7 +587029,7 @@
     {
       "id": "oc-3330dcba0223d92fedb9",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 140,
+      "line": 141,
       "symbol": "read",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587037,7 +587045,7 @@
     {
       "id": "oc-39c5c6c385459ecbeb74",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 145,
+      "line": 146,
       "symbol": "attester",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587053,7 +587061,7 @@
     {
       "id": "oc-c5a1d1d2499cdb982c45",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 145,
+      "line": 146,
       "symbol": "attester",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587069,7 +587077,7 @@
     {
       "id": "oc-94752c815bcfbf420457",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 155,
+      "line": 156,
       "symbol": "attestation_environment",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587085,7 +587093,7 @@
     {
       "id": "oc-30539b51407c6fa43dc0",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 155,
+      "line": 156,
       "symbol": "attestation_environment",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587101,7 +587109,7 @@
     {
       "id": "oc-881d2a5df6d165c9dc33",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 156,
+      "line": 157,
       "symbol": "attestation_environment",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587117,7 +587125,7 @@
     {
       "id": "oc-8155093ec1b7183da431",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 159,
+      "line": 160,
       "symbol": "attestation_environment",
       "kind": "environment-binding",
       "role": "RAVENROOT_PROCESS_LIMIT",
@@ -587133,7 +587141,7 @@
     {
       "id": "oc-7ae9794dce7265030a86",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 159,
+      "line": 160,
       "symbol": "attestation_environment",
       "kind": "environment-binding",
       "role": "RAVENROOT_WORKSPACE_LIMIT_BYTES",
@@ -587149,7 +587157,7 @@
     {
       "id": "oc-686cd4d5747d0a95bfc9",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 159,
+      "line": 160,
       "symbol": "attestation_environment",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587165,7 +587173,7 @@
     {
       "id": "oc-33ae748a977d95f47ed8",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 159,
+      "line": 160,
       "symbol": "attestation_environment",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587181,7 +587189,7 @@
     {
       "id": "oc-d61ea930ebabb66a9a87",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 159,
+      "line": 160,
       "symbol": "attestation_environment",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587197,7 +587205,7 @@
     {
       "id": "oc-09476c09d025939ed0bd",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 159,
+      "line": 160,
       "symbol": "attestation_environment",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587213,7 +587221,7 @@
     {
       "id": "oc-75bf8960211347443d2e",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 162,
+      "line": 163,
       "symbol": "attestation_environment",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587229,7 +587237,7 @@
     {
       "id": "oc-82cddc1a173c7b4bb985",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 162,
+      "line": 163,
       "symbol": "attestation_environment",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587245,7 +587253,7 @@
     {
       "id": "oc-b5fa51753ca5dbfe3cb7",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 169,
+      "line": 170,
       "symbol": "test_original_failure_markers_are_finite_single_attempt_and_never_echo_dynamic_data",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587261,7 +587269,7 @@
     {
       "id": "oc-ae7a3d3959b517eadf1e",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 169,
+      "line": 170,
       "symbol": "test_original_failure_markers_are_finite_single_attempt_and_never_echo_dynamic_data",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587277,7 +587285,7 @@
     {
       "id": "oc-08752dcbeff6322b5a16",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 169,
+      "line": 170,
       "symbol": "test_original_failure_markers_are_finite_single_attempt_and_never_echo_dynamic_data",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587293,7 +587301,7 @@
     {
       "id": "oc-9908bc3fd133ff3244c8",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 170,
+      "line": 171,
       "symbol": "test_original_failure_markers_are_finite_single_attempt_and_never_echo_dynamic_data",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587309,7 +587317,7 @@
     {
       "id": "oc-409f5708feb17f46aa26",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 170,
+      "line": 171,
       "symbol": "test_original_failure_markers_are_finite_single_attempt_and_never_echo_dynamic_data",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587325,7 +587333,7 @@
     {
       "id": "oc-7b1a335927f41a84d2c9",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 170,
+      "line": 171,
       "symbol": "test_original_failure_markers_are_finite_single_attempt_and_never_echo_dynamic_data",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587341,7 +587349,7 @@
     {
       "id": "oc-09bf9f10b82e881ac3af",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 172,
+      "line": 173,
       "symbol": "test_original_failure_markers_are_finite_single_attempt_and_never_echo_dynamic_data",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587357,7 +587365,7 @@
     {
       "id": "oc-5c0c6aa5e1aa475f4c38",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 172,
+      "line": 173,
       "symbol": "test_original_failure_markers_are_finite_single_attempt_and_never_echo_dynamic_data",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587373,7 +587381,7 @@
     {
       "id": "oc-592c78af7d0cdca883fd",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 172,
+      "line": 173,
       "symbol": "test_original_failure_markers_are_finite_single_attempt_and_never_echo_dynamic_data",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587389,7 +587397,7 @@
     {
       "id": "oc-c09aeb96206172b36d33",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 172,
+      "line": 173,
       "symbol": "test_original_failure_markers_are_finite_single_attempt_and_never_echo_dynamic_data",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587405,7 +587413,7 @@
     {
       "id": "oc-73ad48e6c27f5e83792e",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 172,
+      "line": 173,
       "symbol": "test_original_failure_markers_are_finite_single_attempt_and_never_echo_dynamic_data",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587421,7 +587429,7 @@
     {
       "id": "oc-c0391a4282227665b62d",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 173,
+      "line": 174,
       "symbol": "test_original_failure_markers_are_finite_single_attempt_and_never_echo_dynamic_data",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587437,7 +587445,7 @@
     {
       "id": "oc-1ab9c7532b69c6e0102b",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 173,
+      "line": 174,
       "symbol": "test_original_failure_markers_are_finite_single_attempt_and_never_echo_dynamic_data",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587453,7 +587461,7 @@
     {
       "id": "oc-f01fcba86cfff8ed934b",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 173,
+      "line": 174,
       "symbol": "test_original_failure_markers_are_finite_single_attempt_and_never_echo_dynamic_data",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587469,7 +587477,7 @@
     {
       "id": "oc-8d8e5d11f07a598f3c57",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 186,
+      "line": 187,
       "symbol": "test_original_failure_markers_are_finite_single_attempt_and_never_echo_dynamic_data",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587485,7 +587493,7 @@
     {
       "id": "oc-95e6a4417e40c56a8920",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 186,
+      "line": 187,
       "symbol": "test_original_failure_markers_are_finite_single_attempt_and_never_echo_dynamic_data",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587501,7 +587509,7 @@
     {
       "id": "oc-1cef65c0e82e41aabd98",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 192,
+      "line": 193,
       "symbol": "test_original_fixed_entrypoint_preserves_success_proof_and_fail_closed_identity",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587517,7 +587525,7 @@
     {
       "id": "oc-ac23b194f2615486fdb6",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 192,
+      "line": 193,
       "symbol": "test_original_fixed_entrypoint_preserves_success_proof_and_fail_closed_identity",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587533,7 +587541,7 @@
     {
       "id": "oc-99edc7520d40b1541d07",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 192,
+      "line": 193,
       "symbol": "test_original_fixed_entrypoint_preserves_success_proof_and_fail_closed_identity",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587549,7 +587557,7 @@
     {
       "id": "oc-d994172fc51338b8b4ec",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 194,
+      "line": 195,
       "symbol": "test_original_fixed_entrypoint_preserves_success_proof_and_fail_closed_identity",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587565,7 +587573,7 @@
     {
       "id": "oc-762ebaa1b1ebb6b56797",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 194,
+      "line": 195,
       "symbol": "test_original_fixed_entrypoint_preserves_success_proof_and_fail_closed_identity",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587581,7 +587589,7 @@
     {
       "id": "oc-eb00a417adb4d248f306",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 194,
+      "line": 195,
       "symbol": "test_original_fixed_entrypoint_preserves_success_proof_and_fail_closed_identity",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587597,7 +587605,7 @@
     {
       "id": "oc-cf739c069e5c98c2cfdf",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 194,
+      "line": 195,
       "symbol": "test_original_fixed_entrypoint_preserves_success_proof_and_fail_closed_identity",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587613,7 +587621,7 @@
     {
       "id": "oc-93e6f784f55ec22f9d65",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 194,
+      "line": 195,
       "symbol": "test_original_fixed_entrypoint_preserves_success_proof_and_fail_closed_identity",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587629,7 +587637,7 @@
     {
       "id": "oc-a8d96c387883dd6fa3f2",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 209,
+      "line": 210,
       "symbol": "test_original_fixed_entrypoint_preserves_success_proof_and_fail_closed_identity",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587645,7 +587653,7 @@
     {
       "id": "oc-59a66399b97a3545a6a9",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 212,
+      "line": 213,
       "symbol": "test_actual_original_executable_missing_configuration_is_closed_and_nonzero",
       "kind": "script-default",
       "role": "path",
@@ -587661,7 +587669,7 @@
     {
       "id": "oc-cfce30415cb215774a16",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 213,
+      "line": 214,
       "symbol": "test_actual_original_executable_missing_configuration_is_closed_and_nonzero",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587677,7 +587685,7 @@
     {
       "id": "oc-2fa93ddba1241ceb49ed",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 213,
+      "line": 214,
       "symbol": "test_actual_original_executable_missing_configuration_is_closed_and_nonzero",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587693,7 +587701,7 @@
     {
       "id": "oc-22a38c241dca94a97238",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 214,
+      "line": 215,
       "symbol": "test_actual_original_executable_missing_configuration_is_closed_and_nonzero",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587709,7 +587717,7 @@
     {
       "id": "oc-020f724fa96718af5f7f",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 222,
+      "line": 223,
       "symbol": "test_unexpected_or_forged_executable_failure_still_cannot_echo_exception_data",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587725,7 +587733,7 @@
     {
       "id": "oc-89e611a700bb9cd0b0d9",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 233,
+      "line": 234,
       "symbol": "test_retained_native_results_never_copy_properties_messages_or_output",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587741,7 +587749,7 @@
     {
       "id": "oc-17b58831be541281a767",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 235,
+      "line": 236,
       "symbol": "test_retained_native_results_never_copy_properties_messages_or_output",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587757,7 +587765,7 @@
     {
       "id": "oc-e56b55b5f54fe96632a2",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 238,
+      "line": 239,
       "symbol": "test_retained_native_results_never_copy_properties_messages_or_output",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587773,7 +587781,7 @@
     {
       "id": "oc-c76721a6aaed2d72d66f",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 238,
+      "line": 239,
       "symbol": "test_retained_native_results_never_copy_properties_messages_or_output",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587789,7 +587797,7 @@
     {
       "id": "oc-d71623e035127525b838",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 238,
+      "line": 239,
       "symbol": "test_retained_native_results_never_copy_properties_messages_or_output",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587805,7 +587813,7 @@
     {
       "id": "oc-f5445632dc6ebaebe38c",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 238,
+      "line": 239,
       "symbol": "test_retained_native_results_never_copy_properties_messages_or_output",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587821,7 +587829,7 @@
     {
       "id": "oc-3b366939eec10bc7471d",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 238,
+      "line": 239,
       "symbol": "test_retained_native_results_never_copy_properties_messages_or_output",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587837,7 +587845,7 @@
     {
       "id": "oc-060ac73d110b0f9b7699",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 240,
+      "line": 241,
       "symbol": "test_retained_native_results_never_copy_properties_messages_or_output",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587853,7 +587861,7 @@
     {
       "id": "oc-42faf8f979605e08eee5",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 241,
+      "line": 242,
       "symbol": "test_retained_native_results_never_copy_properties_messages_or_output",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587869,7 +587877,7 @@
     {
       "id": "oc-a1945326e834d188a2b1",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 241,
+      "line": 242,
       "symbol": "test_retained_native_results_never_copy_properties_messages_or_output",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587885,7 +587893,7 @@
     {
       "id": "oc-c39957446d6dffb75bca",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 241,
+      "line": 242,
       "symbol": "test_retained_native_results_never_copy_properties_messages_or_output",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587901,7 +587909,7 @@
     {
       "id": "oc-5ab3b905310385f91fd4",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 242,
+      "line": 243,
       "symbol": "test_retained_native_results_never_copy_properties_messages_or_output",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587917,7 +587925,7 @@
     {
       "id": "oc-ab1e5f639cb77f3509ae",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 247,
+      "line": 248,
       "symbol": "test_retained_native_results_never_copy_properties_messages_or_output",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587933,7 +587941,7 @@
     {
       "id": "oc-0d45e4a577d1e031ab16",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 248,
+      "line": 249,
       "symbol": "test_retained_native_results_never_copy_properties_messages_or_output",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587949,7 +587957,7 @@
     {
       "id": "oc-7daecec0f1d4bd700352",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 248,
+      "line": 249,
       "symbol": "test_retained_native_results_never_copy_properties_messages_or_output",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587965,7 +587973,7 @@
     {
       "id": "oc-f727f310db5f8a8b6d5f",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 248,
+      "line": 249,
       "symbol": "test_retained_native_results_never_copy_properties_messages_or_output",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587981,7 +587989,7 @@
     {
       "id": "oc-69bc5f6c918930b3fdfa",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 249,
+      "line": 250,
       "symbol": "test_retained_native_results_never_copy_properties_messages_or_output",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -587997,7 +588005,7 @@
     {
       "id": "oc-b2385e4b28dcb9c8b5ee",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 249,
+      "line": 250,
       "symbol": "test_retained_native_results_never_copy_properties_messages_or_output",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -588013,7 +588021,7 @@
     {
       "id": "oc-c70668707f0e5060e121",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 249,
+      "line": 250,
       "symbol": "test_retained_native_results_never_copy_properties_messages_or_output",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -588029,7 +588037,7 @@
     {
       "id": "oc-925e9161091502f6c4cd",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 249,
+      "line": 250,
       "symbol": "test_retained_native_results_never_copy_properties_messages_or_output",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -588045,7 +588053,7 @@
     {
       "id": "oc-b93d23d5f56f1814a15e",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 249,
+      "line": 250,
       "symbol": "test_retained_native_results_never_copy_properties_messages_or_output",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -588061,7 +588069,7 @@
     {
       "id": "oc-ea599a3b39bef531fb22",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 249,
+      "line": 250,
       "symbol": "test_retained_native_results_never_copy_properties_messages_or_output",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -588077,7 +588085,7 @@
     {
       "id": "oc-47348e1a693121b54575",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 249,
+      "line": 250,
       "symbol": "test_retained_native_results_never_copy_properties_messages_or_output",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -588093,7 +588101,7 @@
     {
       "id": "oc-a194b45d2372ad70787b",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 249,
+      "line": 250,
       "symbol": "test_retained_native_results_never_copy_properties_messages_or_output",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -588109,7 +588117,7 @@
     {
       "id": "oc-680c2dcee310584b2ad5",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 249,
+      "line": 250,
       "symbol": "test_retained_native_results_never_copy_properties_messages_or_output",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -588125,7 +588133,7 @@
     {
       "id": "oc-e7e5e257e5b309430253",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 249,
+      "line": 250,
       "symbol": "test_retained_native_results_never_copy_properties_messages_or_output",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -588141,7 +588149,7 @@
     {
       "id": "oc-c94a1353a6ce3a707db0",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 249,
+      "line": 250,
       "symbol": "test_retained_native_results_never_copy_properties_messages_or_output",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -588157,7 +588165,7 @@
     {
       "id": "oc-c4644dd8e2c66836d016",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 250,
+      "line": 251,
       "symbol": "test_retained_native_results_never_copy_properties_messages_or_output",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -588173,7 +588181,7 @@
     {
       "id": "oc-2d0f4ef3259e553cb5f8",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 250,
+      "line": 251,
       "symbol": "test_retained_native_results_never_copy_properties_messages_or_output",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -588189,7 +588197,7 @@
     {
       "id": "oc-834f1b87edc0cfc3618b",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 250,
+      "line": 251,
       "symbol": "test_retained_native_results_never_copy_properties_messages_or_output",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -588205,7 +588213,7 @@
     {
       "id": "oc-6a5bdbf9b9da4a734ef9",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 250,
+      "line": 251,
       "symbol": "test_retained_native_results_never_copy_properties_messages_or_output",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -588221,7 +588229,7 @@
     {
       "id": "oc-0ee403f3f45570ca4ee6",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 250,
+      "line": 251,
       "symbol": "test_retained_native_results_never_copy_properties_messages_or_output",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -588237,7 +588245,7 @@
     {
       "id": "oc-9c910a6dae87e87e0a10",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 250,
+      "line": 251,
       "symbol": "test_retained_native_results_never_copy_properties_messages_or_output",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -588253,7 +588261,7 @@
     {
       "id": "oc-8ddc7a7b64be0186ce3a",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 250,
+      "line": 251,
       "symbol": "test_retained_native_results_never_copy_properties_messages_or_output",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -588269,7 +588277,7 @@
     {
       "id": "oc-30c2928e3fc80246d24d",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 250,
+      "line": 251,
       "symbol": "test_retained_native_results_never_copy_properties_messages_or_output",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -588285,7 +588293,7 @@
     {
       "id": "oc-7e9792f159c758363484",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 250,
+      "line": 251,
       "symbol": "test_retained_native_results_never_copy_properties_messages_or_output",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -588301,7 +588309,7 @@
     {
       "id": "oc-c28d3f6d76bb4cdad839",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 250,
+      "line": 251,
       "symbol": "test_retained_native_results_never_copy_properties_messages_or_output",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -588317,7 +588325,7 @@
     {
       "id": "oc-69f1f01cdd7be3ae8c04",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 250,
+      "line": 251,
       "symbol": "test_retained_native_results_never_copy_properties_messages_or_output",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -588333,7 +588341,7 @@
     {
       "id": "oc-196fae772c6e44f56dc5",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 250,
+      "line": 251,
       "symbol": "test_retained_native_results_never_copy_properties_messages_or_output",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -588349,7 +588357,7 @@
     {
       "id": "oc-899a96cf257ff8bb96af",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 250,
+      "line": 251,
       "symbol": "test_retained_native_results_never_copy_properties_messages_or_output",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -588365,7 +588373,7 @@
     {
       "id": "oc-a1cf4e4105cfe1fa33c8",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 250,
+      "line": 251,
       "symbol": "test_retained_native_results_never_copy_properties_messages_or_output",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -588381,7 +588389,7 @@
     {
       "id": "oc-303780c9285d69de67c9",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 250,
+      "line": 251,
       "symbol": "test_retained_native_results_never_copy_properties_messages_or_output",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -588397,7 +588405,7 @@
     {
       "id": "oc-a2e8392cf1aa0ed99cc0",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 256,
+      "line": 257,
       "symbol": "test_missing_malformed_oversized_or_foreign_native_reports_are_explicitly_unavailable",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -588413,7 +588421,7 @@
     {
       "id": "oc-6a5d0e9dac80fa8a5173",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 256,
+      "line": 257,
       "symbol": "test_missing_malformed_oversized_or_foreign_native_reports_are_explicitly_unavailable",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -588429,7 +588437,7 @@
     {
       "id": "oc-210e66d522f27f699224",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 256,
+      "line": 257,
       "symbol": "test_missing_malformed_oversized_or_foreign_native_reports_are_explicitly_unavailable",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -588445,7 +588453,7 @@
     {
       "id": "oc-7572fabd51725d8bae4a",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 256,
+      "line": 257,
       "symbol": "test_missing_malformed_oversized_or_foreign_native_reports_are_explicitly_unavailable",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -588461,7 +588469,7 @@
     {
       "id": "oc-f87ed266b8494e0f9aa8",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 256,
+      "line": 257,
       "symbol": "test_missing_malformed_oversized_or_foreign_native_reports_are_explicitly_unavailable",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -588477,7 +588485,7 @@
     {
       "id": "oc-600c430ec175f10eb125",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 256,
+      "line": 257,
       "symbol": "test_missing_malformed_oversized_or_foreign_native_reports_are_explicitly_unavailable",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -588493,7 +588501,7 @@
     {
       "id": "oc-b4c903d11fe8bb0a7f75",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 262,
+      "line": 263,
       "symbol": "test_missing_malformed_oversized_or_foreign_native_reports_are_explicitly_unavailable",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -588509,7 +588517,7 @@
     {
       "id": "oc-8ba81f74468495aa8d2e",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 262,
+      "line": 263,
       "symbol": "test_missing_malformed_oversized_or_foreign_native_reports_are_explicitly_unavailable",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -588525,7 +588533,7 @@
     {
       "id": "oc-f504368fc4f1097f06a5",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 263,
+      "line": 264,
       "symbol": "test_missing_malformed_oversized_or_foreign_native_reports_are_explicitly_unavailable",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -588541,7 +588549,7 @@
     {
       "id": "oc-ac6b1a5cd0aa58cb20eb",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 264,
+      "line": 265,
       "symbol": "test_missing_malformed_oversized_or_foreign_native_reports_are_explicitly_unavailable",
       "kind": "script-default",
       "role": "report",
@@ -588557,7 +588565,7 @@
     {
       "id": "oc-fcf3b553903573e57863",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 265,
+      "line": 266,
       "symbol": "test_missing_malformed_oversized_or_foreign_native_reports_are_explicitly_unavailable",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -588573,7 +588581,7 @@
     {
       "id": "oc-cf475726c82876004211",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 265,
+      "line": 266,
       "symbol": "test_missing_malformed_oversized_or_foreign_native_reports_are_explicitly_unavailable",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -588589,7 +588597,7 @@
     {
       "id": "oc-5dfb110dc0f530479f30",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 265,
+      "line": 266,
       "symbol": "test_missing_malformed_oversized_or_foreign_native_reports_are_explicitly_unavailable",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -588605,7 +588613,7 @@
     {
       "id": "oc-b405dcd473887b77a7cc",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 265,
+      "line": 266,
       "symbol": "test_missing_malformed_oversized_or_foreign_native_reports_are_explicitly_unavailable",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -588621,7 +588629,7 @@
     {
       "id": "oc-5f48190f9e04ce9cf5d4",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 265,
+      "line": 266,
       "symbol": "test_missing_malformed_oversized_or_foreign_native_reports_are_explicitly_unavailable",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -588637,7 +588645,7 @@
     {
       "id": "oc-77c308be51949e20d89e",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 279,
+      "line": 280,
       "symbol": "test_contradictory_foreign_and_duplicate_case_statuses_are_unavailable",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -588653,7 +588661,7 @@
     {
       "id": "oc-b4e84a1f5a427382a8e8",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 280,
+      "line": 281,
       "symbol": "test_contradictory_foreign_and_duplicate_case_statuses_are_unavailable",
       "kind": "script-default",
       "role": "report",
@@ -588669,7 +588677,7 @@
     {
       "id": "oc-f815589d5b97546fed45",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 281,
+      "line": 282,
       "symbol": "test_contradictory_foreign_and_duplicate_case_statuses_are_unavailable",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -588685,7 +588693,7 @@
     {
       "id": "oc-a50697373945858524aa",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 282,
+      "line": 283,
       "symbol": "test_contradictory_foreign_and_duplicate_case_statuses_are_unavailable",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -588701,7 +588709,7 @@
     {
       "id": "oc-380bc04e7aaeeeeb16e1",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 291,
+      "line": 292,
       "symbol": "test_retained_diagnostics_do_not_partially_accept_malformed_reason_suffixes",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -588717,7 +588725,7 @@
     {
       "id": "oc-4008312d4ecb58940d3e",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 291,
+      "line": 292,
       "symbol": "test_retained_diagnostics_do_not_partially_accept_malformed_reason_suffixes",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -588733,7 +588741,7 @@
     {
       "id": "oc-4adf18769d3feb78a5ed",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 293,
+      "line": 294,
       "symbol": "test_retained_diagnostics_do_not_partially_accept_malformed_reason_suffixes",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -588749,7 +588757,7 @@
     {
       "id": "oc-7c9cb72838df249735cd",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 294,
+      "line": 295,
       "symbol": "test_retained_diagnostics_do_not_partially_accept_malformed_reason_suffixes",
       "kind": "script-default",
       "role": "report",
@@ -588765,7 +588773,7 @@
     {
       "id": "oc-41ac83bf8f1a279bf621",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 295,
+      "line": 296,
       "symbol": "test_retained_diagnostics_do_not_partially_accept_malformed_reason_suffixes",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -588781,7 +588789,7 @@
     {
       "id": "oc-c8b5c21b46bfa3756cc2",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 296,
+      "line": 297,
       "symbol": "test_retained_diagnostics_do_not_partially_accept_malformed_reason_suffixes",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -588797,7 +588805,7 @@
     {
       "id": "oc-386f4086f97ebc32f73d",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 296,
+      "line": 297,
       "symbol": "test_retained_diagnostics_do_not_partially_accept_malformed_reason_suffixes",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -588813,7 +588821,7 @@
     {
       "id": "oc-e9df8c36490aab53a1c5",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 296,
+      "line": 297,
       "symbol": "test_retained_diagnostics_do_not_partially_accept_malformed_reason_suffixes",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -588829,7 +588837,7 @@
     {
       "id": "oc-28005350d7e173cd7d72",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 296,
+      "line": 297,
       "symbol": "test_retained_diagnostics_do_not_partially_accept_malformed_reason_suffixes",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -588845,7 +588853,7 @@
     {
       "id": "oc-bac497deade7737092fb",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 297,
+      "line": 298,
       "symbol": "test_retained_diagnostics_do_not_partially_accept_malformed_reason_suffixes",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -588861,7 +588869,7 @@
     {
       "id": "oc-486ebe81ce52c22e89e1",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 297,
+      "line": 298,
       "symbol": "test_retained_diagnostics_do_not_partially_accept_malformed_reason_suffixes",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -588877,7 +588885,7 @@
     {
       "id": "oc-6e84c92824d337e553fc",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 297,
+      "line": 298,
       "symbol": "test_retained_diagnostics_do_not_partially_accept_malformed_reason_suffixes",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -588893,7 +588901,7 @@
     {
       "id": "oc-04f8aa1678ae05a48c1b",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 301,
+      "line": 302,
       "symbol": "test_native_failure_handling_never_reexecutes_attester_and_uploads_only_safe_fixed_reports",
       "kind": "script-default",
       "role": "failure_path",
@@ -588909,7 +588917,7 @@
     {
       "id": "oc-82de5f9fd396a6f2b7a8",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 301,
+      "line": 302,
       "symbol": "test_native_failure_handling_never_reexecutes_attester_and_uploads_only_safe_fixed_reports",
       "kind": "script-default",
       "role": "failure_path",
@@ -588925,7 +588933,7 @@
     {
       "id": "oc-4e56b29b26f2dd527964",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 301,
+      "line": 302,
       "symbol": "test_native_failure_handling_never_reexecutes_attester_and_uploads_only_safe_fixed_reports",
       "kind": "script-default",
       "role": "failure_path",
@@ -588941,7 +588949,7 @@
     {
       "id": "oc-b8278201275f4dc8c78c",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 301,
+      "line": 302,
       "symbol": "test_native_failure_handling_never_reexecutes_attester_and_uploads_only_safe_fixed_reports",
       "kind": "script-default",
       "role": "failure_path",
@@ -588957,7 +588965,7 @@
     {
       "id": "oc-c32e1ac05a5d2299fe26",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 302,
+      "line": 303,
       "symbol": "test_native_failure_handling_never_reexecutes_attester_and_uploads_only_safe_fixed_reports",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -588973,7 +588981,7 @@
     {
       "id": "oc-6fa311a5e9057f206e23",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 303,
+      "line": 304,
       "symbol": "test_native_failure_handling_never_reexecutes_attester_and_uploads_only_safe_fixed_reports",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -588989,7 +588997,7 @@
     {
       "id": "oc-2585c49a198e686e8f62",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 304,
+      "line": 305,
       "symbol": "test_native_failure_handling_never_reexecutes_attester_and_uploads_only_safe_fixed_reports",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -589005,7 +589013,7 @@
     {
       "id": "oc-d6f9876dc9d6f80badf8",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 305,
+      "line": 306,
       "symbol": "test_native_failure_handling_never_reexecutes_attester_and_uploads_only_safe_fixed_reports",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -589025,7 +589033,7 @@
     {
       "id": "oc-078ca4c537a5398afa0c",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 310,
+      "line": 311,
       "symbol": "assert_native_upload_contract",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -589045,7 +589053,7 @@
     {
       "id": "oc-51ed4bdd9218cd68987f",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 311,
+      "line": 312,
       "symbol": "assert_native_upload_contract",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -589065,7 +589073,7 @@
     {
       "id": "oc-88c64ea30db195e52c07",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 313,
+      "line": 314,
       "symbol": "assert_native_upload_contract",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -589085,7 +589093,7 @@
     {
       "id": "oc-8a1cddc7c4d6a9caa521",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 316,
+      "line": 317,
       "symbol": "test_upload_follows_native_selection_for_complete_and_selected_plans_after_any_outcome",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -589100,7 +589108,7 @@
     {
       "id": "oc-9f6699948df4e965fa8f",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 331,
+      "line": 332,
       "symbol": "test_upload_rejects_mode_only_selection_missing_always_and_unsafe_report_paths",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -589115,7 +589123,7 @@
     {
       "id": "oc-c6ffcba307d7084e8b1d",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 337,
+      "line": 338,
       "symbol": "test_upload_rejects_mode_only_selection_missing_always_and_unsafe_report_paths",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -589130,7 +589138,7 @@
     {
       "id": "oc-2f4655f88d356fe089ac",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 337,
+      "line": 338,
       "symbol": "test_upload_rejects_mode_only_selection_missing_always_and_unsafe_report_paths",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -589145,7 +589153,7 @@
     {
       "id": "oc-6c386203d96f10ff483c",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 338,
+      "line": 339,
       "symbol": "test_upload_rejects_mode_only_selection_missing_always_and_unsafe_report_paths",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -589160,7 +589168,7 @@
     {
       "id": "oc-db50e1c2533e9227f283",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 338,
+      "line": 339,
       "symbol": "test_upload_rejects_mode_only_selection_missing_always_and_unsafe_report_paths",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -589175,7 +589183,7 @@
     {
       "id": "oc-985449c3c6432371fa54",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 348,
+      "line": 349,
       "symbol": "test_inventory_uses_finite_retained_pvs_and_minimal_manager_authority",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -589191,7 +589199,7 @@
     {
       "id": "oc-f519e67f09fb8d4b64d7",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 348,
+      "line": 349,
       "symbol": "test_inventory_uses_finite_retained_pvs_and_minimal_manager_authority",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -589207,7 +589215,7 @@
     {
       "id": "oc-17962dd51c412d419cdb",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 348,
+      "line": 349,
       "symbol": "test_inventory_uses_finite_retained_pvs_and_minimal_manager_authority",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -589223,7 +589231,7 @@
     {
       "id": "oc-0afcae93b13f193992d7",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 348,
+      "line": 349,
       "symbol": "test_inventory_uses_finite_retained_pvs_and_minimal_manager_authority",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -589239,7 +589247,7 @@
     {
       "id": "oc-500f691d1bef986be57e",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 350,
+      "line": 351,
       "symbol": "test_inventory_uses_finite_retained_pvs_and_minimal_manager_authority",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -589255,7 +589263,7 @@
     {
       "id": "oc-28ba1623a95b7667f2e7",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 350,
+      "line": 351,
       "symbol": "test_inventory_uses_finite_retained_pvs_and_minimal_manager_authority",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -589271,7 +589279,7 @@
     {
       "id": "oc-07b0d074c948fe776b09",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 357,
+      "line": 358,
       "symbol": "test_ephemeral_manager_token_file_is_owner_only",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -589287,7 +589295,7 @@
     {
       "id": "oc-fd4c061186b5ef58bc4a",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 357,
+      "line": 358,
       "symbol": "test_ephemeral_manager_token_file_is_owner_only",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -589303,7 +589311,7 @@
     {
       "id": "oc-8950967d462e396f4ad3",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 358,
+      "line": 359,
       "symbol": "test_ephemeral_manager_token_file_is_owner_only",
       "kind": "script-default",
       "role": "path",
@@ -589319,7 +589327,7 @@
     {
       "id": "oc-ee625281944dfae2b59c",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 358,
+      "line": 359,
       "symbol": "test_ephemeral_manager_token_file_is_owner_only",
       "kind": "script-default",
       "role": "path",
@@ -589335,7 +589343,7 @@
     {
       "id": "oc-e47a24050914720123e0",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 360,
+      "line": 361,
       "symbol": "test_ephemeral_manager_token_file_is_owner_only",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -589351,7 +589359,7 @@
     {
       "id": "oc-63b785711d1d803e6514",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 360,
+      "line": 361,
       "symbol": "test_ephemeral_manager_token_file_is_owner_only",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -589367,7 +589375,7 @@
     {
       "id": "oc-762a6be5f8f0aeb58a1b",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 360,
+      "line": 361,
       "symbol": "test_ephemeral_manager_token_file_is_owner_only",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -589383,7 +589391,7 @@
     {
       "id": "oc-3ba37a9214fb68fed036",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 360,
+      "line": 361,
       "symbol": "test_ephemeral_manager_token_file_is_owner_only",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -589399,7 +589407,7 @@
     {
       "id": "oc-40f8ada10ea33e7be8de",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 360,
+      "line": 361,
       "symbol": "test_ephemeral_manager_token_file_is_owner_only",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -589415,7 +589423,7 @@
     {
       "id": "oc-2d0ce7df5c38cd670759",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 370,
+      "line": 371,
       "symbol": "test_wrong_tool_version_or_broken_host_bridge_prevents_cluster_creation",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -589431,7 +589439,7 @@
     {
       "id": "oc-4eb3b54bf7bd54c1fdcf",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 374,
+      "line": 375,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -589447,7 +589455,7 @@
     {
       "id": "oc-55d76194b9e519ca4b64",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 374,
+      "line": 375,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -589463,7 +589471,7 @@
     {
       "id": "oc-fec83064bc770c4c4af7",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 374,
+      "line": 375,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -589479,7 +589487,7 @@
     {
       "id": "oc-e0006dd35581da3c7df8",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 376,
+      "line": 377,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -589495,7 +589503,7 @@
     {
       "id": "oc-56efaf747515c738cd79",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 376,
+      "line": 377,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -589511,7 +589519,7 @@
     {
       "id": "oc-896d6e3aeec0439e09cf",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 376,
+      "line": 377,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -589527,7 +589535,7 @@
     {
       "id": "oc-43d028f876aec5fab408",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 376,
+      "line": 377,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -589543,7 +589551,7 @@
     {
       "id": "oc-b0c87f34322187f4a11d",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 376,
+      "line": 377,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -589559,7 +589567,7 @@
     {
       "id": "oc-3d840e109a58aa17ae35",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 382,
+      "line": 383,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -589575,7 +589583,7 @@
     {
       "id": "oc-c1d052736ad3138ad5f8",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 382,
+      "line": 383,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -589591,7 +589599,7 @@
     {
       "id": "oc-4cfc4e9bb50183bfe8b5",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 388,
+      "line": 389,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -589607,7 +589615,7 @@
     {
       "id": "oc-c04dfa4fee333adae6ac",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 388,
+      "line": 389,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -589623,7 +589631,7 @@
     {
       "id": "oc-4499f5b0f8a2f357618b",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 388,
+      "line": 389,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -589639,7 +589647,7 @@
     {
       "id": "oc-6b37070f0eb7c8ba5731",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 390,
+      "line": 391,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -589655,7 +589663,7 @@
     {
       "id": "oc-6d119f0065b9fcc7c9a4",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 390,
+      "line": 391,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -589671,7 +589679,7 @@
     {
       "id": "oc-9829bb797e4a77ef46f3",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 390,
+      "line": 391,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -589687,7 +589695,7 @@
     {
       "id": "oc-db9b24888a4177f915af",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 392,
+      "line": 393,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -589703,7 +589711,7 @@
     {
       "id": "oc-9a037a177389aca7b63f",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 392,
+      "line": 393,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -589719,7 +589727,7 @@
     {
       "id": "oc-680f185df2873cced470",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 392,
+      "line": 393,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -589735,7 +589743,7 @@
     {
       "id": "oc-b9a07d900262894745de",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 400,
+      "line": 401,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -589751,7 +589759,7 @@
     {
       "id": "oc-cf829f91427040fcb8c4",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 400,
+      "line": 401,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -589767,7 +589775,7 @@
     {
       "id": "oc-863410d4b84d12b78d58",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 400,
+      "line": 401,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -589783,7 +589791,7 @@
     {
       "id": "oc-a2fd5bca070eee98629e",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 400,
+      "line": 401,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -589799,7 +589807,7 @@
     {
       "id": "oc-c1c343d844a73a10b122",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 400,
+      "line": 401,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -589815,7 +589823,7 @@
     {
       "id": "oc-53b16371bc14731467ab",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 401,
+      "line": 402,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -589831,7 +589839,7 @@
     {
       "id": "oc-e635b720e496a37ecafd",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 401,
+      "line": 402,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -589847,7 +589855,7 @@
     {
       "id": "oc-ceb65a5ade4711a8c404",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 401,
+      "line": 402,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -589863,7 +589871,7 @@
     {
       "id": "oc-e700b1bd896512a6bc63",
       "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-      "line": 401,
+      "line": 402,
       "symbol": "command",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -589875,6 +589883,96 @@
       "classification": "test-fixture",
       "remediationOwner": "#446",
       "rationale": "Reviewed issue #446 CI repair atom 2 in scripts/tests/test_kubernetes_runner_acceptance.py#command: invocation-owned bridge identity/lifecycle, positive preservation check, pinned supported cluster/tool identity, or negative fixture assertion; no production configuration default or authority is introduced."
+    },
+    {
+      "id": "oc-6f2200a1eca29b85c839",
+      "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+      "line": 408,
+      "symbol": "test_native_cpu_fixture_keeps_real_boundary_positive_proof_and_zero_skip_gates",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "\"profile.allowedAgents(), profile.fleetLimits(), 100, WorkspaceProfile.Driver.KUBERNETES\"",
+      "expressionDigest": "20e26155cc57afcf4c3c61c3f5e1fb01e022a0bba4cc1fd1f9dd7eb03f63d0e4",
+      "evidenceDigest": "41636c6fe45cba8a28e44940cae4f1ccffec975a17a21175d0a2ff53d79879e5",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "#606 Attempt4 native CPU test fixture atom '\"profile.allowedAgents(), profile.fleetLimits(), 100, WorkspaceProfile.Driver.KUBERNETES\"' in test_native_cpu_fixture_keeps_real_boundary_positive_proof_and_zero_skip_gates: stricter workspace100m, preserved real500m/preflight, positive counter refusal and five zero-skip native gates; production unchanged."
+    },
+    {
+      "id": "oc-23146f7bc388315882de",
+      "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+      "line": 412,
+      "symbol": "test_native_cpu_fixture_keeps_real_boundary_positive_proof_and_zero_skip_gates",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "\"RunnerFleetLimits.from(capacity), 500, WorkspaceProfile.Driver.KUBERNETES\"",
+      "expressionDigest": "775ca6d245a7afe58b3e7d00b2e3741a95d89ca8456cf9d62309416f6c038dc1",
+      "evidenceDigest": "476dccca1b31a0ab592af2ed5bf4832c89f15d35a621bc20bd0c4fa5fa010cd8",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "#606 Attempt4 native CPU test fixture atom '\"RunnerFleetLimits.from(capacity), 500, WorkspaceProfile.Driver.KUBERNETES\"' in test_native_cpu_fixture_keeps_real_boundary_positive_proof_and_zero_skip_gates: stricter workspace100m, preserved real500m/preflight, positive counter refusal and five zero-skip native gates; production unchanged."
+    },
+    {
+      "id": "oc-cc983156e9dc873332a0",
+      "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+      "line": 414,
+      "symbol": "test_native_cpu_fixture_keeps_real_boundary_positive_proof_and_zero_skip_gates",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "\"end = time.monotonic() + 10\"",
+      "expressionDigest": "18ad9c5ca0e87768f4fea7cb788fcb828202ffc5e5cddb33b5e1fd68468e0829",
+      "evidenceDigest": "97766d5937ba49adf8f6d9464f192704edcabfb902e8d00c96372cb25a2eae31",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "#606 Attempt4 native CPU test fixture atom '\"end = time.monotonic() + 10\"' in test_native_cpu_fixture_keeps_real_boundary_positive_proof_and_zero_skip_gates: stricter workspace100m, preserved real500m/preflight, positive counter refusal and five zero-skip native gates; production unchanged."
+    },
+    {
+      "id": "oc-756f5311735169911f4b",
+      "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+      "line": 414,
+      "symbol": "test_native_cpu_fixture_keeps_real_boundary_positive_proof_and_zero_skip_gates",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "'raise RuntimeError(\"positive CPU throttling evidence is missing\")'",
+      "expressionDigest": "92ff2db97a10b46fefc4fc32a47deb6a96a5269c1ea2ba5b554aec820ebd8266",
+      "evidenceDigest": "97766d5937ba49adf8f6d9464f192704edcabfb902e8d00c96372cb25a2eae31",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "#606 Attempt4 native CPU test fixture atom '\\'raise RuntimeError(\"positive CPU throttling evidence is missing\")\\'' in test_native_cpu_fixture_keeps_real_boundary_positive_proof_and_zero_skip_gates: stricter workspace100m, preserved real500m/preflight, positive counter refusal and five zero-skip native gates; production unchanged."
+    },
+    {
+      "id": "oc-a2af44bcdf53bcf217fd",
+      "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+      "line": 423,
+      "symbol": "verify",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "1",
+      "expressionDigest": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "evidenceDigest": "ce2162c5768afd34488ef09a1c57a1efe99472a58f784dfa7997cffd1d6f05c3",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "#606 Attempt4 native CPU test fixture atom '1' in verify: stricter workspace100m, preserved real500m/preflight, positive counter refusal and five zero-skip native gates; production unchanged."
+    },
+    {
+      "id": "oc-467208e5aaae90da34b0",
+      "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+      "line": 428,
+      "symbol": "verify",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "\"\"",
+      "expressionDigest": "12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+      "evidenceDigest": "3be8a3978518661cc587a75b7fa6efa1a2feb0a905ac90f38dc26120e2fa9d05",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "#606 Attempt4 native CPU test fixture atom '\"\"' in verify: stricter workspace100m, preserved real500m/preflight, positive counter refusal and five zero-skip native gates; production unchanged."
     },
     {
       "id": "oc-d756cc2048647c7a9196",
@@ -695707,6 +695805,24 @@
       "rationale": "#605 exact closed RouteTable regression fixture 482 asserts130descriptors and890sourceatoms, including482summaryatoms, and still rejects missing/foreign constructor positions.",
       "retirementRationale": "Issue #606 replaces the RouteTable fixture's observed positional count 482 with the actual new route role count; existing descriptors and all historical evidence remain retained.",
       "evidence": "{'methods': 143, 'path': 130, 'summary': 482, 'successStatuses': 135},"
+    },
+    {
+      "id": "oc-ee825194ebfb4bbc29d7",
+      "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+      "line": 136,
+      "symbol": "read",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "\"500\"",
+      "expressionDigest": "5ac95f46dcda9e6a85f4d281cd691aea7b00846d8f8612d198d396136e9c5140",
+      "evidenceDigest": "bd68908a5ae9069db085b5e834737b3bd57b98a7fe1bcf8f90d211de0a451076",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "remediationOwner": "#446",
+      "rationale": "Reviewed issue #446 atom \"500\" at scripts/tests/test_kubernetes_runner_acceptance.py#read: executable positive/negative contract input or assertion; no production authority.",
+      "retirementRationale": "#606 Attempt4 replaces CPU fixture atom '\"500\"' in read: mock quota and environment now cover100m and500m; this is not equivalent migration.",
+      "evidence": "patch.dict(attester.os.environ, {\"RAVENROOT_MEMORY_LIMIT_BYTES\": \"134217728\", \"RAVENROOT_CPU_MILLICORES\": \"500\"}):"
     }
   ],
   "evidenceRecords": {
@@ -696792,7 +696908,6 @@
     "17b4a1e8166966f96e615517577d58389f129c8e8b35622a934898496a65a038": "public static final String TRUNCATION_MARKER = \" [truncated]\";",
     "17b721fbc2d111aac2320f830afcda2b135f1a5cf8f7d64dcb8b5f1fb71bc86d": "public final class OpenApiRequestReplyNodeBehavior implements NodeBehavior, InboundSourceCapable { public static final String BEHAVIOR = \"openapi.request-reply\";",
     "17c0b7131a3f7d6822da3b84ec13fbb73baf8322d389099fcf246e709ee22685": "self.assertEqual(feature, (self.root / \"feature.txt\").read_bytes())",
-    "17c6c7842f48517bafe6e892e9cff0b160ba48957dac68722900f0993d7faf30": "with patch.object(attester.pathlib.Path, \"read_text\", autospec=True, side_effect=read), \\",
     "17c8d469bb82727ac795de6aada11ed6f01a560b72973557b389d23fe2764c97": "\"sourceInventoryDigest\": audit.hashlib.sha256(inventory.read_bytes()).hexdigest(),",
     "17d5d43f1fcd42304eaf40778daf0e95aef2913250b20d7d452a31038aad6150": "const summary = document.getElementById('activity-summary');",
     "17dee63939c61a10a460970cfad6cd386d84950d559b284a76b490249c5f2ed5": "\"\"\"Resolve one local href to its rendered URL path and decoded fragment.",
@@ -698432,6 +698547,7 @@
     "3bd754f83ee64b7441ab9750ad8f98c55cb9a4a2dd074f43e04073590a46e2f2": "\"cni\": \"calico\", \"storage\": \"fixed-ext4-local-pv\", \"tests\": sum(CLASSES.values()),",
     "3bdaf4eaa07da2b3665f19168d3004791aaadebdc2757a3ea6ccb4752e810faa": "const pending = Number(node.data('humanTaskPending')) > 0;",
     "3bddbb05525159fb72e9904cd15a0e3962189cd07ad9ab980e0428d914761ae0": "static final String TOOL_FAILED = \"The tool failed. Do not call it again with the same arguments.\";",
+    "3be8a3978518661cc587a75b7fa6efa1a2feb0a905ac90f38dc26120e2fa9d05": "verify(dict(sources, **{path: sources[path].replace(marker, \"\")}))",
     "3be9ddaaeec982c5a4779662d2d2545e7b955c33bf0f20f43261b9138714db21": "} private static <T> T await(CompletionStage<T> stage) { return stage.toCompletableFuture().orTimeout(10, TimeUnit.SECONDS).join();",
     "3bf300511dfc265a77c40a4075e403fed4162012ec7b80fcdb3bccb9b7cd1172": "'DEFAULT_TIMEOUT_MS = 5_000;', 'MIN_TIMEOUT_MS = 100;', 'MAX_TIMEOUT_MS = 300_000;',",
     "3bf52e39cc53be5ba3c58c868443e1f79e1d515139eb5396e009658d302c14c9": "const current = zone === 'bottom' ? moveEvent.clientY : moveEvent.clientX;",
@@ -698686,6 +698802,7 @@
     "41530136d6252f59d314a7a51a90c7858de63ebea81af0a070fbb85384911069": "path.write_text(original.replace(before, \"if digest(downloaded) == digest(local):\"), encoding=\"utf-8\")",
     "4158f4df4797705f3d49e21a5c213b2be52afed2f0d78070f3a562f7c3d7e6a8": "echo \"OK: RED reproduced -- the script rejected the opt-in in the image\" >&2 ;;",
     "4160749e1330d7870af771c6c69201c435f3676452ceaa0d66044520c1c14e00": "path = \"ravenroot/ravenroot-ui/package.json\"",
+    "41636c6fe45cba8a28e44940cae4f1ccffec975a17a21175d0a2ff53d79879e5": "(\"profile.allowedAgents(), profile.fleetLimits(), 100, WorkspaceProfile.Driver.KUBERNETES\",),",
     "4164c99a2a462ec25076ba746d05fccc173f86127478e0239a18ee994db815ca": "public static final String EXECUTION_STORE_DIR_VARIABLE = \"RAVENROOT_EXECUTION_STORE_DIR\";",
     "416ab4af4f3d7dc998947c8f8ce2e46a35a883e83d65ee5492e8f341f44aaa01": "[ $# -ge 2 ] || { echo \"install --all: --dir requires a value\" >&2; return 2; }",
     "416f29e170913cc27e83765c00112b3196f9348d55717994fdacb7d4b81ccb1a": "\"\"\"Verify release metadata, publication boundaries, and workflow authority.\"\"\"",
@@ -698981,6 +699098,7 @@
     "4766ad3eacb93bf65fa77eb15a3c98a5e18267b2cb40dc2b2c45f2ed4f516433": "mkdir -p \"$SINGLE_SOURCE\"",
     "476826548152936b950bf3ba60a4f02fd5846f07196bde6ccebe80ffec3c3789": "raise OciRegistryError(\"image manifest has no layers\")",
     "476ce2d0b269c561429afc06381604da1bba59d6edc9ca3407b3b8b529824b5e": "results={j:'success' for j in ci_required.GATED_JOBS}|{'release-classification':'success'}",
+    "476dccca1b31a0ab592af2ed5bf4832c89f15d35a621bc20bd0c4fa5fa010cd8": "(\"RunnerFleetLimits.from(capacity), 500, WorkspaceProfile.Driver.KUBERNETES\",),",
     "477709c23576a5bad13839260493f800ca16937aa74de8433a20600417f1e886": "self.git(\"commit\", \"-qm\", message)",
     "477a9231885f1db3b0427960e9b9b03bd48d567c285bc711946e3eac20663dc5": "\"owner\": authority[\"owner\"], \"field\": \"maxDepth\",",
     "477acfefc1adbb5b963fc74671fb8ed9ebf6ba4cffa16a0e36bc01c8ec906834": "echo \"Building $target_count extensions in one Maven reactor invocation...\" >&2",
@@ -701664,6 +701782,7 @@
     "80a008fdc0e186ccd59040abdb97a740aea5ed25e2b346afd02c7c5d37f806ea": "public record RateLimitConfiguration( int addressRequestsPerSecond, int addressBurst, int tenantRequestsPerSecond, int tenantBurst, int principalRequestsPerSecond, int principalBurst, int submissionsPerSecond, int submissionBurst, int tenantConcurrentSubmissions, int globalActiveExecutions, int tenantConcurrentStreams, int principalConcurrentStreams, int streamQueueCapacity, int maxQueryBytes, int maxQueryParameters, int maxHeaderCount, int maxHeaderBytes, int maxHeaderValueBytes, int maxTrackedClients, int maxTrackedTenants, int maxTrackedPrincipals, Duration idleEntryTtl, Duration executionMaxAge) { private static final int MAX_BURST = 1_000_000;",
     "80a1377a205e406d84927bd6828113cfeb1c4d42a076725304460c1145010c08": "const line = document.createElement('p');",
     "80a7cc42c8ae1e2a4956fd2b01d8130a0545c12b1d92e9ea72b5e271172411fc": "const unconfigured = adapterBound && adapterIdOf(value) === '';",
+    "80c18cb29116700037e2dff1b66170350eff1b4f6913cde2cff62b0e5389e399": "patch.object(attester.pathlib.Path, \"read_text\", autospec=True, side_effect=read), \\",
     "80c5d06c6a73dc47163cfe9f37af4347826fa61dec4bad297c111cf970fe6111": "original_test.replace(', \"RAVENROOT_SYNTHETIC_MAX_BURST\"', \"\"),",
     "80c7fc53ab56fb07c0708d92f321364ac3bfe38818bac43004852e9f30db2abb": "\"RAVENROOT_GRAPH_RELEASE_AUTOMATION\",",
     "80cf16e2332ef13351a9f03b94769dd0e7d88eab244b6c8ebecedec4370e9d57": "('configuration.maxOutgoingFrameBytes()', '65536'),",
@@ -702740,6 +702859,7 @@
     "976201e2998d1e80dce7e1a573470cce64ecc4a3b27c09667d6b45f1f212122b": "retry = next(row for row in rows if row[3] == \"/properties/retries/oneOf/1/$ref\")",
     "97628cf9174cfb5f7bb179becf619fff5ed6cb12b91b02eecee475f4b5ff44a6": "const onKeyDown = event => { if (event.key === 'Escape' && dismiss()) { event.preventDefault();",
     "97661eebd99c77ceb88016dddceabc89eafd271c5c2bb607ced4d2c752d6c5b1": "ENV RAVENROOT_ENABLED_PLUGINS=ai.ravenroot.extensions.ocr",
+    "97766d5937ba49adf8f6d9464f192704edcabfb902e8d00c96372cb25a2eae31": "(\"end = time.monotonic() + 10\", 'raise RuntimeError(\"positive CPU throttling evidence is missing\")'),",
     "977a139a08fa37243a53e681dbdaaac0d53cf4b580b3d3257a9f30dfbc8ea461": "raise RuntimeError(\"an existing dedicated runner temporary directory is required\")",
     "978223541d739b8f0dc697ea3f00b17f6c5c5c8c2671ec47bc661c6c6031b102": "command([\"mkfs.xfs\", \"-f\", \"-n\", \"ftype=1\", str(image_file)])",
     "97827abfcedfb81e5eb432b3fbd6f8492067845d4f1f52d15d5488171089127b": "node -e \"require('node:http').createServer(()=>{}).listen(${PORT},'127.0.0.1')\" &",
@@ -704503,6 +704623,7 @@
     "bd2c241daeba07d28931ea25b13001dbd8889a0a3743ac1952e2be508b5b48e8": "\"RAVENROOT_GRAPH_AUTHORING_TENANT_NAMESPACES\": (",
     "bd2ed97d2d8c1d324b4dec92fbcd712ef207691e250dd7d40b87ded5cbde00cb": "CHART=\"$PROJECT_DIR/deploy/helm/ravenroot\"",
     "bd32ba13035e303648ced9d9ea1bd71b04ed16379e5425f392707a4184012063": "\"RAVENROOT_CONTAINER_LOOPBACK_ONLY\": \"true\", \"RAVENROOT_LOCAL_HOST_BIND_ADDRESS\": \"127.0.0.1\"",
+    "bd33332c65623acf82f33cac615e6dcc65e534b321bc674d70b3eeae1683a915": "patch.dict(attester.os.environ, {\"RAVENROOT_MEMORY_LIMIT_BYTES\": \"134217728\", \"RAVENROOT_CPU_MILLICORES\": str(millicores)}):",
     "bd33e617b92c213d57ff48db60210d1e0d3314f4d3ba06dbe9ab32e5b4cd81af": "RAVENROOT_RATELIMIT_SUBMISSION_RPS submissionsPerSecond rateLimit.submissionsPerSecond 1000000",
     "bd352745e8fa308a9d96a6fb547fe2335be05439e4b9187d89a8b11debad0ff5": "public static final String RETRY_ON = \"retry.retryOn\";",
     "bd3575afc1a9a30b745118040a488723492313beb8ad1067fa04df2d7494e4cf": "RAVENROOT_HUMAN_TASK_RESPONSE_MAX_VALUE_COUNT: ${RAVENROOT_HUMAN_TASK_RESPONSE_MAX_VALUE_COUNT:-}",
@@ -704521,7 +704642,6 @@
     "bd5ad078960f5ba68dd2324f7ec13a73da5d7b4c960016966d5b964630a0c34e": "positive(\"RAVENROOT_AI_MAX_DISCOVERED_MCP_TOOLS_PER_SERVER\", maxDiscoveredMcpToolsPerServer);",
     "bd5d656a847a3f77c0c642aa0d71bc8f576ee0891e569af4c243af773b365f65": "export const ASSISTANT_PROPOSAL_OPERATION_LIMIT = 64;",
     "bd601c98c7916cf87c387d081c12a2e114cf71b55a1627b89a04987c7128667f": "--set probes.liveness.periodSeconds=11 \\",
-    "bd68908a5ae9069db085b5e834737b3bd57b98a7fe1bcf8f90d211de0a451076": "patch.dict(attester.os.environ, {\"RAVENROOT_MEMORY_LIMIT_BYTES\": \"134217728\", \"RAVENROOT_CPU_MILLICORES\": \"500\"}):",
     "bd6f0b92bbacd5819c16b7b0facd64f42144d498df1a6ef1121c9e003c0df99b": "f\"immutable GHCR image differs: expected {expected_image_digest}, found {image_digest}\"",
     "bd78532364a0d2c1f28e949942077ecbbe9d963984ab32c10a2ed13d6b590d82": "\"RAVENROOT_CONTAINER_LOOPBACK_ONLY\": \"true\", \"RAVENROOT_LOCAL_HOST_BIND_ADDRESS\": \"127.0.0.1\",",
     "bd787e80defc1556141fe9ea6da432305bce31b17399c5e6425bba0f6f071c01": "- name: RAVENROOT_ACTIVITY_CAPTURE_ENABLED",
@@ -705335,6 +705455,7 @@
     "ce122db625e38a6239d8dd3d928dd910504d3eb080690b74319103b090f9168c": "\"maxAttentionPageSize\": { \"$ref\": \"#/definitions/positive100\" }",
     "ce18d53fffa7c28f347258371cd81d6a554b7dba4c8b75761c7ca08b6d434e1b": "*) echo \"RAVENROOT_IMAGE must be an immutable OCI digest\" >&2; exit 1 ;; \\",
     "ce1e154474897f5ab8ca3db4ce744e43b1f4ee32ff320fb9f4272f46f6055a7d": "const parallel = dataValByName(edgeEl, 'parallel', 'd17') === 'true';",
+    "ce2162c5768afd34488ef09a1c57a1efe99472a58f784dfa7997cffd1d6f05c3": "self.assertEqual(1, observed[path].count(marker), (path, marker))",
     "ce251240420361f9f1d6819fa3aa85bd7ce0ec594fc64de4f4a67e68c01dcca6": "public record JoinRecord(JoinKey key, long revision, Map<String, JoinBranchOutcome> branches, JoinPhase phase, Instant openedAt, Instant settledAt, JoinFailureReason failureReason, Integer firedThrough) { public static final long ABSENT_REVISION = 0L;",
     "ce2b8b6965cbecfce33ab12a983709da1b3b30cfef44d32f2d911ace74a6ef5a": "- name: RAVENROOT_GRAPH_MAX_TRAVERSAL_STEPS",
     "ce2c0e571c0549068c9b2dadb7e878cb9324ebd3cc787ea0b0bf5ae6076da500": "const buildButton = panel.querySelector('[data-program-operation=\"build\"]');",
@@ -1529411,6 +1529532,140 @@
       "mappings": [],
       "retirements": [],
       "additions": []
+    },
+    {
+      "id": "issue-606-attempt4-native-cpu-fixture-v1",
+      "issue": "#606",
+      "sourceRevision": "56a724995a1b43ba76d6d898321fac59907a16f5",
+      "targetRevision": "edc1036d6b5904dfa9685e2be7db08596a03c15f",
+      "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+      "sourceInventoryDigest": "908498ccf7d83e43bc925f776cff26ae044a7ec98e5b30fc984a007155b9a7cb",
+      "targetCandidateDigest": "5d67d4ac099ba3b720eada3b34610cb88e348fc494911c5367587850fa1d43d0",
+      "mappings": [
+        {
+          "fromId": "oc-f7f53c7c5b8d80415fa6",
+          "toId": "oc-1e739b648aab1e25444f",
+          "approved": true,
+          "rationale": "#606 Attempt4 retains read inline-script-operational/inline atom '\"read_text\"' in scripts/tests/test_kubernetes_runner_acceptance.py; only surrounding native CPU fixture proof changes evidence.",
+          "equivalence": {
+            "kind": "same-atom-v1",
+            "beforeEvidenceDigest": "17c6c7842f48517bafe6e892e9cff0b160ba48957dac68722900f0993d7faf30",
+            "afterEvidenceDigest": "80c18cb29116700037e2dff1b66170350eff1b4f6913cde2cff62b0e5389e399"
+          }
+        },
+        {
+          "fromId": "oc-e9c81e5e8dcf3df7ef0f",
+          "toId": "oc-09b74c761e05e9cc15bb",
+          "approved": true,
+          "rationale": "#606 Attempt4 retains read environment-binding/RAVENROOT_CPU_MILLICORES atom 'RAVENROOT_CPU_MILLICORES' in scripts/tests/test_kubernetes_runner_acceptance.py; only surrounding native CPU fixture proof changes evidence.",
+          "equivalence": {
+            "kind": "same-atom-v1",
+            "beforeEvidenceDigest": "bd68908a5ae9069db085b5e834737b3bd57b98a7fe1bcf8f90d211de0a451076",
+            "afterEvidenceDigest": "bd33332c65623acf82f33cac615e6dcc65e534b321bc674d70b3eeae1683a915"
+          }
+        },
+        {
+          "fromId": "oc-5b8401f87250fb1ce9e6",
+          "toId": "oc-616e4b60250b7fd1742d",
+          "approved": true,
+          "rationale": "#606 Attempt4 retains read environment-binding/RAVENROOT_MEMORY_LIMIT_BYTES atom 'RAVENROOT_MEMORY_LIMIT_BYTES' in scripts/tests/test_kubernetes_runner_acceptance.py; only surrounding native CPU fixture proof changes evidence.",
+          "equivalence": {
+            "kind": "same-atom-v1",
+            "beforeEvidenceDigest": "bd68908a5ae9069db085b5e834737b3bd57b98a7fe1bcf8f90d211de0a451076",
+            "afterEvidenceDigest": "bd33332c65623acf82f33cac615e6dcc65e534b321bc674d70b3eeae1683a915"
+          }
+        },
+        {
+          "fromId": "oc-13440e89875c5f99220d",
+          "toId": "oc-52712b830b59360140e5",
+          "approved": true,
+          "rationale": "#606 Attempt4 retains read inline-script-operational/inline atom '\"134217728\"' in scripts/tests/test_kubernetes_runner_acceptance.py; only surrounding native CPU fixture proof changes evidence.",
+          "equivalence": {
+            "kind": "same-atom-v1",
+            "beforeEvidenceDigest": "bd68908a5ae9069db085b5e834737b3bd57b98a7fe1bcf8f90d211de0a451076",
+            "afterEvidenceDigest": "bd33332c65623acf82f33cac615e6dcc65e534b321bc674d70b3eeae1683a915"
+          }
+        },
+        {
+          "fromId": "oc-22bbf69e1b9ced8dde42",
+          "toId": "oc-51640a7a92138d7b7b4e",
+          "approved": true,
+          "rationale": "#606 Attempt4 retains read inline-script-operational/inline atom '\"RAVENROOT_CPU_MILLICORES\"' in scripts/tests/test_kubernetes_runner_acceptance.py; only surrounding native CPU fixture proof changes evidence.",
+          "equivalence": {
+            "kind": "same-atom-v1",
+            "beforeEvidenceDigest": "bd68908a5ae9069db085b5e834737b3bd57b98a7fe1bcf8f90d211de0a451076",
+            "afterEvidenceDigest": "bd33332c65623acf82f33cac615e6dcc65e534b321bc674d70b3eeae1683a915"
+          }
+        },
+        {
+          "fromId": "oc-d919421c67c6d602d8a6",
+          "toId": "oc-957011b9653333a9dc17",
+          "approved": true,
+          "rationale": "#606 Attempt4 retains read inline-script-operational/inline atom '\"RAVENROOT_MEMORY_LIMIT_BYTES\"' in scripts/tests/test_kubernetes_runner_acceptance.py; only surrounding native CPU fixture proof changes evidence.",
+          "equivalence": {
+            "kind": "same-atom-v1",
+            "beforeEvidenceDigest": "bd68908a5ae9069db085b5e834737b3bd57b98a7fe1bcf8f90d211de0a451076",
+            "afterEvidenceDigest": "bd33332c65623acf82f33cac615e6dcc65e534b321bc674d70b3eeae1683a915"
+          }
+        }
+      ],
+      "retirements": [
+        {
+          "id": "oc-ee825194ebfb4bbc29d7",
+          "approved": true,
+          "rationale": "#606 Attempt4 replaces CPU fixture atom '\"500\"' in read: mock quota and environment now cover100m and500m; this is not equivalent migration."
+        }
+      ],
+      "additions": [
+        {
+          "id": "oc-6f2200a1eca29b85c839",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "#606 Attempt4 native CPU test fixture atom '\"profile.allowedAgents(), profile.fleetLimits(), 100, WorkspaceProfile.Driver.KUBERNETES\"' in test_native_cpu_fixture_keeps_real_boundary_positive_proof_and_zero_skip_gates: stricter workspace100m, preserved real500m/preflight, positive counter refusal and five zero-skip native gates; production unchanged."
+          }
+        },
+        {
+          "id": "oc-23146f7bc388315882de",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "#606 Attempt4 native CPU test fixture atom '\"RunnerFleetLimits.from(capacity), 500, WorkspaceProfile.Driver.KUBERNETES\"' in test_native_cpu_fixture_keeps_real_boundary_positive_proof_and_zero_skip_gates: stricter workspace100m, preserved real500m/preflight, positive counter refusal and five zero-skip native gates; production unchanged."
+          }
+        },
+        {
+          "id": "oc-cc983156e9dc873332a0",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "#606 Attempt4 native CPU test fixture atom '\"end = time.monotonic() + 10\"' in test_native_cpu_fixture_keeps_real_boundary_positive_proof_and_zero_skip_gates: stricter workspace100m, preserved real500m/preflight, positive counter refusal and five zero-skip native gates; production unchanged."
+          }
+        },
+        {
+          "id": "oc-756f5311735169911f4b",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "#606 Attempt4 native CPU test fixture atom '\\'raise RuntimeError(\"positive CPU throttling evidence is missing\")\\'' in test_native_cpu_fixture_keeps_real_boundary_positive_proof_and_zero_skip_gates: stricter workspace100m, preserved real500m/preflight, positive counter refusal and five zero-skip native gates; production unchanged."
+          }
+        },
+        {
+          "id": "oc-a2af44bcdf53bcf217fd",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "#606 Attempt4 native CPU test fixture atom '1' in verify: stricter workspace100m, preserved real500m/preflight, positive counter refusal and five zero-skip native gates; production unchanged."
+          }
+        },
+        {
+          "id": "oc-467208e5aaae90da34b0",
+          "metadata": {
+            "status": "retained",
+            "classification": "test-fixture",
+            "rationale": "#606 Attempt4 native CPU test fixture atom '\"\"' in verify: stricter workspace100m, preserved real500m/preflight, positive counter refusal and five zero-skip native gates; production unchanged."
+          }
+        }
+      ]
     }
   ],
   "semanticReviewHistory": [

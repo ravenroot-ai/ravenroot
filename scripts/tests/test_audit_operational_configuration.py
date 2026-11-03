@@ -6900,7 +6900,8 @@ class GraphAuthoringPolicyAuditTest(unittest.TestCase):
                 ('release-proposal-progress.js', 'decode(observed) === candidate.graphMl', 'true'),
                 ('release-proposal-progress.js', 'feedback.signal, AbortSignal.timeout(timeout)', 'new AbortController().signal'),
                 ('graph-authoring-client.js', 'registrationIdentity: binding.registrationIdentity', 'registrationIdentity: deployment.registrationIdentity'),
-                ('ReleaseAutomationPolicy.java', 'if (raw.isBlank()) return disabled();', 'if (raw.isBlank()) return null;')):
+                ('ReleaseAutomationPolicy.java', 'if (raw.isBlank()) return disabled();', 'if (raw.isBlank()) return null;'),
+                ('ReleaseAutomationPolicy.java', 'new PayloadLimits(4096, 4, 20, 20, 1024, 64)', 'new PayloadLimits(8192, 4, 20, 20, 1024, 64)')):
             path = next(path for path in sources if path.name == filename)
             self.assertIn(before, sources[path])
             mutated = {**sources, path: sources[path].replace(before, after)}

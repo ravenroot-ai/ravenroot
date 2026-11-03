@@ -15372,7 +15372,8 @@ def graph_authoring_release_boundary(sources: dict[Path, str], ui: str, applicat
     return includes(policy, 'Set.of("label", "deploymentId",',
                     '"registrationIdentity", "graphVersion", "sourceNodeId")',
                     'if (raw.isBlank()) return disabled();', '!disabled &&',
-                    'map.values().stream().anyMatch(x -> !(x instanceof String))') \
+                    'map.values().stream().anyMatch(x -> !(x instanceof String))',
+                    'new PayloadLimits(4096, 4, 20, 20, 1024, 64)') \
         and includes(facade, 'require(context, AuthorizationAction.EXECUTION_START, collection("deployments", context));') \
         and includes(trigger, '!record.durableRegistration()', '!record.lifecycleId().value().equals(registrationIdentity)',
                      '!record.deployment().incarnationId().equals(incarnationId)', '!record.graphHash().equals(graphVersion)',
@@ -15726,8 +15727,6 @@ def graph_authoring_authority_from_source(
             "setting": setting,
             "owner": ("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GraphAuthoringWebhookConfiguration.java#GraphAuthoringWebhookConfiguration"
                       if environment.startswith("RAVENROOT_GRAPH_AUTHORING_WEBHOOK_") else
-                      "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/ReleaseAutomationPolicy.java#ReleaseAutomationPolicy"
-                      if environment == "RAVENROOT_GRAPH_RELEASE_AUTOMATION" else
                       f"{GRAPH_AUTHORING_CONFIGURATION_PATH.as_posix()}#GraphAuthoringConfiguration"),
             "field": field, "bindings": [environment], "default": default,
             "defaultEvidence": ids, "validation": validation,

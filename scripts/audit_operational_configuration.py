@@ -14950,7 +14950,7 @@ GRAPH_AUTHORING_SUPPORT_FILE_PROOFS = {
 GRAPH_AUTHORING_TEST_PROOFS = {
     Path("ravenroot/ravenroot-ui/test/release-proposal-progress.test.js"): "73281595637e9c21f9044c2109bae7a103dd60170ada604d7cc33f9fbb91d80f",
     Path("ravenroot/ravenroot-ui/test/repository-picker.test.js"): 'bdbdcec0431ce60bc55578cf6310f7d730ac17ff6bdc7d4aea176b1241872fb0',
-    Path("ravenroot/ravenroot-ui/e2e/managed-repository.spec.js"): '8d2ebab64c414968814f5bb2af91e9582165ba26f965daa67fe0e01117260b60',
+    Path("ravenroot/ravenroot-ui/e2e/managed-repository.spec.js"): '14c5142bab6caf5abc81e3460e5301a62ebeab0fb388910f6900b4f774b29e12',
     Path("ravenroot/ravenroot-ui/e2e/activity-localization.spec.js"): '420078563f5c9e1c3b0365828066c9a8df354a0c00d1e733f64ef2345a0612c4',
     Path("ravenroot/ravenroot-ui/e2e/startup-import.spec.js"): '4117b49e63dbb83c325650f1788f21ccb6bbcc80f86b7cbea71956475756eeb0',
     Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/AuthoringPublicationIndexTest.java"): "64bd2a9f1cd7a82af8442fa2be71a7e84833582ba6aee133dbe8ed395d475afd",
@@ -15075,7 +15075,7 @@ GRAPH_AUTHORING_UI_METHOD_PROOFS = {
     "repositoryHistory": "23a4f3610446b3e1e16e327b73f2401ad0dad4f27f614dbf423242059a914c8d",
     "repositoryDiscard": "1399bd3fda6a09e40903bd0b166d606c1e64fc7524d559390924f74c6faf7be6",
     "repositoryDelete": "12486c92d762174b9161c1ec5be9a3c77e54436f945bff7b673b2407507d8893",
-    "repositoryRelease": "4da3dcda89efdb8c8df5078265f5d9f7678310231ed8dc5185334f9912ef4c39",
+    "repositoryRelease": "de3b913d8a4fc56ac6c5027555849b4afef40e98acb5a08ac8a6cd193a1c7e13",
     "publishedArtifacts": "21ce0b20bfb0f6bb3bab951cc5662dd2d416788bf67684ca0bc749578b1a0637",
     "connectRuntime": '9d8c41966918060e48f83d576318a64a7a7156cca769df6802810e670ea1bf60',
     "createStartupImportPlaceholder": "9b194ed16409f284ecdbe713a9be041d8cc60982f90a84b5d6f016c886e6feef",
@@ -15334,11 +15334,19 @@ def graph_authoring_managed_open_boundary(sources: dict[Path, str], ui: str) -> 
     if not includes(released, "const saved = await client.open(id, 'draft');",
                     "saved.revision?.[key] !== binding.expected[key]",
                     "graphMl: decodeGraphMl(saved)",
-                    "const operation = await releaseOperationIdentity([client.baseUrl, id, candidate]);",
+                    "let candidate = null;",
+                    "} catch (error) { requireRepositoryOperationBinding(target, binding);"
+                    " if (error.status !== 404 || error.code !== 'NOT_FOUND' || automation?.mode === 'isolated-automerge') throw error;",
+                    "const operation = await releaseOperationIdentity([client.baseUrl, id,"
+                    " candidate || { documentId: id, revision: binding.expected, draftAbsent: true }]);",
                     "Object.freeze(result);", "result.draftHead, result.releaseHead, automation",
+                    "if (candidate && automation?.mode === 'isolated-automerge')",
                     "await client.triggerAutomation(automation, requestId,",
                     "receipt.outcome === 'RECONCILE'", "feedback.reconcile(queue)",
-                    "observeReleaseProposal({ client, candidate, feedback"):
+                    "if (candidate) void observeReleaseProposal({ client, candidate, feedback"):
+        return False
+    if released.count("candidate =") != 2 or released.count("client.open(") != 1 \
+            or re.search(r"feedback\.(?:released|published)\(", released):
         return False
     saved = body("saveRepositoryGraph")
     if not includes(saved, "if (target.history === history && history.revision() === submittedRevision)",

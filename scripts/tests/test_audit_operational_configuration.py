@@ -6908,6 +6908,29 @@ class GraphAuthoringPolicyAuditTest(unittest.TestCase):
             with self.subTest(guard=before):
                 self.assertFalse(audit.graph_authoring_release_boundary(mutated, ui, application))
 
+    def test_missing_draft_review_exception_stays_ordinary_exact_and_unobserved(self) -> None:
+        sources = {path: (self.root / path).read_text(encoding="utf-8")
+                   for path in (*audit.GRAPH_AUTHORING_FILE_PROOFS, *audit.GRAPH_AUTHORING_SUPPORT_FILE_PROOFS)}
+        ui = (self.root / audit.GRAPH_AUTHORING_UI_PATH).read_text(encoding="utf-8")
+        span = audit._javascript_function_span(ui, "repositoryRelease")
+        body = ui[slice(*span)]
+        self.assertTrue(audit.graph_authoring_managed_open_boundary(sources, ui))
+        for before, after in (
+                ("error.status !== 404", "error.status !== 403"),
+                ("error.code !== 'NOT_FOUND'", "false"),
+                ("|| automation?.mode === 'isolated-automerge'", "|| false"),
+                ("} catch (error) {\n      requireRepositoryOperationBinding(target, binding);", "} catch (error) {"),
+                ("saved.revision?.[key] !== binding.expected[key]", "false"),
+                ("if (candidate) void observeReleaseProposal", "void observeReleaseProposal"),
+                ("if (candidate && automation?.mode", "if (automation?.mode"),
+                ("feedback.success(result);", "feedback.success(result); feedback.published();"),
+                ("let candidate = null;", "let candidate = { graphMl: 'old release' };"),
+                ("if (error.status !== 404", "throw error; if (error.status !== 404")):
+            with self.subTest(guard=before):
+                self.assertEqual(1, body.count(before))
+                mutated = ui[:span[0]] + body.replace(before, after, 1) + ui[span[1]:]
+                self.assertFalse(audit.graph_authoring_managed_open_boundary(sources, mutated))
+
     def test_authoring_evidence_reorders_only_live_ids_and_retains_closed_membership(self) -> None:
         evidence = ["oc-before-a", "oc-before-z", "oc-before-a"]
         document = {

@@ -222,12 +222,156 @@ public class PersonalOAuthServiceTest {
             assertEquals("login-required", call("/authorize", browser, Map.of()).document().get("state"));
         }
     }
+    @Test void executionAdmissionRejectsCompletedLogoutAfterPreflight() throws Exception { executionAfterPreflight("/sign-out"); }
+    @Test void executionAdmissionRejectsSessionReplacementAfterPreflight() throws Exception { executionAfterPreflight("/select"); }
+    @Test void executionAdmissionRejectsProtectedLockAfterPreflight() throws Exception { executionAfterPreflight("/lock"); }
+    private void executionAfterPreflight(String action) throws Exception {
+        String browser = login("A", "oaiapp_A", null);
+        String id = connectionId(call("", browser, null).document());
+        if (action.equals("/lock")) {
+            call("/protect", browser, Map.of("passphrase", "a bounded execution passphrase"));
+            call("/unlock", browser, Map.of("passphrase", "a bounded execution passphrase", "purpose", "execution"));
+        }
+        var context = personalContext(browser, "late-execution");
+        var entered = new CountDownLatch(1); var release = new CountDownLatch(1);
+        // Test-only scheduling seam at the existing requirement comparison, after token preflight.
+        // Production callers use ordinary immutable sets; the barrier is not a public input contract.
+        Set<String> requirements = new AbstractSet<>() {
+            public Iterator<String> iterator() { return Set.of("openai").iterator(); }
+            public int size() { return 1; }
+            public boolean equals(Object other) { entered.countDown(); await(release); return Set.of("openai").equals(other); }
+        };
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            var attempt = executor.submit(() -> assertThrows(PersonalConnectionException.class,
+                    () -> service.authorizeExecution(headers(browser), context, requirements)));
+            try {
+                assertTrue(entered.await(10, TimeUnit.SECONDS));
+                assertEquals(200, call(action, browser, Map.of("connection", id)).code);
+            } finally { release.countDown(); }
+            attempt.get(10, TimeUnit.SECONDS);
+        }
+        assertNoExecution(context);
+    }
+    @Test void executionAdmissionRejectsExpiredSessionDuringRefresh() throws Exception { executionDuringRefresh("expiry"); }
+    @Test void executionAdmissionRejectsLocalLogoutDuringProtectedRefresh() throws Exception { executionDuringRefresh("/sign-out"); }
+    @Test void executionAdmissionRejectsLocalLockDuringProtectedRefreshAndKeepsRotation() throws Exception { executionDuringRefresh("/lock"); }
+    @Test void executionAdmissionRejectsExpiredUnlockDuringProtectedRefresh() throws Exception { executionDuringRefresh("unlock-expiry"); }
+    private void executionDuringRefresh(String action) throws Exception {
+        var time = new MutableClock(); clock = time; service = create(); provider.initialExpiry = 1;
+        String browser = login("A", "oaiapp_A", null);
+        boolean protectedConnection = !action.equals("expiry");
+        if (protectedConnection) {
+            assertEquals(200, call("/protect", browser, Map.of("passphrase", "a refresh rotation passphrase")).code);
+            assertEquals(200, call("/unlock", browser, Map.of("passphrase", "a refresh rotation passphrase", "purpose", "execution")).code);
+        }
+        var context = personalContext(browser, "refresh-execution");
+        var entered = new CountDownLatch(1); var release = new CountDownLatch(1);
+        provider.beforeRefreshResponse = () -> { entered.countDown(); await(release); };
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var attempt = executor.submit(() -> assertThrows(PersonalConnectionException.class,
+                    () -> service.authorizeExecution(headers(browser), context, Set.of("openai"))));
+            Future<FakeExchange> cancellation = null;
+            try {
+                assertTrue(entered.await(10, TimeUnit.SECONDS));
+                if (action.equals("expiry")) time.now = time.now.plusSeconds(28_801);
+                else if (action.equals("unlock-expiry")) time.now = time.now.plusSeconds(901);
+                else {
+                    cancellation = executor.submit(() -> call(action, browser, Map.of()));
+                    // Observe immediate local invalidation without waiting on durable cleanup's store lock.
+                    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+                    while (!locallyInvalidated(browser, action) && System.nanoTime() < deadline) Thread.onSpinWait();
+                    assertTrue(locallyInvalidated(browser, action));
+                }
+            } finally { release.countDown(); }
+            attempt.get(10, TimeUnit.SECONDS);
+            if (cancellation != null) assertEquals(200, cancellation.get(10, TimeUnit.SECONDS).code);
+        }
+        assertNoExecution(context);
+        if (protectedConnection) {
+            // Verify durable rotation independently of the revoked in-memory unlock, using artificial fixture data.
+            new ProtectedConnectionStore(config.directory(), config.keyFile()).transaction(data -> {
+                var connections = (Map<?, ?>) data.get("connections"); var c = (Map<?, ?>) connections.values().iterator().next();
+                byte[] key = ProtectedConnectionStore.passwordKey("a refresh rotation passphrase".toCharArray(), Base64.getDecoder().decode((String)c.get("salt")));
+                byte[] plain = ProtectedConnectionStore.decrypt(key, Base64.getDecoder().decode((String)c.get("lockedTokens")));
+                try { assertEquals("refresh-2", ((Map<?, ?>)PayloadJson.read(plain, ProtectedConnectionStore.LIMITS).toJava()).get("refresh_token")); }
+                finally { Arrays.fill(key, (byte)0); Arrays.fill(plain, (byte)0); }
+                return null;
+            });
+        }
+    }
+    private boolean locallyInvalidated(String browser, String action) {
+        if (action.equals("/sign-out")) return !service.principal(headers(browser), perimeter).issuer().equals(PersonalOAuthService.ISSUER);
+        try {
+            var field = PersonalOAuthService.class.getDeclaredField("unlocked"); field.setAccessible(true);
+            return !((Map<?, ?>)field.get(service)).containsKey(browser.split("=", 2)[1]);
+        } catch (ReflectiveOperationException failure) { throw new AssertionError(failure); }
+    }
+    private void assertNoExecution(RequestContext context) {
+        try {
+            var field = PersonalOAuthService.class.getDeclaredField("unlocked"); field.setAccessible(true);
+            assertFalse(((Map<?, ?>)field.get(service)).containsKey(context.requestId()), "revoked unlock cannot transfer to the late execution");
+        } catch (ReflectiveOperationException failure) { throw new AssertionError(failure); }
+        assertThrows(PersonalConnectionException.class, () -> service.requireExecutionAuthority(SecurityContext.of(context), Set.of("openai")));
+        assertTrue(service.resolveHttp("ai.ravenroot.extensions.ai", SecurityContext.of(context), URI.create("https://api.openai.com/v1/responses"), "personal:openai").isEmpty());
+        new ProtectedConnectionStore(config.directory(), config.keyFile()).transaction(data -> {
+            assertFalse(((Map<?, ?>)data.getOrDefault("executions", Map.of())).containsKey(context.requestId())); return null;
+        });
+        assertEquals(0, provider.inferences.get());
+    }
+    @Test void assistantDoesNotDispatchAfterCatalogLogout() throws Exception { assistantAfterCatalog("/sign-out"); }
+    @Test void assistantDoesNotDispatchAfterCatalogDisconnect() throws Exception { assistantAfterCatalog("/disconnect"); }
+    @Test void assistantDoesNotDispatchAfterCatalogLock() throws Exception { assistantAfterCatalog("/lock"); }
+    @Test void assistantDoesNotDispatchAfterCatalogExpiry() throws Exception { assistantAfterCatalog("expiry"); }
+    @Test void assistantDoesNotDispatchAfterCatalogUnlockExpiry() throws Exception { assistantAfterCatalog("unlock-expiry"); }
+    @Test void assistantDoesNotDispatchAfterCatalogSessionExpiry() throws Exception { assistantAfterCatalog("session-expiry"); }
+    @Test void assistantDoesNotDispatchAfterCatalogSessionReplacement() throws Exception { assistantAfterCatalog("/select"); }
+    private void assistantAfterCatalog(String action) throws Exception {
+        var time = new MutableClock(); clock = time; service = create();
+        String browser = login("A", "oaiapp_A", null); String id = connectionId(call("", browser, null).document());
+        if (action.equals("/lock") || action.equals("unlock-expiry")) {
+            call("/protect", browser, Map.of("passphrase", "a bounded assistant passphrase"));
+            call("/unlock", browser, Map.of("passphrase", "a bounded assistant passphrase", "purpose", "assistant"));
+        }
+        if (action.equals("unlock-expiry")) time.now = time.now.plusSeconds(840);
+        assertEquals(200, call("/authorize", browser, Map.of()).code);
+        var context = personalContext(browser, "late-assistant");
+        var entered = new CountDownLatch(1); var release = new CountDownLatch(1);
+        provider.beforeModelsResponse = () -> { entered.countDown(); await(release); };
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            var attempt = executor.submit(() -> assertThrows(PersonalConnectionException.class,
+                    () -> service.assistant(headers(browser), context, "hello", "account-model")));
+            try {
+                assertTrue(entered.await(10, TimeUnit.SECONDS)); assertEquals(0, provider.inferences.get());
+                if (action.equals("expiry")) time.now = time.now.plusSeconds(901);
+                else if (action.equals("unlock-expiry")) time.now = time.now.plusSeconds(61);
+                else if (action.equals("session-expiry")) time.now = time.now.plusSeconds(28_801);
+                else assertEquals(200, call(action, browser, Map.of("connection", id)).code);
+            } finally { release.countDown(); }
+            attempt.get(10, TimeUnit.SECONDS); assertEquals(0, provider.inferences.get(), "revocation must prevent dispatch, not merely reject the reply");
+        }
+    }
+    @Test void admittedAssistantIoDoesNotHoldAuthorityLocksWhileAwaitingHeaders() throws Exception {
+        String browser = login("A", "oaiapp_A", null); call("/authorize", browser, Map.of());
+        var context = personalContext(browser, "already-admitted");
+        var admitted = new CountDownLatch(1); provider.afterInferenceAdmission = admitted::countDown;
+        provider.responseHeaders = new CompletableFuture<>();
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var answer = executor.submit(() -> assertThrows(PersonalConnectionException.class,
+                    () -> service.assistant(headers(browser), context, "hello", "account-model")));
+            try {
+                assertTrue(admitted.await(10, TimeUnit.SECONDS));
+                assertEquals(200, executor.submit(() -> call("/sign-out", browser, Map.of())).get(10, TimeUnit.SECONDS).code);
+                assertEquals(1, provider.inferences.get(), "already-admitted I/O remains in flight");
+            } finally { provider.responseHeaders.complete(null); }
+            answer.get(10, TimeUnit.SECONDS);
+        }
+    }
     private static void await(CountDownLatch latch) {
         try { if (!latch.await(10, TimeUnit.SECONDS)) throw new AssertionError("provider response was not released"); }
         catch (InterruptedException failure) { Thread.currentThread().interrupt(); throw new AssertionError(failure); }
     }
     private static final class MutableClock extends Clock {
-        Instant now = Instant.parse("2026-11-04T00:00:00Z");
+        volatile Instant now = Instant.parse("2026-11-04T00:00:00Z");
         public ZoneId getZone() { return ZoneOffset.UTC; }
         public Clock withZone(ZoneId zone) { return this; }
         public Instant instant() { return now; }
@@ -542,8 +686,14 @@ public class PersonalOAuthServiceTest {
         String refreshScope; String refreshedSubject; String refreshError;
         String authorizationError;
         public void failAuthorization(String error) { authorizationError = error; }
+        public void expireInitialToken() { initialExpiry = 1; }
+        public void onRefresh(Runnable barrier) { beforeRefreshResponse = barrier; }
+        public void onModels(Runnable barrier) { beforeModelsResponse = barrier; }
         Runnable beforeAuthorizationResponse = () -> { };
         Runnable beforeRefreshResponse = () -> { };
+        Runnable beforeModelsResponse = () -> { };
+        Runnable afterInferenceAdmission = () -> { };
+        CompletableFuture<Void> responseHeaders;
         final List<String> authorizationRequests = new CopyOnWriteArrayList<>();
         public String responseText = "completed-answer";
         public Map<String, Object> usage = Map.of("input_tokens", 2, "output_tokens", 2);
@@ -559,7 +709,10 @@ public class PersonalOAuthServiceTest {
                 String subject = body.contains("code=B") ? "B" : body.contains("code=C") ? "C" : "A";
                 result = ProtectedConnectionStore.json(Map.of("access_token", "access-" + subject, "refresh_token", "refresh-" + tokens.get(), "id_token", refresh && refreshedSubject != null ? refreshedSubject : subject,
                         "scope", refresh && refreshScope != null ? refreshScope : scope, "token_type", "Bearer", "expires_in", refresh ? 3600 : initialExpiry));
-            } else if (path.equals("/v1/models")) result = ProtectedConnectionStore.json(Map.of("models", List.of(Map.of("slug", "account-model", "display_name", "Account model", "visibility", "list"))));
+            } else if (path.equals("/v1/models")) {
+                beforeModelsResponse.run();
+                result = ProtectedConnectionStore.json(Map.of("models", List.of(Map.of("slug", "account-model", "display_name", "Account model", "visibility", "list"))));
+            }
             else if (path.equals("/v1/responses")) {
                 inferences.incrementAndGet(); inferenceBearer = request.headers().firstValue("Authorization").orElse("").replace("Bearer ", "");
                 inferenceBearers.add(inferenceBearer);
@@ -613,7 +766,14 @@ public class PersonalOAuthServiceTest {
         @Override public Optional<java.net.Authenticator> authenticator() { return Optional.empty(); }
         @Override public Version version() { return Version.HTTP_1_1; }
         @Override public Optional<Executor> executor() { return Optional.empty(); }
-        @Override public <T> CompletableFuture<HttpResponse<T>> sendAsync(HttpRequest r, HttpResponse.BodyHandler<T> h) { return CompletableFuture.completedFuture(send(r, h)); }
+        @Override public <T> CompletableFuture<HttpResponse<T>> sendAsync(HttpRequest r, HttpResponse.BodyHandler<T> h) {
+            var response = send(r, h);
+            if (r.uri().getPath().equals("/v1/responses")) {
+                afterInferenceAdmission.run();
+                if (responseHeaders != null) return responseHeaders.thenApply(ignored -> response);
+            }
+            return CompletableFuture.completedFuture(response);
+        }
         @Override public <T> CompletableFuture<HttpResponse<T>> sendAsync(HttpRequest r, HttpResponse.BodyHandler<T> h, HttpResponse.PushPromiseHandler<T> p) { return sendAsync(r, h); }
     }
 }

@@ -77,6 +77,54 @@ class PersonalOAuthHttpIntegrationTest {
             }
         }
     }
+    @Test void expiredSessionDuringRealExecutionRefreshCreatesNoGrantOrGraphEffect() throws Exception {
+        var now = new AtomicReference<>(Instant.now());
+        Clock clock = new Clock() {
+            public ZoneId getZone() { return ZoneOffset.UTC; }
+            public Clock withZone(ZoneId zone) { return this; }
+            public Instant instant() { return now.get(); }
+        };
+        var registry = registry().withPersonalConnectionAuthority((identity, requirements) -> personal.get().requireExecutionAuthority(identity, requirements));
+        var entered = new CountDownLatch(1); var release = new CountDownLatch(1);
+        provider.expireInitialToken(); provider.onRefresh(() -> barrier(entered, release));
+        try (var engine = new PekkoExecutionEngine("personal-refresh-expiry"); var executor = Executors.newSingleThreadExecutor()) {
+            var app = new DefaultRavenrootApplication(engine, new ExecutionMonitor(), registry);
+            try (var server = server(app)) {
+                server.start(); install(server, clock); String cookie = login(server, "A", "oaiapp_A");
+                var run = executor.submit(() -> post(server, "/v1/executions?mode=run", cookie, graph(true)));
+                try {
+                    assertTrue(entered.await(10, TimeUnit.SECONDS)); now.set(now.get().plusSeconds(28_801));
+                } finally { release.countDown(); }
+                var refused = run.get(10, TimeUnit.SECONDS);
+                assertEquals(409, refused.statusCode(), refused.body());
+                assertEquals(0, executionGrants()); assertEquals(0, effects.get()); assertTrue(provider.inferenceBearers.isEmpty());
+            }
+        }
+    }
+    @Test void realAssistantLogoutDuringCatalogPreventsInferenceDispatch() throws Exception {
+        var entered = new CountDownLatch(1); var release = new CountDownLatch(1);
+        provider.onModels(() -> barrier(entered, release));
+        try (var engine = new PekkoExecutionEngine("personal-catalog-logout"); var executor = Executors.newSingleThreadExecutor()) {
+            var app = new DefaultRavenrootApplication(engine, new ExecutionMonitor(), registry());
+            try (var server = server(app)) {
+                server.start(); install(server); String cookie = login(server, "A", "oaiapp_A");
+                assertEquals(200, post(server, "/v1/personal/authorize", cookie, "{}").statusCode());
+                var answer = executor.submit(() -> originPost(server, "/v1/assistant/messages", cookie,
+                        "{\"prompt\":\"hello\"}", List.of(), List.of(), true));
+                try {
+                    assertTrue(entered.await(10, TimeUnit.SECONDS)); assertTrue(provider.inferenceBearers.isEmpty());
+                    assertEquals(200, post(server, "/v1/personal/sign-out", cookie, "{}").statusCode());
+                } finally { release.countDown(); }
+                assertEquals(409, answer.get(10, TimeUnit.SECONDS).statusCode());
+                assertTrue(provider.inferenceBearers.isEmpty()); assertEquals(0, effects.get()); assertEquals(0, executionGrants());
+            }
+        }
+    }
+    static void barrier(CountDownLatch entered, CountDownLatch release) {
+        entered.countDown();
+        try { assertTrue(release.await(10, TimeUnit.SECONDS)); }
+        catch (InterruptedException failure) { Thread.currentThread().interrupt(); throw new AssertionError(failure); }
+    }
     static String queryValue(URI uri, String name) {
         return Arrays.stream(uri.getQuery().split("&")).filter(value -> value.startsWith(name + "="))
                 .findFirst().orElseThrow().substring(name.length() + 1);
@@ -457,11 +505,12 @@ class PersonalOAuthHttpIntegrationTest {
         return new RavenrootServer(app, new InetSocketAddress("127.0.0.1", 0), null,
                 new DisabledLoopbackAuthenticator(), new DefaultAuthorizationService(event -> { }), AssistantService.fromEnvironment(Map.of()));
     }
-    void install(RavenrootServer server) {
+    void install(RavenrootServer server) { install(server, Clock.systemUTC()); }
+    void install(RavenrootServer server, Clock clock) {
         var config = new PersonalOAuthConfiguration("loopback", URI.create(base(server) + "/auth/callback"), "", "",
                 directory.resolve("connections"), directory.resolve("key"), Set.of("auth.openai.com", "api.openai.com"), "account-model");
         personal.set(new PersonalOAuthService(config, (pkg, tenant, ref) -> Optional.of(new SecretValue("system-key".toCharArray())), provider,
-                (token, client, nonce) -> Map.of("sub", token, "email", token + "@example.invalid"), Clock.systemUTC()));
+                (token, client, nonce) -> Map.of("sub", token, "email", token + "@example.invalid"), clock));
         server.installPersonalOAuth(personal.get());
     }
     BehaviorRegistry registry() throws Exception {

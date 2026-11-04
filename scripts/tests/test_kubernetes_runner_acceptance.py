@@ -426,34 +426,69 @@ class KubernetesAcceptanceFixtureTest(unittest.TestCase):
             with self.subTest(mutation=before), self.assertRaises(ValueError):
                 fixture.cpu_hierarchy_report(raw.replace(before, after))
 
+    def cpu_probe_node(self, cpu=0):
+        return [{"Name": "/rr-native-" + "a" * 12, "Config": {"Image": fixture.CLUSTER_IMAGE},
+                 "State": {"Running": True}, "Id": "b" * 64,
+                 "HostConfig": {"CgroupnsMode": "private", "Memory": 2147483648, "NanoCpus": cpu}}]
+
     def test_hosted_probe_missing_own_evidence_stops_acceptance_but_retains_counters(self):
-        node = [{"Name": "/owned", "Config": {"Image": fixture.CLUSTER_IMAGE}, "State": {"Running": True}, "Id": "exact-id"}]
         for positive in (False, True):
             with tempfile.TemporaryDirectory() as directory, patch.object(fixture, "REPORT_DIRECTORY", Path(directory)), \
-                    patch.object(fixture, "command", side_effect=[json.dumps(node).encode(), self.cpu_probe_output(new_positive=positive), b"CLEANUP\n"]) as run:
+                    patch.object(fixture, "command", side_effect=[json.dumps(self.cpu_probe_node()).encode(), b"", json.dumps(self.cpu_probe_node(2000000000)).encode(), self.cpu_probe_output(new_positive=positive), b"CLEANUP\n"]) as run:
                 if positive:
-                    fixture.verify_cpu_hierarchy("owned")
+                    fixture.verify_cpu_hierarchy("rr-native-" + "a" * 12)
                 else:
                     with self.assertRaisesRegex(RuntimeError, "own-child"):
-                        fixture.verify_cpu_hierarchy("owned")
+                        fixture.verify_cpu_hierarchy("rr-native-" + "a" * 12)
                 report = json.loads((Path(directory) / "NativeCpuHierarchyProbe.json").read_text())
                 self.assertEqual("VERIFIED" if positive else "FAILED", report["status"])
                 self.assertEqual(2, len(report["cases"]))
                 self.assertTrue(report["cleanup"])
-                self.assertEqual("exact-id", run.call_args.args[0][3])
+                self.assertEqual("b" * 64, run.call_args.args[0][3])
 
     def test_probe_cleanup_has_its_own_budget_after_main_timeout_and_cannot_hide_failure(self):
-        node = [{"Name": "/owned", "Config": {"Image": fixture.CLUSTER_IMAGE}, "State": {"Running": True}, "Id": "exact-id"}]
         for cleanup in (b"CLEANUP\n", RuntimeError("cleanup refused")):
             with tempfile.TemporaryDirectory() as directory, patch.object(fixture, "REPORT_DIRECTORY", Path(directory)), \
                     patch.object(fixture.time, "monotonic", side_effect=[0, 45]), \
-                    patch.object(fixture, "command", side_effect=[json.dumps(node).encode(), subprocess.TimeoutExpired("probe", 45), cleanup]) as run:
+                    patch.object(fixture, "command", side_effect=[json.dumps(self.cpu_probe_node()).encode(), b"", json.dumps(self.cpu_probe_node(2000000000)).encode(), subprocess.TimeoutExpired("probe", 45), cleanup]) as run:
                 with self.assertRaises((RuntimeError, subprocess.TimeoutExpired)):
-                    fixture.verify_cpu_hierarchy("owned")
+                    fixture.verify_cpu_hierarchy("rr-native-" + "a" * 12)
                 self.assertEqual(12, run.call_args.kwargs["timeout"])
                 report = json.loads((Path(directory) / "NativeCpuHierarchyProbe.json").read_text())
                 self.assertEqual("FAILED", report["status"])
                 self.assertEqual(isinstance(cleanup, bytes), report["cleanup"])
+
+    def test_node_cpu_preparation_updates_only_exact_owned_private_node_and_refuses_drift(self):
+        profile = "rr-native-" + "a" * 12
+        before, after = self.cpu_probe_node(), self.cpu_probe_node(2000000000)
+        with patch.object(fixture, "command", side_effect=[json.dumps(before).encode(), b"", json.dumps(after).encode()]) as run:
+            self.assertEqual("b" * 64, fixture.prepare_cpu_probe_node(profile))
+            self.assertEqual(["docker", "update", "--cpus=2", "b" * 64], run.call_args_list[1].args[0])
+            for call in run.call_args_list:
+                self.assertEqual({"timeout": 10, "quiet": True}, call.kwargs)
+        changes = [("Name", None, "/foreign"), ("Id", None, "short"), ("Id", None, "c" * 64),
+                   ("Config", "Image", "foreign"), ("State", "Running", False),
+                   ("HostConfig", "CgroupnsMode", "host"), ("HostConfig", "CgroupnsMode", ""),
+                   ("HostConfig", "Memory", 1073741824), ("HostConfig", "NanoCpus", 0)]
+        for post in (False, True):
+            for field, child, value in changes:
+                if not post and ((field == "Id" and value == "c" * 64) or child == "NanoCpus"):
+                    continue
+                changed = json.loads(json.dumps(after if post else before))
+                if child is None:
+                    changed[0][field] = value
+                else:
+                    changed[0][field][child] = value
+                responses = [json.dumps(before).encode(), b"", json.dumps(changed).encode()] if post else [json.dumps(changed).encode()]
+                with self.subTest(post=post, field=field, child=child), patch.object(fixture, "command", side_effect=responses) as run, self.assertRaises(RuntimeError):
+                    fixture.prepare_cpu_probe_node(profile)
+                self.assertEqual(3 if post else 1, run.call_count)
+        with patch.object(fixture, "command") as run, self.assertRaises(RuntimeError):
+            fixture.prepare_cpu_probe_node("foreign")
+        run.assert_not_called()
+        with patch.object(fixture, "command", side_effect=[json.dumps(before).encode(), RuntimeError("update refused")]) as run, self.assertRaisesRegex(RuntimeError, "update refused"):
+            fixture.prepare_cpu_probe_node(profile)
+        self.assertEqual(2, run.call_count)
 
     def test_native_cpu_fixture_keeps_real_boundary_positive_proof_and_zero_skip_gates(self):
         required = {
@@ -482,6 +517,42 @@ class KubernetesAcceptanceFixtureTest(unittest.TestCase):
             for marker in markers:
                 with self.subTest(path=path, removed=marker), self.assertRaises(AssertionError):
                     verify(dict(sources, **{path: sources[path].replace(marker, "")}))
+
+
+    def test_admission_typechecking_keeps_only_closed_bounded_warning_evidence_and_refuses(self):
+        fixture.verify_admission_typechecking({"items": [{"status": {"typeChecking": {}}}]})
+        for name, warnings in (
+                ("native-ravenroot-agent-native", [{"fieldRef": "spec.validations[11].expression", "warning": "ERROR: undefined field 'limits'\nsecret source and credentials"}]),
+                ("native-ravenroot-agent-native-channel", [{"fieldRef": "spec.validations[0].expression", "warning": "found no matching overload for 'quantity' applied to secret"}]),
+                ("foreign-secret", [{"fieldRef": "secret", "warning": "undefined field 'limits' secret"}]),
+                ("native-ravenroot-agent-native", [{"fieldRef": "secret", "warning": "undefined field 'limits-secret'"}] * 20),
+                ("native-ravenroot-agent-native", {"secret": "malformed"})):
+            stream = io.StringIO()
+            with self.subTest(name=name, warnings=type(warnings).__name__), redirect_stdout(stream), \
+                    self.assertRaisesRegex(RuntimeError, "type-checking warning"):
+                fixture.verify_admission_typechecking({"items": [{"metadata": {"name": name}, "status": {"typeChecking": {"expressionWarnings": warnings}}}]})
+            text = stream.getvalue()
+            self.assertNotIn("secret", text)
+            self.assertLess(len(text), 3000)
+            report = json.loads(text.split("=", 1)[1])
+            self.assertLessEqual(len(report["warnings"]), 8)
+            first = report["warnings"][0]
+            self.assertEqual({"role", "fieldRef", "class", "identifier", "digest"}, set(first))
+            self.assertRegex(first["digest"], "^[0-9a-f]{64}$")
+            if name.endswith("-native") and isinstance(warnings, list) and len(warnings) == 1:
+                self.assertEqual(("POD", "UNDEFINED_FIELD", "limits", "spec.validations[11].expression"),
+                                 (first["role"], first["class"], first["identifier"], first["fieldRef"]))
+            if name.endswith("-channel"):
+                self.assertEqual(("CHANNEL", "NO_MATCHING_OVERLOAD", "quantity"),
+                                 (first["role"], first["class"], first["identifier"]))
+            if name.startswith("foreign"):
+                self.assertEqual(("FOREIGN", "UNKNOWN", "UNKNOWN"),
+                                 (first["role"], first["class"], first["identifier"]))
+            if isinstance(warnings, list) and len(warnings) > 8:
+                self.assertTrue(report["truncated"])
+                self.assertEqual("UNKNOWN", first["identifier"])
+        source = Path(fixture.__file__).read_text().split("def run():", 1)[1]
+        self.assertLess(source.index("verify_admission_typechecking(policies)"), source.index("verify_cpu_hierarchy(profile)"))
 
 
 if __name__ == "__main__":

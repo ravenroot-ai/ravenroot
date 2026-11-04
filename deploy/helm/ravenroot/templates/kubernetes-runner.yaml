@@ -234,10 +234,10 @@ spec:
         has(object.spec.resources) &&
         [dyn(object.spec.resources), dyn(object.spec.containers[0].resources)].all(r,
           r.requests == r.limits && r.limits.size() == 2 && 'cpu' in r.limits && 'memory' in r.limits) &&
-        quantity(object.spec.resources.limits['memory']).compareTo(quantity(object.spec.containers[0].resources.limits['memory'])) == 0 &&
+        quantity(dyn(object.spec.resources).limits['memory']).compareTo(quantity(dyn(object.spec.containers[0].resources).limits['memory'])) == 0 &&
         object.spec.containers[0].env.filter(e, e.name == 'RAVENROOT_CPU_MILLICORES').all(e,
-          quantity(object.spec.resources.limits['cpu']).compareTo(quantity(e.value + 'm')) == 0 &&
-          quantity(object.spec.containers[0].resources.limits['cpu']).compareTo(quantity(string(4 * int(e.value) / 5) + 'm')) == 0)
+          quantity(dyn(object.spec.resources).limits['cpu']).compareTo(quantity(e.value + 'm')) == 0 &&
+          quantity(dyn(object.spec.containers[0].resources).limits['cpu']).compareTo(quantity(string(4 * int(e.value) / 5) + 'm')) == 0)
       message: "Guaranteed Pod budget and strictly lower Agent CPU ceiling are required"
     - expression: "has(object.metadata.annotations) && ['ravenroot.ai/tenant', 'ravenroot.ai/process', 'ravenroot.ai/workspace', 'ravenroot.ai/node', 'ravenroot.ai/generation', 'ravenroot.ai/runner', 'ravenroot.ai/cluster', 'ravenroot.ai/protocol', 'ravenroot.ai/job', 'ravenroot.ai/fence', 'ravenroot.ai/traversal', 'ravenroot.ai/invocation', 'ravenroot.ai/attempt', 'ravenroot.ai/definition', 'ravenroot.ai/definition-version', 'ravenroot.ai/profile', 'ravenroot.ai/pool'].all(k, k in object.metadata.annotations && size(object.metadata.annotations[k]) <= 256)"
       message: "Complete bounded Ravenroot ownership correlation is required"

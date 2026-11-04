@@ -220057,7 +220057,7 @@
     {
       "id": "oc-b3617f45691ea6114ee7",
       "path": "ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmProgramRuntime.java",
-      "line": 269,
+      "line": 284,
       "symbol": "catch",
       "kind": "inline-operational-call",
       "role": "timeunit-get",
@@ -220073,7 +220073,7 @@
     {
       "id": "oc-cd336367b39423fbd08a",
       "path": "ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmProgramRuntime.java",
-      "line": 404,
+      "line": 456,
       "symbol": "remaining",
       "kind": "inline-operational-call",
       "role": "Duration.ofNanos",
@@ -220089,7 +220089,7 @@
     {
       "id": "oc-829504654a1c4e6e6ebe",
       "path": "ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmProgramRuntime.java",
-      "line": 424,
+      "line": 476,
       "symbol": "deadlineExceeded",
       "kind": "inline-operational-call",
       "role": "Duration.ofNanos",
@@ -220105,7 +220105,7 @@
     {
       "id": "oc-16a8f2cd1e0a6f0e0efe",
       "path": "ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmProgramRuntime.java",
-      "line": 464,
+      "line": 516,
       "symbol": "BoundedOutputStream",
       "kind": "inline-operational-call",
       "role": "timeunit-get",
@@ -220121,7 +220121,7 @@
     {
       "id": "oc-34efa6bda77e6329c69a",
       "path": "ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmProgramRuntime.java",
-      "line": 468,
+      "line": 520,
       "symbol": "policyFor",
       "kind": "property-binding",
       "role": "System.getProperty",
@@ -220137,7 +220137,7 @@
     {
       "id": "oc-0a1a6cddb1224d678309",
       "path": "ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmProgramRuntime.java",
-      "line": 491,
+      "line": 543,
       "symbol": "MissingLauncher",
       "kind": "fixed-declaration",
       "role": "literal",
@@ -220153,7 +220153,7 @@
     {
       "id": "oc-90b8d80f89c8a19f807b",
       "path": "ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmProgramRuntime.java",
-      "line": 493,
+      "line": 545,
       "symbol": "MissingLauncher",
       "kind": "environment-binding",
       "role": "RAVENROOT_GRAAL_SANDBOX_SUPERVISOR",
@@ -220169,7 +220169,7 @@
     {
       "id": "oc-5b3cd8c7239e9cbc8532",
       "path": "ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmProgramRuntime.java",
-      "line": 518,
+      "line": 571,
       "symbol": "BoundedOutputStream",
       "kind": "operational-declaration",
       "role": "maximum",
@@ -1209401,6 +1209401,18 @@
           }
         }
       ]
+    },
+    {
+      "id": "issue-599-maintained-program-cleanup-publication-v1",
+      "issue": "#599",
+      "sourceRevision": "e0a18fb5ac1a5abf509237c1cbdf32a650357eef",
+      "targetRevision": "a06fd88a178f661a2c537fcc1ef60c91b0c7c5ae",
+      "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+      "sourceInventoryDigest": "34be103b143aa20fbe68aee929676dde05e632526acc59e98cdd781575690b81",
+      "targetCandidateDigest": "5b719ad2d4bc3a15d5f705a2821136c8949483098d745934914a62cb6beabe6b",
+      "mappings": [],
+      "retirements": [],
+      "additions": []
     }
   ],
   "semanticReviewHistory": [
@@ -1272490,7 +1272502,7 @@
           "fromConfiguration": "0ca67fa506c530f72897d8c7a0b4dfa490b43e3fa00042db117b8b80e47130f8",
           "policyFor": "91e38f0842847ea7e98fba78fbd464007d61c32402d98448bc2d47cc533ddd31",
           "compatibilityFingerprint": "824b33e5d31385702080c8557be683aee0e5e28ad136be8cd42ed7a5185f77a7",
-          "invokeSupervisor": "6c5cec717183df992e80a0846392e386ecfda040aef4dbaf09c1ff54e2764da3"
+          "invokeSupervisor": "0e3adb603f158580d68bf6234afd2bd18d930270c2ab55d2b9057622a8d2736a"
         },
         "resolverDigest": "d980fda0dcb0229dce77f05300079d6a2d0af9b67b7323960301df7f3d321a15"
       },
@@ -1283973,7 +1283985,7 @@
         },
         {
           "path": "ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmProgramRuntime.java",
-          "digest": "3edaa845d80403d224e163605b6f11d3f64ed0969155c993d9f0a0afe3ded064"
+          "digest": "7b277d0980dfb1c2c6f20b9a767eb45a583f22e4773251d987a42b052743528f"
         },
         {
           "path": "ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmRuntimeConfiguration.java",

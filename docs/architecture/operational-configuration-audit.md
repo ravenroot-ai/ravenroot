@@ -62,7 +62,7 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 190.
+Checked source reconciliations: 191.
 
 The following tables are exhaustive projections of the same active inventory; each includes
 zero-count or unclassified rows as needed and sums to 32510 candidates.
@@ -127,11 +127,11 @@ identity and retirement has its own approved record in the machine-readable inve
 
 | Partition | Count |
 |---|---:|
-| Source inventory candidates | 32508 |
-| Unchanged identities | 32507 |
-| Approved identity migrations | 1 |
+| Source inventory candidates | 32510 |
+| Unchanged identities | 32510 |
+| Approved identity migrations | 0 |
 | Approved retirements | 0 |
-| Semantically classified additions | 2 |
+| Semantically classified additions | 0 |
 | Current candidates | 32510 |
 
 ## Final semantic review
@@ -10348,14 +10348,14 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-87a8b47e57f1b7e827eb` | `ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmProgramRuntime.java:39` `GraalVmProgramRuntime` | java | retained | security-ceiling-or-default | The finite fixed value is an implementation safety or cleanup ceiling outside operator configuration. |
 | `oc-8e83f0b450af7e5ff4b8` | `ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmProgramRuntime.java:39` `GraalVmProgramRuntime` | java | retained | security-ceiling-or-default | The finite fixed value is an implementation safety or cleanup ceiling outside operator configuration. |
 | `oc-5a5c83584303f5e079f4` | `ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmProgramRuntime.java:40` `GraalVmProgramRuntime` | java | retained | security-ceiling-or-default | The finite fixed value is an implementation safety or cleanup ceiling outside operator configuration. |
-| `oc-b3617f45691ea6114ee7` | `ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmProgramRuntime.java:269` `catch` | java | retained | derived | The value is an implementation clamp/index for bounded waits/output, derived from the resolved policy. |
-| `oc-cd336367b39423fbd08a` | `ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmProgramRuntime.java:404` `remaining` | java | retained | derived | The value is an implementation clamp/index for bounded waits/output, derived from the resolved policy. |
-| `oc-829504654a1c4e6e6ebe` | `ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmProgramRuntime.java:424` `deadlineExceeded` | java | retained | derived | The value is an implementation clamp/index for bounded waits/output, derived from the resolved policy. |
-| `oc-16a8f2cd1e0a6f0e0efe` | `ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmProgramRuntime.java:464` `BoundedOutputStream` | java | retained | derived | The value is an implementation clamp/index for bounded waits/output, derived from the resolved policy. |
-| `oc-34efa6bda77e6329c69a` | `ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmProgramRuntime.java:468` `policyFor` | java | retained | derived | The Java executable/classpath fallback is derived from the host JVM and then included in runtime compatibility, not exposed as a new Ravenroot setting. |
-| `oc-0a1a6cddb1224d678309` | `ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmProgramRuntime.java:491` `MissingLauncher` | java | retained | protocol-or-format-invariant | The stable typed failure/diagnostic token names an unavailable launcher. |
-| `oc-90b8d80f89c8a19f807b` | `ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmProgramRuntime.java:493` `MissingLauncher` | java | retained | protocol-or-format-invariant | The stable typed failure/diagnostic token names an unavailable launcher. |
-| `oc-5b3cd8c7239e9cbc8532` | `ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmProgramRuntime.java:518` `BoundedOutputStream` | java | retained | derived | The value is an implementation clamp/index for bounded waits/output, derived from the resolved policy. |
+| `oc-b3617f45691ea6114ee7` | `ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmProgramRuntime.java:284` `catch` | java | retained | derived | The value is an implementation clamp/index for bounded waits/output, derived from the resolved policy. |
+| `oc-cd336367b39423fbd08a` | `ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmProgramRuntime.java:456` `remaining` | java | retained | derived | The value is an implementation clamp/index for bounded waits/output, derived from the resolved policy. |
+| `oc-829504654a1c4e6e6ebe` | `ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmProgramRuntime.java:476` `deadlineExceeded` | java | retained | derived | The value is an implementation clamp/index for bounded waits/output, derived from the resolved policy. |
+| `oc-16a8f2cd1e0a6f0e0efe` | `ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmProgramRuntime.java:516` `BoundedOutputStream` | java | retained | derived | The value is an implementation clamp/index for bounded waits/output, derived from the resolved policy. |
+| `oc-34efa6bda77e6329c69a` | `ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmProgramRuntime.java:520` `policyFor` | java | retained | derived | The Java executable/classpath fallback is derived from the host JVM and then included in runtime compatibility, not exposed as a new Ravenroot setting. |
+| `oc-0a1a6cddb1224d678309` | `ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmProgramRuntime.java:543` `MissingLauncher` | java | retained | protocol-or-format-invariant | The stable typed failure/diagnostic token names an unavailable launcher. |
+| `oc-90b8d80f89c8a19f807b` | `ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmProgramRuntime.java:545` `MissingLauncher` | java | retained | protocol-or-format-invariant | The stable typed failure/diagnostic token names an unavailable launcher. |
+| `oc-5b3cd8c7239e9cbc8532` | `ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmProgramRuntime.java:571` `BoundedOutputStream` | java | retained | derived | The value is an implementation clamp/index for bounded waits/output, derived from the resolved policy. |
 | `oc-a6b53eda69e9e2552ccd` | `ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmRuntimeConfiguration.java:13` `GraalVmRuntimeConfiguration` | java | already-centralized | operator-configurable | Actual typed authority binding/default with closed field and consumer proof; carrier transport is distinct from each scoped field. |
 | `oc-550e8914435c12c5ba17` | `ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmRuntimeConfiguration.java:14` `GraalVmRuntimeConfiguration` | java | retained | security-ceiling-or-default | Typed validation boundary, diagnostic label or unit/path derivation; it is not a separate operator setting. |
 | `oc-b8a591efe1a3a2672a12` | `ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmRuntimeConfiguration.java:15` `GraalVmRuntimeConfiguration` | java | retained | security-ceiling-or-default | Typed validation boundary, diagnostic label or unit/path derivation; it is not a separate operator setting. |

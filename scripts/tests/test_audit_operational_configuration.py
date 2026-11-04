@@ -7238,8 +7238,12 @@ class GraphAuthoringPolicyAuditTest(unittest.TestCase):
             (ui_path, "saveRepositoryGraph", "pristineSource ? { xml: pristineSource } : prepareDocumentDownload(target.id)", "prepareDocumentDownload(target.id)"),
             (ui_path, "saveRepositoryGraph", "&& repositoryPresentationSnapshot(target) === submittedPresentation", ""),
             (ui_path, "repositoryPresentationSnapshot", "target.visualGroupState", "null"),
-            (ui_path, "setRenderMode", "owner.visualGroupPresentationDirty = true;", "owner.visualGroupPresentationDirty = false;"),
-            (ui_path, "arrangeDesign", "owner.visualGroupPresentationDirty = true;", "owner.visualGroupPresentationDirty = false;"),
+            (ui_path, "setRenderMode", "owner.authoring.localChanges = true;", "owner.authoring.localChanges = false;"),
+            (ui_path, "arrangeDesign", "owner.authoring.localChanges = true;", "owner.authoring.localChanges = false;"),
+            (ui_path, "setRenderMode", " || owner.authoring.saveFlight", ""),
+            (ui_path, "arrangeDesign", " || owner.authoring.saveFlight", ""),
+            (ui_path, "setRenderMode", " && (owner.authoring.providerDocumentId || owner.authoring.saveFlight)", ""),
+            (ui_path, "arrangeDesign", "owner.authoring.localChanges = true;", "owner.visualGroupPresentationDirty = true;"),
             (ui_path, "applyAuthoringDocument", "target.authoring.saveError = null;", "target.authoring.saveError = null; target.authoring.localChanges = false;"),
             (Path("ravenroot/ravenroot-ui/src/workspace-persistence.js"), "persistedAuthoring",
              "localChanges: Boolean(localChanges)", "localChanges: false"),
@@ -10263,6 +10267,9 @@ class PristineSaveFinalReviewCorrespondenceTest(unittest.TestCase):
                     source.replace("maxBytes: currentGraphDocumentByteLimit()", "maxBytes: 1", 1),
                     source.replace("&& !paneIsDirty(target)", "", 1),
                     source.replace("&& repositoryPresentationSnapshot(target) === submittedPresentation", "", 1),
+                    source.replace(" || owner.authoring.saveFlight", "", 1),
+                    source.replace(" && (owner.authoring.providerDocumentId || owner.authoring.saveFlight)", "", 1),
+                    source.replace("owner.authoring.localChanges = true;", "owner.visualGroupPresentationDirty = true;", 1),
                 ]
                 helper = audit._javascript_function_span(source, "repositoryPresentationSnapshot")
                 self.assertIsNotNone(helper)

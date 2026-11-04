@@ -3110,11 +3110,11 @@ FINAL_REVIEW_UI_SAVE_GROUPS = frozenset({
 })
 FINAL_REVIEW_UI_SAVE_ANCHOR = "6ca1eac5aa04bc824256f332364f1eab028968a2"
 FINAL_REVIEW_UI_SAVE_BEFORE = "842fd8f12c013baee0a554f1dabb5015680fddf388758f3e0a712dcfecdfdb97"
-FINAL_REVIEW_UI_SAVE_AFTER = "0391356fb02229be57562b3b6ad8b230849d9bb602df8e8d21bc19835eb70e9e"
+FINAL_REVIEW_UI_SAVE_AFTER = "00da74a8f8862de91ce136897edc3e7d5be61078acf1eb72751d9229e42aac05"
 # These reviewed replacements are independent of inventory or refreshable method proof metadata.
 FINAL_REVIEW_UI_SAVE_METHODS = {
-    "setRenderMode": "e99c69a84d22bd2e0c0b144f3da370bfbf92887f4038e4bc9e50afd8e95c1ccd",
-    "arrangeDesign": "0eecb17873ccf33f0911b8355a4dc426340197fbb76deb3db28186c7e9b10147",
+    "setRenderMode": "7959c6e6b5bfc85bffc8f79977e9c30ef3fac63ed5e74920c31a6ba1d07c5150",
+    "arrangeDesign": "6d64169eeb44be8cc48d0cc6dfeefc20c061d1b209d13278402a34155edece5f",
     "saveRepositoryGraph": "4c2ac003000fd7dd07d4d0ef14c8213395fc08501c2ade467108e722f256c3cc",
     "repositoryPresentationSnapshot": "c4bb9b77bcde66b9ae41a9b601feb7b043e76bb84c44bf83814ae4341a03a735",
 }
@@ -15014,7 +15014,7 @@ GRAPH_AUTHORING_SUPPORT_FILE_PROOFS = {
 GRAPH_AUTHORING_TEST_PROOFS = {
     Path("ravenroot/ravenroot-ui/test/release-proposal-progress.test.js"): "73281595637e9c21f9044c2109bae7a103dd60170ada604d7cc33f9fbb91d80f",
     Path("ravenroot/ravenroot-ui/test/repository-picker.test.js"): 'bdbdcec0431ce60bc55578cf6310f7d730ac17ff6bdc7d4aea176b1241872fb0',
-    Path("ravenroot/ravenroot-ui/e2e/managed-repository.spec.js"): '1d944b14ad10d19079bb0e05433d2d491a2018f6fca810207d6c2da6a13a8551',
+    Path("ravenroot/ravenroot-ui/e2e/managed-repository.spec.js"): '7583b454a512b69989780d78ac1dee950efa3d147f989ac1d80c3988851c677f',
     Path("ravenroot/ravenroot-ui/e2e/activity-localization.spec.js"): '420078563f5c9e1c3b0365828066c9a8df354a0c00d1e733f64ef2345a0612c4',
     Path("ravenroot/ravenroot-ui/e2e/startup-import.spec.js"): '4117b49e63dbb83c325650f1788f21ccb6bbcc80f86b7cbea71956475756eeb0',
     Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/AuthoringPublicationIndexTest.java"): "64bd2a9f1cd7a82af8442fa2be71a7e84833582ba6aee133dbe8ed395d475afd",
@@ -15157,8 +15157,8 @@ GRAPH_AUTHORING_UI_METHOD_PROOFS = {
 # their existing classifications rather than being absorbed by the authoring cohort.
 GRAPH_AUTHORING_UI_SUPPORT_SPAN_PROOFS = {
     "repositoryPresentationSnapshot": "c4bb9b77bcde66b9ae41a9b601feb7b043e76bb84c44bf83814ae4341a03a735",
-    "setRenderMode": "e99c69a84d22bd2e0c0b144f3da370bfbf92887f4038e4bc9e50afd8e95c1ccd",
-    "arrangeDesign": "0eecb17873ccf33f0911b8355a4dc426340197fbb76deb3db28186c7e9b10147",
+    "setRenderMode": "7959c6e6b5bfc85bffc8f79977e9c30ef3fac63ed5e74920c31a6ba1d07c5150",
+    "arrangeDesign": "6d64169eeb44be8cc48d0cc6dfeefc20c061d1b209d13278402a34155edece5f",
     "paneIsDirty": "ceb8181d2effb12561ea1b26434ab5feb729eeddafbc4240ac942c65f80d9601",
     "updateHistoryUi": "11f1b9907d64e960b1d48f54910113ccf9920900d3da6ad739e8f38bacb50578",
     "completeReplaceActiveDocument": "c3ba35734683c8cd2fb6c22144b2cb577e1c0fd5ffec4625841f2ab1349d7724",
@@ -15429,8 +15429,10 @@ def graph_authoring_managed_open_boundary(sources: dict[Path, str], ui: str) -> 
                     "return JSON.stringify([target.renderMode, target.layoutMode, target.designArrangement, target.visualGroupState]);"):
         return False
     for method in ("setRenderMode", "arrangeDesign"):
-        if not includes(body(method), "if (documentIsEditable(owner))",
-                        "owner.visualGroupPresentationDirty = true;", "updateHistoryUi();"):
+        if not includes(body(method),
+                        "if (documentIsEditable(owner) && (owner.authoring.providerDocumentId || owner.authoring.saveFlight))",
+                        "owner.authoring.localChanges = true;", "updateHistoryUi();") \
+                or "owner.visualGroupPresentationDirty =" in body(method):
             return False
     persistence = normalized(sources[Path("ravenroot/ravenroot-ui/src/workspace-persistence.js")])
     close = normalized(sources[Path("ravenroot/ravenroot-ui/src/document-close-plan.js")])

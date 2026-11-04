@@ -927,6 +927,8 @@ for (const change of ['authored', 'presentation']) test(`no-op acknowledgement p
 test('first managed save acknowledgement preserves an in-flight presentation edit', async ({ page }) => {
   const requests = await setup(page);
   await page.goto('/');
+  await page.locator('#file-inp').setInputFiles({ name: 'local-orders.graphml',
+    mimeType: 'application/xml', buffer: Buffer.from(graph(1)) });
   let enter, release;
   const entered = new Promise(resolve => { enter = resolve; });
   const gate = new Promise(resolve => { release = resolve; });

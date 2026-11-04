@@ -26,6 +26,7 @@ public class PersonalOAuthServiceTest {
     final AuthenticatedPrincipal perimeter = new DisabledLoopbackAuthenticator().authenticate(new Headers());
     PersonalOAuthService service;
     PersonalOAuthConfiguration config;
+    Clock clock = Clock.systemUTC();
     @BeforeEach void setup() {
         config = new PersonalOAuthConfiguration("loopback", URI.create("http://127.0.0.1:8080/auth/callback"), "", "",
                 directory.resolve("vault"), directory.resolve("key"), Set.of("auth.openai.com", "api.openai.com"), "account-model");
@@ -33,7 +34,208 @@ public class PersonalOAuthServiceTest {
     }
     PersonalOAuthService create() {
         return new PersonalOAuthService(config, (pkg, tenant, ref) -> Optional.of(new SecretValue("system-key".toCharArray())), provider,
-                (token, client, nonce) -> Map.of("sub", token, "email", token + "@example.invalid"), Clock.systemUTC());
+                (token, client, nonce) -> Map.of("sub", token, "email", token + "@example.invalid"), clock);
+    }
+    @Test void invalidCodeGrantRestartsOnceWithTheIssuedClientAndFreshProofOnly() throws Exception {
+        for (boolean planUse : List.of(false, true)) {
+            service = create();
+            var begin = call("/sign-in", null, Map.of("enablePlanUse", planUse));
+            var original = authorization(begin);
+            provider.authorizationError = "invalid_grant";
+            var failed = callback(begin.cookie(), original, "A", "oaiapp_A");
+            assertEquals(303, failed.code);
+            assertEquals("no-store", failed.response.getFirst("Cache-Control"));
+            assertEquals("no-referrer", failed.response.getFirst("Referrer-Policy"));
+            assertNull(failed.response.getFirst("Set-Cookie"), "recovery cannot extend the browser session");
+            var retry = query(URI.create(failed.response.getFirst("Location")));
+            assertEquals("oaiapp_A", retry.get("client_id"));
+            assertFalse(retry.containsKey("agent_name_hint"));
+            assertEquals(planUse ? "consent" : null, retry.get("prompt"));
+            for (String key : List.of("scope", "resource", "ext_agent_host_id", "redirect_uri", "response_type", "code_challenge_method"))
+                assertEquals(original.get(key), retry.get(key), key);
+            for (String key : List.of("state", "nonce", "code_challenge")) assertNotEquals(original.get(key), retry.get(key), key);
+            assertEquals("signed-out", call("", begin.cookie(), null).document().get("state"));
+            assertEquals("login-required", call("/authorize", begin.cookie(), Map.of()).document().get("state"));
+            new ProtectedConnectionStore(config.directory(), config.keyFile()).transaction(data -> {
+                assertFalse(data.containsKey("identities")); assertFalse(data.containsKey("connections")); return null;
+            });
+            int exchanges = provider.tokens.get();
+            assertEquals(400, callback(begin.cookie(), original, "A", "oaiapp_A").code);
+            assertEquals(exchanges, provider.tokens.get(), "consumed code/state cannot be exchanged again");
+            provider.authorizationError = null;
+            var completed = callback(begin.cookie(), retry, "A", null);
+            assertEquals(303, completed.code); assertEquals("/", completed.response.getFirst("Location"));
+            assertEquals("signed-in", call("", completed.cookie(), null).document().get("state"));
+            assertEquals(400, callback(begin.cookie(), retry, "A", null).code);
+            var requests = provider.authorizationRequests;
+            var first = query(URI.create("http://test.invalid/?" + requests.get(requests.size() - 2)));
+            var second = query(URI.create("http://test.invalid/?" + requests.getLast()));
+            assertEquals("oaiapp_A", first.get("client_id")); assertEquals("oaiapp_A", second.get("client_id"));
+            assertNotEquals(first.get("code_verifier"), second.get("code_verifier"));
+            // Each iteration needs an independent empty provider store, not the previous verified account.
+            config = new PersonalOAuthConfiguration("loopback", config.callback(), "", "",
+                    directory.resolve("second-vault"), directory.resolve("second-key"), config.allowedHosts(), "account-model");
+        }
+    }
+    @Test void repeatedInvalidGrantEndsTheAttemptAndAnotherUserActionStartsFresh() throws Exception {
+        provider.authorizationError = "invalid_grant";
+        var begin = call("/sign-in", null, Map.of());
+        var failed = callback(begin.cookie(), authorization(begin), "A", "oaiapp_A");
+        var retry = query(URI.create(failed.response.getFirst("Location")));
+        var exhausted = callback(begin.cookie(), retry, "A", null);
+        assertEquals(400, exhausted.code); assertEquals("reconnect-required", exhausted.document().get("state"));
+        assertNull(exhausted.response.getFirst("Location"));
+        assertEquals(2, provider.tokens.get());
+        assertEquals(400, callback(begin.cookie(), retry, "A", null).code); assertEquals(2, provider.tokens.get());
+        assertEquals("dynamic_agent_client", authorization(call("/sign-in", begin.cookie(), Map.of())).get("client_id"));
+    }
+    @Test void recoveryNeverAcceptsChangedClientsCopiedStatesOrOtherProviderFailures() throws Exception {
+        provider.authorizationError = "invalid_grant";
+        var begin = call("/sign-in", null, Map.of());
+        var failed = callback(begin.cookie(), authorization(begin), "A", "oaiapp_A");
+        var retry = query(URI.create(failed.response.getFirst("Location")));
+        assertEquals(400, callback(begin.cookie(), retry, "A", "oaiapp_B").code);
+        assertEquals(1, provider.tokens.get());
+        var another = call("/sign-in", null, Map.of());
+        var stolen = callback(another.cookie(), authorization(call("/sign-in", begin.cookie(), Map.of())), "B", "oaiapp_B");
+        assertEquals(400, stolen.code); assertNull(stolen.response.getFirst("Location")); assertEquals(1, provider.tokens.get());
+        for (String error : List.of("invalid_refresh_token", "access_denied", "server_error")) {
+            provider.authorizationError = error;
+            var fresh = call("/sign-in", null, Map.of());
+            var refused = callback(fresh.cookie(), authorization(fresh), "A", "oaiapp_A");
+            assertEquals(400, refused.code); assertNull(refused.response.getFirst("Location"));
+        }
+        provider.authorizationError = null;
+        service = new PersonalOAuthService(config, (pkg, tenant, ref) -> Optional.empty(), provider,
+                (token, client, nonce) -> { throw new PersonalConnectionException("sign-in-unverified"); }, clock);
+        var unverified = call("/sign-in", null, Map.of());
+        var rejected = callback(unverified.cookie(), authorization(unverified), "A", "oaiapp_A");
+        assertEquals(400, rejected.code); assertNull(rejected.response.getFirst("Location"));
+    }
+    @Test void recoveryKeepsTheOriginalDeadlineAndRestartDropsProvisionalState() throws Exception {
+        var time = new MutableClock(); clock = time; service = create();
+        String existing = login("A", "oaiapp_A", null);
+        provider.authorizationError = "invalid_grant";
+        var begin = call("/sign-in", existing, Map.of("newConnection", true));
+        time.now = time.now.plusSeconds(599);
+        var failed = callback(begin.cookie(), authorization(begin), "A", "oaiapp_A");
+        var retry = query(URI.create(failed.response.getFirst("Location")));
+        time.now = time.now.plusSeconds(1);
+        var expired = callback(begin.cookie(), retry, "A", null);
+        assertEquals(400, expired.code); assertNull(expired.response.getFirst("Location")); assertEquals(2, provider.tokens.get());
+        assertEquals("signed-in", call("", existing, null).document().get("state"), "the browser is still active after the attempt expires");
+        var fresh = call("/sign-in", null, Map.of());
+        var next = callback(fresh.cookie(), authorization(fresh), "A", "oaiapp_A");
+        var beforeRestart = query(URI.create(next.response.getFirst("Location")));
+        service = create();
+        assertEquals(400, callback(fresh.cookie(), beforeRestart, "A", null).code);
+        assertEquals("dynamic_agent_client", authorization(call("/sign-in", null, Map.of())).get("client_id"));
+    }
+    @Test void anAttemptExpiringDuringExchangeCannotCreateARecovery() throws Exception {
+        var time = new MutableClock(); clock = time; service = create();
+        String existing = login("A", "oaiapp_A", null);
+        var begin = call("/sign-in", existing, Map.of("newConnection", true));
+        provider.authorizationError = "invalid_grant";
+        provider.beforeAuthorizationResponse = () -> time.now = time.now.plusSeconds(600);
+        var expired = callback(existing, authorization(begin), "A", "oaiapp_C");
+        assertEquals(400, expired.code); assertEquals("sign-in-unverified", expired.document().get("state"));
+        assertNull(expired.response.getFirst("Location"));
+        assertEquals("signed-in", call("", existing, null).document().get("state"));
+    }
+    @Test void recoveryDoesNotExtendTheExistingBrowserSessionCapacity() throws Exception {
+        var begin = call("/sign-in", null, Map.of());
+        var field = PersonalOAuthService.class.getDeclaredField("sessions"); field.setAccessible(true);
+        @SuppressWarnings("unchecked") var occupied = (Map<String, Object>) field.get(service);
+        Object session = occupied.values().iterator().next();
+        for (int i = 1; i < 4096; i++) occupied.put("occupied-" + i, session);
+        assertEquals("capacity-unavailable", call("/sign-in", null, Map.of()).document().get("state"));
+        provider.authorizationError = "invalid_grant";
+        var retry = callback(begin.cookie(), authorization(begin), "A", "oaiapp_A");
+        assertEquals(303, retry.code); assertEquals(4096, occupied.size());
+        assertEquals("capacity-unavailable", call("/sign-in", null, Map.of()).document().get("state"));
+    }
+    @Test void logoutOrSessionRotationDuringExchangeCannotResurrectRecovery() throws Exception {
+        for (boolean signOut : List.of(true, false)) {
+            provider.authorizationError = null; provider.beforeAuthorizationResponse = () -> { }; service = create();
+            String browser = login("A", "oaiapp_A", null);
+            var begin = call("/sign-in", browser, Map.of("newConnection", true));
+            var sibling = call("/sign-in", browser, Map.of("newConnection", true));
+            var entered = new CountDownLatch(1); var release = new CountDownLatch(1);
+            provider.authorizationError = "invalid_grant";
+            provider.beforeAuthorizationResponse = () -> { entered.countDown(); await(release); };
+            try (var executor = Executors.newSingleThreadExecutor()) {
+                var response = executor.submit(() -> callback(browser, authorization(begin), "A", "oaiapp_C"));
+                assertTrue(entered.await(10, TimeUnit.SECONDS));
+                provider.authorizationError = null; provider.beforeAuthorizationResponse = () -> { };
+                try {
+                    if (signOut) assertEquals(200, call("/sign-out", browser, Map.of()).code);
+                    else assertEquals(303, callback(browser, authorization(sibling), "A", "oaiapp_C").code);
+                } finally { release.countDown(); }
+                var refused = response.get(10, TimeUnit.SECONDS);
+                assertEquals(400, refused.code); assertEquals("sign-in-unverified", refused.document().get("state"));
+                assertNull(refused.response.getFirst("Location"));
+                assertEquals(400, callback(browser, authorization(sibling), "A", "oaiapp_C").code);
+            }
+        }
+    }
+    @Test void concurrentlyFilledPendingCapacityCannotBeExceededByRecovery() throws Exception {
+        var begin = call("/sign-in", null, Map.of());
+        var entered = new CountDownLatch(1); var release = new CountDownLatch(1);
+        provider.authorizationError = "invalid_grant";
+        provider.beforeAuthorizationResponse = () -> { entered.countDown(); await(release); };
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            var response = executor.submit(() -> callback(begin.cookie(), authorization(begin), "A", "oaiapp_A"));
+            assertTrue(entered.await(10, TimeUnit.SECONDS));
+            List<FakeExchange> full = new ArrayList<>();
+            try {
+                for (int i = 0; i < 256; i++) { var entry = call("/sign-in", null, Map.of()); assertEquals(200, entry.code); full.add(entry); }
+            } finally { release.countDown(); }
+            var refused = response.get(10, TimeUnit.SECONDS);
+            assertEquals(400, refused.code); assertEquals("capacity-unavailable", refused.document().get("state"));
+            assertNull(refused.response.getFirst("Location"));
+            assertEquals("capacity-unavailable", call("/sign-in", null, Map.of()).document().get("state"));
+            var first = full.getFirst();
+            var denied = exchange("/auth/callback?error=access_denied&state=" + authorization(first).get("state"), first.cookie(), null);
+            service.callback(denied); assertEquals(400, denied.code);
+            assertEquals(200, call("/sign-in", null, Map.of()).code);
+        }
+    }
+    @Test void assistantAuthorizationCannotRestoreASessionSignedOutDuringRefresh() throws Exception {
+        provider.initialExpiry = 1;
+        String browser = login("A", "oaiapp_A", null);
+        var entered = new CountDownLatch(1); var release = new CountDownLatch(1);
+        provider.beforeRefreshResponse = () -> { entered.countDown(); await(release); };
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var authorization = executor.submit(() -> call("/authorize", browser, Map.of()));
+            assertTrue(entered.await(10, TimeUnit.SECONDS));
+            var signOut = executor.submit(() -> call("/sign-out", browser, Map.of()));
+            try {
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+                while (service.principal(headers(browser), perimeter).issuer().equals(PersonalOAuthService.ISSUER)
+                        && System.nanoTime() < deadline) Thread.onSpinWait();
+                assertNotEquals(PersonalOAuthService.ISSUER, service.principal(headers(browser), perimeter).issuer());
+            } finally { release.countDown(); }
+            assertEquals(200, signOut.get(10, TimeUnit.SECONDS).code);
+            var response = authorization.get(10, TimeUnit.SECONDS);
+            assertEquals("signed-out", call("", browser, null).document().get("state"));
+            assertEquals(409, response.code);
+            assertEquals("login-required", call("/authorize", browser, Map.of()).document().get("state"));
+        }
+    }
+    private static void await(CountDownLatch latch) {
+        try { if (!latch.await(10, TimeUnit.SECONDS)) throw new AssertionError("provider response was not released"); }
+        catch (InterruptedException failure) { Thread.currentThread().interrupt(); throw new AssertionError(failure); }
+    }
+    private static final class MutableClock extends Clock {
+        Instant now = Instant.parse("2026-11-04T00:00:00Z");
+        public ZoneId getZone() { return ZoneOffset.UTC; }
+        public Clock withZone(ZoneId zone) { return this; }
+        public Instant instant() { return now; }
+    }
+    Map<String, String> authorization(FakeExchange begin) { return query(URI.create((String) begin.document().get("authorizationUrl"))); }
+    FakeExchange callback(String browser, Map<String, String> authorization, String code, String client) throws Exception {
+        var callback = exchange("/auth/callback?code=" + code + "&state=" + authorization.get("state") + (client == null ? "" : "&client_id=" + client), browser, null);
+        service.callback(callback); return callback;
     }
     @Test void browserOAuthIsOneTimeBoundToBrowserAndSupportsDeniedConsent() throws Exception {
         var begin = call("/sign-in", null, Map.of());
@@ -338,15 +540,22 @@ public class PersonalOAuthServiceTest {
         String scope = "openid profile email offline_access resource.invoke chatgpt.tokens.use.direct";
         int initialExpiry = 3600; String inferenceBearer;
         String refreshScope; String refreshedSubject; String refreshError;
+        String authorizationError;
+        public void failAuthorization(String error) { authorizationError = error; }
+        Runnable beforeAuthorizationResponse = () -> { };
+        Runnable beforeRefreshResponse = () -> { };
+        final List<String> authorizationRequests = new CopyOnWriteArrayList<>();
         public String responseText = "completed-answer";
         public Map<String, Object> usage = Map.of("input_tokens", 2, "output_tokens", 2);
         Map<String, Object> lastInference = Map.of();
         @Override @SuppressWarnings("unchecked") public <T> HttpResponse<T> send(HttpRequest request, HttpResponse.BodyHandler<T> handler) {
             byte[] result;
             String path = request.uri().getPath();
+            String authorizationFailure = null;
             if (path.endsWith("/oauth/token")) {
                 tokens.incrementAndGet(); String body = requestBody(request); boolean refresh = body.contains("grant_type=refresh_token");
-                if (refresh) refreshes.incrementAndGet();
+                if (refresh) { refreshes.incrementAndGet(); beforeRefreshResponse.run(); }
+                else { authorizationRequests.add(body); authorizationFailure = authorizationError; beforeAuthorizationResponse.run(); }
                 String subject = body.contains("code=B") ? "B" : body.contains("code=C") ? "C" : "A";
                 result = ProtectedConnectionStore.json(Map.of("access_token", "access-" + subject, "refresh_token", "refresh-" + tokens.get(), "id_token", refresh && refreshedSubject != null ? refreshedSubject : subject,
                         "scope", refresh && refreshScope != null ? refreshScope : scope, "token_type", "Bearer", "expires_in", refresh ? 3600 : initialExpiry));
@@ -369,8 +578,9 @@ public class PersonalOAuthServiceTest {
                 result = ProtectedConnectionStore.json(Map.of("choices", List.of(Map.of("message", Map.of("content", "system-answer"), "finish_reason", "stop")), "usage", Map.of("prompt_tokens", 2, "completion_tokens", 2)));
             } else if (path.endsWith("openid-configuration")) result = ProtectedConnectionStore.json(Map.of("revocation_endpoint", "https://auth.openai.com/revoke"));
             else { if (path.equals("/revoke")) revocations.incrementAndGet(); result = new byte[0]; }
-            int status = path.endsWith("/oauth/token") && requestBody(request).contains("grant_type=refresh_token") && refreshError != null ? 400 : 200;
-            if (status != 200) result = ProtectedConnectionStore.json(Map.of("error", refreshError));
+            String failure = path.endsWith("/oauth/token") && requestBody(request).contains("grant_type=refresh_token") ? refreshError : authorizationFailure;
+            int status = failure != null ? 400 : 200;
+            if (status != 200) result = ProtectedConnectionStore.json(Map.of("error", failure));
             InputStream input = new ByteArrayInputStream(result);
             return new HttpResponse<>() {
                 @Override public int statusCode() { return status; }

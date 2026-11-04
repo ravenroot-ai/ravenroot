@@ -42,6 +42,46 @@ class PersonalOAuthHttpIntegrationTest {
     final CountDownLatch firstPersonalFailure = new CountDownLatch(1);
     final List<String> personalAttempts = new CopyOnWriteArrayList<>();
 
+    @Test void realCallbackRestartsAnInvalidCodeOnceWithoutGrantingPersonalAuthority() throws Exception {
+        try (var engine = new PekkoExecutionEngine("personal-code-recovery")) {
+            var app = new DefaultRavenrootApplication(engine, new ExecutionMonitor(), registry());
+            try (var server = server(app)) {
+                server.start(); install(server);
+                var begin = post(server, "/v1/personal/sign-in", null, "{}");
+                assertEquals(200, begin.statusCode());
+                String cookie = begin.headers().firstValue("Set-Cookie").orElseThrow().split(";", 2)[0];
+                URI authorization = URI.create((String) object(begin.body()).get("authorizationUrl"));
+                String state = queryValue(authorization, "state");
+                provider.failAuthorization("invalid_grant");
+                URI callback = URI.create(base(server) + "/auth/callback?code=A&client_id=oaiapp_A&state=" + state);
+                var failed = browser.send(HttpRequest.newBuilder(callback).header("Cookie", cookie)
+                        .header("Sec-Fetch-Site", "cross-site").GET().build(), HttpResponse.BodyHandlers.ofString());
+                assertEquals(303, failed.statusCode(), failed.body());
+                assertEquals("no-store", failed.headers().firstValue("Cache-Control").orElseThrow());
+                assertEquals("no-referrer", failed.headers().firstValue("Referrer-Policy").orElseThrow());
+                assertTrue(failed.headers().allValues("Set-Cookie").isEmpty());
+                URI retry = URI.create(failed.headers().firstValue("Location").orElseThrow());
+                assertEquals("oaiapp_A", queryValue(retry, "client_id"));
+                assertNotEquals(state, queryValue(retry, "state"));
+                assertFalse(retry.getQuery().contains("agent_name_hint"));
+                assertEquals("signed-out", object(get(server, "/v1/personal", cookie, false).body()).get("state"));
+                assertEquals("login-required", object(post(server, "/v1/personal/authorize", cookie, "{}").body()).get("state"));
+                var replay = browser.send(HttpRequest.newBuilder(callback).header("Cookie", cookie).GET().build(), HttpResponse.BodyHandlers.ofString());
+                assertEquals(400, replay.statusCode());
+                URI secondCallback = URI.create(base(server) + "/auth/callback?code=A&state=" + queryValue(retry, "state"));
+                var exhausted = browser.send(HttpRequest.newBuilder(secondCallback).header("Cookie", cookie).GET().build(), HttpResponse.BodyHandlers.ofString());
+                assertEquals(400, exhausted.statusCode());
+                assertEquals("reconnect-required", object(exhausted.body()).get("state"));
+                assertTrue(exhausted.headers().firstValue("Location").isEmpty());
+                assertEquals(0, executionGrants());
+            }
+        }
+    }
+    static String queryValue(URI uri, String name) {
+        return Arrays.stream(uri.getQuery().split("&")).filter(value -> value.startsWith(name + "="))
+                .findFirst().orElseThrow().substring(name.length() + 1);
+    }
+
     @Test void allowedForeignOriginCannotUseCookieAuthorityBeforeAnyGraphEffect() throws Exception {
         var registry = registry().withPersonalConnectionAuthority((identity, requirements) -> personal.get().requireExecutionAuthority(identity, requirements));
         registry.register("system-finished", message -> CompletableFuture.completedFuture(NodeResult.continueWith(message.payload())));

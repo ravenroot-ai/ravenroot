@@ -41,7 +41,8 @@ public final class PersonalOAuthService implements TenantCredentialResolver {
 
     private record BrowserSession(String owner, String connection, Instant expires, String perimeter) { }
     private record Pending(String browser, String owner, String connection, String client, String verifier,
-                           String nonce, Instant expires, String perimeter, boolean planUse) { }
+                           String nonce, Instant expires, String perimeter, boolean planUse,
+                           String host, URI callback, String mode, BrowserSession session, boolean retried) { }
     private record Unlocked(String owner, String connection, byte[] key, Instant expires, String purpose) { }
 
     public PersonalOAuthService(PersonalOAuthConfiguration configuration, TenantCredentialResolver system) {
@@ -90,10 +91,13 @@ public final class PersonalOAuthService implements TenantCredentialResolver {
                     || incoming.isAbsolute() && !origin(incoming, true).equals(origin(configuration.callback(), true))) throw refused("sign-in-unverified");
             Map<String, String> query = query(incoming.getRawQuery());
             String state = query.getOrDefault("state", "");
-            Pending attempt = pending.remove(state); // single consumption on success and every failure
             String browser = cookie(exchange.getRequestHeaders());
-            if (attempt == null || !Objects.equals(browser, attempt.browser()) || !attempt.expires().isAfter(clock.instant())
-                    || !sessions.containsKey(attempt.browser())) throw refused("sign-in-unverified");
+            Pending attempt;
+            synchronized (pending) {
+                attempt = pending.remove(state); // single consumption on success and every failure
+                if (attempt == null || !Objects.equals(browser, attempt.browser()) || !activeAttempt(attempt))
+                    throw refused("sign-in-unverified");
+            }
             if (query.containsKey("error")) throw refused("consent-declined");
             String client = attempt.client();
             if (client.equals("dynamic_agent_client")) {
@@ -102,62 +106,74 @@ public final class PersonalOAuthService implements TenantCredentialResolver {
             } else if (query.containsKey("client_id") && !client.equals(query.get("client_id"))) throw refused("sign-in-unverified");
             String code = query.get("code");
             if (code == null || code.isBlank() || code.length() > 8192) throw refused("sign-in-unverified");
-            Map<String, Object> tokens = tokenRequest(Map.of("grant_type", "authorization_code", "client_id", client,
-                    "code", code, "code_verifier", attempt.verifier(), "redirect_uri", configuration.callback().toString(), "resource", RESOURCE));
+            Map<String, Object> tokens;
+            try {
+                tokens = tokenRequest(Map.of("grant_type", "authorization_code", "client_id", client,
+                        "code", code, "code_verifier", attempt.verifier(), "redirect_uri", attempt.callback().toString(), "resource", RESOURCE));
+            } catch (PersonalConnectionException failure) {
+                if (!failure.code().equals("invalid_grant")) throw failure;
+                if (attempt.retried()) throw refused("reconnect-required");
+                restartAuthorization(exchange, attempt, client);
+                return;
+            }
             var identity = verifier.verify(text(tokens, "id_token"), client, attempt.nonce());
             String issued = client;
             String subject = text(identity, "sub");
             String identityKey = digest("https://auth.openai.com|" + client + "|" + subject);
             String connectionId = attempt.connection() == null ? UUID.randomUUID().toString() : attempt.connection();
-            Map<String, Object> linked = store.transaction(data -> {
-                Map<String, Object> identities = map(data, "identities");
-                Map<String, Object> connections = map(data, "connections");
-                String existing = (String) identities.get(identityKey);
-                String owner = attempt.owner() == null ? existing == null ? UUID.randomUUID().toString() : existing : attempt.owner();
-                if (existing != null && !existing.equals(owner)) throw refused("account-already-linked");
-                if (attempt.connection() != null) {
-                    Map<String, Object> old = connection(data, owner, connectionId);
-                    if (!subject.equals(old.get("subject")) || !issued.equals(old.get("client"))) throw refused("account-mismatch");
-                    if (old.containsKey("salt") && attempt.planUse()) tokenMap(old, attempt.browser());
-                }
-                identities.put(identityKey, owner);
-                Map<String, Object> entry = new LinkedHashMap<>();
-                entry.put("id", connectionId); entry.put("owner", owner); entry.put("provider", "openai"); entry.put("subject", subject);
-                entry.put("client", issued); entry.put("label", identity.getOrDefault("email", "ChatGPT account"));
-                if (attempt.connection() != null) {
-                    var old = connection(data, owner, connectionId);
-                    if (old.containsKey("salt")) entry.put("salt", old.get("salt"));
-                }
-                if (attempt.connection() != null && !attempt.planUse()) {
-                    // Fresh identity proof does not replace or decrypt an existing connection grant.
-                    // In particular a protected returning account can sign in before owner unlock.
-                    var old = connection(data, owner, connectionId);
-                    if (old.containsKey("tokens")) entry.put("tokens", old.get("tokens"));
-                    if (old.containsKey("lockedTokens")) entry.put("lockedTokens", old.get("lockedTokens"));
-                } else saveTokens(entry, normalizeTokens(tokens, null), attempt.browser());
-                connections.put(connectionId, entry);
-                return Map.of("owner", owner, "connection", connectionId);
-            });
-            // Rotate the first-party cookie after authenticating. No provider credential crosses this boundary.
-            cancelAuthority(browser);
-            sessions.remove(browser); unlocked.remove(browser);
-            String next = ProtectedConnectionStore.randomId();
-            sessions.put(next, new BrowserSession(text(linked, "owner"), text(linked, "connection"), clock.instant().plus(Duration.ofHours(8)), attempt.perimeter()));
-            setCookie(exchange, next, 28_800);
-            String registration = ProtectedConnectionStore.randomId();
-            store.transaction(data -> {
-                var hints = map(data, "registrations");
-                String previous = cookie(exchange.getRequestHeaders(), REGISTRATION_COOKIE);
-                if (previous != null) hints.remove(digest(previous));
-                hints.put(digest(registration), Map.of("connection", text(linked, "connection"),
-                        "perimeter", attempt.perimeter(), "expires", clock.instant().plus(Duration.ofDays(30)).getEpochSecond()));
-                return null;
-            });
-            setCookie(exchange, REGISTRATION_COOKIE, registration, 30 * 86400);
-            exchange.getResponseHeaders().set("Cache-Control", "no-store");
-            exchange.getResponseHeaders().set("Referrer-Policy", "no-referrer");
-            exchange.getResponseHeaders().set("Location", "/");
-            exchange.sendResponseHeaders(303, -1); exchange.close();
+            synchronized (pending) {
+                if (!activeAttempt(attempt)) throw refused("sign-in-unverified");
+                Map<String, Object> linked = store.transaction(data -> {
+                    Map<String, Object> identities = map(data, "identities");
+                    Map<String, Object> connections = map(data, "connections");
+                    String existing = (String) identities.get(identityKey);
+                    String owner = attempt.owner() == null ? existing == null ? UUID.randomUUID().toString() : existing : attempt.owner();
+                    if (existing != null && !existing.equals(owner)) throw refused("account-already-linked");
+                    if (attempt.connection() != null) {
+                        Map<String, Object> old = connection(data, owner, connectionId);
+                        if (!subject.equals(old.get("subject")) || !issued.equals(old.get("client"))) throw refused("account-mismatch");
+                        if (old.containsKey("salt") && attempt.planUse()) tokenMap(old, attempt.browser());
+                    }
+                    identities.put(identityKey, owner);
+                    Map<String, Object> entry = new LinkedHashMap<>();
+                    entry.put("id", connectionId); entry.put("owner", owner); entry.put("provider", "openai"); entry.put("subject", subject);
+                    entry.put("client", issued); entry.put("label", identity.getOrDefault("email", "ChatGPT account"));
+                    if (attempt.connection() != null) {
+                        var old = connection(data, owner, connectionId);
+                        if (old.containsKey("salt")) entry.put("salt", old.get("salt"));
+                    }
+                    if (attempt.connection() != null && !attempt.planUse()) {
+                        // Fresh identity proof does not replace or decrypt an existing connection grant.
+                        // In particular a protected returning account can sign in before owner unlock.
+                        var old = connection(data, owner, connectionId);
+                        if (old.containsKey("tokens")) entry.put("tokens", old.get("tokens"));
+                        if (old.containsKey("lockedTokens")) entry.put("lockedTokens", old.get("lockedTokens"));
+                    } else saveTokens(entry, normalizeTokens(tokens, null), attempt.browser());
+                    connections.put(connectionId, entry);
+                    return Map.of("owner", owner, "connection", connectionId);
+                });
+                // Rotate the first-party cookie after authenticating. No provider credential crosses this boundary.
+                cancelAuthority(browser);
+                sessions.remove(browser); unlocked.remove(browser);
+                pending.entrySet().removeIf(entry -> entry.getValue().browser().equals(browser));
+                String next = ProtectedConnectionStore.randomId();
+                sessions.put(next, new BrowserSession(text(linked, "owner"), text(linked, "connection"), clock.instant().plus(Duration.ofHours(8)), attempt.perimeter()));
+                setCookie(exchange, next, 28_800);
+                String registration = ProtectedConnectionStore.randomId();
+                store.transaction(data -> {
+                    var hints = map(data, "registrations");
+                    String previous = cookie(exchange.getRequestHeaders(), REGISTRATION_COOKIE);
+                    if (previous != null) hints.remove(digest(previous));
+                    hints.put(digest(registration), Map.of("connection", text(linked, "connection"),
+                            "perimeter", attempt.perimeter(), "expires", clock.instant().plus(Duration.ofDays(30)).getEpochSecond()));
+                    return null;
+                });
+                setCookie(exchange, REGISTRATION_COOKIE, registration, 30 * 86400);
+                exchange.getResponseHeaders().set("Cache-Control", "no-store");
+                exchange.getResponseHeaders().set("Referrer-Policy", "no-referrer");
+                exchange.getResponseHeaders().set("Location", "/");
+                exchange.sendResponseHeaders(303, -1); exchange.close();
+            }
         } catch (PersonalConnectionException failure) { reply(exchange, 400, Map.of("state", failure.code())); }
         catch (RuntimeException failure) { reply(exchange, 400, Map.of("state", "sign-in-unverified")); }
     }
@@ -182,9 +198,11 @@ public final class PersonalOAuthService implements TenantCredentialResolver {
             String browser = cookie(exchange.getRequestHeaders());
             switch (action) {
                 case "/sign-out" -> {
-                    sessions.remove(browser); unlocked.remove(browser); cancelAuthority(browser);
-                    pending.entrySet().removeIf(entry -> entry.getValue().browser().equals(browser));
-                    setCookie(exchange, "", 0); reply(exchange, 200, Map.of("state", "signed-out"));
+                    synchronized (pending) {
+                        sessions.remove(browser); unlocked.remove(browser); cancelAuthority(browser);
+                        pending.entrySet().removeIf(entry -> entry.getValue().browser().equals(browser));
+                        setCookie(exchange, "", 0); reply(exchange, 200, Map.of("state", "signed-out"));
+                    }
                 }
                 case "/registration" -> {
                     String code = ProtectedConnectionStore.randomId();
@@ -200,7 +218,10 @@ public final class PersonalOAuthService implements TenantCredentialResolver {
                 case "/select" -> {
                     String id = text(body, "connection");
                     store.transaction(data -> { connection(data, session.owner(), id); return null; });
-                    sessions.put(browser, new BrowserSession(session.owner(), id, session.expires(), session.perimeter()));
+                    synchronized (pending) {
+                        if (sessions.get(browser) != session) throw refused("login-required");
+                        sessions.put(browser, new BrowserSession(session.owner(), id, session.expires(), session.perimeter()));
+                    }
                     unlocked.remove(browser); reply(exchange, 200, Map.of("state", "selected"));
                 }
                 case "/disconnect" -> disconnect(exchange, session, browser, text(body, "connection"));
@@ -211,8 +232,10 @@ public final class PersonalOAuthService implements TenantCredentialResolver {
                     var unlock = unlocked.get(browser);
                     if (unlock != null && !unlock.purpose().equals("assistant")) throw refused("unlock-assistant-required");
                     requireTokens(session.owner(), session.connection(), browser, true);
-                    sessions.put(browser, session); // authorization belongs to this already verified browser only
-                    store.transaction(data -> { pruneExpiredGrants(data); map(data, "assistant").put(digest(browser), Map.of("owner", session.owner(), "connection", session.connection(), "expires", clock.instant().plusSeconds(900).getEpochSecond())); return null; });
+                    synchronized (pending) {
+                        if (sessions.get(browser) != session || !session.expires().isAfter(clock.instant())) throw refused("login-required");
+                        store.transaction(data -> { pruneExpiredGrants(data); map(data, "assistant").put(digest(browser), Map.of("owner", session.owner(), "connection", session.connection(), "expires", clock.instant().plusSeconds(900).getEpochSecond())); return null; });
+                    }
                     reply(exchange, 200, Map.of("state", "authorized", "expiresIn", 900));
                 }
                 default -> reply(exchange, 404, Map.of("state", "not-found"));
@@ -222,55 +245,88 @@ public final class PersonalOAuthService implements TenantCredentialResolver {
     }
 
     private void begin(HttpExchange exchange, AuthenticatedPrincipal perimeter, Map<String, Object> body) throws IOException {
-        if (!configuration.networkReady()) throw refused("provider-egress-not-granted");
-        if (!callbackAuthority(exchange.getRequestHeaders())) throw refused("unsupported-deployment");
-        purgeExpired();
-        if (pending.size() >= 256 || sessions.size() >= 4096) throw refused("capacity-unavailable");
-        String browser = cookie(exchange.getRequestHeaders());
-        var session = current(exchange.getRequestHeaders(), perimeterKey(perimeter));
-        if (browser == null || session == null) {
-            browser = ProtectedConnectionStore.randomId();
-            session = new BrowserSession(null, null, clock.instant().plusSeconds(600), perimeterKey(perimeter));
-            sessions.put(browser, session);
+        synchronized (pending) {
+            if (!configuration.networkReady()) throw refused("provider-egress-not-granted");
+            if (!callbackAuthority(exchange.getRequestHeaders())) throw refused("unsupported-deployment");
+            purgeExpired();
+            if (pending.size() >= 256 || sessions.size() >= 4096) throw refused("capacity-unavailable");
+            String browser = cookie(exchange.getRequestHeaders());
+            var session = current(exchange.getRequestHeaders(), perimeterKey(perimeter));
+            if (browser == null || session == null) {
+                browser = ProtectedConnectionStore.randomId();
+                session = new BrowserSession(null, null, clock.instant().plusSeconds(600), perimeterKey(perimeter));
+                sessions.put(browser, session);
+            }
+            String selected = body.get("connection") instanceof String s && !s.isBlank() ? s : null;
+            String owner = session.owner();
+            Map<String, Object> saved;
+            if (selected != null) {
+                String explicit = selected;
+                saved = store.transaction(data -> connection(data, owner, explicit));
+            } else if (owner == null && !Boolean.TRUE.equals(body.get("newConnection"))) {
+                boolean explicit = body.containsKey("registration");
+                String registration = explicit ? text(body, "registration") : cookie(exchange.getRequestHeaders(), REGISTRATION_COOKIE);
+                if (explicit && !registration.matches("[A-Za-z0-9_-]{43}")) throw refused("registration-unavailable");
+                saved = registration == null ? Map.of() : store.transaction(data -> {
+                    var hints = map(data, "registrations");
+                    hints.entrySet().removeIf(entry -> number(cast(entry.getValue()), "expires") <= clock.instant().getEpochSecond());
+                    var hint = cast(hints.get(digest(registration)));
+                    if (!perimeterKey(perimeter).equals(hint.get("perimeter"))) return Map.of();
+                    return cast(map(data, "connections").get(text(hint, "connection")));
+                });
+                if (!saved.isEmpty()) selected = text(saved, "id");
+                else if (explicit) throw refused("registration-unavailable");
+            } else saved = Map.of();
+            boolean planUse = Boolean.TRUE.equals(body.get("enablePlanUse"));
+            if (saved.containsKey("salt") && planUse && !isUnlocked(browser, owner, selected)) throw refused("unlock-before-reconnect");
+            String client = saved.isEmpty() ? configuration.loopback() ? "dynamic_agent_client" : configuration.clientId() : text(saved, "client");
+            String state = ProtectedConnectionStore.randomId();
+            String nonce = ProtectedConnectionStore.randomId();
+            String pkce = ProtectedConnectionStore.randomId();
+            var attempt = new Pending(browser, owner, selected, client, pkce, nonce, clock.instant().plusSeconds(600), perimeterKey(perimeter), planUse,
+                    store.transaction(data -> text(data, "host")), configuration.callback(), configuration.mode(), session, false);
+            pending.put(state, attempt);
+            setCookie(exchange, browser, owner == null ? 600 : 28_800);
+            reply(exchange, 200, Map.of("authorizationUrl", authorizationUrl(state, attempt)));
         }
-        String selected = body.get("connection") instanceof String s && !s.isBlank() ? s : null;
-        String owner = session.owner();
-        Map<String, Object> saved;
-        if (selected != null) {
-            String explicit = selected;
-            saved = store.transaction(data -> connection(data, owner, explicit));
-        } else if (owner == null && !Boolean.TRUE.equals(body.get("newConnection"))) {
-            boolean explicit = body.containsKey("registration");
-            String registration = explicit ? text(body, "registration") : cookie(exchange.getRequestHeaders(), REGISTRATION_COOKIE);
-            if (explicit && !registration.matches("[A-Za-z0-9_-]{43}")) throw refused("registration-unavailable");
-            saved = registration == null ? Map.of() : store.transaction(data -> {
-                var hints = map(data, "registrations");
-                hints.entrySet().removeIf(entry -> number(cast(entry.getValue()), "expires") <= clock.instant().getEpochSecond());
-                var hint = cast(hints.get(digest(registration)));
-                if (!perimeterKey(perimeter).equals(hint.get("perimeter"))) return Map.of();
-                return cast(map(data, "connections").get(text(hint, "connection")));
-            });
-            if (!saved.isEmpty()) selected = text(saved, "id");
-            else if (explicit) throw refused("registration-unavailable");
-        } else saved = Map.of();
-        boolean planUse = Boolean.TRUE.equals(body.get("enablePlanUse"));
-        if (saved.containsKey("salt") && planUse && !isUnlocked(browser, owner, selected)) throw refused("unlock-before-reconnect");
-        String client = saved.isEmpty() ? configuration.loopback() ? "dynamic_agent_client" : configuration.clientId() : text(saved, "client");
-        String state = ProtectedConnectionStore.randomId();
-        String nonce = ProtectedConnectionStore.randomId();
-        String pkce = ProtectedConnectionStore.randomId();
-        pending.put(state, new Pending(browser, owner, selected, client, pkce, nonce, clock.instant().plusSeconds(600), perimeterKey(perimeter), planUse));
+    }
+
+    /** A provisional issued client is usable only for one fresh proof in the original transaction. */
+    private void restartAuthorization(HttpExchange exchange, Pending previous, String client) throws IOException {
+        synchronized (pending) {
+            if (!previous.host().equals(store.transaction(data -> text(data, "host"))))
+                throw refused("sign-in-unverified");
+            String state = ProtectedConnectionStore.randomId();
+            var attempt = new Pending(previous.browser(), previous.owner(), previous.connection(), client,
+                    ProtectedConnectionStore.randomId(), ProtectedConnectionStore.randomId(), previous.expires(),
+                    previous.perimeter(), previous.planUse(), previous.host(), previous.callback(), previous.mode(), previous.session(), true);
+            if (!activeAttempt(previous)) throw refused("sign-in-unverified");
+            if (pending.size() >= 256) throw refused("capacity-unavailable");
+            pending.put(state, attempt);
+            exchange.getResponseHeaders().set("Cache-Control", "no-store");
+            exchange.getResponseHeaders().set("Referrer-Policy", "no-referrer");
+            exchange.getResponseHeaders().set("Location", authorizationUrl(state, attempt));
+            exchange.sendResponseHeaders(303, -1); exchange.close();
+        }
+    }
+    private boolean activeAttempt(Pending attempt) {
+        return attempt.expires().isAfter(clock.instant()) && attempt.session().expires().isAfter(clock.instant())
+                && sessions.get(attempt.browser()) == attempt.session()
+                && Objects.equals(attempt.owner(), attempt.session().owner())
+                && attempt.perimeter().equals(attempt.session().perimeter())
+                && attempt.callback().equals(configuration.callback()) && attempt.mode().equals(configuration.mode());
+    }
+    private String authorizationUrl(String state, Pending attempt) {
         Map<String, String> parameters = new LinkedHashMap<>();
-        parameters.put("client_id", client); parameters.put("response_type", "code");
-        parameters.put("redirect_uri", configuration.callback().toString());
-        parameters.put("scope", Boolean.TRUE.equals(body.get("enablePlanUse")) ? PLAN_SCOPES : IDENTITY_SCOPES);
-        parameters.put("state", state); parameters.put("nonce", nonce); parameters.put("code_challenge_method", "S256");
-        parameters.put("code_challenge", digest(pkce)); parameters.put("resource", RESOURCE);
-        parameters.put("ext_agent_host_id", store.transaction(data -> text(data, "host")));
-        if (client.equals("dynamic_agent_client")) parameters.put("agent_name_hint", "Ravenroot");
-        if (client.equals("dynamic_agent_client") || planUse) parameters.put("prompt", "consent");
-        setCookie(exchange, browser, owner == null ? 600 : 28_800);
-        reply(exchange, 200, Map.of("authorizationUrl", AUTH + "?" + form(parameters)));
+        parameters.put("client_id", attempt.client()); parameters.put("response_type", "code");
+        parameters.put("redirect_uri", attempt.callback().toString());
+        parameters.put("scope", attempt.planUse() ? PLAN_SCOPES : IDENTITY_SCOPES);
+        parameters.put("state", state); parameters.put("nonce", attempt.nonce()); parameters.put("code_challenge_method", "S256");
+        parameters.put("code_challenge", digest(attempt.verifier())); parameters.put("resource", RESOURCE);
+        parameters.put("ext_agent_host_id", attempt.host());
+        if (attempt.client().equals("dynamic_agent_client")) parameters.put("agent_name_hint", "Ravenroot");
+        if (attempt.client().equals("dynamic_agent_client") || attempt.planUse()) parameters.put("prompt", "consent");
+        return AUTH + "?" + form(parameters);
     }
 
     private void status(HttpExchange exchange, AuthenticatedPrincipal perimeter) throws IOException {

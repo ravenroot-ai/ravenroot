@@ -84,6 +84,14 @@ Replicas and execution workers that share these connections must share the prote
 
 The backend exchanges codes and verifies RS256 ID-token signatures against OpenAI JWKS, exact issuer, issued-client audience, subject, nonce, and expiry. Transactions expire after 10 minutes and are consumed once. A local account is keyed by verified issuer/client/subject, never by matching email. Linking another provider registration requires an existing signed-in browser session and fresh proof from the account being linked. Different registrations remain separate even when their email labels match.
 
+If the token endpoint rejects an authorization code with `invalid_grant`, Ravenroot automatically
+starts one fresh authorization using that attempt's issued client ID, new state, nonce and PKCE,
+and the same browser, host, callback and requested permissions. The original ten-minute deadline
+does not move. This provisional retry grants no identity or model authority and is discarded on
+restart, sign-out, session replacement or expiry. A second `invalid_grant` ends the attempt with
+`reconnect-required`; start a fresh sign-in. Other provider failures, denied consent and failed
+identity verification do not trigger this automatic retry.
+
 Connection state is AES-256-GCM encrypted and atomically replaced under a cross-process lock. Unix key/state/lock files are created with mode `0600`; the state directory is `0700`. The storage key is separate from ciphertext, but its default sidecar is accessible to the same service account. This protects a copied ciphertext file without its key; it does not protect against compromise of the key, the service account, an authorized operator, or the executing runtime. Move and manage the key separately when the deployment requires stronger storage separation. Existing user-credential storage is not assumed to be encrypted by this feature.
 
 Refresh is serialized with connection mutation across processes. The latest access token, expiry, granted scopes, and rotating refresh token are replaced together. Temporary provider failures retain credentials. Terminal refresh invalidation removes unusable tokens and requires reconnect. Identity permission alone cannot authorize Responses requests.

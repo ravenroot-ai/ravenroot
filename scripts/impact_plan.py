@@ -84,6 +84,72 @@ def model(commit: str) -> tuple[dict[str, set[str]], set[str]]:
                 modules[module].add(target)
     return modules, set(files)
 
+def canonical_product_version_only(base: str, candidate: str, path: str) -> bool:
+    """Recognize release metadata without admitting the inactive licensed reactor.
+
+    Only the optional module's direct internal project/parent version fields may move,
+    and only with the authoritative root version. Dependencies, profiles, repositories,
+    coordinates and every other XML field remain part of the comparison.
+    """
+    if path != 'ravenroot/ravenroot-akka/pom.xml':
+        return False
+
+    def parse(commit: str, pom: str) -> ET.Element:
+        source = git('show', f'{commit}:{pom}')
+        if '<!DOCTYPE' in source or '<!ENTITY' in source:
+            raise ValueError('noncanonical XML declarations')
+        return ET.fromstring(source, parser=ET.XMLParser(
+            target=ET.TreeBuilder(insert_comments=True, insert_pis=True)))
+
+    def field(node: ET.Element, name: str) -> ET.Element:
+        matches = node.findall(f'm:{name}', NS)
+        if len(matches) != 1 or len(matches[0]) or matches[0].attrib:
+            raise ValueError(f'noncanonical {name}')
+        return matches[0]
+
+    def value(node: ET.Element, name: str) -> str:
+        return (field(node, name).text or '').strip()
+
+    def signature(node: ET.Element) -> tuple:
+        return (node.tag, sorted(node.attrib.items()), (node.text or '').strip(),
+                (node.tail or '').strip(), tuple(signature(child) for child in node))
+
+    try:
+        trees = []
+        versions = []
+        for commit in (base, candidate):
+            root = parse(commit, 'ravenroot/pom.xml')
+            if (root.tag != f"{{{NS['m']}}}project"
+                    or value(root, 'groupId') != 'ai.ravenroot'
+                    or value(root, 'artifactId') != 'ravenroot-parent'):
+                return False
+            version = value(root, 'version')
+            if not version or '${' in version:
+                return False
+            versions.append(version)
+            tree = parse(commit, path)
+            if tree.tag != root.tag or value(tree, 'artifactId') != 'ravenroot-akka':
+                return False
+            parents = tree.findall('m:parent', NS)
+            if len(parents) != 1:
+                return False
+            parent = parents[0]
+            if (value(parent, 'groupId') != 'ai.ravenroot'
+                    or value(parent, 'artifactId') != 'ravenroot-parent'
+                    or value(parent, 'version') != version):
+                return False
+            if tree.findall('m:groupId', NS) and value(tree, 'groupId') != 'ai.ravenroot':
+                return False
+            field(parent, 'version').text = '@canonical-product-version@'
+            if tree.findall('m:version', NS):
+                if value(tree, 'version') != version:
+                    return False
+                field(tree, 'version').text = '@canonical-product-version@'
+            trees.append(tree)
+        return versions[0] != versions[1] and signature(trees[0]) == signature(trees[1])
+    except (ValueError, ET.ParseError, subprocess.CalledProcessError):
+        return False
+
 def closure(seeds: set[str], edges: dict[str, set[str]]) -> set[str]:
     result = set(seeds)
     while True:
@@ -106,8 +172,11 @@ def make_plan(base: str, candidate: str, event: str, lane: str, force: bool = Fa
         base = git('rev-parse', '--verify', f'{base}^{{commit}}')
         git('merge-base', base, candidate)  # unrelated histories must never become an empty plan
         changed = paths_between(base, candidate)
-        if any(p.startswith('ravenroot/ravenroot-akka/') for p in changed):
-            raise RuntimeError('licensed optional Akka profile needs an explicitly authorized validation runner; default CI cannot prove this change')
+        for path in changed:
+            if path.startswith('ravenroot/ravenroot-akka/'):
+                if not canonical_product_version_only(base, candidate, path):
+                    raise RuntimeError('licensed optional Akka profile needs an explicitly authorized validation runner; default CI cannot prove this change')
+                reasons.append(f'{path}: canonical internal product-version metadata only; licensed profile remains excluded')
         old, _ = model(base)
         new, _ = model(candidate)
         graph = {m: old.get(m, set()) | new.get(m, set()) for m in old.keys() | new.keys()}

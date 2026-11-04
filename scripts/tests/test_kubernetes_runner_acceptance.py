@@ -426,6 +426,65 @@ class KubernetesAcceptanceFixtureTest(unittest.TestCase):
             with self.subTest(mutation=before), self.assertRaises(ValueError):
                 fixture.cpu_hierarchy_report(raw.replace(before, after))
 
+    def test_fresh_idle_periods_are_valid_but_reuse_backwards_and_zero_work_are_not(self):
+        raw = self.cpu_probe_output(True)
+        idle = raw.replace(b"BEFORE 0 0 0 0", b"BEFORE 0 7 0 0")
+        accepted = fixture.cpu_hierarchy_report(idle)
+        self.assertTrue(accepted["cases"][1]["ownThrottlingWithinTenSeconds"])
+        self.assertEqual([0, 7, 0, 0], accepted["cases"][1]["CHILD_BEFORE"])
+        mutations = (
+            (b"PARENT_BEFORE 0 0 0 0", b"PARENT_BEFORE 1 0 0 0", "STALE_BASELINE", "PARENT", "usage_usec"),
+            (b"CHILD_BEFORE 0 0 0 0", b"CHILD_BEFORE 0 0 1 0", "STALE_BASELINE", "CHILD", "nr_throttled"),
+            (b"NOISE_BEFORE 0 0 0 0", b"NOISE_BEFORE 0 0 0 1", "STALE_BASELINE", "NOISE", "throttled_usec"),
+            (b"CHILD_BEFORE 0 0 0 0", b"CHILD_BEFORE 0 101 0 0", "COUNTER_BACKWARDS", "CHILD", "nr_periods"),
+            (b"NOISE_AFTER 1000", b"NOISE_AFTER 0", "NO_WORKLOAD", "NOISE", "usage_usec"),
+            (b"WORKER 0 1 100000", b"WORKER 2 1 100000", "OWN_COUNTER_WINDOW", "CHILD", "nr_throttled"),
+            (b"WORKER 0 1 100000", b"WORKER 0 1 11000000", "INVALID_DURATION", "WORKER", "elapsed_usec"),
+        )
+        for label in ("equal", "stricter"):
+            start = raw.index(("CASE " + label).encode())
+            end = raw.index(b"CASE stricter") if label == "equal" else len(raw)
+            for before, after, reason, group, counter in mutations:
+                changed = raw[:start] + raw[start:end].replace(before, after, 1) + raw[end:]
+                evidence = {}
+                with self.subTest(case=label, reason=reason), self.assertRaises(ValueError):
+                    fixture.cpu_hierarchy_report(changed, evidence=evidence)
+                self.assertEqual(reason, evidence["reason"])
+                self.assertEqual({"case": label, "group": group, "counter": counter}, evidence["failure"])
+                self.assertEqual(2, len(evidence["cases"]), "safe vectors must survive semantic rejection")
+                self.assertTrue(evidence["probeCleanup"])
+
+    def test_probe_decoder_refuses_malformed_or_oversized_output_without_raw_leaks(self):
+        for raw, reason in ((b"secret" * 1000, "OVERSIZED_OUTPUT"), (b"\xffsecret", "MALFORMED_OUTPUT"),
+                            (self.cpu_probe_output().replace(b"CHILD_BEFORE 0", b"CHILD_BEFORE -1"), "MALFORMED_MEASUREMENT"),
+                            (self.cpu_probe_output().replace(b"CLEANUP\n", b""), "CLEANUP_MISSING"),
+                            (self.cpu_probe_output() + b"secret path PID\n", "MALFORMED_TRAILER")):
+            evidence = {}
+            with self.subTest(reason=reason), self.assertRaises(ValueError):
+                fixture.cpu_hierarchy_report(raw, evidence=evidence)
+            self.assertEqual(reason, evidence["reason"])
+            self.assertNotIn("secret", json.dumps(evidence))
+
+    def test_semantic_probe_failure_keeps_vectors_and_primary_reason_through_cleanup(self):
+        raw = self.cpu_probe_output(True)
+        start = raw.index(b"CASE stricter")
+        raw = raw[:start] + raw[start:].replace(b"CHILD_BEFORE 0 0 0 0", b"CHILD_BEFORE 0 101 0 0", 1)
+        for cleanup in (b"CLEANUP\n", RuntimeError("cleanup refused")):
+            with tempfile.TemporaryDirectory() as directory, patch.object(fixture, "REPORT_DIRECTORY", Path(directory)), \
+                    patch.object(fixture, "command", side_effect=[json.dumps(self.cpu_probe_node()).encode(), b"", json.dumps(self.cpu_probe_node(2000000000)).encode(), raw, cleanup]), \
+                    self.assertRaises((ValueError, RuntimeError)):
+                try:
+                    fixture.verify_cpu_hierarchy("rr-native-" + "a" * 12)
+                finally:
+                    report = json.loads((Path(directory) / "NativeCpuHierarchyProbe.json").read_text())
+                    self.assertEqual("FAILED", report["status"])
+                    self.assertEqual(2, len(report["cases"]))
+                    self.assertEqual([0, 101, 0, 0], report["cases"][1]["CHILD_BEFORE"])
+                    self.assertEqual({"case": "stricter", "group": "CHILD", "counter": "nr_periods"}, report["failure"])
+                    self.assertEqual(isinstance(cleanup, bytes), report["cleanup"])
+                    self.assertEqual("COUNTER_BACKWARDS", report["reason"] if isinstance(cleanup, bytes) else report["primaryReason"])
+                    self.assertTrue(report["probeCleanup"])
+
     def cpu_probe_node(self, cpu=0):
         return [{"Name": "/rr-native-" + "a" * 12, "Config": {"Image": fixture.CLUSTER_IMAGE},
                  "State": {"Running": True}, "Id": "b" * 64,

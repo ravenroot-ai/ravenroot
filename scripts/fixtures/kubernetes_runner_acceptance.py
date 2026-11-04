@@ -209,39 +209,67 @@ def retain_reports(source=None, destination=None):
         (destination / (name.rsplit(".", 1)[1] + ".json")).write_text(json.dumps(report, sort_keys=True) + "\n")
 
 
-def cpu_hierarchy_report(raw):
-    """Parse only fixed tokens and finite integers; never retain arbitrary node output."""
-    lines = raw.decode("ascii").splitlines()
+def cpu_hierarchy_report(raw, evidence=None):
+    """Decode finite measurements before validation; never retain arbitrary node output."""
+    def refuse(reason, case="UNKNOWN", group="UNKNOWN", counter="UNKNOWN"):
+        if evidence is not None:
+            evidence.update(reason=reason, failure={"case": case, "group": group, "counter": counter})
+        raise ValueError("CPU hierarchy " + reason)
+    if len(raw) > 4096:
+        refuse("OVERSIZED_OUTPUT")
+    try:
+        lines = raw.decode("ascii").splitlines()
+    except UnicodeError:
+        refuse("MALFORMED_OUTPUT")
     result = {"schemaVersion": 1, "approvedMillicores": 100, "outerMillicores": 500,
               "memoryBytes": 67108864, "pids": 16, "cases": [], "cleanup": False}
     keys = ("PARENT", "CHILD", "NOISE", "PARENT_BEFORE", "CHILD_BEFORE", "NOISE_BEFORE",
             "WORKER", "PARENT_AFTER", "CHILD_AFTER", "NOISE_AFTER")
-    for label, quota in (("equal", 10000), ("stricter", 8000)):
+    for label in ("equal", "stricter"):
         if not lines or lines.pop(0) != "CASE " + label:
-            raise ValueError("missing CPU hierarchy case")
+            refuse("MISSING_CASE", label)
         case = {"case": label}
         for key in keys:
             parts = lines.pop(0).split() if lines else []
             width = 2 if key in ("PARENT", "CHILD", "NOISE") else 3 if key == "WORKER" else 4
             if len(parts) != width + 1 or parts[0] != key or any(not re.fullmatch(r"[0-9]{1,19}", x) or int(x) > 2**63 - 1 for x in parts[1:]):
-                raise ValueError("invalid CPU hierarchy measurement")
+                refuse("MALFORMED_MEASUREMENT", label, key)
             case[key] = list(map(int, parts[1:]))
-        if case["PARENT"] != [10000, 100000] or case["CHILD"] != [quota, 100000] or case["NOISE"] != [1000, 100000]:
-            raise ValueError("CPU hierarchy quota readback differs")
-        for name in ("PARENT", "CHILD", "NOISE"):
+        result["cases"].append(case)
+    result["probeCleanup"] = result["cleanup"] = lines == ["CLEANUP"]
+    # All retained fields now have fixed keys/labels and bounded integer arrays.
+    # Preserve them even when a later semantic check rejects this measurement.
+    if evidence is not None:
+        evidence.update(result)
+    if not lines:
+        refuse("CLEANUP_MISSING")
+    if not result["probeCleanup"]:
+        refuse("MALFORMED_TRAILER")
+    fields = ("usage_usec", "nr_periods", "nr_throttled", "throttled_usec")
+    for case, quota in zip(result["cases"], (10000, 8000)):
+        label = case["case"]
+        for name, expected in (("PARENT", [10000, 100000]), ("CHILD", [quota, 100000]), ("NOISE", [1000, 100000])):
+            if case[name] != expected:
+                refuse("QUOTA_MISMATCH", label, name, "quota_period")
             before, after = case[name + "_BEFORE"], case[name + "_AFTER"]
-            if before != [0, 0, 0, 0] or any(b > a for b, a in zip(before, after)) or after[0] <= 0:
-                raise ValueError("CPU hierarchy counters are stale or workload did not run")
+            # Enabling a quota starts its timer: nr_periods can advance while idle.
+            # Fresh exclusive groups still have no pre-work CPU usage or throttling.
+            for index in (0, 2, 3):
+                if before[index] != 0:
+                    refuse("STALE_BASELINE", label, name, fields[index])
+            for index, (baseline, final) in enumerate(zip(before, after)):
+                if baseline > final:
+                    refuse("COUNTER_BACKWARDS", label, name, fields[index])
+            if after[0] <= before[0]:
+                refuse("NO_WORKLOAD", label, name, "usage_usec")
         baseline, final, elapsed = case["WORKER"]
-        if baseline > final or final > case["CHILD_AFTER"][2] or not 0 < elapsed <= 10_200_000:
-            raise ValueError("invalid own counter window")
+        if baseline > final or baseline < case["CHILD_BEFORE"][2] or final > case["CHILD_AFTER"][2]:
+            refuse("OWN_COUNTER_WINDOW", label, "CHILD", "nr_throttled")
+        if not 0 < elapsed <= 10_200_000:
+            refuse("INVALID_DURATION", label, "WORKER", "elapsed_usec")
         positive = final > baseline and elapsed <= 10_000_000
         case["ownThrottlingWithinTenSeconds"] = positive
         case["outcome"] = ("NOT_REPRODUCED" if positive else "OWN_THROTTLING_MISSING") if label == "equal" else ("VERIFIED" if positive else "OWN_THROTTLING_MISSING")
-        result["cases"].append(case)
-    if lines != ["CLEANUP"]:
-        raise ValueError("CPU hierarchy cleanup missing or unexpected output")
-    result["cleanup"] = True
     return result
 
 
@@ -283,9 +311,9 @@ def verify_cpu_hierarchy(profile):
     try:
         raw = command(["docker", "exec", "-i", identity, "timeout", "--signal=TERM", "--kill-after=2", "43",
                        "bash", "-s", "--", name, "run", nonce], data=payload, timeout=45, quiet=True)
-        report.update(cpu_hierarchy_report(raw))
+        report.update(cpu_hierarchy_report(raw, evidence=report))
         if not report["cases"][1]["ownThrottlingWithinTenSeconds"]:
-            report["reason"] = "OWN_THROTTLING_MISSING"
+            report.update(reason="OWN_THROTTLING_MISSING", failure={"case": "stricter", "group": "CHILD", "counter": "nr_throttled"})
             raise RuntimeError("fresh own-child throttling proof missing")
         report.update(status="VERIFIED", reason="NONE")
     finally:
@@ -300,7 +328,7 @@ def verify_cpu_hierarchy(profile):
                 raise RuntimeError("CPU probe cleanup unconfirmed")
             report["cleanup"] = True
         except Exception:
-            report.update(status="FAILED", reason="CLEANUP_UNCONFIRMED", cleanup=False)
+            report.update(primaryReason=report["reason"], status="FAILED", reason="CLEANUP_UNCONFIRMED", cleanup=False)
             raise
         finally:
             REPORT_DIRECTORY.mkdir(parents=True, exist_ok=True)

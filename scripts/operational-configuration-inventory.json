@@ -256984,24 +256984,28 @@
       "rationale": "Personal account display or worker diagnostic text Reviewed source atom: \"personal-provider-deadlines\"."
     },
     {
-      "id": "oc-660a4cbdb848addcdca9",
+      "id": "oc-86ebb0b62b771737d452",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 48,
+      "line": 49,
       "symbol": "PersonalOAuthService",
       "kind": "inline-operational-call",
       "role": "Duration.ofSeconds",
       "expression": "10",
       "expressionDigest": "4a44dc15364204a80fe80e9039455cc1608281820fe2b24f1e5233ade6af1dd5",
-      "evidenceDigest": "71f703189a8050b2ec45c0e226b2e8e08bcd94fc8888620d6f29f6a9218f5bc5",
+      "evidenceDigest": "d894ce8f7247439d4f3e5a1f3fdf2a14be328b3a7359882c4434e0c18695e8a2",
       "surface": "java",
       "status": "retained",
       "classification": "security-ceiling-or-default",
-      "rationale": "Finite local browser/grant/registration lifetime, provider deadline or response envelope; no indefinite personal authority Reviewed source atom: 10."
+      "rationale": "Finite local browser/grant/registration lifetime, provider deadline or response envelope; no indefinite personal authority Reviewed source atom: 10.",
+      "identityMigration": {
+        "history": "issue-599-invalid-grant-single-recovery-v1",
+        "fromId": "oc-660a4cbdb848addcdca9"
+      }
     },
     {
       "id": "oc-7cdd8feba8e18d50fdc0",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 92,
+      "line": 93,
       "symbol": "callback",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -257016,7 +257020,7 @@
     {
       "id": "oc-909cd941b86b961ab817",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 92,
+      "line": 93,
       "symbol": "callback",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -257031,7 +257035,7 @@
     {
       "id": "oc-2a09e64fd503a3b85af9",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 126,
+      "line": 140,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -257046,7 +257050,7 @@
     {
       "id": "oc-61a8b0e0106a2d9bbe3d",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 126,
+      "line": 140,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -257061,7 +257065,7 @@
     {
       "id": "oc-2522cd5d1bb081935a80",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 126,
+      "line": 140,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -257076,7 +257080,7 @@
     {
       "id": "oc-9f4b965fc7ecaca68689",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 145,
+      "line": 160,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "Duration.ofHours",
@@ -257091,7 +257095,7 @@
     {
       "id": "oc-fe24a34bd4f74dbee071",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 145,
+      "line": 160,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "Duration.ofHours",
@@ -257106,7 +257110,7 @@
     {
       "id": "oc-68fe10e4fdea2e63b2cf",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 145,
+      "line": 160,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "Duration.ofHours",
@@ -257121,7 +257125,7 @@
     {
       "id": "oc-a3c0942b6edd73f7c22f",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 152,
+      "line": 167,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "Duration.ofDays",
@@ -257136,7 +257140,7 @@
     {
       "id": "oc-50de8f9d7b17741de20e",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 152,
+      "line": 167,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "Duration.ofDays",
@@ -257151,7 +257155,7 @@
     {
       "id": "oc-a494c4571b38c77a4bd5",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 153,
+      "line": 168,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "Duration.ofDays",
@@ -257166,7 +257170,7 @@
     {
       "id": "oc-83f15abe2af5ba270490",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 153,
+      "line": 168,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "Duration.ofDays",
@@ -257181,7 +257185,7 @@
     {
       "id": "oc-07333769bc25c2a88d20",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 153,
+      "line": 168,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "Duration.ofDays",
@@ -257194,9 +257198,39 @@
       "rationale": "Finite local browser/grant/registration lifetime, provider deadline or response envelope; no indefinite personal authority Reviewed source atom: 30."
     },
     {
+      "id": "oc-34bb47598bdd3a56c0e6",
+      "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
+      "line": 286,
+      "symbol": "if",
+      "kind": "operational-declaration",
+      "role": "attempt",
+      "expression": "600",
+      "expressionDigest": "284b7e6d788f363f910f7beb1910473e23ce9d6c871f1ce0f31f22a982d48ad4",
+      "evidenceDigest": "0b8d7a4e52af056dc0c6ce1aed4975206bb5d7d6c337fea734d46f340f5f1d54",
+      "surface": "java",
+      "status": "retained",
+      "classification": "security-ceiling-or-default",
+      "rationale": "The initial pending attempt retains its existing ten-minute bound; automatic invalid_grant recovery copies this original deadline and never extends it. This is no new operator setting."
+    },
+    {
+      "id": "oc-908dbf1fc833883dc011",
+      "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
+      "line": 287,
+      "symbol": "if",
+      "kind": "operational-declaration",
+      "role": "attempt",
+      "expression": "\"host\"",
+      "expressionDigest": "e62c1c090b46507d918567756c90b6547e348e779338fc6cf38a10de2b109e62",
+      "evidenceDigest": "0b8d7a4e52af056dc0c6ce1aed4975206bb5d7d6c337fea734d46f340f5f1d54",
+      "surface": "java",
+      "status": "retained",
+      "classification": "protocol-or-format-invariant",
+      "rationale": "Protected installation-state key for the stable OpenAI host ID captured in the pending proof and checked before its single retry; this value confers no verified account or model authority."
+    },
+    {
       "id": "oc-d67042e992b4f4cbd394",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 285,
+      "line": 341,
       "symbol": "for",
       "kind": "operational-declaration",
       "role": "health",
@@ -257211,7 +257245,7 @@
     {
       "id": "oc-7ebf9355faceb4cf516d",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 285,
+      "line": 341,
       "symbol": "for",
       "kind": "operational-declaration",
       "role": "health",
@@ -257226,7 +257260,7 @@
     {
       "id": "oc-e4e37887bd7d37869b4f",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 289,
+      "line": 345,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "usage",
@@ -257241,7 +257275,7 @@
     {
       "id": "oc-9df43de8512504fd0c4f",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 290,
+      "line": 346,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "health",
@@ -257256,7 +257290,7 @@
     {
       "id": "oc-6978193c863835c8cd4f",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 290,
+      "line": 346,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "health",
@@ -257271,7 +257305,7 @@
     {
       "id": "oc-2494f556dfd7d4b14f98",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 291,
+      "line": 347,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "health",
@@ -257286,7 +257320,7 @@
     {
       "id": "oc-8b88fb0e76a088144f1b",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 292,
+      "line": 348,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "health",
@@ -257301,7 +257335,7 @@
     {
       "id": "oc-3756a3a5674993bdd417",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 292,
+      "line": 348,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "health",
@@ -257316,7 +257350,7 @@
     {
       "id": "oc-210cc5025e6676aa538e",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 431,
+      "line": 487,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -257331,7 +257365,7 @@
     {
       "id": "oc-aab4fbef3c56f4c7b588",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 431,
+      "line": 487,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -257346,7 +257380,7 @@
     {
       "id": "oc-7dd338cad9a34336b488",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 431,
+      "line": 487,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -257361,7 +257395,7 @@
     {
       "id": "oc-4f5e9d047e87b1a31fd9",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 432,
+      "line": 488,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -257376,7 +257410,7 @@
     {
       "id": "oc-200c5694eb6b66f745fd",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 432,
+      "line": 488,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -257391,7 +257425,7 @@
     {
       "id": "oc-a99706cc437829826295",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 432,
+      "line": 488,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -257406,7 +257440,7 @@
     {
       "id": "oc-5224ff6132464eff872d",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 580,
+      "line": 636,
       "symbol": "request",
       "kind": "operational-declaration",
       "role": "deadline",
@@ -257421,7 +257455,7 @@
     {
       "id": "oc-8d1dcb7f9b161dd5ee24",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 581,
+      "line": 637,
       "symbol": "request",
       "kind": "inline-operational-call",
       "role": "Duration.ofSeconds",
@@ -257436,7 +257470,7 @@
     {
       "id": "oc-73c2c95662134223407f",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 591,
+      "line": 647,
       "symbol": "while",
       "kind": "operational-declaration",
       "role": "size",
@@ -257451,7 +257485,7 @@
     {
       "id": "oc-a594de2999cb466bfc73",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 647,
+      "line": 703,
       "symbol": "setCookie",
       "kind": "operational-declaration",
       "role": "Path",
@@ -257466,7 +257500,7 @@
     {
       "id": "oc-e0f18eac16dbb8000002",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 647,
+      "line": 703,
       "symbol": "setCookie",
       "kind": "operational-declaration",
       "role": "Path",
@@ -257481,7 +257515,7 @@
     {
       "id": "oc-733621ce8d48ad3f7068",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 647,
+      "line": 703,
       "symbol": "setCookie",
       "kind": "operational-declaration",
       "role": "Path",
@@ -257496,7 +257530,7 @@
     {
       "id": "oc-6363f47b22d338016432",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 647,
+      "line": 703,
       "symbol": "setCookie",
       "kind": "operational-declaration",
       "role": "Path",
@@ -257511,7 +257545,7 @@
     {
       "id": "oc-19f22515028ffc8fed2c",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 647,
+      "line": 703,
       "symbol": "setCookie",
       "kind": "operational-declaration",
       "role": "Path",
@@ -257526,7 +257560,7 @@
     {
       "id": "oc-0199aadc16526c4de74e",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 684,
+      "line": 740,
       "symbol": "query",
       "kind": "inline-operational-call",
       "role": "readNBytes",
@@ -663572,6 +663606,7 @@
     "0b6ae2b1b893c6a54149c23c0e9a62da7e96dea14025626063d418b0cd5883b6": "for relative in (\"ravenroot/ravenroot-ui/package.json\", \"ravenroot/ravenroot-ui/package-lock.json\"):",
     "0b6ff46b885e74b945ba134812eb38ea9eebccd934a7a8f9265da21a92441f96": "path = next(path for path in sorted(self.files) if path.startswith(owner + '/src/main/java/') and path.endswith('.java'))",
     "0b709d0ccacb884b181a411d21de98337b71febbb5cadd3a68305cc54bc3596d": "self.assertEqual(\"b\" * 40, release[\"sourceCommit\"])",
+    "0b8d7a4e52af056dc0c6ce1aed4975206bb5d7d6c337fea734d46f340f5f1d54": "var attempt = new Pending(browser, owner, selected, client, pkce, nonce, clock.instant().plusSeconds(600), perimeterKey(perimeter), planUse, store.transaction(data -> text(data, \"host\")), configuration.callback(), configuration.mode(), session, false);",
     "0b97aed5d4d8488badd435bb38223b9dad3c4a8f53c80018b24b92f98afeeef2": "} private static byte[] hexToBytes(String hex) { byte[] bytes = new byte[hex.length() / 2];",
     "0ba3f6d35ac0eaa5aa5eea3d339a6c25e68c180e2de616c4a344d680c5760771": "PID_FILE=\"$RUNTIME_DIR/ravenroot.pid\"",
     "0ba85104635e72f5de9ff15e3f7a115d414c3f33b3553007fd5229e878256358": "assertTrue(executed.await(5, TimeUnit.SECONDS));",
@@ -668128,7 +668163,6 @@
     "71d8a4e2f1068986e0f2e6e81ecdce5ad910a9f2fa2689538101ad69f6d23636": "const derivedKey = element('derived-idempotency-key');",
     "71dfff9e1c71f7668914e8478e64e3a3d9797562fef943b906c8b267f67d93a2": "check \"the invalid checksum stops the batch before Maven\" reject_call 'mvn '",
     "71f4c1c39fb1a3c1ea4cf493275fccc6bc192eed32dfe6b2fa77074061f046a6": "{\"pointer\":\"/properties/probes/properties/liveness/$ref\",\"reference\":\"#/definitions/httpProbeTiming\",\"required\":true,\"resolutionError\":null,\"resolved\":{\"additionalProperties\":false,\"properties\":{\"initialDelaySeconds\":{\"maximum\":2147483647,\"minimum\":0,\"type\":\"integer\"},\"periodSeconds\":{\"maximum\":2147483647,\"minimum\":1,\"type\":\"integer\"}},\"required\":[\"initialDelaySeconds\",\"periodSeconds\"],\"type\":\"object\"}}",
-    "71f703189a8050b2ec45c0e226b2e8e08bcd94fc8888620d6f29f6a9218f5bc5": "private record BrowserSession(String owner, String connection, Instant expires, String perimeter) { } private record Pending(String browser, String owner, String connection, String client, String verifier, String nonce, Instant expires, String perimeter, boolean planUse) { } private record Unlocked(String owner, String connection, byte[] key, Instant expires, String purpose) { } public PersonalOAuthService(PersonalOAuthConfiguration configuration, TenantCredentialResolver system) { this(configuration, system, HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)) .followRedirects(HttpClient.Redirect.NEVER).build(), new OpenAiIdentityVerifier(), Clock.systemUTC());",
     "71f886980b474d00577127fe0bf8d4cf017dab83b7abdd986cded7d556199234": "self.assertTrue(document[\"prerelease\"])",
     "71fa6a916c90f0e8f9507cfabdbaa8353b1290e14c68dfe60f59212d5c729f15": "echo \"Extension module not found: $module_dir\" >&2",
     "71ff1d031e9a0411153076beedf4066caf5aa6edbc692f83de16f3baab015833": "fail(\"the isolated quota daemon readiness probe could not execute\")",
@@ -672785,6 +672819,7 @@
     "d882dd253e70ad2d2ba74f62cb174565439ddd05f9655dbcd800820d9972f3df": "final class AngusImapConsumerProtocol implements ImapConsumerProtocol { static final int MAX_IO_TIMEOUT_MS = 30_000;",
     "d88dfd5a42ec1d1f5ee79d47fa0df38cdab08d09aeb39df941648ede277e5843": "const list = document.createElement('ul');",
     "d891290a2624dddfa16e2074235ae6cfe7857376ce5846234875e439ff98a072": "RAVENROOT_HUMAN_TASK_DEFAULT_ATTENTION_PAGE_SIZE",
+    "d894ce8f7247439d4f3e5a1f3fdf2a14be328b3a7359882c4434e0c18695e8a2": "private record BrowserSession(String owner, String connection, Instant expires, String perimeter) { } private record Pending(String browser, String owner, String connection, String client, String verifier, String nonce, Instant expires, String perimeter, boolean planUse, String host, URI callback, String mode, BrowserSession session, boolean retried) { } private record Unlocked(String owner, String connection, byte[] key, Instant expires, String purpose) { } public PersonalOAuthService(PersonalOAuthConfiguration configuration, TenantCredentialResolver system) { this(configuration, system, HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)) .followRedirects(HttpClient.Redirect.NEVER).build(), new OpenAiIdentityVerifier(), Clock.systemUTC());",
     "d899bc2212d421e9433d1544c3bc327470253f0803eed770f693523c0974853f": "const halfH = node.height / 2;",
     "d8a99ce89cc58c6795e6c8e0a165b1b9b1e83a8bece1bd4c69890327923bd54d": "{\"pointer\":\"/properties/assistant/properties/maxOutputTokens/oneOf/1/$ref\",\"reference\":\"#/definitions/graphBlank\",\"required\":true,\"resolutionError\":null,\"resolved\":{\"pattern\":\"^[\\t-\\r\\u001c- \\u1680\\u2000-\\u2006\\u2008-\\u200a\\u2028-\\u2029\\u205f\\u3000]*$\",\"type\":\"string\"}}",
     "d8ae8a5df249ddba2923d0d9fa4ae974aa51da5caba03aebc02dd065145cee14": "public final class StandardPublicationPolicyEvaluator implements PublicationPolicyEvaluator { private static final int MAX_LOGICAL_PATH_CHARACTERS = 2_048;",
@@ -1209322,6 +1209357,47 @@
             "status": "retained",
             "classification": "test-fixture",
             "rationale": "scripts/tests/test_impact_plan.py::test_workflow_uses_one_lane_authority_for_planning_and_gate atom \"'PLAN: ${{ needs.release-classification.outputs.plan }}'\" is test input or an assertion that dispatch selects one trusted lane and consumes the authoritative plan; it configures no production setting."
+          }
+        }
+      ]
+    },
+    {
+      "id": "issue-599-invalid-grant-single-recovery-v1",
+      "issue": "#599",
+      "sourceRevision": "2976c5441f8e6a5ace2f91cb692df4a9fc04e833",
+      "targetRevision": "5b90edcbd10679ced5fa0aec6a0c0950683e2753",
+      "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+      "sourceInventoryDigest": "566bed79133dcf18786bd932f22a792f52ce067133ca650ecd6ead7123ba6cf4",
+      "targetCandidateDigest": "5b719ad2d4bc3a15d5f705a2821136c8949483098d745934914a62cb6beabe6b",
+      "mappings": [
+        {
+          "fromId": "oc-660a4cbdb848addcdca9",
+          "toId": "oc-86ebb0b62b771737d452",
+          "approved": true,
+          "rationale": "Unchanged ten-second provider connect timeout; the pending record gained immutable retry bindings, shifting the surrounding declaration evidence without changing this source atom or security ceiling.",
+          "equivalence": {
+            "kind": "same-atom-v1",
+            "beforeEvidenceDigest": "71f703189a8050b2ec45c0e226b2e8e08bcd94fc8888620d6f29f6a9218f5bc5",
+            "afterEvidenceDigest": "d894ce8f7247439d4f3e5a1f3fdf2a14be328b3a7359882c4434e0c18695e8a2"
+          }
+        }
+      ],
+      "retirements": [],
+      "additions": [
+        {
+          "id": "oc-34bb47598bdd3a56c0e6",
+          "metadata": {
+            "status": "retained",
+            "classification": "security-ceiling-or-default",
+            "rationale": "The initial pending attempt retains its existing ten-minute bound; automatic invalid_grant recovery copies this original deadline and never extends it. This is no new operator setting."
+          }
+        },
+        {
+          "id": "oc-908dbf1fc833883dc011",
+          "metadata": {
+            "status": "retained",
+            "classification": "protocol-or-format-invariant",
+            "rationale": "Protected installation-state key for the stable OpenAI host ID captured in the pending proof and checked before its single retry; this value confers no verified account or model authority."
           }
         }
       ]

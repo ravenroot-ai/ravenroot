@@ -36,18 +36,18 @@ semantic review and focused source inventories remain required for those boundar
 
 | Measure | Count |
 |---|---:|
-| Atomic operational candidates discovered | 32508 |
+| Atomic operational candidates discovered | 32510 |
 | Source-proven Helm operator fields | 39 |
 | Helm operator fields represented by lexical inventory rows | 31 |
 | Source-proven Helm fields outside lexical candidate patterns | 8 |
-| Reviewed | 32508 |
+| Reviewed | 32510 |
 | Pending review | 0 |
 | Confirmed hard-coded candidates awaiting remediation | 0 |
 | Unique confirmed operator-configurable parameters | 358 |
 | Unique parameters converted to centralized configuration | 16 |
 | Duplicate authorities removed | 27 |
-| Retained security ceilings or defaults | 2443 |
-| Retained protocol or format invariants | 13927 |
+| Retained security ceilings or defaults | 2444 |
+| Retained protocol or format invariants | 13928 |
 | Retained published contract descriptions | 624 |
 | Retained presentation text | 2981 |
 | Retained derived values | 1157 |
@@ -62,10 +62,10 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 189.
+Checked source reconciliations: 190.
 
 The following tables are exhaustive projections of the same active inventory; each includes
-zero-count or unclassified rows as needed and sums to 32508 candidates.
+zero-count or unclassified rows as needed and sums to 32510 candidates.
 
 ### Status counts
 
@@ -77,7 +77,7 @@ zero-count or unclassified rows as needed and sums to 32508 candidates.
 | deferred | 0 |
 | duplicate-removed | 0 |
 | pending-review | 0 |
-| retained | 30574 |
+| retained | 30576 |
 
 ### Classification counts
 
@@ -86,9 +86,9 @@ zero-count or unclassified rows as needed and sums to 32508 candidates.
 | derived | 1157 |
 | operator-configurable | 1934 |
 | presentation-text | 2981 |
-| protocol-or-format-invariant | 13927 |
+| protocol-or-format-invariant | 13928 |
 | published-contract-description | 624 |
-| security-ceiling-or-default | 2443 |
+| security-ceiling-or-default | 2444 |
 | test-fixture | 9442 |
 | unclassified | 0 |
 
@@ -98,7 +98,7 @@ zero-count or unclassified rows as needed and sums to 32508 candidates.
 |---|---:|
 | deployment | 3215 |
 | deployment-example | 20 |
-| java | 8341 |
+| java | 8343 |
 | script | 3033 |
 | test-fixture | 9442 |
 | ui | 8457 |
@@ -118,7 +118,7 @@ assigned to an issue retroactively.
 | #319 | 334 |
 | #320 | 1466 |
 | #321 | 8111 |
-| Retained; no remediation required | 22325 |
+| Retained; no remediation required | 22327 |
 
 ## Latest reconciliation
 
@@ -127,12 +127,12 @@ identity and retirement has its own approved record in the machine-readable inve
 
 | Partition | Count |
 |---|---:|
-| Source inventory candidates | 32502 |
-| Unchanged identities | 32502 |
-| Approved identity migrations | 0 |
+| Source inventory candidates | 32508 |
+| Unchanged identities | 32507 |
+| Approved identity migrations | 1 |
 | Approved retirements | 0 |
-| Semantically classified additions | 6 |
-| Current candidates | 32508 |
+| Semantically classified additions | 2 |
+| Current candidates | 32510 |
 
 ## Final semantic review
 
@@ -11732,43 +11732,45 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-7112491d12cb24cccbd1` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:26` `PersonalOAuthService` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "invalid_grant". |
 | `oc-8116b0d8499eae7ce10f` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:26` `PersonalOAuthService` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "refresh_token_expired". |
 | `oc-afd7747e0e0b7cdcff32` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:29` `PersonalOAuthService` | java | retained | presentation-text | Personal account display or worker diagnostic text Reviewed source atom: "personal-provider-deadlines". |
-| `oc-660a4cbdb848addcdca9` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:48` `PersonalOAuthService` | java | retained | security-ceiling-or-default | Finite local browser/grant/registration lifetime, provider deadline or response envelope; no indefinite personal authority Reviewed source atom: 10. |
-| `oc-7cdd8feba8e18d50fdc0` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:92` `callback` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "". |
-| `oc-909cd941b86b961ab817` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:92` `callback` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "state". |
-| `oc-2522cd5d1bb081935a80` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:126` `if` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "label". |
-| `oc-2a09e64fd503a3b85af9` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:126` `if` | java | retained | presentation-text | Personal account display or worker diagnostic text Reviewed source atom: "ChatGPT account". |
-| `oc-61a8b0e0106a2d9bbe3d` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:126` `if` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "email". |
-| `oc-68fe10e4fdea2e63b2cf` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:145` `if` | java | retained | security-ceiling-or-default | Finite local browser/grant/registration lifetime, provider deadline or response envelope; no indefinite personal authority Reviewed source atom: 8. |
-| `oc-9f4b965fc7ecaca68689` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:145` `if` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "connection". |
-| `oc-fe24a34bd4f74dbee071` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:145` `if` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "owner". |
-| `oc-50de8f9d7b17741de20e` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:152` `if` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "connection". |
-| `oc-a3c0942b6edd73f7c22f` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:152` `if` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "connection". |
-| `oc-07333769bc25c2a88d20` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:153` `if` | java | retained | security-ceiling-or-default | Finite local browser/grant/registration lifetime, provider deadline or response envelope; no indefinite personal authority Reviewed source atom: 30. |
-| `oc-83f15abe2af5ba270490` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:153` `if` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "perimeter". |
-| `oc-a494c4571b38c77a4bd5` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:153` `if` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "expires". |
-| `oc-7ebf9355faceb4cf516d` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:285` `for` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "unlock-required". |
-| `oc-d67042e992b4f4cbd394` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:285` `for` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "connected". |
-| `oc-e4e37887bd7d37869b4f` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:289` `if` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "chatgpt.tokens.use.direct". |
-| `oc-6978193c863835c8cd4f` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:290` `if` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "reconnect-required". |
-| `oc-9df43de8512504fd0c4f` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:290` `if` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "access_token". |
-| `oc-2494f556dfd7d4b14f98` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:291` `if` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "plan-permission-required". |
-| `oc-3756a3a5674993bdd417` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:292` `if` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "refresh-required". |
-| `oc-8b88fb0e76a088144f1b` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:292` `if` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "expires". |
-| `oc-210cc5025e6676aa538e` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:431` `if` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "list". |
-| `oc-7dd338cad9a34336b488` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:431` `if` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "visibility". |
-| `oc-aab4fbef3c56f4c7b588` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:431` `if` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "slug". |
-| `oc-200c5694eb6b66f745fd` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:432` `if` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "display_name". |
-| `oc-4f5e9d047e87b1a31fd9` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:432` `if` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "display_name". |
-| `oc-a99706cc437829826295` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:432` `if` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "slug". |
-| `oc-5224ff6132464eff872d` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:580` `request` | java | retained | security-ceiling-or-default | Finite local browser/grant/registration lifetime, provider deadline or response envelope; no indefinite personal authority Reviewed source atom: 90. |
-| `oc-8d1dcb7f9b161dd5ee24` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:581` `request` | java | retained | security-ceiling-or-default | Finite local browser/grant/registration lifetime, provider deadline or response envelope; no indefinite personal authority Reviewed source atom: 90. |
-| `oc-73c2c95662134223407f` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:591` `while` | java | retained | derived | Stream byte accounting Reviewed source atom: 1. |
-| `oc-19f22515028ffc8fed2c` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:647` `setCookie` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "Set-Cookie". |
-| `oc-6363f47b22d338016432` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:647` `setCookie` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "=". |
-| `oc-733621ce8d48ad3f7068` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:647` `setCookie` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "; Secure". |
-| `oc-a594de2999cb466bfc73` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:647` `setCookie` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "". |
-| `oc-e0f18eac16dbb8000002` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:647` `setCookie` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "; Path=/; HttpOnly; SameSite=Lax; Max-Age=". |
-| `oc-0199aadc16526c4de74e` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:684` `query` | java | retained | security-ceiling-or-default | Finite local browser/grant/registration lifetime, provider deadline or response envelope; no indefinite personal authority Reviewed source atom: 65537. |
+| `oc-86ebb0b62b771737d452` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:49` `PersonalOAuthService` | java | retained | security-ceiling-or-default | Finite local browser/grant/registration lifetime, provider deadline or response envelope; no indefinite personal authority Reviewed source atom: 10. |
+| `oc-7cdd8feba8e18d50fdc0` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:93` `callback` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "". |
+| `oc-909cd941b86b961ab817` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:93` `callback` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "state". |
+| `oc-2522cd5d1bb081935a80` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:140` `if` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "label". |
+| `oc-2a09e64fd503a3b85af9` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:140` `if` | java | retained | presentation-text | Personal account display or worker diagnostic text Reviewed source atom: "ChatGPT account". |
+| `oc-61a8b0e0106a2d9bbe3d` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:140` `if` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "email". |
+| `oc-68fe10e4fdea2e63b2cf` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:160` `if` | java | retained | security-ceiling-or-default | Finite local browser/grant/registration lifetime, provider deadline or response envelope; no indefinite personal authority Reviewed source atom: 8. |
+| `oc-9f4b965fc7ecaca68689` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:160` `if` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "connection". |
+| `oc-fe24a34bd4f74dbee071` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:160` `if` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "owner". |
+| `oc-50de8f9d7b17741de20e` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:167` `if` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "connection". |
+| `oc-a3c0942b6edd73f7c22f` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:167` `if` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "connection". |
+| `oc-07333769bc25c2a88d20` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:168` `if` | java | retained | security-ceiling-or-default | Finite local browser/grant/registration lifetime, provider deadline or response envelope; no indefinite personal authority Reviewed source atom: 30. |
+| `oc-83f15abe2af5ba270490` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:168` `if` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "perimeter". |
+| `oc-a494c4571b38c77a4bd5` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:168` `if` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "expires". |
+| `oc-34bb47598bdd3a56c0e6` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:286` `if` | java | retained | security-ceiling-or-default | The initial pending attempt retains its existing ten-minute bound; automatic invalid_grant recovery copies this original deadline and never extends it. This is no new operator setting. |
+| `oc-908dbf1fc833883dc011` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:287` `if` | java | retained | protocol-or-format-invariant | Protected installation-state key for the stable OpenAI host ID captured in the pending proof and checked before its single retry; this value confers no verified account or model authority. |
+| `oc-7ebf9355faceb4cf516d` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:341` `for` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "unlock-required". |
+| `oc-d67042e992b4f4cbd394` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:341` `for` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "connected". |
+| `oc-e4e37887bd7d37869b4f` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:345` `if` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "chatgpt.tokens.use.direct". |
+| `oc-6978193c863835c8cd4f` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:346` `if` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "reconnect-required". |
+| `oc-9df43de8512504fd0c4f` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:346` `if` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "access_token". |
+| `oc-2494f556dfd7d4b14f98` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:347` `if` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "plan-permission-required". |
+| `oc-3756a3a5674993bdd417` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:348` `if` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "refresh-required". |
+| `oc-8b88fb0e76a088144f1b` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:348` `if` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "expires". |
+| `oc-210cc5025e6676aa538e` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:487` `if` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "list". |
+| `oc-7dd338cad9a34336b488` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:487` `if` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "visibility". |
+| `oc-aab4fbef3c56f4c7b588` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:487` `if` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "slug". |
+| `oc-200c5694eb6b66f745fd` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:488` `if` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "display_name". |
+| `oc-4f5e9d047e87b1a31fd9` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:488` `if` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "display_name". |
+| `oc-a99706cc437829826295` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:488` `if` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "slug". |
+| `oc-5224ff6132464eff872d` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:636` `request` | java | retained | security-ceiling-or-default | Finite local browser/grant/registration lifetime, provider deadline or response envelope; no indefinite personal authority Reviewed source atom: 90. |
+| `oc-8d1dcb7f9b161dd5ee24` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:637` `request` | java | retained | security-ceiling-or-default | Finite local browser/grant/registration lifetime, provider deadline or response envelope; no indefinite personal authority Reviewed source atom: 90. |
+| `oc-73c2c95662134223407f` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:647` `while` | java | retained | derived | Stream byte accounting Reviewed source atom: 1. |
+| `oc-19f22515028ffc8fed2c` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:703` `setCookie` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "Set-Cookie". |
+| `oc-6363f47b22d338016432` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:703` `setCookie` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "=". |
+| `oc-733621ce8d48ad3f7068` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:703` `setCookie` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "; Secure". |
+| `oc-a594de2999cb466bfc73` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:703` `setCookie` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "". |
+| `oc-e0f18eac16dbb8000002` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:703` `setCookie` | java | retained | protocol-or-format-invariant | Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: "; Path=/; HttpOnly; SameSite=Lax; Max-Age=". |
+| `oc-0199aadc16526c4de74e` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java:740` `query` | java | retained | security-ceiling-or-default | Finite local browser/grant/registration lifetime, provider deadline or response envelope; no indefinite personal authority Reviewed source atom: 65537. |
 | `oc-025dcdbfdc63838df8b5` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/ProtectedConnectionStore.java:21` `ProtectedConnectionStore` | java | retained | security-ceiling-or-default | Bounded personal provider/state decoding safety envelope Reviewed source atom: 1024. |
 | `oc-0c49fd0aeb5e76815fe8` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/ProtectedConnectionStore.java:21` `ProtectedConnectionStore` | java | retained | security-ceiling-or-default | Bounded personal provider/state decoding safety envelope Reviewed source atom: 4096. |
 | `oc-2df3b35aac685196d75b` | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/ProtectedConnectionStore.java:21` `ProtectedConnectionStore` | java | retained | security-ceiling-or-default | Bounded personal provider/state decoding safety envelope Reviewed source atom: 1024. |

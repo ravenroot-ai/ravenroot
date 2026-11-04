@@ -17,6 +17,13 @@ Models, agents, and program artifacts increase capability only through explicitl
 - Keep artifact source in governed artifact storage, require validation and approval, and execute only an active identity.
 - Enforce the sandbox supervisor, 5,000 ms default timeout, and 64 MiB default heap. Enable dual control explicitly with `RAVENROOT_ARTIFACT_DUAL_CONTROL=true` where policy requires a second approver.
 
+Successful GraalVM program results are published after session cleanup and admission closure.
+Cancellation and revocation share one bounded cleanup attempt, including a session returned after
+cancellation during launch. Cleanup or close errors prevent success, are preserved with an existing
+failure, or are recorded when the result is already cancelled. A failed or unconfirmed cleanup attempt
+is not proof that the process tree was reaped. Each invocation attempts admission closure once after
+cleanup settlement.
+
 ## Residual responsibility
 
 Model output is untrusted payload, tool use is a privileged side effect, and code approval is distinct

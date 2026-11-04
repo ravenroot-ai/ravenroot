@@ -837,10 +837,15 @@ jobs:
       - name: Admit the integration candidate to regression testing
         env:
           PLAN_JOBS: ${{ needs.release-classification.outputs.jobs }}
-          RESULTS: ${{ toJSON(needs) }}
         run: |
-          jq -e --argjson jobs "$PLAN_JOBS" 'to_entries | all(.key as $key | if $key == "release-classification" or ($jobs | index($key)) then .value.result == "success" else .value.result == "skipped" end)' \
-            <<<"$RESULTS" >/dev/null
+          set -euo pipefail
+          umask 077
+          set -o noclobber
+          cat > "$RUNNER_TEMP/full-preflight-needs.json" <<'RAVENROOT_NEEDS_JSON'
+          ${{ toJSON(needs) }}
+          RAVENROOT_NEEDS_JSON
+          test "$(wc -c < "$RUNNER_TEMP/full-preflight-needs.json")" -le 8388608
+          jq -e --argjson jobs "$PLAN_JOBS" 'to_entries | all(.key as $key | if $key == "release-classification" or ($jobs | index($key)) then .value.result == "success" else .value.result == "skipped" end)' "$RUNNER_TEMP/full-preflight-needs.json" >/dev/null
 
   full-backend-tests:
     name: full-backend-tests
@@ -1211,10 +1216,15 @@ jobs:
       - name: Admit the integration candidate to the container smoke test
         env:
           PLAN_JOBS: ${{ needs.release-classification.outputs.jobs }}
-          RESULTS: ${{ toJSON(needs) }}
         run: |
-          jq -e --argjson jobs "$PLAN_JOBS" 'to_entries | all(.key as $key | if $key == "release-classification" or ($jobs | index($key)) then .value.result == "success" else .value.result == "skipped" end)' \
-            <<<"$RESULTS" >/dev/null
+          set -euo pipefail
+          umask 077
+          set -o noclobber
+          cat > "$RUNNER_TEMP/full-regression-needs.json" <<'RAVENROOT_NEEDS_JSON'
+          ${{ toJSON(needs) }}
+          RAVENROOT_NEEDS_JSON
+          test "$(wc -c < "$RUNNER_TEMP/full-regression-needs.json")" -le 8388608
+          jq -e --argjson jobs "$PLAN_JOBS" 'to_entries | all(.key as $key | if $key == "release-classification" or ($jobs | index($key)) then .value.result == "success" else .value.result == "skipped" end)' "$RUNNER_TEMP/full-regression-needs.json" >/dev/null
 
   full-runtime-container-smoke:
     name: full-runtime-container-smoke
@@ -1368,7 +1378,6 @@ jobs:
       - name: Require every job this event demanded
         if: ${{ success() && !cancelled() }}
         env:
-          IMPACT_PLAN: ${{ needs.release-classification.outputs.plan }}
           IMPACT_LANE: ${{ inputs.integration_ref || github.base_ref || github.event.merge_group.base_ref || github.ref_name }}
           IMPACT_BASE: ${{ inputs.routing_run_id != '' && inputs.base_sha || github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
           CI_CANCELLED: ${{ job.status != 'success' }}
@@ -1381,8 +1390,15 @@ jobs:
           REPOSITORY: ${{ github.repository }}
           PROMOTED_SHA: ${{ env.PROMOTION_SOURCE_SHA || github.event.pull_request.head.sha }}
           PROMOTION_EVIDENCE: ${{ runner.temp }}/promotion-evidence.json
-          NEEDS_JSON: ${{ toJSON(needs) }}
-        run: python3 scripts/ci_required.py
+        run: |
+          set -euo pipefail
+          umask 077
+          set -o noclobber
+          cat > "$RUNNER_TEMP/ci-required-needs.json" <<'RAVENROOT_NEEDS_JSON'
+          ${{ toJSON(needs) }}
+          RAVENROOT_NEEDS_JSON
+          test "$(wc -c < "$RUNNER_TEMP/ci-required-needs.json")" -le 8388608
+          python3 scripts/ci_required.py --needs-file "$RUNNER_TEMP/ci-required-needs.json"
       - name: Refuse cancellation after verification
         if: ${{ cancelled() }}
         run: |

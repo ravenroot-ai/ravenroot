@@ -492625,9 +492625,69 @@
    "rationale": "scripts/impact_plan.py::model atom '0' is fixed CI evidence/schema, exact branch/job/module routing, source graph ownership, or serialization vocabulary. Its source context is reviewed as part of the maintenance CI contract; it is not an operator-configurable value. Reconfirmed against current dev source during #604, preserving the reviewed #598 CI contract."
   },
   {
+   "id": "oc-4d97e473970d7e7684fb",
+   "path": "scripts/impact_plan.py",
+   "line": 88,
+   "symbol": "canonical_product_version_only",
+   "kind": "inline-script-operational",
+   "role": "inline",
+   "expression": "\"\"",
+   "expressionDigest": "12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+   "evidenceDigest": "309145154c2cc0fa2db054abf2ff3096a0b07540bfc15b8259df68c898781915",
+   "surface": "script",
+   "status": "retained",
+   "classification": "presentation-text",
+   "rationale": "#607 scripts/impact_plan.py:88 \"\" is fixed developer documentation or plan-reason output produced by the metadata predicate/planner and consumed only as explanation. The literal does not control version normalization, job selection, profile activation, credentials or runtime configuration."
+  },
+  {
+   "id": "oc-5ff6a723ddbb137723d4",
+   "path": "scripts/impact_plan.py",
+   "line": 94,
+   "symbol": "canonical_product_version_only",
+   "kind": "inline-script-operational",
+   "role": "inline",
+   "expression": "'ravenroot/ravenroot-akka/pom.xml'",
+   "expressionDigest": "185667a16623e07cce6e176ae70023d6a7c9015363b9078925b29bae8de66f2d",
+   "evidenceDigest": "965eea0dbc7abaeee14d1c19a3658c2f2eeb1fe19f547648004504a4313c0b04",
+   "surface": "script",
+   "status": "retained",
+   "classification": "protocol-or-format-invariant",
+   "rationale": "#607 scripts/impact_plan.py:94 'ravenroot/ravenroot-akka/pom.xml' is the exact source-owned optional-module routing identity consumed by canonical_product_version_only or make_plan. It restricts the metadata exception to the registered Akka POM and retains fail-closed rejection for other optional-module changes; it is not an operator-selected path or licensed-runner authority."
+  },
+  {
+   "id": "oc-74223896046595169ba3",
+   "path": "scripts/impact_plan.py",
+   "line": 176,
+   "symbol": "make_plan",
+   "kind": "inline-script-operational",
+   "role": "inline",
+   "expression": "'ravenroot/ravenroot-akka/'",
+   "expressionDigest": "5367565e342d08c99e05ac5a2aabca5ace1f4537310f06b98d370d42d71db605",
+   "evidenceDigest": "90971b5cfc6bd19ef25c9ad09d2d010a75a67d3ad5d0b48227580273f7f544a5",
+   "surface": "script",
+   "status": "retained",
+   "classification": "protocol-or-format-invariant",
+   "rationale": "#607 scripts/impact_plan.py:176 'ravenroot/ravenroot-akka/' is the exact source-owned optional-module routing identity consumed by canonical_product_version_only or make_plan. It restricts the metadata exception to the registered Akka POM and retains fail-closed rejection for other optional-module changes; it is not an operator-selected path or licensed-runner authority."
+  },
+  {
+   "id": "oc-eee8c1de87ce5234aa28",
+   "path": "scripts/impact_plan.py",
+   "line": 179,
+   "symbol": "make_plan",
+   "kind": "inline-script-operational",
+   "role": "inline",
+   "expression": "'{path}: canonical internal product-version metadata only; licensed profile remains excluded'",
+   "expressionDigest": "56538a969262b69617a2df4f8f259231e400474710a0b9508f3518bc96414e3f",
+   "evidenceDigest": "902688f0e4606be3d3f61ff65d9a7ec0b392cbad9805ce614af4153112d48c18",
+   "surface": "script",
+   "status": "retained",
+   "classification": "presentation-text",
+   "rationale": "#607 scripts/impact_plan.py:179 '{path}: canonical internal product-version metadata only; licensed profile remains excluded' is fixed developer documentation or plan-reason output produced by the metadata predicate/planner and consumed only as explanation. The literal does not control version normalization, job selection, profile activation, credentials or runtime configuration."
+  },
+  {
    "id": "oc-f83f6b208d79edd3e72f",
    "path": "scripts/impact_plan.py",
-   "line": 134,
+   "line": 203,
    "symbol": "make_plan",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -492642,7 +492702,7 @@
   {
    "id": "oc-b1c36049b4da01c15463",
    "path": "scripts/impact_plan.py",
-   "line": 134,
+   "line": 203,
    "symbol": "make_plan",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -492657,7 +492717,7 @@
   {
    "id": "oc-8d869e1c6233c5d80d3b",
    "path": "scripts/impact_plan.py",
-   "line": 134,
+   "line": 203,
    "symbol": "make_plan",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -492672,7 +492732,7 @@
   {
    "id": "oc-0e50bec9d96dbd72e4b7",
    "path": "scripts/impact_plan.py",
-   "line": 134,
+   "line": 203,
    "symbol": "make_plan",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -492687,7 +492747,7 @@
   {
    "id": "oc-58808e30c4d0aaa6f91a",
    "path": "scripts/impact_plan.py",
-   "line": 134,
+   "line": 203,
    "symbol": "make_plan",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -492702,7 +492762,7 @@
   {
    "id": "oc-6b9b946cb4cf4a5cc0b2",
    "path": "scripts/impact_plan.py",
-   "line": 134,
+   "line": 203,
    "symbol": "make_plan",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -492717,7 +492777,7 @@
   {
    "id": "oc-fdabacb673cb98151501",
    "path": "scripts/impact_plan.py",
-   "line": 134,
+   "line": 203,
    "symbol": "make_plan",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -492732,7 +492792,7 @@
   {
    "id": "oc-f731f0768a18825f01ab",
    "path": "scripts/impact_plan.py",
-   "line": 134,
+   "line": 203,
    "symbol": "make_plan",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -492747,7 +492807,7 @@
   {
    "id": "oc-f567bc64de4e3531bc62",
    "path": "scripts/impact_plan.py",
-   "line": 134,
+   "line": 203,
    "symbol": "make_plan",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -492762,7 +492822,7 @@
   {
    "id": "oc-f075e7a06358eb1d9ba0",
    "path": "scripts/impact_plan.py",
-   "line": 134,
+   "line": 203,
    "symbol": "make_plan",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -492777,7 +492837,7 @@
   {
    "id": "oc-71b53f968fc4cdaca29a",
    "path": "scripts/impact_plan.py",
-   "line": 134,
+   "line": 203,
    "symbol": "make_plan",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -492792,7 +492852,7 @@
   {
    "id": "oc-175c8ff7ebbcb9aef6cf",
    "path": "scripts/impact_plan.py",
-   "line": 134,
+   "line": 203,
    "symbol": "make_plan",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -492807,7 +492867,7 @@
   {
    "id": "oc-96be135d3d8ac01372b2",
    "path": "scripts/impact_plan.py",
-   "line": 151,
+   "line": 220,
    "symbol": "make_plan",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -492822,7 +492882,7 @@
   {
    "id": "oc-e724b883da2fc89523be",
    "path": "scripts/impact_plan.py",
-   "line": 151,
+   "line": 220,
    "symbol": "make_plan",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -492837,7 +492897,7 @@
   {
    "id": "oc-cde6e002da6ec0757338",
    "path": "scripts/impact_plan.py",
-   "line": 152,
+   "line": 221,
    "symbol": "make_plan",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -492852,7 +492912,7 @@
   {
    "id": "oc-e381d5ba5236e249e683",
    "path": "scripts/impact_plan.py",
-   "line": 161,
+   "line": 230,
    "symbol": "make_plan",
    "kind": "script-default",
    "role": "support_builds",
@@ -492867,7 +492927,7 @@
   {
    "id": "oc-55b77a26a64bcbe44bae",
    "path": "scripts/impact_plan.py",
-   "line": 175,
+   "line": 244,
    "symbol": "make_plan",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -492882,7 +492942,7 @@
   {
    "id": "oc-093301f318d529f20a66",
    "path": "scripts/impact_plan.py",
-   "line": 182,
+   "line": 251,
    "symbol": "make_plan",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -492897,7 +492957,7 @@
   {
    "id": "oc-f48f154ca1a72860df37",
    "path": "scripts/impact_plan.py",
-   "line": 186,
+   "line": 255,
    "symbol": "make_plan",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -492912,7 +492972,7 @@
   {
    "id": "oc-7c6920ce27701c76915e",
    "path": "scripts/impact_plan.py",
-   "line": 187,
+   "line": 256,
    "symbol": "make_plan",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -492927,7 +492987,7 @@
   {
    "id": "oc-a01ebe26341d9b77e95a",
    "path": "scripts/impact_plan.py",
-   "line": 203,
+   "line": 272,
    "symbol": "make_plan",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -492942,7 +493002,7 @@
   {
    "id": "oc-b24cae676e9c23745c91",
    "path": "scripts/impact_plan.py",
-   "line": 203,
+   "line": 272,
    "symbol": "make_plan",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -492957,7 +493017,7 @@
   {
    "id": "oc-4350306a2998db1191cc",
    "path": "scripts/impact_plan.py",
-   "line": 203,
+   "line": 272,
    "symbol": "make_plan",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -492972,7 +493032,7 @@
   {
    "id": "oc-744052f201ab674a8dfa",
    "path": "scripts/impact_plan.py",
-   "line": 203,
+   "line": 272,
    "symbol": "make_plan",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -492987,7 +493047,7 @@
   {
    "id": "oc-31ad85e086a6a0df9203",
    "path": "scripts/impact_plan.py",
-   "line": 223,
+   "line": 292,
    "symbol": "make_plan",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -493002,7 +493062,7 @@
   {
    "id": "oc-3df1f9daecfd45caf03f",
    "path": "scripts/impact_plan.py",
-   "line": 223,
+   "line": 292,
    "symbol": "make_plan",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -493017,7 +493077,7 @@
   {
    "id": "oc-b5d3219d298907373b99",
    "path": "scripts/impact_plan.py",
-   "line": 224,
+   "line": 293,
    "symbol": "make_plan",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -493032,7 +493092,7 @@
   {
    "id": "oc-a9b6be705ce2dcd263aa",
    "path": "scripts/impact_plan.py",
-   "line": 228,
+   "line": 297,
    "symbol": "make_plan",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -493047,7 +493107,7 @@
   {
    "id": "oc-68b05fabdf093c51aa31",
    "path": "scripts/impact_plan.py",
-   "line": 228,
+   "line": 297,
    "symbol": "make_plan",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -493062,7 +493122,7 @@
   {
    "id": "oc-8de144674e98d5eb5e2b",
    "path": "scripts/impact_plan.py",
-   "line": 228,
+   "line": 297,
    "symbol": "make_plan",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -493077,7 +493137,7 @@
   {
    "id": "oc-f1f70588d860125e80ff",
    "path": "scripts/impact_plan.py",
-   "line": 231,
+   "line": 300,
    "symbol": "make_plan",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -493092,7 +493152,7 @@
   {
    "id": "oc-18657565cf8d5a286e69",
    "path": "scripts/impact_plan.py",
-   "line": 253,
+   "line": 322,
    "symbol": "main",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -493107,7 +493167,7 @@
   {
    "id": "oc-d383f0f855eecff4df26",
    "path": "scripts/impact_plan.py",
-   "line": 253,
+   "line": 322,
    "symbol": "main",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -493122,7 +493182,7 @@
   {
    "id": "oc-0200d165d27a54df8774",
    "path": "scripts/impact_plan.py",
-   "line": 267,
+   "line": 336,
    "symbol": "main",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -589354,6 +589414,231 @@
    "status": "retained",
    "classification": "test-fixture",
    "rationale": "#604 scripts/tests/test_impact_plan.py::test_dev_mail_consumer_reaches_history_harness_and_support uses \"'/src/main/java/'\" as deterministic planner/topology regression fixture data, not runtime configuration."
+  },
+  {
+   "id": "oc-15427e7b27931a07f06d",
+   "path": "scripts/tests/test_impact_plan.py",
+   "line": 369,
+   "symbol": "test_native_selection_covers_shared_selected_and_complete_but_not_leaf_scopes",
+   "kind": "script-default",
+   "role": "AKKA",
+   "expression": "'ravenroot/ravenroot-akka'",
+   "expressionDigest": "3ec1d63107f9d6f4d66e8bf4895e00133f0713d850ba60afa64827bd780629bc",
+   "evidenceDigest": "88d48b0a170d6a05b1efaf382ca370112479ea35289b1ff345b3aa91501dd5e2",
+   "surface": "test-fixture",
+   "status": "retained",
+   "classification": "test-fixture",
+   "rationale": "#607 scripts/tests/test_impact_plan.py:369 'ravenroot/ravenroot-akka' is verification-only data produced by LicensedReleaseMetadataTest and consumed by its synthetic canonical Maven documents, mocked Git/changed-path boundary or forced-complete planner assertions. It exercises canonical metadata acceptance or substantive licensed-change rejection; it cannot configure or activate a runtime engine."
+  },
+  {
+   "id": "oc-3395a4099d68d3a1e7bb",
+   "path": "scripts/tests/test_impact_plan.py",
+   "line": 370,
+   "symbol": "test_native_selection_covers_shared_selected_and_complete_but_not_leaf_scopes",
+   "kind": "script-default",
+   "role": "POM",
+   "expression": "'/pom.xml'",
+   "expressionDigest": "d8e9c2ba3233d078401a4ed4183652fa21785add947d3cae901f441ee791d7cb",
+   "evidenceDigest": "6d73ad97736bbfe20bf1046b0d2ae7cb704bf5f013174b7a4be208e2fd711323",
+   "surface": "test-fixture",
+   "status": "retained",
+   "classification": "test-fixture",
+   "rationale": "#607 scripts/tests/test_impact_plan.py:370 '/pom.xml' is verification-only data produced by LicensedReleaseMetadataTest and consumed by its synthetic canonical Maven documents, mocked Git/changed-path boundary or forced-complete planner assertions. It exercises canonical metadata acceptance or substantive licensed-change rejection; it cannot configure or activate a runtime engine."
+  },
+  {
+   "id": "oc-615cc58335238d2673ad",
+   "path": "scripts/tests/test_impact_plan.py",
+   "line": 371,
+   "symbol": "test_native_selection_covers_shared_selected_and_complete_but_not_leaf_scopes",
+   "kind": "script-default",
+   "role": "OLD",
+   "expression": "'0.8.0-alpha.1'",
+   "expressionDigest": "f6d807c75faab253b08b52880c7c4ad8497f390534c16e38768cdc89d5451dfb",
+   "evidenceDigest": "08fd0916e91c52374499fd686d1ba71d8480bf4ba92f870c705d9a5fa6526d02",
+   "surface": "test-fixture",
+   "status": "retained",
+   "classification": "test-fixture",
+   "rationale": "#607 scripts/tests/test_impact_plan.py:371 '0.8.0-alpha.1' is verification-only data produced by LicensedReleaseMetadataTest and consumed by its synthetic canonical Maven documents, mocked Git/changed-path boundary or forced-complete planner assertions. It exercises canonical metadata acceptance or substantive licensed-change rejection; it cannot configure or activate a runtime engine."
+  },
+  {
+   "id": "oc-d2d319a1f009763048eb",
+   "path": "scripts/tests/test_impact_plan.py",
+   "line": 372,
+   "symbol": "test_native_selection_covers_shared_selected_and_complete_but_not_leaf_scopes",
+   "kind": "script-default",
+   "role": "NEW",
+   "expression": "'0.9.0-alpha.1'",
+   "expressionDigest": "5244f06fc212d2e698f0a1cb200518a4fae99a763d35e199ba9242648578bcc6",
+   "evidenceDigest": "ddb9eff585bbe335f2877f550ab9b37019ede161723c8ee10c4004549f70f56b",
+   "surface": "test-fixture",
+   "status": "retained",
+   "classification": "test-fixture",
+   "rationale": "#607 scripts/tests/test_impact_plan.py:372 '0.9.0-alpha.1' is verification-only data produced by LicensedReleaseMetadataTest and consumed by its synthetic canonical Maven documents, mocked Git/changed-path boundary or forced-complete planner assertions. It exercises canonical metadata acceptance or substantive licensed-change rejection; it cannot configure or activate a runtime engine."
+  },
+  {
+   "id": "oc-f3d5eca00da9079c56f3",
+   "path": "scripts/tests/test_impact_plan.py",
+   "line": 373,
+   "symbol": "test_native_selection_covers_shared_selected_and_complete_but_not_leaf_scopes",
+   "kind": "script-default",
+   "role": "PREFIX",
+   "expression": "'<project xmlns=\"http://maven.apache.org/POM/4.0.0\"><modelVersion>4.0.0</modelVersion>'",
+   "expressionDigest": "214a1e9df16f6aa6a122df4aaab4cd5473ad29b47bb015a2e23cf410f287c811",
+   "evidenceDigest": "189adfb7e3e3da9835bc9ccddcaea2a6e4c198e39dfdb9e2032f68f68f52feb9",
+   "surface": "test-fixture",
+   "status": "retained",
+   "classification": "test-fixture",
+   "rationale": "#607 scripts/tests/test_impact_plan.py:373 '<project xmlns=\"http://maven.apache.org/POM/4.0.0\"><modelVersion>4.0.0</modelVersion>' is verification-only data produced by LicensedReleaseMetadataTest and consumed by its synthetic canonical Maven documents, mocked Git/changed-path boundary or forced-complete planner assertions. It exercises canonical metadata acceptance or substantive licensed-change rejection; it cannot configure or activate a runtime engine."
+  },
+  {
+   "id": "oc-10bd169597f5c690baba",
+   "path": "scripts/tests/test_impact_plan.py",
+   "line": 384,
+   "symbol": "documents",
+   "kind": "inline-script-operational",
+   "role": "inline",
+   "expression": "''",
+   "expressionDigest": "6f49cdbd80e1b95d5e6427e1501fc217790daee87055fa5b4e71064288bddede",
+   "evidenceDigest": "c275b5629ae1942ac69c509a74d7c8a136d49f9c53ea48e9d3df28fdcd95edb0",
+   "surface": "test-fixture",
+   "status": "retained",
+   "classification": "test-fixture",
+   "rationale": "#607 scripts/tests/test_impact_plan.py:384 '' is verification-only data produced by LicensedReleaseMetadataTest and consumed by its synthetic canonical Maven documents, mocked Git/changed-path boundary or forced-complete planner assertions. It exercises canonical metadata acceptance or substantive licensed-change rejection; it cannot configure or activate a runtime engine."
+  },
+  {
+   "id": "oc-40ffb959d801e50d0d91",
+   "path": "scripts/tests/test_impact_plan.py",
+   "line": 384,
+   "symbol": "documents",
+   "kind": "inline-script-operational",
+   "role": "inline",
+   "expression": "'<groupId>ai.ravenroot</groupId><version>{version}</version>'",
+   "expressionDigest": "aa0f49a33ea1936192d37d314f2a1447179d085c1d2c72eb22c903c2c9d8e359",
+   "evidenceDigest": "c275b5629ae1942ac69c509a74d7c8a136d49f9c53ea48e9d3df28fdcd95edb0",
+   "surface": "test-fixture",
+   "status": "retained",
+   "classification": "test-fixture",
+   "rationale": "#607 scripts/tests/test_impact_plan.py:384 '<groupId>ai.ravenroot</groupId><version>{version}</version>' is verification-only data produced by LicensedReleaseMetadataTest and consumed by its synthetic canonical Maven documents, mocked Git/changed-path boundary or forced-complete planner assertions. It exercises canonical metadata acceptance or substantive licensed-change rejection; it cannot configure or activate a runtime engine."
+  },
+  {
+   "id": "oc-15be3d9411af1ac4e35c",
+   "path": "scripts/tests/test_impact_plan.py",
+   "line": 390,
+   "symbol": "plan",
+   "kind": "inline-script-operational",
+   "role": "inline",
+   "expression": "'dev'",
+   "expressionDigest": "9823cc5a2b92adfc0629ef1daa0eab9ab0689232288fa4915a0bf4d35ebba9fc",
+   "evidenceDigest": "548b998b4f11e808a3405a2235d99535fe3be4d3c99d3c5cbd99b91f032b6a57",
+   "surface": "test-fixture",
+   "status": "retained",
+   "classification": "test-fixture",
+   "rationale": "#607 scripts/tests/test_impact_plan.py:390 'dev' is verification-only data produced by LicensedReleaseMetadataTest and consumed by its synthetic canonical Maven documents, mocked Git/changed-path boundary or forced-complete planner assertions. It exercises canonical metadata acceptance or substantive licensed-change rejection; it cannot configure or activate a runtime engine."
+  },
+  {
+   "id": "oc-31d18d88263cb8e92262",
+   "path": "scripts/tests/test_impact_plan.py",
+   "line": 393,
+   "symbol": "git",
+   "kind": "inline-script-operational",
+   "role": "inline",
+   "expression": "':'",
+   "expressionDigest": "4266e0541c5a6d5a1bef06c2781f9d8add1394e1224782acfb2e1917b5089af9",
+   "evidenceDigest": "4b025ef48ec2594ab712b67789cb01c10449b1d3a985d4b61c3faca243138dae",
+   "surface": "test-fixture",
+   "status": "retained",
+   "classification": "test-fixture",
+   "rationale": "#607 scripts/tests/test_impact_plan.py:393 ':' is verification-only data produced by LicensedReleaseMetadataTest and consumed by its synthetic canonical Maven documents, mocked Git/changed-path boundary or forced-complete planner assertions. It exercises canonical metadata acceptance or substantive licensed-change rejection; it cannot configure or activate a runtime engine."
+  },
+  {
+   "id": "oc-a79e4b61f81ae1936fec",
+   "path": "scripts/tests/test_impact_plan.py",
+   "line": 393,
+   "symbol": "git",
+   "kind": "inline-script-operational",
+   "role": "inline",
+   "expression": "1",
+   "expressionDigest": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+   "evidenceDigest": "4b025ef48ec2594ab712b67789cb01c10449b1d3a985d4b61c3faca243138dae",
+   "surface": "test-fixture",
+   "status": "retained",
+   "classification": "test-fixture",
+   "rationale": "#607 scripts/tests/test_impact_plan.py:393 1 is verification-only data produced by LicensedReleaseMetadataTest and consumed by its synthetic canonical Maven documents, mocked Git/changed-path boundary or forced-complete planner assertions. It exercises canonical metadata acceptance or substantive licensed-change rejection; it cannot configure or activate a runtime engine."
+  },
+  {
+   "id": "oc-364badc1a5f1c83f23e2",
+   "path": "scripts/tests/test_impact_plan.py",
+   "line": 393,
+   "symbol": "git",
+   "kind": "inline-script-operational",
+   "role": "inline",
+   "expression": "1",
+   "expressionDigest": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+   "evidenceDigest": "4b025ef48ec2594ab712b67789cb01c10449b1d3a985d4b61c3faca243138dae",
+   "surface": "test-fixture",
+   "status": "retained",
+   "classification": "test-fixture",
+   "rationale": "#607 scripts/tests/test_impact_plan.py:393 1 is verification-only data produced by LicensedReleaseMetadataTest and consumed by its synthetic canonical Maven documents, mocked Git/changed-path boundary or forced-complete planner assertions. It exercises canonical metadata acceptance or substantive licensed-change rejection; it cannot configure or activate a runtime engine."
+  },
+  {
+   "id": "oc-abbddcb4e7794cd0230f",
+   "path": "scripts/tests/test_impact_plan.py",
+   "line": 401,
+   "symbol": "git",
+   "kind": "inline-script-operational",
+   "role": "inline",
+   "expression": "'paths_between'",
+   "expressionDigest": "cbbbfcc8f7ab2bb67222e2dd71e808504f5bb6aa25047969dd4d71df66f46288",
+   "evidenceDigest": "295ac3cdc03c4516ba76fd7ac11f56139618da56c1acecb6fd02e5d8c48f914b",
+   "surface": "test-fixture",
+   "status": "retained",
+   "classification": "test-fixture",
+   "rationale": "#607 scripts/tests/test_impact_plan.py:401 'paths_between' is verification-only data produced by LicensedReleaseMetadataTest and consumed by its synthetic canonical Maven documents, mocked Git/changed-path boundary or forced-complete planner assertions. It exercises canonical metadata acceptance or substantive licensed-change rejection; it cannot configure or activate a runtime engine."
+  },
+  {
+   "id": "oc-54abaa149852ad8d1c38",
+   "path": "scripts/tests/test_impact_plan.py",
+   "line": 407,
+   "symbol": "test_canonical_parent_and_optional_direct_project_versions_preserve_complete_default",
+   "kind": "inline-script-operational",
+   "role": "inline",
+   "expression": "'dev'",
+   "expressionDigest": "9823cc5a2b92adfc0629ef1daa0eab9ab0689232288fa4915a0bf4d35ebba9fc",
+   "evidenceDigest": "e137c6c6f3a228bdc24fc3afafa57a0b2ba8c7013a0c0ec32c207b37c39854a8",
+   "surface": "test-fixture",
+   "status": "retained",
+   "classification": "test-fixture",
+   "rationale": "#607 scripts/tests/test_impact_plan.py:407 'dev' is verification-only data produced by LicensedReleaseMetadataTest and consumed by its synthetic canonical Maven documents, mocked Git/changed-path boundary or forced-complete planner assertions. It exercises canonical metadata acceptance or substantive licensed-change rejection; it cannot configure or activate a runtime engine."
+  },
+  {
+   "id": "oc-f7bdaca1cb3616565a73",
+   "path": "scripts/tests/test_impact_plan.py",
+   "line": 407,
+   "symbol": "test_canonical_parent_and_optional_direct_project_versions_preserve_complete_default",
+   "kind": "inline-script-operational",
+   "role": "inline",
+   "expression": "'release/0.8'",
+   "expressionDigest": "12937ad353ab6f5f93cd72e7f04e79231d352fdefc7c3122e5c49b899df76475",
+   "evidenceDigest": "e137c6c6f3a228bdc24fc3afafa57a0b2ba8c7013a0c0ec32c207b37c39854a8",
+   "surface": "test-fixture",
+   "status": "retained",
+   "classification": "test-fixture",
+   "rationale": "#607 scripts/tests/test_impact_plan.py:407 'release/0.8' is verification-only data produced by LicensedReleaseMetadataTest and consumed by its synthetic canonical Maven documents, mocked Git/changed-path boundary or forced-complete planner assertions. It exercises canonical metadata acceptance or substantive licensed-change rejection; it cannot configure or activate a runtime engine."
+  },
+  {
+   "id": "oc-9c37092e8a1b323c2774",
+   "path": "scripts/tests/test_impact_plan.py",
+   "line": 458,
+   "symbol": "test_missing_pom_and_version_only_plus_licensed_source_changes_refuse",
+   "kind": "inline-script-operational",
+   "role": "inline",
+   "expression": "'/src/main/java/Changed.java'",
+   "expressionDigest": "a75ac1b0aef534cbb7c4a0cb799fc2d6e631529d8ee7958531134ec289c4e89b",
+   "evidenceDigest": "b95f331b0e49a6d919ecc9fbf98ef1ed3e5b9e4a811b40518b5f4a7d8b1733db",
+   "surface": "test-fixture",
+   "status": "retained",
+   "classification": "test-fixture",
+   "rationale": "#607 scripts/tests/test_impact_plan.py:458 '/src/main/java/Changed.java' is verification-only data produced by LicensedReleaseMetadataTest and consumed by its synthetic canonical Maven documents, mocked Git/changed-path boundary or forced-complete planner assertions. It exercises canonical metadata acceptance or substantive licensed-change rejection; it cannot configure or activate a runtime engine."
   },
   {
    "id": "oc-efef3a23afec24427569",
@@ -704026,6 +704311,7 @@
   "08ec718315022e5899dcb619e8a9cee2db2db2b1c2a8b252412732fe34df8d94": "sorted({name for name in uploads if uploads.count(name) > 1}),",
   "08eddb8ec9781c07f6f1e9ff4389986a571f7ca619da1dd9e82910e6b22132af": "if set(rate.get(\"required\", [])) != expected_leaves or set(rate.get(\"properties\", {})) != expected_leaves:",
   "08f399f50e60195e5ce42a344ebe30f1efaccba5e402b43604ec1bf74b5907fa": "forged={'baseline':BASE,'candidate':HEAD,'event':'merge_group','lane':'release/0.8','full':False,'jobs':[]}",
+  "08fd0916e91c52374499fd686d1ba71d8480bf4ba92f870c705d9a5fa6526d02": "OLD = '0.8.0-alpha.1'",
   "090a7497d995efd9f403f00b0dbdd7104b2f0de94e656a046e7e70f5a714e6fe": "require_literal \"$compose\" 'RAVENROOT_ARTIFACT_STORE_DIR: /opt/ravenroot/data/artifact-store'",
   "0910aceef60ce2e4f87891c8517b572bf5745f0b46b49e128b2cab4fad20c923": "RAVENROOT_GRAAL_SANDBOX_SUPERVISOR: /opt/ravenroot/dev/sandbox-supervisor.sh",
   "09133658b0012ad28b4318c787032156569e0f6ceed72081075fc159eb93f8d5": "var workers = Executors.newVirtualThreadPerTaskExecutor()) { var barrier = new CyclicBarrier(6);",
@@ -704756,6 +705042,7 @@
   "1883511534d1e514a650b5efac96a828fd55bb8e56c5a2bb0629fcc95c1a9f59": "(( validation_code == 0 )) || report_valid=false",
   "1891c8db0596f7f844fefe6e22d5bc01e1789b3548c61f8178663d545d01a16a": "const snapX = source.renderedWidth() / 2 + 18;",
   "18993192d943d348549846f0657f17600131b54d953342771cf37acf14553e10": "prepare(fixture({\"1.chore.md\": \"Tidies up.\"}), \"minor\")",
+  "189adfb7e3e3da9835bc9ccddcaea2a6e4c198e39dfdb9e2032f68f68f52feb9": "PREFIX = '<project xmlns=\"http://maven.apache.org/POM/4.0.0\"><modelVersion>4.0.0</modelVersion>'",
   "189f6a01439296af0f24886e3781c3f4729cdf6a6d98a1f7150684cd24e9c8d6": "public RateLimitConfiguration { positive(\"RAVENROOT_RATELIMIT_ADDRESS_RPS\", addressRequestsPerSecond);",
   "18a2c4dce360dc6522e39650678ee3713949e8ceb40fe0f8a03d81ccd4d73a95": "TEST = \"writableContainerDevelopmentCycleUsesRealWorkspaceAcrossEveryRestart\"",
   "18bcffd7aae62a9f63c1884ff1ca186c7a47c8e237cd10e284d20a47d70909df": "\"\"\"Report every way `ci.yml` no longer matches the topology declared above.\"\"\"",
@@ -705495,6 +705782,7 @@
   "29450165fc7a81f580ffbbf90f4ba907f35187d66f7c4233ed96d7ff20e78467": "const fromMenu = Boolean(applicationCommand.closest('#application-menu'));",
   "2945efceae01a4da3dca3511798ae68bc28e20aff04753b36a40d7546365c3a4": "final class FilesystemRuntime { private static final int MAX_GATES = 4096;",
   "2959af9548b7e8193c07d863c507a67a1f6e33b388bccca28752058bc9c2319a": "public static final Duration HARD_MAX_RETENTION = Duration.ofDays(3_650);",
+  "295ac3cdc03c4516ba76fd7ac11f56139618da56c1acecb6fd02e5d8c48f914b": "patch.object(impact, 'paths_between', return_value=paths or [self.POM]), \\",
   "295ecb1dd72768fbf84a86be4321a6a534350cbba06af379a6a8a4148458c96e": "mkdir -p \"$output_dir/logs\" \"$output_dir/load\" \"$output_dir/reports\" \"$output_dir/markers\"",
   "2962e5fe694c3dfb4563e1508ad812485187df154ad578175da405a36e3b1130": "try { daemon.waitFor(2, TimeUnit.SECONDS);",
   "29649edbdba32aa6c77ce5c33fb82b7728dd8bb2adc67a239cbebacdd4633f88": "--env RAVENROOT_IMAP_PROFILE_74656E616E74_726561646572='localhost;3993;IMAPS;reader;credential;INBOX,Archive,Trash;5000;5000;2;10;128' \\",
@@ -705815,6 +706103,7 @@
   "308726044afe5d8c6dd344edfa95f058d89989e94e887dc200453a0940ce592f": "} } private void awaitAllDead(List<Long> pids) throws InterruptedException { long deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();",
   "3088e482c49e7289a2964f5128883a49bb41e7c96c7a09853a6525849709c20d": "const fieldName = colon < 0 ? line : line.slice(0, colon);",
   "308a383abc17472716b1321dfe73455f980e2f16fb0f29102c8835cb969389c7": "value: {{ include \"ravenroot.graphLimitValue\" .Values.rateLimit.maxTrackedClients }}",
+  "309145154c2cc0fa2db054abf2ff3096a0b07540bfc15b8259df68c898781915": "\"\"\"Recognize release metadata without admitting the inactive licensed reactor.",
   "309bd771085f9564192d45ec5f758de9589af61ba4e60bc1ad781c1aee12aec1": "byte[] yBytes = decode(y, 32);",
   "309fcb95d08fd18086fc44d4e0528d760588cbe9c1d2d78c4db004d08886f88e": "rationale=\"HikariCP's minimum accepted pool-acquisition timeout is a fixed dependency contract.\",",
   "30a769d598917da24cb7d1ceca3b093fa23bdd7ac2a6aafa25b50370ccbf7ddd": "CLI_SOURCE = ROOT / \"ravenroot\" / \"ravenroot-cli\" / \"src\" / \"main\" / \"java\" / \"ai\" / \"ravenroot\" / \"cli\"",
@@ -707113,6 +707402,7 @@
   "4af9564cab9474bee5c22fa6f0682ef386daa14625450ab1e0b8c4d43aeb3958": "const key = elType + '/' + type;",
   "4afbc88bba1f2607a57690176356c22739f4471c610ca920d13bc9e778cee5b9": "RAVENROOT_AUDIT_DIR=\"$SERVER_RUN_DIR/audit\" \\",
   "4afc74bf6657870c24ea11ccf35220aee555664c74afb8f00160b838837d6867": "const TOOLTIP_GAP = 8;",
+  "4b025ef48ec2594ab712b67789cb01c10449b1d3a985d4b61c3faca243138dae": "commit, path = args[1].split(':', 1)",
   "4b06b5b3eba8e49da5b0543350dc47efe2e86cf8c7b9492d8b74f6534568be58": "generate_cp=\"$generate_cp:$jar\"",
   "4b08b0fb090a2ee6d017a5d7d49766df65f93f8c3bd02f10db4365b57800d00a": "AWS_CLI_TIMEOUT_SECONDS = 90",
   "4b09ff5de6681d0b722071353f3ea5e635e34f5949602c969ae50532e13c7230": "pkg_dir=\"$dir/src/main/java/ai/ravenroot/extensions/$id\"",
@@ -707594,6 +707884,7 @@
   "5480e75897dfbf78a9812c07c5d3df797e863317265ba81b7e446c79e651779a": "\"RAVENROOT_ACTIVITY_CAPTURE_MAX_PAYLOAD_BYTES\",",
   "548735ef2cd865d21af354e6ffab0171718d83219a075b1012deeda142ca9653": "pids_limit: 128",
   "5489a5ce929bc5c58bea5848a32fe07e8aba633cec9ce239ec6ef0c1acd02ab0": "const global = shortcut => ({ scope: 'global', ...shortcut });",
+  "548b998b4f11e808a3405a2235d99535fe3be4d3c99d3c5cbd99b91f032b6a57": "def plan(self, documents, paths=None, force=True, lane='dev'):",
   "548f6670e5c3153df5a3d0c21bb16c3946854151911675d60355bd04c02df60f": "public static final int MAX_DECLARABLE_ATTEMPTS = 100;",
   "549bb790741d0048221039c1659ed99287b91c02beeafcf648c6a7a5cd1fc542": "{\"pointer\":\"/$defs/output/oneOf/1/$ref\",\"reference\":\"#/$defs/retry\",\"required\":false,\"resolutionError\":null,\"resolved\":{\"additionalProperties\":false,\"properties\":{\"attempts\":{\"type\":\"integer\"},\"generation\":{\"type\":\"integer\"},\"reason\":{\"const\":\"RATE_LIMITED\"},\"remoteId\":{\"type\":\"string\"},\"retryAtEpochMs\":{\"minimum\":1,\"type\":\"integer\"},\"status\":{\"const\":\"waiting\"},\"version\":{\"const\":\"github.operation.retry.v1\"}},\"required\":[\"version\",\"status\",\"reason\",\"retryAtEpochMs\",\"generation\",\"attempts\",\"remoteId\"],\"type\":\"object\"}}",
   "549c6aa19d7be39e5a06e18dd2003b4f14e0deb1d190a049a4c536d89662be95": "LeaseHandle lease = await(store().claim(key, \"runner\", TTL));",
@@ -708750,6 +709041,7 @@
   "6d63156912e8b47e4ee265d46a34287f10bdce6cdb1ab05fa39a1e20c3065d6b": "' throw new UnsupportedOperationException(\"published graph imports require',",
   "6d6f7128243a23a2a95e91a4a803dfb40c21b0c01693567b98a714a0b5492571": "next(iter(wrong_entries.values()))[\"setting\"] = \"deployment.unsupported\"",
   "6d709e35c5bdd16638c02af8f860eca4186459b6aa5df2fb6d37de172e1ba03f": "row.pop(\"agentBudgetAuthority\", None)",
+  "6d73ad97736bbfe20bf1046b0d2ae7cb704bf5f013174b7a4be208e2fd711323": "POM = AKKA + '/pom.xml'",
   "6d75c6fee943aee8e859fab61260c6aab58d72a59c0cc425fc6318039b7ebee4": "public record ReplayBoundarySeed(String nodeId, Set<UUID> predecessorInvocationIds) { public static final int MAX_NODE_ID_LENGTH = 200;",
   "6d7a1f670365221d8fa0a74e23f1c2683f3a13aab1ce71ea8efbb4bf0612307b": "EXCLUDED_PARTS = (\"target\", \"node_modules\")",
   "6d871c142e106a9f501fb73296233394d9978f3fa0e234f63b076952e0b73f24": "const stillCurrent = token.mode === 'elastic' && owner.layoutMode === 'elastic' && owner.cy === token.cy && job?.owner === owner && job.target === owner.cy && job.token === token && layoutRequestIsCurrent(token);",
@@ -710063,6 +710355,7 @@
   "88d03905648471d44cd6aa504859b021e58c1be106e999f11ba893bae6395d42": "} private static String adapter(NodeTypeDescriptor descriptor) { return switch (descriptor.behavior()) { case \"jdbc.insert\" -> \"ravenroot.jdbc-receipt.v1\";",
   "88d0824e6ba0c5327b7f1b6fac9e3ae9a413a437a81c476e2e6cb48e889dc0f9": "if [ -s \"$nvm_dir/nvm.sh\" ]; then",
   "88d397c4ae9359cd6487bb7a9fd964e121801da2eeb82e34f1655cfecc5968a0": "package(dist, first, 1770000000)",
+  "88d48b0a170d6a05b1efaf382ca370112479ea35289b1ff345b3aa91501dd5e2": "AKKA = 'ravenroot/ravenroot-akka'",
   "88d4ecadedacbfbefd3578f0c068d073709f853720955eb0797ef6cc7d715def": "return {\"tier\": tier, \"release_intent\": intent, \"docs_only\": str(docs_only).lower()}",
   "88e03595259862474355d593836444e695abcb1fb9a4f15be0ea414556364861": "schema_path.write_text(json.dumps(schema), encoding=\"utf-8\")",
   "88e6dc5bd1d7006a92a9a9d4c2159ab5b50d8f3441e2e90cc804d3a56907406a": "- name: RAVENROOT_HUMAN_TASK_INTERACTION_CONFIG",
@@ -710411,6 +710704,7 @@
   "9020cf1ca36c3489c6e02a4d602fa8f37993a21fcda4c7c23233bd1193d686ce": "self.assertTrue(any(\"asciiTrimContract has unsupported signature\" in error",
   "90241678ad893e12509f3d77d2acb692e4037eec268d62c0dab0cf0ff0655a74": "} static final class RetainedEntryPendingException extends RuntimeException { RetainedEntryPendingException() { super(\"retained source has original downstream work requiring reconciliation\");",
   "90257564b76f5b0c14a50308842a7fb0630e8eee59722233bfb40276ef473300": "config_path.write_text(local_default_symbol, encoding=\"utf-8\")",
+  "902688f0e4606be3d3f61ff65d9a7ec0b392cbad9805ce614af4153112d48c18": "reasons.append(f'{path}: canonical internal product-version metadata only; licensed profile remains excluded')",
   "9028b5be5a6f919db170d1e31b2c5f24d616aa6ea8217db08eb6bec637ee137e": "private static final Set<String> REQUIRED_KEYS = Set.of( \"schemaVersion\", \"id\", \"version\", \"sdkContract\", \"nodePackageClasses\", \"behaviors\", \"mainArtifact\");",
   "903057e7fb5c62e486191f55c2cbf6145ad87205f37a04fda1ee6e6a672384ec": "report = json.loads((Path(directory) / \"NativeCpuHierarchyProbe.json\").read_text())",
   "90309e5ecc598cbaea185fab7cd806e868ccaee723fb6d00523a3b597f87dcd4": "return PayloadJson.read(document, new PayloadLimits(Math.max(1, maxResponseBytes), 48, collections, values, Math.max(1, maxResponseBytes / 2), 256));",
@@ -710430,6 +710724,7 @@
   "9091f7cce13f7f10448df0dd2a0e9dc0c51a60b8a8bbfa15111341725facb600": "\"defaults.maxRecoveryDeliveriesPerAttempt, HARD_MAX_RECOVERY_DELIVERIES));\\n\"",
   "9093174e175cbbeb1e0cd4d27ae86e64a7dadc1dfff2c1bf17159ce04802e37e": "ASSISTANT_DOC = ROOT / \"docs\" / \"operator-guide\" / \"authoring-assistant.md\"",
   "90959b14a9384f64686e4521ac3a29c5a95d38b2ad1a7d089cdb6d29f0ad0ffa": "boolean retryable = \"40001\".equals(state) || \"40P01\".equals(state) || code == 5 || code == 6 || code == 517;",
+  "90971b5cfc6bd19ef25c9ad09d2d010a75a67d3ad5d0b48227580273f7f544a5": "if path.startswith('ravenroot/ravenroot-akka/'):",
   "90a41a311a7861a3dd1a60ed215f7e6bbbf45368fde6d06ebe08919d37da0bcb": "AGENT_EMAIL = \"agents@ravenroot.ai\"",
   "90a888e1940d7cf3baab43bfd4977a81589fc8340cb5bd7d409257e79141975d": "mock.patch.object(audit, \"tracked_files\", return_value=(Path(\"runtime-policy.txt\"),)):",
   "90af3d3cb53aeefe7fc01128aa501c315098dead6ee201adccaff6574bd37220": "\"The Human Task rows show the production descriptor when its durable store supports confirmation \",",
@@ -710693,6 +710988,7 @@
   "96496a522d129a060aee8cafa4c516c8d2b60d0c6f7b87970ad1005710d610de": "const closeButton = element(document_, 'button', { type: 'submit', className: 'btn primary' });",
   "964c6f2448a88967d0492d62f6100db7f95f2256b92f43801bf14788407d6842": "image = document[\"manifests\"][0]",
   "9653be494703ba619b6ece3c2ff0064e0371a56c431e1e5b61dbcfb3e1b44f83": "Bundle(\"ai\", \"ai.ravenroot.extensions.ai\", (\"llm-prompt\", \"agent\")),",
+  "965eea0dbc7abaeee14d1c19a3658c2f2eeb1fe19f547648004504a4313c0b04": "if path != 'ravenroot/ravenroot-akka/pom.xml':",
   "96646eecc5719e25487ddbaa2e2a9e19af0c8049e4f152cac4fe9cec403c066e": "private static final Set<String> FIELDS = Set.of(\"destination\", \"headers\", \"subprotocols\", \"credentialBindingId\", \"credentialReference\", \"maximumMessageBytes\", \"maximumFragments\", \"timeoutMs\", \"reconnectBackoffMs\", \"maxConcurrency\", \"maxBufferedEvents\");",
   "966785f154e57a18547179cf7d3004357b9f8a71e5285f6359b640b11ef6ba12": "directory = parent / \"ravenroot-runner-quota-fixture\"",
   "966e7078a97fb25b93750bdee94f16c99b36c81e7d2fc9f7fd7098d3a0893d67": "\"oneOf\": [{ \"type\": \"integer\", \"minimum\": 1, \"maximum\": 268435456 }, { \"$ref\": \"#/definitions/graphBlank\" }]",
@@ -712369,6 +712665,7 @@
   "b948ea49fe031a4d7a0b608389566c33037c269f14a8caffeb1ff4b6536c2d20": "mock.patch.object(audit, \"assistant_limit_authority_errors\", return_value=[]), \\",
   "b94bc8aedf91ac145c4f8f876d322d47ab7adf49692b23ee95725cf38075f211": "check \"-st still uses one reactor package invocation\" test \"$(package_call_count)\" -eq 1",
   "b958dbbb61557a5ac78d32190136e9d83feb075f2f71399a48e4bbc1ee908ba4": "\"RAVENROOT_POSTGRES_STATEMENT_TIMEOUT_MS\": \"PostgreSQL statement bound in positive whole milliseconds; default `30000` and no shorter than lock timeout\",",
+  "b95f331b0e49a6d919ecc9fbf98ef1ed3e5b9e4a811b40518b5f4a7d8b1733db": "for paths in ([self.AKKA + '/src/main/java/Changed.java'],",
   "b9624d8abe4959413ea30cd1631e0d49993c5fe1cc985c2de71f092b9457a079": "\"RAVENROOT_WEBSOCKET_ENABLED\",",
   "b967562b42a782b1c06a023e9b936f815634a6ed5e17c0e9f3b631c638a7f952": "GraphExecutionResult result = runner.execute(ExecutionEngineContract.TCK_IDENTITY, \"input\") .toCompletableFuture().get(10, TimeUnit.SECONDS);",
   "b96a63364a72422e00fdfa275707f23d94f0eb2c984c38765d8e287a96513fc3": "\"responseMaxKeyLength\": { \"$ref\": \"#/definitions/positive4096\" },",
@@ -712798,6 +713095,7 @@
   "c2652fa9696ab47e0886f2d2318487e513292823e25fb27f3eff7d11b0d0c39e": "\"agentBudgetAuthority\": audit.AGENT_BUDGET_AUTHORITY_ID,",
   "c266ef50fdc7089f20516abe4590410c0b92425946de7d67ffce1c558f79b450": "drainedNow = terminated && operationsInFlight == 0;",
   "c26bd782f8c6510bdcc9be8ebf2278664b8787c9abfba1ba96965aecf0f0f879": "if sorted(RELEASE_LABELS.intersection(labels)) != [\"release:minor\"]:",
+  "c275b5629ae1942ac69c509a74d7c8a136d49f9c53ea48e9d3df28fdcd95edb0": "+ (f'<groupId>ai.ravenroot</groupId><version>{version}</version>' if direct_version else '')",
   "c27bb89ed81ffe281867e38172f20f7ac09a25a57720e9d6cbe019d01fa79e6b": "if name.startswith(\"RAVENROOT_AGENT_\"):",
   "c27f9a1ffc3659122fe859b7119170aa41072c172a916a1b5a1657ae4b399672": "changed[audit.ASSISTANT_LIMIT_FAMILY_ID][\"consumerAuthority\"][\"testBodyDigest\"] = \\",
   "c27fe6fc5a499572f8e23b3d55a1d8a7b52cc41a3ebc52d4e01c607833a0084b": "echo \"measure-e2e-stability: target ${RAVENROOT_E2E_TARGET:-<whole suite>}\"",
@@ -714125,6 +714423,7 @@
   "ddb2a5bb68641775806dc8146175f9fb89db28ea7bcfe80602e97b8a7d527944": "record GitWorkspaceRequest(Operation operation, String taskId, String baseRevision, String issueBranch, String approvedRevision) { static final String CONTRACT = \"git-workspace.v1\";",
   "ddb642e8c571f56bae8ebf0cec7c364f1984989ea2e6870a72f5656f3157f68a": "raise RegistryError(\"cannot import the reviewed Ravenroot release key\")",
   "ddb9897df13fcefe39360582d08228cd565019546e179543650f2055252eb845": "const focusedMenuCommand = document.activeElement?.closest('#application-menu [data-command-id]')?.dataset.commandId;",
+  "ddb9eff585bbe335f2877f550ab9b37019ede161723c8ee10c4004549f70f56b": "NEW = '0.9.0-alpha.1'",
   "ddc963382f47568cb6a26cb59e1cdc8af14d17ae4deb3b46ec4437585e1801ff": "const position = element => { const viewport = { left: 0, top: 0, width: suppliedWindow?.innerWidth || document.documentElement.clientWidth, height: suppliedWindow?.innerHeight || document.documentElement.clientHeight, };",
   "ddcef72ec2f54ce8bee00bdbbeb4241dc1aab81fd192593b7084c2e2f98451bb": "public record PostgresStoreConfig(Duration lockTimeout, Duration statementTimeout, int serializationRetries, Duration maxLeaseTtl, int maxPayloadBytes, Duration maxClockSkew, Duration journalRetention, int maxInventoryPageSize, Duration terminalRetention, Duration executionResultRetention, int graphDefinitionUpsertAttempts, ai.ravenroot.api.correlation.BusinessHistoryPolicy businessHistories) { public static final PostgresStoreConfig DEFAULTS = new PostgresStoreConfig( Duration.ofSeconds(5), Duration.ofSeconds(30), 3, Duration.ofMinutes(5), 1024 * 1024, Duration.ofSeconds(5), Duration.ofHours(24), 100, Duration.ofDays(7), Duration.ofDays(7), 3);",
   "ddd26ad051fb70f9e52d729e6691c2112db2a426c2e2ef379a63b183576ca4b2": "pom.write_bytes(b\"<project/>\")",
@@ -714289,6 +714588,7 @@
   "e1253ab3f6817de8ae9b02999e946a94bcbf9fbbcb13dc3c9377a32b127b638f": "- name: RAVENROOT_ACTIVITY_CAPTURE_WRITE_TIMEOUT_MILLIS",
   "e127cfe2c991f51dde16c39b9ea385d8c97006b64cf29c559cdd8432531aaa8f": "seconds(properties, environment, \"idle-timeout-seconds\", 60)",
   "e12997a95a5039b005c623a870e6b8c7208e533dfb7f7184b56fe24ac4f4ebe7": "\"size\": { \"$ref\": \"#/definitions/kubernetesPositiveQuantity\" },",
+  "e137c6c6f3a228bdc24fc3afafa57a0b2ba8c7013a0c0ec32c207b37c39854a8": "for lane in ('dev', 'release/0.8'):",
   "e13c4863bdd87e609b8d31fcb880eb3fdceb612ec8a4779218a6c4ec3e62bf06": "changed_test = service_test_path.read_text(encoding=\"utf-8\")",
   "e13e587102b47613ad9c08b05dde3f80b7d9bf3fac316dbe24461ab20e500fe2": "private static final Set<String> DOCUMENT_FIELDS = Set.of(\"version\", \"rules\");",
   "e13fe3d4c96ccbf63c15dc9e3f70fed602e032f7687eca344ddba3b5a84a0dc3": "\"bounded `store` settings, and a nonempty tenant/profile map; ignored when the Mattermost package \"",
@@ -1542166,6 +1542466,171 @@
       "status": "retained",
       "classification": "test-fixture",
       "rationale": "#606 Attempt8 scripts/tests/test_kubernetes_runner_acceptance.py test_semantic_probe_failure_keeps_vectors_and_primary_reason_through_cleanup atom '\"probeCleanup\"': period-only baseline exception, monotonic/positive-work/own10s proof or closed retained failure/regression data; fixture-only, not an operator setting."
+     }
+    }
+   ]
+  },
+  {
+   "id": "issue-607-attempt2-canonical-release-metadata-inventory-v1",
+   "issue": "#607",
+   "sourceRevision": "0bd64c419401adf0e91324d76f3c0b8262fd776f",
+   "targetRevision": "00c88a56e8d86adeb899c63ef0c22242ad896151",
+   "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+   "sourceInventoryDigest": "fe31a329235fe953dbcf4682b4c01cfc9a7471c6a6a05b70dbd47e5b8ad6f54b",
+   "targetCandidateDigest": "0ad5a97c06cc7cfe4e77f7493467e3c2669d497450b861142133a14ad3f10ecf",
+   "mappings": [],
+   "retirements": [],
+   "additions": [
+    {
+     "id": "oc-4d97e473970d7e7684fb",
+     "metadata": {
+      "status": "retained",
+      "classification": "presentation-text",
+      "rationale": "#607 scripts/impact_plan.py:88 \"\" is fixed developer documentation or plan-reason output produced by the metadata predicate/planner and consumed only as explanation. The literal does not control version normalization, job selection, profile activation, credentials or runtime configuration."
+     }
+    },
+    {
+     "id": "oc-5ff6a723ddbb137723d4",
+     "metadata": {
+      "status": "retained",
+      "classification": "protocol-or-format-invariant",
+      "rationale": "#607 scripts/impact_plan.py:94 'ravenroot/ravenroot-akka/pom.xml' is the exact source-owned optional-module routing identity consumed by canonical_product_version_only or make_plan. It restricts the metadata exception to the registered Akka POM and retains fail-closed rejection for other optional-module changes; it is not an operator-selected path or licensed-runner authority."
+     }
+    },
+    {
+     "id": "oc-74223896046595169ba3",
+     "metadata": {
+      "status": "retained",
+      "classification": "protocol-or-format-invariant",
+      "rationale": "#607 scripts/impact_plan.py:176 'ravenroot/ravenroot-akka/' is the exact source-owned optional-module routing identity consumed by canonical_product_version_only or make_plan. It restricts the metadata exception to the registered Akka POM and retains fail-closed rejection for other optional-module changes; it is not an operator-selected path or licensed-runner authority."
+     }
+    },
+    {
+     "id": "oc-eee8c1de87ce5234aa28",
+     "metadata": {
+      "status": "retained",
+      "classification": "presentation-text",
+      "rationale": "#607 scripts/impact_plan.py:179 '{path}: canonical internal product-version metadata only; licensed profile remains excluded' is fixed developer documentation or plan-reason output produced by the metadata predicate/planner and consumed only as explanation. The literal does not control version normalization, job selection, profile activation, credentials or runtime configuration."
+     }
+    },
+    {
+     "id": "oc-15427e7b27931a07f06d",
+     "metadata": {
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "#607 scripts/tests/test_impact_plan.py:369 'ravenroot/ravenroot-akka' is verification-only data produced by LicensedReleaseMetadataTest and consumed by its synthetic canonical Maven documents, mocked Git/changed-path boundary or forced-complete planner assertions. It exercises canonical metadata acceptance or substantive licensed-change rejection; it cannot configure or activate a runtime engine."
+     }
+    },
+    {
+     "id": "oc-3395a4099d68d3a1e7bb",
+     "metadata": {
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "#607 scripts/tests/test_impact_plan.py:370 '/pom.xml' is verification-only data produced by LicensedReleaseMetadataTest and consumed by its synthetic canonical Maven documents, mocked Git/changed-path boundary or forced-complete planner assertions. It exercises canonical metadata acceptance or substantive licensed-change rejection; it cannot configure or activate a runtime engine."
+     }
+    },
+    {
+     "id": "oc-615cc58335238d2673ad",
+     "metadata": {
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "#607 scripts/tests/test_impact_plan.py:371 '0.8.0-alpha.1' is verification-only data produced by LicensedReleaseMetadataTest and consumed by its synthetic canonical Maven documents, mocked Git/changed-path boundary or forced-complete planner assertions. It exercises canonical metadata acceptance or substantive licensed-change rejection; it cannot configure or activate a runtime engine."
+     }
+    },
+    {
+     "id": "oc-d2d319a1f009763048eb",
+     "metadata": {
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "#607 scripts/tests/test_impact_plan.py:372 '0.9.0-alpha.1' is verification-only data produced by LicensedReleaseMetadataTest and consumed by its synthetic canonical Maven documents, mocked Git/changed-path boundary or forced-complete planner assertions. It exercises canonical metadata acceptance or substantive licensed-change rejection; it cannot configure or activate a runtime engine."
+     }
+    },
+    {
+     "id": "oc-f3d5eca00da9079c56f3",
+     "metadata": {
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "#607 scripts/tests/test_impact_plan.py:373 '<project xmlns=\"http://maven.apache.org/POM/4.0.0\"><modelVersion>4.0.0</modelVersion>' is verification-only data produced by LicensedReleaseMetadataTest and consumed by its synthetic canonical Maven documents, mocked Git/changed-path boundary or forced-complete planner assertions. It exercises canonical metadata acceptance or substantive licensed-change rejection; it cannot configure or activate a runtime engine."
+     }
+    },
+    {
+     "id": "oc-10bd169597f5c690baba",
+     "metadata": {
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "#607 scripts/tests/test_impact_plan.py:384 '' is verification-only data produced by LicensedReleaseMetadataTest and consumed by its synthetic canonical Maven documents, mocked Git/changed-path boundary or forced-complete planner assertions. It exercises canonical metadata acceptance or substantive licensed-change rejection; it cannot configure or activate a runtime engine."
+     }
+    },
+    {
+     "id": "oc-40ffb959d801e50d0d91",
+     "metadata": {
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "#607 scripts/tests/test_impact_plan.py:384 '<groupId>ai.ravenroot</groupId><version>{version}</version>' is verification-only data produced by LicensedReleaseMetadataTest and consumed by its synthetic canonical Maven documents, mocked Git/changed-path boundary or forced-complete planner assertions. It exercises canonical metadata acceptance or substantive licensed-change rejection; it cannot configure or activate a runtime engine."
+     }
+    },
+    {
+     "id": "oc-15be3d9411af1ac4e35c",
+     "metadata": {
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "#607 scripts/tests/test_impact_plan.py:390 'dev' is verification-only data produced by LicensedReleaseMetadataTest and consumed by its synthetic canonical Maven documents, mocked Git/changed-path boundary or forced-complete planner assertions. It exercises canonical metadata acceptance or substantive licensed-change rejection; it cannot configure or activate a runtime engine."
+     }
+    },
+    {
+     "id": "oc-31d18d88263cb8e92262",
+     "metadata": {
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "#607 scripts/tests/test_impact_plan.py:393 ':' is verification-only data produced by LicensedReleaseMetadataTest and consumed by its synthetic canonical Maven documents, mocked Git/changed-path boundary or forced-complete planner assertions. It exercises canonical metadata acceptance or substantive licensed-change rejection; it cannot configure or activate a runtime engine."
+     }
+    },
+    {
+     "id": "oc-a79e4b61f81ae1936fec",
+     "metadata": {
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "#607 scripts/tests/test_impact_plan.py:393 1 is verification-only data produced by LicensedReleaseMetadataTest and consumed by its synthetic canonical Maven documents, mocked Git/changed-path boundary or forced-complete planner assertions. It exercises canonical metadata acceptance or substantive licensed-change rejection; it cannot configure or activate a runtime engine."
+     }
+    },
+    {
+     "id": "oc-364badc1a5f1c83f23e2",
+     "metadata": {
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "#607 scripts/tests/test_impact_plan.py:393 1 is verification-only data produced by LicensedReleaseMetadataTest and consumed by its synthetic canonical Maven documents, mocked Git/changed-path boundary or forced-complete planner assertions. It exercises canonical metadata acceptance or substantive licensed-change rejection; it cannot configure or activate a runtime engine."
+     }
+    },
+    {
+     "id": "oc-abbddcb4e7794cd0230f",
+     "metadata": {
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "#607 scripts/tests/test_impact_plan.py:401 'paths_between' is verification-only data produced by LicensedReleaseMetadataTest and consumed by its synthetic canonical Maven documents, mocked Git/changed-path boundary or forced-complete planner assertions. It exercises canonical metadata acceptance or substantive licensed-change rejection; it cannot configure or activate a runtime engine."
+     }
+    },
+    {
+     "id": "oc-54abaa149852ad8d1c38",
+     "metadata": {
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "#607 scripts/tests/test_impact_plan.py:407 'dev' is verification-only data produced by LicensedReleaseMetadataTest and consumed by its synthetic canonical Maven documents, mocked Git/changed-path boundary or forced-complete planner assertions. It exercises canonical metadata acceptance or substantive licensed-change rejection; it cannot configure or activate a runtime engine."
+     }
+    },
+    {
+     "id": "oc-f7bdaca1cb3616565a73",
+     "metadata": {
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "#607 scripts/tests/test_impact_plan.py:407 'release/0.8' is verification-only data produced by LicensedReleaseMetadataTest and consumed by its synthetic canonical Maven documents, mocked Git/changed-path boundary or forced-complete planner assertions. It exercises canonical metadata acceptance or substantive licensed-change rejection; it cannot configure or activate a runtime engine."
+     }
+    },
+    {
+     "id": "oc-9c37092e8a1b323c2774",
+     "metadata": {
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "#607 scripts/tests/test_impact_plan.py:458 '/src/main/java/Changed.java' is verification-only data produced by LicensedReleaseMetadataTest and consumed by its synthetic canonical Maven documents, mocked Git/changed-path boundary or forced-complete planner assertions. It exercises canonical metadata acceptance or substantive licensed-change rejection; it cannot configure or activate a runtime engine."
      }
     }
    ]

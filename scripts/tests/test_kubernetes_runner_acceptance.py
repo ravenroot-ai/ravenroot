@@ -308,7 +308,8 @@ class KubernetesAcceptanceFixtureTest(unittest.TestCase):
     def assert_native_upload_contract(self, workflow):
         upload = workflow.split("- name: Retain sanitized native Kubernetes results", 1)[1].split("- name:", 1)[0]
         self.assertIn("if: always() && steps.backend-scope.outputs.native == 'true'", upload)
-        self.assertEqual(["ravenroot/ravenroot-core/target/native-kubernetes-reports/KubernetesPodRunnerNativeTest.json",
+        self.assertEqual(["ravenroot/ravenroot-core/target/native-kubernetes-reports/NativeCpuHierarchyProbe.json",
+                      "ravenroot/ravenroot-core/target/native-kubernetes-reports/KubernetesPodRunnerNativeTest.json",
                           "ravenroot/ravenroot-core/target/native-kubernetes-reports/KubernetesWorkspaceGraphNativeTest.json"],
                          re.findall(r"(?m)^            (\S+)$", upload))
         self.assertNotIn("surefire-reports", upload)
@@ -390,7 +391,8 @@ class KubernetesAcceptanceFixtureTest(unittest.TestCase):
                 return fixture.MINIKUBE.encode()
             if args[:2] == ["minikube", "start"]:
                 for option in ("--kubernetes-version=" + fixture.KUBERNETES,
-                               "--base-image=" + fixture.CLUSTER_IMAGE, "--driver=docker", "--container-runtime=containerd"):
+                               "--base-image=" + fixture.CLUSTER_IMAGE, "--driver=docker", "--container-runtime=containerd",
+                               "--feature-gates=PodLevelResources=true", "--extra-config=kubelet.cpu-cfs-quota-period=100ms"):
                     self.assertIn(option, args)
                 raise RuntimeError("cluster start refused")
             return b""
@@ -401,6 +403,57 @@ class KubernetesAcceptanceFixtureTest(unittest.TestCase):
             self.assertEqual(1, sum(call.args[0][:2] == ["minikube", "start"] for call in run.call_args_list))
             self.assertEqual(["minikube", "delete"], run.call_args.args[0][:2])
 
+
+    def cpu_probe_output(self, old_positive=False, new_positive=True):
+        lines = []
+        for label, quota, positive in (("equal", 10000, old_positive), ("stricter", 8000, new_positive)):
+            lines += ["CASE " + label, "PARENT 10000 100000", f"CHILD {quota} 100000", "NOISE 1000 100000"]
+            lines += [key + " 0 0 0 0" for key in ("PARENT_BEFORE", "CHILD_BEFORE", "NOISE_BEFORE")]
+            lines += [f"WORKER 0 {int(positive)} {100000 if positive else 10000000}",
+                      "PARENT_AFTER 10000 100 5 1000", f"CHILD_AFTER 8000 100 {int(positive)} 1000", "NOISE_AFTER 1000 100 1 100"]
+        return ("\n".join(lines) + "\nCLEANUP\n").encode()
+
+    def test_probe_records_both_control_outcomes_and_refuses_malformed_or_stale_evidence(self):
+        for positive in (False, True):
+            report = fixture.cpu_hierarchy_report(self.cpu_probe_output(positive))
+            self.assertEqual("NOT_REPRODUCED" if positive else "OWN_THROTTLING_MISSING", report["cases"][0]["outcome"])
+            self.assertTrue(report["cases"][1]["ownThrottlingWithinTenSeconds"])
+            self.assertTrue(report["cleanup"])
+        raw = self.cpu_probe_output()
+        for before, after in ((b"CHILD 8000", b"CHILD 10000"), (b"CHILD_BEFORE 0 0 0 0", b"CHILD_BEFORE 1 1 1 1"),
+                              (b"NOISE_AFTER 1000", b"NOISE_AFTER 0"), (b"CLEANUP\n", b""),
+                              (b"PARENT 10000 100000", b"PARENT max 100000"), (b"WORKER 0 1 100000", b"WORKER 0 1 11000000")):
+            with self.subTest(mutation=before), self.assertRaises(ValueError):
+                fixture.cpu_hierarchy_report(raw.replace(before, after))
+
+    def test_hosted_probe_missing_own_evidence_stops_acceptance_but_retains_counters(self):
+        node = [{"Name": "/owned", "Config": {"Image": fixture.CLUSTER_IMAGE}, "State": {"Running": True}, "Id": "exact-id"}]
+        for positive in (False, True):
+            with tempfile.TemporaryDirectory() as directory, patch.object(fixture, "REPORT_DIRECTORY", Path(directory)), \
+                    patch.object(fixture, "command", side_effect=[json.dumps(node).encode(), self.cpu_probe_output(new_positive=positive), b"CLEANUP\n"]) as run:
+                if positive:
+                    fixture.verify_cpu_hierarchy("owned")
+                else:
+                    with self.assertRaisesRegex(RuntimeError, "own-child"):
+                        fixture.verify_cpu_hierarchy("owned")
+                report = json.loads((Path(directory) / "NativeCpuHierarchyProbe.json").read_text())
+                self.assertEqual("VERIFIED" if positive else "FAILED", report["status"])
+                self.assertEqual(2, len(report["cases"]))
+                self.assertTrue(report["cleanup"])
+                self.assertEqual("exact-id", run.call_args.args[0][3])
+
+    def test_probe_cleanup_has_its_own_budget_after_main_timeout_and_cannot_hide_failure(self):
+        node = [{"Name": "/owned", "Config": {"Image": fixture.CLUSTER_IMAGE}, "State": {"Running": True}, "Id": "exact-id"}]
+        for cleanup in (b"CLEANUP\n", RuntimeError("cleanup refused")):
+            with tempfile.TemporaryDirectory() as directory, patch.object(fixture, "REPORT_DIRECTORY", Path(directory)), \
+                    patch.object(fixture.time, "monotonic", side_effect=[0, 45]), \
+                    patch.object(fixture, "command", side_effect=[json.dumps(node).encode(), subprocess.TimeoutExpired("probe", 45), cleanup]) as run:
+                with self.assertRaises((RuntimeError, subprocess.TimeoutExpired)):
+                    fixture.verify_cpu_hierarchy("owned")
+                self.assertEqual(12, run.call_args.kwargs["timeout"])
+                report = json.loads((Path(directory) / "NativeCpuHierarchyProbe.json").read_text())
+                self.assertEqual("FAILED", report["status"])
+                self.assertEqual(isinstance(cleanup, bytes), report["cleanup"])
 
     def test_native_cpu_fixture_keeps_real_boundary_positive_proof_and_zero_skip_gates(self):
         required = {
@@ -414,9 +467,12 @@ class KubernetesAcceptanceFixtureTest(unittest.TestCase):
                 ("end = time.monotonic() + 10", 'raise RuntimeError("positive CPU throttling evidence is missing")'),
             "scripts/fixtures/kubernetes_runner_acceptance.py":
                 ('"ai.ravenroot.core.runner.KubernetesPodRunnerNativeTest": 1',
-                 '"ai.ravenroot.core.runtime.KubernetesWorkspaceGraphNativeTest": 4', '"skipped": "0"'),
+                 '"ai.ravenroot.core.runtime.KubernetesWorkspaceGraphNativeTest": 4', '"skipped": "0"',
+                 "            verify_cpu_hierarchy(profile)\n", "elapsed <= 10_000_000", "if not report[\"cases\"][1][\"ownThrottlingWithinTenSeconds\"]:"),
         }
         sources = {path: (fixture.ROOT / path).read_text() for path in required}
+        helper = sources["scripts/fixtures/kubernetes_runner_acceptance.py"]
+        self.assertLess(helper.index("            verify_cpu_hierarchy(profile)\n"), helper.index("with endpoint_module.ModelProtocolEndpoint()"))
         def verify(observed):
             for path, markers in required.items():
                 for marker in markers:

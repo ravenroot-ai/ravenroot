@@ -16,6 +16,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 import uuid
 import xml.etree.ElementTree as ET
 
@@ -172,6 +173,80 @@ def retain_reports(source=None, destination=None):
         (destination / (name.rsplit(".", 1)[1] + ".json")).write_text(json.dumps(report, sort_keys=True) + "\n")
 
 
+def cpu_hierarchy_report(raw):
+    """Parse only fixed tokens and finite integers; never retain arbitrary node output."""
+    lines = raw.decode("ascii").splitlines()
+    result = {"schemaVersion": 1, "approvedMillicores": 100, "outerMillicores": 500,
+              "memoryBytes": 67108864, "pids": 16, "cases": [], "cleanup": False}
+    keys = ("PARENT", "CHILD", "NOISE", "PARENT_BEFORE", "CHILD_BEFORE", "NOISE_BEFORE",
+            "WORKER", "PARENT_AFTER", "CHILD_AFTER", "NOISE_AFTER")
+    for label, quota in (("equal", 10000), ("stricter", 8000)):
+        if not lines or lines.pop(0) != "CASE " + label:
+            raise ValueError("missing CPU hierarchy case")
+        case = {"case": label}
+        for key in keys:
+            parts = lines.pop(0).split() if lines else []
+            width = 2 if key in ("PARENT", "CHILD", "NOISE") else 3 if key == "WORKER" else 4
+            if len(parts) != width + 1 or parts[0] != key or any(not re.fullmatch(r"[0-9]{1,19}", x) or int(x) > 2**63 - 1 for x in parts[1:]):
+                raise ValueError("invalid CPU hierarchy measurement")
+            case[key] = list(map(int, parts[1:]))
+        if case["PARENT"] != [10000, 100000] or case["CHILD"] != [quota, 100000] or case["NOISE"] != [1000, 100000]:
+            raise ValueError("CPU hierarchy quota readback differs")
+        for name in ("PARENT", "CHILD", "NOISE"):
+            before, after = case[name + "_BEFORE"], case[name + "_AFTER"]
+            if before != [0, 0, 0, 0] or any(b > a for b, a in zip(before, after)) or after[0] <= 0:
+                raise ValueError("CPU hierarchy counters are stale or workload did not run")
+        baseline, final, elapsed = case["WORKER"]
+        if baseline > final or final > case["CHILD_AFTER"][2] or not 0 < elapsed <= 10_200_000:
+            raise ValueError("invalid own counter window")
+        positive = final > baseline and elapsed <= 10_000_000
+        case["ownThrottlingWithinTenSeconds"] = positive
+        case["outcome"] = ("NOT_REPRODUCED" if positive else "OWN_THROTTLING_MISSING") if label == "equal" else ("VERIFIED" if positive else "OWN_THROTTLING_MISSING")
+        result["cases"].append(case)
+    if lines != ["CLEANUP"]:
+        raise ValueError("CPU hierarchy cleanup missing or unexpected output")
+    result["cleanup"] = True
+    return result
+
+
+def verify_cpu_hierarchy(profile):
+    # Existing privileged disposable node only; no new image, host mount or authority.
+    node = json.loads(command(["docker", "inspect", profile]))[0]
+    if node["Name"] != "/" + profile or node["Config"]["Image"] != CLUSTER_IMAGE or not node["State"]["Running"]:
+        raise RuntimeError("CPU probe node ownership differs")
+    identity = node["Id"]
+    name = "rr-cpu-" + uuid.uuid4().hex
+    nonce = uuid.uuid4().hex
+    payload = Path(__file__).with_name("kubernetes_cpu_hierarchy_probe.sh").read_bytes()
+    started = time.monotonic()
+    report = {"schemaVersion": 1, "status": "FAILED", "reason": "PROBE_UNAVAILABLE", "cleanup": False}
+    try:
+        raw = command(["docker", "exec", "-i", identity, "timeout", "--signal=TERM", "--kill-after=2", "43",
+                       "bash", "-s", "--", name, "run", nonce], data=payload, timeout=45, quiet=True)
+        report.update(cpu_hierarchy_report(raw))
+        if not report["cases"][1]["ownThrottlingWithinTenSeconds"]:
+            report["reason"] = "OWN_THROTTLING_MISSING"
+            raise RuntimeError("fresh own-child throttling proof missing")
+        report.update(status="VERIFIED", reason="NONE")
+    finally:
+        try:
+            # Independent remaining budget, even if the main 45-second deadline expired.
+            remaining = 60 - (time.monotonic() - started)
+            if remaining <= 1:
+                raise RuntimeError("CPU probe cleanup deadline expired")
+            cleaned = command(["docker", "exec", "-i", identity, "timeout", "--signal=TERM", "--kill-after=1", "10",
+                               "bash", "-s", "--", name, "cleanup", nonce], data=payload, timeout=min(12, remaining), quiet=True)
+            if cleaned != b"CLEANUP\n":
+                raise RuntimeError("CPU probe cleanup unconfirmed")
+            report["cleanup"] = True
+        except Exception:
+            report.update(status="FAILED", reason="CLEANUP_UNCONFIRMED", cleanup=False)
+            raise
+        finally:
+            REPORT_DIRECTORY.mkdir(parents=True, exist_ok=True)
+            (REPORT_DIRECTORY / "NativeCpuHierarchyProbe.json").write_text(json.dumps(report, indent=2) + "\n")
+
+
 def run():
     for tool in ("docker", "minikube", "kubectl", "helm", "mvn"):
         if not shutil.which(tool):
@@ -193,7 +268,8 @@ def run():
             print("Native Kubernetes preflight: creating isolated containerd/Calico cluster", flush=True)
             command(["minikube", "start", "--profile=" + profile, "--driver=docker", "--container-runtime=containerd",
                      "--kubernetes-version=" + KUBERNETES, "--base-image=" + CLUSTER_IMAGE,
-                     "--cni=calico", "--cpus=2", "--memory=2048",
+                     "--cni=calico", "--cpus=2", "--memory=2048", "--feature-gates=PodLevelResources=true",
+                     "--extra-config=kubelet.cpu-cfs-quota-period=100ms",
                      "--extra-config=kubelet.pod-max-pids=256", "--keep-context", "--embed-certs", "--install-addons=false"], timeout=600)
             kubectl = ["kubectl", "--context=" + profile]
             # Pin one policy backend. Calico Auto can change its choice during initial kube-proxy
@@ -228,6 +304,7 @@ def run():
             policies = json.loads(command(kubectl + ["get", "validatingadmissionpolicies", "-o", "json"]))
             if any(policy.get("status", {}).get("typeChecking", {}).get("expressionWarnings") for policy in policies["items"]):
                 raise RuntimeError("native admission policy has a type-checking warning")
+            verify_cpu_hierarchy(profile)
             for name in CLASSES:
                 (ROOT / "ravenroot/ravenroot-core/target/surefire-reports" / ("TEST-" + name + ".xml")).unlink(missing_ok=True)
             with endpoint_module.ModelProtocolEndpoint() as endpoint:

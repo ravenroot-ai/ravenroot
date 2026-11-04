@@ -18381,6 +18381,11 @@ def render_report(document: dict[str, object], root: Path = ROOT) -> str:
     return "\n".join(lines)
 
 
+def render_inventory(document: dict[str, object]) -> str:
+    """Readable lossless inventory encoding; historical evidence values stay untouched."""
+    return json.dumps(document, indent=1, ensure_ascii=False) + "\n"
+
+
 def refresh_inventory(root: Path, inventory_path: Path = INVENTORY, report_path: Path = REPORT,
                       *, accept_retired_pending: bool = False,
                       reconciliation_plan: dict[str, object] | None = None) -> tuple[list[str], dict[str, int]]:
@@ -18414,7 +18419,7 @@ def refresh_inventory(root: Path, inventory_path: Path = INVENTORY, report_path:
         inventory_temporary = inventory_path.with_suffix(inventory_path.suffix + ".tmp")
         report_temporary = report_path.with_suffix(report_path.suffix + ".tmp")
         inventory_temporary.write_text(
-            json.dumps(refreshed, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+            render_inventory(refreshed), encoding="utf-8")
         report_temporary.write_text(render_report(refreshed, root), encoding="utf-8")
         inventory_temporary.replace(inventory_path)
         report_temporary.replace(report_path)
@@ -18532,7 +18537,7 @@ def refresh_inventory(root: Path, inventory_path: Path = INVENTORY, report_path:
     rendered = render_report(refreshed, root)
     inventory_temporary = inventory_path.with_suffix(inventory_path.suffix + ".tmp")
     report_temporary = report_path.with_suffix(report_path.suffix + ".tmp")
-    inventory_temporary.write_text(json.dumps(refreshed, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    inventory_temporary.write_text(render_inventory(refreshed), encoding="utf-8")
     report_temporary.write_text(rendered, encoding="utf-8")
     inventory_temporary.replace(inventory_path)
     report_temporary.replace(report_path)
@@ -18557,7 +18562,7 @@ def bootstrap(root: Path, inventory_path: Path, report_path: Path) -> None:
     }
     inventory_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.parent.mkdir(parents=True, exist_ok=True)
-    inventory_path.write_text(json.dumps(document, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    inventory_path.write_text(render_inventory(document), encoding="utf-8")
     report_path.write_text(render_report(document, root), encoding="utf-8")
 
 

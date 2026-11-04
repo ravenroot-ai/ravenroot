@@ -149,8 +149,15 @@ class ScheduledSourceLifecycleTest {
         var node = new GraphNode("timer", NodeKind.BEHAVIOR, "timer", Map.of(
                 "zoneId", "UTC", "times", "09:00:01", "mode", "RECURRING", "misfirePolicy", "SKIP"));
         var durable = new RecordingDurableIngress();
-        durable.inboxOnlyForUnknown.set(true);
         var context = new TestContext(durable);
+        var schedule = new ScheduleDefinition.Timer("UTC", "09:00:01", "");
+        String inboxKey = scheduledKey(context, schedule, baseline.plusSeconds(1));
+        String futureKey = scheduledKey(context, schedule, baseline.plus(Duration.ofDays(1)).plusSeconds(1));
+        durable.inboxOnlyKeys.add(inboxKey);
+        assertEquals(DurableIngressStartState.INBOX_ONLY,
+                durable.startState(context.identity(), "occurrences", inboxKey).toCompletableFuture().join());
+        assertEquals(DurableIngressStartState.ABSENT,
+                durable.startState(context.identity(), "occurrences", futureKey).toCompletableFuture().join());
         try (var scheduler = new ScheduledThreadPoolExecutor(1)) {
             var source = new TimerNodeBehaviorFactory(adjustableClock(now), scheduler).createSource(node, context);
             source.start(context).toCompletableFuture().get(2, TimeUnit.SECONDS);
@@ -159,8 +166,17 @@ class ScheduledSourceLifecycleTest {
                     "a committed inbox row must be repaired despite the late SKIP policy");
             awaitCursor(durable);
             assertEquals(1, durable.offers.get());
+            assertEquals(baseline.plusSeconds(1).toString(), durable.payload.get("scheduledAt"));
+            assertEquals(DurableIngressStartState.ABSENT,
+                    durable.startState(context.identity(), "occurrences", futureKey).toCompletableFuture().join(),
+                    "repairing one inbox key must not invent custody for a future occurrence");
             source.stop().toCompletableFuture().get(2, TimeUnit.SECONDS);
         }
+    }
+
+    private static String scheduledKey(TestContext context, ScheduleDefinition schedule, Instant occurrence) {
+        return ScheduleDefinition.digest(context.deploymentId().value() + '\0' + context.nodeId() + '\0'
+                + schedule.fingerprint() + '\0' + occurrence + '\0' + ZoneOffset.UTC);
     }
 
     private static Clock adjustableClock(AtomicReference<Instant> now) {
@@ -211,7 +227,7 @@ class ScheduledSourceLifecycleTest {
         private final AtomicInteger offers = new AtomicInteger();
         private final AtomicInteger deliveries = new AtomicInteger();
         private final AtomicBoolean startImmediately = new AtomicBoolean(true);
-        private final AtomicBoolean inboxOnlyForUnknown = new AtomicBoolean();
+        private final java.util.Set<String> inboxOnlyKeys = ConcurrentHashMap.newKeySet();
         private volatile String lastKey;
         private volatile Map<?, ?> payload;
         @Override public CompletionStage<JournalCursor> sourceCheckpoint(SecurityContext security, String sourceId) {
@@ -239,7 +255,7 @@ class ScheduledSourceLifecycleTest {
                 SecurityContext security, String sourceId, String key) {
             return CompletableFuture.completedFuture(startedKeys.contains(key) ? DurableIngressStartState.STARTED
                     : acceptedKeys.contains(key) ? DurableIngressStartState.ACCEPTED_UNSTARTED
-                    : inboxOnlyForUnknown.get() ? DurableIngressStartState.INBOX_ONLY
+                    : inboxOnlyKeys.contains(key) ? DurableIngressStartState.INBOX_ONLY
                     : DurableIngressStartState.ABSENT);
         }
         void markStarted() { startedKeys.add(lastKey); }

@@ -922,3 +922,33 @@ for (const change of ['authored', 'presentation']) test(`no-op acknowledgement p
     await expect(page.locator('#graph-mode-label')).toContainText('Repository draft · v6');
   } finally { release(); }
 });
+
+
+test('first managed save acknowledgement preserves an in-flight presentation edit', async ({ page }) => {
+  const requests = await setup(page);
+  await page.goto('/');
+  let enter, release;
+  const entered = new Promise(resolve => { enter = resolve; });
+  const gate = new Promise(resolve => { release = resolve; });
+  await page.route('**/v1/graph-authoring/orders.graphml', async route => {
+    if (route.request().method() === 'PUT') { enter(); await gate; }
+    await route.fallback();
+  });
+  page.once('dialog', dialog => dialog.accept('orders.graphml'));
+  try {
+    await page.locator('#btn-export').click();
+    await entered;
+    expect(await page.evaluate(() => window.ravenroot.activeDocument().authoring.providerDocumentId)).toBe(null);
+    await page.locator('#menu-layout').click();
+    await page.locator('[data-command-id="layout.arrange.keep"]').click();
+    release();
+    await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().authoring.saveFlight)).toBe(null);
+    expect(await page.evaluate(() => window.ravenroot.activeDocument().authoring.localChanges)).toBe(true);
+    await page.locator('#btn-export').click();
+    await expect.poll(() => requests.filter(request => request.method === 'PUT').length).toBe(2);
+    const bodies = requests.filter(request => request.method === 'PUT').map(request => request.body);
+    expect(bodies[1]).not.toBe(bodies[0]);
+    expect(bodies[1]).toContain('>keep</data>');
+    await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().authoring.localChanges)).toBe(false);
+  } finally { release(); }
+});

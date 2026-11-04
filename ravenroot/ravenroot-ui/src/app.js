@@ -6213,7 +6213,9 @@ function setRenderMode(name, { skipDraftGuard = false } = {}) {
   if (!skipDraftGuard && semanticMode !== renderMode) {
     return runAfterInspectorDraft(() => setRenderMode(name, { skipDraftGuard: true }));
   }
-  if (documentIsEditable(owner)) owner.visualGroupPresentationDirty = true;
+  if (documentIsEditable(owner) && (owner.authoring.providerDocumentId || owner.authoring.saveFlight)) {
+    owner.authoring.localChanges = true;
+  }
   invalidateDocumentLayouts(owner);
   captureDocumentModeView(owner, renderMode);
   if (dragSnapshot?.owner === owner) cancelNodeMoveGesture();
@@ -6257,8 +6259,8 @@ function arrangeDesign(name, { skipDraftGuard = false } = {}) {
   if (!skipDraftGuard) {
     return runAfterInspectorDraft(() => arrangeDesign(name, { skipDraftGuard: true }));
   }
-  if (documentIsEditable(owner)) {
-    owner.visualGroupPresentationDirty = true;
+  if (documentIsEditable(owner) && (owner.authoring.providerDocumentId || owner.authoring.saveFlight)) {
+    owner.authoring.localChanges = true;
     updateHistoryUi();
   }
   if (designArrangement === name) {

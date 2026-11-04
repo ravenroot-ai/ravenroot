@@ -7232,7 +7232,18 @@ class GraphAuthoringPolicyAuditTest(unittest.TestCase):
             (ui_path, "openRepositoryGraph", "current.history.revision() !== observedRevision", "false"),
             (ui_path, "openRepositoryGraph", "if (!completeReplaceActiveDocument(target, graph, result.documentId)) return false;", "openDocument({ name: result.documentId, graph });"),
             (ui_path, "saveRepositoryGraph", "if (!repositoryDocumentBindingIsCurrent(target)) return false;", ";"),
-            (ui_path, "saveRepositoryGraph", "if (target.history === history && history.revision() === submittedRevision)", "if (true)"),
+            (ui_path, "saveRepositoryGraph", "if (target.history === history && history.revision() === submittedRevision", "if (true"),
+            (ui_path, "saveRepositoryGraph", "target.authoring.providerDocumentId && !paneIsDirty(target)", "target.authoring.providerDocumentId"),
+            (ui_path, "saveRepositoryGraph", "? target.graph.sourceXml : null", "? serializeGraphML(target.graph) : null"),
+            (ui_path, "saveRepositoryGraph", "pristineSource ? { xml: pristineSource } : prepareDocumentDownload(target.id)", "prepareDocumentDownload(target.id)"),
+            (ui_path, "saveRepositoryGraph", "&& repositoryPresentationSnapshot(target) === submittedPresentation", ""),
+            (ui_path, "repositoryPresentationSnapshot", "target.visualGroupState", "null"),
+            (ui_path, "setRenderMode", "owner.authoring.localChanges = true;", "owner.authoring.localChanges = false;"),
+            (ui_path, "arrangeDesign", "owner.authoring.localChanges = true;", "owner.authoring.localChanges = false;"),
+            (ui_path, "setRenderMode", " || owner.authoring.saveFlight", ""),
+            (ui_path, "arrangeDesign", " || owner.authoring.saveFlight", ""),
+            (ui_path, "setRenderMode", " && (owner.authoring.providerDocumentId || owner.authoring.saveFlight)", ""),
+            (ui_path, "arrangeDesign", "owner.authoring.localChanges = true;", "owner.visualGroupPresentationDirty = true;"),
             (ui_path, "applyAuthoringDocument", "target.authoring.saveError = null;", "target.authoring.saveError = null; target.authoring.localChanges = false;"),
             (Path("ravenroot/ravenroot-ui/src/workspace-persistence.js"), "persistedAuthoring",
              "localChanges: Boolean(localChanges)", "localChanges: false"),
@@ -10215,3 +10226,83 @@ class BusinessHistoryPolicyAuthorityTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PristineSaveFinalReviewCorrespondenceTest(unittest.TestCase):
+    def test_exact_inverse_preserves_only_five_frozen_groups_and_rejects_unreviewed_edits(self):
+        relative = Path("ravenroot/ravenroot-ui/src/app.js")
+        source = (ROOT / relative).read_text()
+        anchor = audit.committed_source(ROOT, audit.FINAL_REVIEW_UI_SAVE_ANCHOR, relative.as_posix())
+        self.assertIsNotNone(anchor)
+        for group in audit.FINAL_REVIEW_UI_SAVE_GROUPS:
+            self.assertTrue(audit.final_review_ui_save_correspondence(
+                ROOT, group, relative, audit.FINAL_REVIEW_UI_SAVE_BEFORE))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for path in (relative, Path("ravenroot/ravenroot-ui/src/workspace-persistence.js"),
+                         Path("ravenroot/ravenroot-ui/src/document-close-plan.js"),
+                         Path("ravenroot/ravenroot-ui/src/workspace.js")):
+                target = root / path; target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text((ROOT / path).read_text())
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(["git", "add", "."], cwd=root, check=True)
+            subprocess.run(["git", "-c", "user.name=Audit Test", "-c",
+                            "user.email=audit@example.invalid", "commit", "-qm", "correspondence fixture"],
+                           cwd=root, check=True)
+            target = root / relative
+            def matches(group="ui-presentation-copy", path=relative,
+                        digest=audit.FINAL_REVIEW_UI_SAVE_BEFORE):
+                return audit.final_review_ui_save_correspondence(root, group, path, digest)
+            with mock.patch.object(audit, "revision_is_ancestor", return_value=True), \
+                    mock.patch.object(audit, "committed_source", return_value=anchor):
+                for group in audit.FINAL_REVIEW_UI_SAVE_GROUPS:
+                    self.assertTrue(matches(group), group)
+                self.assertFalse(matches("unknown-group"))
+                self.assertFalse(matches(path=Path("other.js")))
+                self.assertFalse(matches(digest="0" * 64))
+                mutations = [
+                    source.replace("const INITIAL_LAYOUT_EXPOSURE_TIMEOUT_MS = 15000;",
+                                   "const INITIAL_LAYOUT_EXPOSURE_TIMEOUT_MS = 15001;", 1),
+                    source.replace("'repository.error.conflict'", "'repository.error.unreviewed'", 1),
+                    source.replace("maxBytes: currentGraphDocumentByteLimit()", "maxBytes: 1", 1),
+                    source.replace("&& !paneIsDirty(target)", "", 1),
+                    source.replace("&& repositoryPresentationSnapshot(target) === submittedPresentation", "", 1),
+                    source.replace(" || owner.authoring.saveFlight", "", 1),
+                    source.replace(" && (owner.authoring.providerDocumentId || owner.authoring.saveFlight)", "", 1),
+                    source.replace("owner.authoring.localChanges = true;", "owner.visualGroupPresentationDirty = true;", 1),
+                ]
+                helper = audit._javascript_function_span(source, "repositoryPresentationSnapshot")
+                self.assertIsNotNone(helper)
+                helper_body = source[slice(*helper)]
+                mutations.extend([
+                    source[:helper[0]] + helper_body.replace("target.visualGroupState", "null") + source[helper[1]:],
+                    source[:helper[0]] + source[helper[1]:],
+                    source + "\n" + helper_body,
+                    helper_body + "\n\n" + source[:helper[0]] + source[helper[1] + 2:],
+                ])
+                for changed in mutations:
+                    with self.subTest(digest=hashlib.sha256(changed.encode()).hexdigest()):
+                        self.assertNotEqual(source, changed)
+                        target.write_text(changed)
+                        # Refreshable method/source metadata cannot authorize correspondence.
+                        methods = {}; support = {}
+                        for name in audit.GRAPH_AUTHORING_UI_METHOD_PROOFS:
+                            span = audit._javascript_function_span(changed, name)
+                            if span: methods[name] = hashlib.sha256(audit.normalized(changed[slice(*span)]).encode()).hexdigest()
+                        for name in audit.GRAPH_AUTHORING_UI_SUPPORT_SPAN_PROOFS:
+                            span = audit._javascript_function_span(changed, name)
+                            if span: support[name] = hashlib.sha256(audit.normalized(changed[slice(*span)]).encode()).hexdigest()
+                        with mock.patch.dict(audit.GRAPH_AUTHORING_UI_METHOD_PROOFS, methods), \
+                                mock.patch.dict(audit.GRAPH_AUTHORING_UI_SUPPORT_SPAN_PROOFS, support), \
+                                mock.patch.dict(audit.GRAPH_AUTHORING_SUPPORT_FILE_PROOFS,
+                                                {relative: hashlib.sha256(changed.encode()).hexdigest()}):
+                            self.assertFalse(matches())
+                target.write_text(source)
+            with mock.patch.object(audit, "revision_is_ancestor", return_value=False):
+                self.assertFalse(matches())
+            with mock.patch.object(audit, "revision_is_ancestor", return_value=True), \
+                    mock.patch.object(audit, "committed_source", return_value=None):
+                self.assertFalse(matches())
+            with mock.patch.object(audit, "revision_is_ancestor", return_value=True), \
+                    mock.patch.object(audit, "committed_source", return_value=source):
+                self.assertFalse(matches())

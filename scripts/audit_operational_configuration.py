@@ -3102,6 +3102,68 @@ def reviewed_reappearance_semantic_payload(entry: dict[str, object]) -> dict[str
             if key != "evidence"}
 
 
+# Reviewed #607 correspondence preserves the five frozen #321 decisions; it does not
+# approve the changed save behavior, whose current closed authority and CI remain mandatory.
+FINAL_REVIEW_UI_SAVE_GROUPS = frozenset({
+    "ui-layout-and-rendering-derived-values", "ui-message-catalog-keys", "ui-presentation-copy",
+    "ui-resource-and-safety-bounds", "ui-timing-and-retry-defaults",
+})
+FINAL_REVIEW_UI_SAVE_ANCHOR = "6ca1eac5aa04bc824256f332364f1eab028968a2"
+FINAL_REVIEW_UI_SAVE_BEFORE = "842fd8f12c013baee0a554f1dabb5015680fddf388758f3e0a712dcfecdfdb97"
+FINAL_REVIEW_UI_SAVE_AFTER = "00da74a8f8862de91ce136897edc3e7d5be61078acf1eb72751d9229e42aac05"
+# These reviewed replacements are independent of inventory or refreshable method proof metadata.
+FINAL_REVIEW_UI_SAVE_METHODS = {
+    "setRenderMode": "7959c6e6b5bfc85bffc8f79977e9c30ef3fac63ed5e74920c31a6ba1d07c5150",
+    "arrangeDesign": "6d64169eeb44be8cc48d0cc6dfeefc20c061d1b209d13278402a34155edece5f",
+    "saveRepositoryGraph": "4c2ac003000fd7dd07d4d0ef14c8213395fc08501c2ade467108e722f256c3cc",
+    "repositoryPresentationSnapshot": "c4bb9b77bcde66b9ae41a9b601feb7b043e76bb84c44bf83814ae4341a03a735",
+}
+
+
+def final_review_ui_save_correspondence(
+        root: Path, group: str, relative: Path, expected_digest: str) -> bool:
+    """Prove only the reviewed save/view delta reconstructs the exact frozen source bytes."""
+    if group not in FINAL_REVIEW_UI_SAVE_GROUPS \
+            or relative != Path("ravenroot/ravenroot-ui/src/app.js") \
+            or expected_digest != FINAL_REVIEW_UI_SAVE_BEFORE:
+        return False
+    try:
+        raw = (root / relative).read_bytes()
+        head = subprocess.run(["git", "rev-parse", "--verify", "HEAD^{commit}"],
+                              cwd=root, check=True, capture_output=True, text=True).stdout.strip()
+        if hashlib.sha256(raw).hexdigest() != FINAL_REVIEW_UI_SAVE_AFTER \
+                or not revision_is_ancestor(root, FINAL_REVIEW_UI_SAVE_ANCHOR, head):
+            return False
+        source = raw.decode("utf-8")
+        anchor = committed_source(root, FINAL_REVIEW_UI_SAVE_ANCHOR, relative.as_posix())
+        if anchor is None or hashlib.sha256(anchor.encode("utf-8")).hexdigest() != expected_digest:
+            return False
+        sources = {path: (root / path).read_text(encoding="utf-8") for path in (
+            Path("ravenroot/ravenroot-ui/src/workspace-persistence.js"),
+            Path("ravenroot/ravenroot-ui/src/document-close-plan.js"),
+            Path("ravenroot/ravenroot-ui/src/workspace.js"))}
+        if not graph_authoring_managed_open_boundary(sources, source):
+            return False
+        for method, digest in FINAL_REVIEW_UI_SAVE_METHODS.items():
+            span = _javascript_function_span(source, method)
+            if span is None or hashlib.sha256(normalized(source[slice(*span)]).encode()).hexdigest() != digest:
+                return False
+        inverse = source
+        for method in ("setRenderMode", "arrangeDesign", "saveRepositoryGraph"):
+            current = _javascript_function_span(inverse, method)
+            prior = _javascript_function_span(anchor, method)
+            if current is None or prior is None:
+                return False
+            inverse = inverse[:current[0]] + anchor[slice(*prior)] + inverse[current[1]:]
+        helper = _javascript_function_span(inverse, "repositoryPresentationSnapshot")
+        if helper is None or inverse[helper[1]:helper[1] + 2] != "\n\n":
+            return False
+        inverse = inverse[:helper[0]] + inverse[helper[1] + 2:]
+        return inverse.encode("utf-8") == anchor.encode("utf-8")
+    except (OSError, UnicodeError, ValueError, subprocess.CalledProcessError):
+        return False
+
+
 def final_review_authority_errors(
         root: Path, document: dict[str, object],
         expected_metadata: dict[str, dict[str, object]],
@@ -3235,7 +3297,9 @@ def final_review_authority_errors(
             proof_path = root / relative
             if relative.is_absolute() or ".." in relative.parts or relative not in tracked \
                     or not proof_path.is_file() \
-                    or hashlib.sha256(proof_path.read_bytes()).hexdigest() != item["digest"]:
+                    or (hashlib.sha256(proof_path.read_bytes()).hexdigest() != item["digest"]
+                        and not final_review_ui_save_correspondence(
+                            root, identifier, relative, str(item["digest"]))):
                 errors.append(f"final review group {identifier} source proof has drifted: {item['path']}")
         foreign = set(str(candidate) for candidate in candidates) - reviewable
         overlap = assigned & set(str(candidate) for candidate in candidates)
@@ -14950,7 +15014,7 @@ GRAPH_AUTHORING_SUPPORT_FILE_PROOFS = {
 GRAPH_AUTHORING_TEST_PROOFS = {
     Path("ravenroot/ravenroot-ui/test/release-proposal-progress.test.js"): "73281595637e9c21f9044c2109bae7a103dd60170ada604d7cc33f9fbb91d80f",
     Path("ravenroot/ravenroot-ui/test/repository-picker.test.js"): 'bdbdcec0431ce60bc55578cf6310f7d730ac17ff6bdc7d4aea176b1241872fb0',
-    Path("ravenroot/ravenroot-ui/e2e/managed-repository.spec.js"): '14c5142bab6caf5abc81e3460e5301a62ebeab0fb388910f6900b4f774b29e12',
+    Path("ravenroot/ravenroot-ui/e2e/managed-repository.spec.js"): '7583b454a512b69989780d78ac1dee950efa3d147f989ac1d80c3988851c677f',
     Path("ravenroot/ravenroot-ui/e2e/activity-localization.spec.js"): '420078563f5c9e1c3b0365828066c9a8df354a0c00d1e733f64ef2345a0612c4',
     Path("ravenroot/ravenroot-ui/e2e/startup-import.spec.js"): '4117b49e63dbb83c325650f1788f21ccb6bbcc80f86b7cbea71956475756eeb0',
     Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/AuthoringPublicationIndexTest.java"): "64bd2a9f1cd7a82af8442fa2be71a7e84833582ba6aee133dbe8ed395d475afd",
@@ -15071,7 +15135,7 @@ GRAPH_AUTHORING_UI_METHOD_PROOFS = {
     "setGraphAuthoringAvailability": "cc45311d49eb56cec124cf2a5932b8e2bc1bac23c179ea6e9f74253eaf3d1d59",
     "applyAuthoringDocument": "e8f4ad0229b75ac7e451a7e58da8e7c6d90cd156b7d81979f118f5181c77348a",
     "openRepositoryGraph": 'dfe5d91cf5dd0f5d5a31f876441830b26e9e2e0e7d6744cb72bbb5d452931d75',
-    "saveRepositoryGraph": '0a66154234cccc41169d326bcd1b6a64f9481f8ad43d04a02c0804b9486e22c2',
+    "saveRepositoryGraph": '4c2ac003000fd7dd07d4d0ef14c8213395fc08501c2ade467108e722f256c3cc',
     "repositoryHistory": "23a4f3610446b3e1e16e327b73f2401ad0dad4f27f614dbf423242059a914c8d",
     "repositoryDiscard": "1399bd3fda6a09e40903bd0b166d606c1e64fc7524d559390924f74c6faf7be6",
     "repositoryDelete": "12486c92d762174b9161c1ec5be9a3c77e54436f945bff7b673b2407507d8893",
@@ -15092,6 +15156,9 @@ GRAPH_AUTHORING_UI_METHOD_PROOFS = {
 # These broad shell functions are supporting evidence only; their unrelated candidates retain
 # their existing classifications rather than being absorbed by the authoring cohort.
 GRAPH_AUTHORING_UI_SUPPORT_SPAN_PROOFS = {
+    "repositoryPresentationSnapshot": "c4bb9b77bcde66b9ae41a9b601feb7b043e76bb84c44bf83814ae4341a03a735",
+    "setRenderMode": "7959c6e6b5bfc85bffc8f79977e9c30ef3fac63ed5e74920c31a6ba1d07c5150",
+    "arrangeDesign": "6d64169eeb44be8cc48d0cc6dfeefc20c061d1b209d13278402a34155edece5f",
     "paneIsDirty": "ceb8181d2effb12561ea1b26434ab5feb729eeddafbc4240ac942c65f80d9601",
     "updateHistoryUi": "11f1b9907d64e960b1d48f54910113ccf9920900d3da6ad739e8f38bacb50578",
     "completeReplaceActiveDocument": "c3ba35734683c8cd2fb6c22144b2cb577e1c0fd5ffec4625841f2ab1349d7724",
@@ -15349,10 +15416,24 @@ def graph_authoring_managed_open_boundary(sources: dict[Path, str], ui: str) -> 
             or re.search(r"feedback\.(?:released|published)\(", released):
         return False
     saved = body("saveRepositoryGraph")
-    if not includes(saved, "if (target.history === history && history.revision() === submittedRevision)",
+    if not includes(saved,
+                    "const pristineSource = target.authoring.providerDocumentId && !paneIsDirty(target) ? target.graph.sourceXml : null;",
+                    "const prepared = pristineSource ? { xml: pristineSource } : prepareDocumentDownload(target.id);",
+                    "const submittedPresentation = repositoryPresentationSnapshot(target);",
+                    "await client.save(providerDocumentId, prepared.xml, expected, flight)",
+                    "if (target.history === history && history.revision() === submittedRevision && repositoryPresentationSnapshot(target) === submittedPresentation)",
                     "history.markSaved(); target.visualGroupPresentationDirty = false; target.authoring.localChanges = false;") \
             or "localChanges = false" in body("applyAuthoringDocument"):
         return False
+    if not includes(body("repositoryPresentationSnapshot"),
+                    "return JSON.stringify([target.renderMode, target.layoutMode, target.designArrangement, target.visualGroupState]);"):
+        return False
+    for method in ("setRenderMode", "arrangeDesign"):
+        if not includes(body(method),
+                        "if (documentIsEditable(owner) && (owner.authoring.providerDocumentId || owner.authoring.saveFlight))",
+                        "owner.authoring.localChanges = true;", "updateHistoryUi();") \
+                or "owner.visualGroupPresentationDirty =" in body(method):
+            return False
     persistence = normalized(sources[Path("ravenroot/ravenroot-ui/src/workspace-persistence.js")])
     close = normalized(sources[Path("ravenroot/ravenroot-ui/src/document-close-plan.js")])
     workspace = normalized(sources[Path("ravenroot/ravenroot-ui/src/workspace.js")])

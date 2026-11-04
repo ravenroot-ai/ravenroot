@@ -363,3 +363,99 @@ class NativePlanScopeTest(unittest.TestCase):
         leaf = self.plan([MAIL + '/src/main/java/Mail.java'], lane='dev')
         self.assertFalse(leaf['full'])
         self.assertFalse(leaf['native_acceptance'])
+
+
+class LicensedReleaseMetadataTest(unittest.TestCase):
+    AKKA = 'ravenroot/ravenroot-akka'
+    POM = AKKA + '/pom.xml'
+    OLD = '0.8.0-alpha.1'
+    NEW = '0.9.0-alpha.1'
+    PREFIX = '<project xmlns="http://maven.apache.org/POM/4.0.0"><modelVersion>4.0.0</modelVersion>'
+
+    def documents(self, direct_version=False):
+        result = {}
+        for commit, version in ((BASE, self.OLD), (HEAD, self.NEW)):
+            result[commit, 'ravenroot/pom.xml'] = (self.PREFIX
+                + '<groupId>ai.ravenroot</groupId><artifactId>ravenroot-parent</artifactId>'
+                + f'<version>{version}</version></project>')
+            result[commit, self.POM] = (self.PREFIX
+                + '<parent><groupId>ai.ravenroot</groupId><artifactId>ravenroot-parent</artifactId>'
+                + f'<version>{version}</version></parent><artifactId>ravenroot-akka</artifactId>'
+                + (f'<groupId>ai.ravenroot</groupId><version>{version}</version>' if direct_version else '')
+                + '<dependencies><dependency><groupId>com.typesafe.akka</groupId>'
+                + '<artifactId>akka-actor-typed_2.13</artifactId><version>${akka.version}</version>'
+                + '</dependency></dependencies></project>')
+        return result
+
+    def plan(self, documents, paths=None, force=True, lane='dev'):
+        def git(*args):
+            if args[0] == 'show':
+                commit, path = args[1].split(':', 1)
+                if (commit, path) not in documents:
+                    raise subprocess.CalledProcessError(128, ['git', *args])
+                return documents[commit, path]
+            if args[0] == 'rev-parse':
+                return HEAD if args[-1].startswith(HEAD) else BASE
+            return BASE
+        with patch.object(impact, 'git', side_effect=git), \
+             patch.object(impact, 'paths_between', return_value=paths or [self.POM]), \
+             patch.object(impact, 'model', return_value=(GRAPH, set())):
+            return impact.make_plan(BASE, HEAD, 'workflow_dispatch', lane, force)
+
+    def test_canonical_parent_and_optional_direct_project_versions_preserve_complete_default(self):
+        for direct in (False, True):
+            for lane in ('dev', 'release/0.8'):
+                with self.subTest(direct=direct, lane=lane):
+                    plan = self.plan(self.documents(direct), lane=lane)
+                    self.assertTrue(plan['full'])
+                    self.assertEqual(set(plan['jobs']), set(ci_required.GATED_JOBS))
+                    self.assertNotIn(self.AKKA, plan['build'])
+                    self.assertNotIn(self.AKKA, plan['test'])
+                    self.assertTrue(any('metadata only; licensed profile remains excluded' in r for r in plan['reasons']))
+
+    def test_meaningful_optional_pom_changes_refuse_even_forced_complete(self):
+        mutations = {
+            'external dependency version': lambda s: s.replace('${akka.version}', '2.10.1'),
+            'dependency coordinate': lambda s: s.replace('com.typesafe.akka', 'other.group'),
+            'project coordinate': lambda s: s.replace('<artifactId>ravenroot-akka</artifactId>', '<artifactId>other</artifactId>'),
+            'parent coordinate': lambda s: s.replace('<artifactId>ravenroot-parent</artifactId>', '<artifactId>other-parent</artifactId>'),
+            'parent group': lambda s: s.replace('<groupId>ai.ravenroot</groupId>', '<groupId>other.group</groupId>'),
+            'repository': lambda s: s.replace('</project>', '<repositories><repository><id>licensed</id><url>https://example.org</url></repository></repositories></project>'),
+            'profile activation': lambda s: s.replace('</project>', '<profiles><profile><id>akka</id><activation><activeByDefault>true</activeByDefault></activation></profile></profiles></project>'),
+            'arbitrary property': lambda s: s.replace('</project>', '<properties><akka.version>2.10.1</akka.version></properties></project>'),
+            'noncanonical parent version': lambda s: s.replace(self.NEW, '9.9.9', 1),
+            'unresolved parent version': lambda s: s.replace(self.NEW, '${revision}', 1),
+            'duplicate version': lambda s: s.replace(f'<version>{self.NEW}</version>', f'<version>{self.NEW}</version><version>{self.NEW}</version>', 1),
+            'external XML declaration': lambda s: '<!DOCTYPE project SYSTEM "https://example.org/license.dtd">' + s,
+            'processing instruction': lambda s: s.replace('</project>', '<?configuration licensed?></project>'),
+            'malformed XML': lambda s: s.removesuffix('</project>'),
+        }
+        for name, mutate in mutations.items():
+            with self.subTest(change=name):
+                docs = self.documents(); docs[HEAD, self.POM] = mutate(docs[HEAD, self.POM])
+                with self.assertRaises(RuntimeError):
+                    self.plan(docs)
+
+    def test_dependency_versions_equal_to_product_versions_are_still_not_metadata(self):
+        docs = self.documents()
+        for commit, version in ((BASE, self.OLD), (HEAD, self.NEW)):
+            docs[commit, self.POM] = docs[commit, self.POM].replace('${akka.version}', version)
+        with self.assertRaises(RuntimeError): self.plan(docs)
+
+    def test_noncanonical_direct_project_version_or_root_identity_refuses(self):
+        docs = self.documents(direct_version=True)
+        # Replace the direct project version without touching the canonical parent field.
+        docs[HEAD, self.POM] = docs[HEAD, self.POM].replace(f'<groupId>ai.ravenroot</groupId><version>{self.NEW}</version>', '<groupId>ai.ravenroot</groupId><version>9.9.9</version>')
+        with self.assertRaises(RuntimeError): self.plan(docs)
+        docs = self.documents()
+        docs[HEAD, 'ravenroot/pom.xml'] = docs[HEAD, 'ravenroot/pom.xml'].replace('ai.ravenroot', 'other.group')
+        with self.assertRaises(RuntimeError): self.plan(docs)
+
+    def test_missing_pom_and_version_only_plus_licensed_source_changes_refuse(self):
+        for missing in ((BASE, self.POM), (HEAD, self.POM), (HEAD, 'ravenroot/pom.xml')):
+            docs = self.documents(); del docs[missing]
+            with self.subTest(missing=missing), self.assertRaises(RuntimeError): self.plan(docs)
+        for paths in ([self.AKKA + '/src/main/java/Changed.java'],
+                      [self.POM, self.AKKA + '/src/main/java/Changed.java']):
+            with self.subTest(paths=paths), self.assertRaises(RuntimeError):
+                self.plan(self.documents(), paths=paths)

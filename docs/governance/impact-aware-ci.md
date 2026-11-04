@@ -29,8 +29,11 @@ Maven relationships are derived from both Git trees: project coordinates, parent
 dependencies (including test dependencies) and active build/plugin relationships. Managed
 coordinates supply versions to actual dependencies; dependencyManagement alone is not a build
 edge. Inactive profiles are not silently activated. The optional licensed Akka engine is
-explicitly excluded from secretless default CI; a change within that module refuses planning
-until an authorized licensed validation runner can prove it. A parent relationship
+explicitly excluded from secretless default CI. Its POM may follow the canonical product version
+through direct internal project/parent version fields only, with fixed Ravenroot coordinates and
+all other XML semantics unchanged. This release metadata does not validate or activate Akka.
+Every other change within that module refuses planning until an authorized licensed validation
+runner can prove it. A parent relationship
 carries inherited dependency/build changes to its descendants. Dynamic internal coordinates fail
 closed. Version-managed dependencies are selected by group/artifact identity regardless of the
 managed version; external dependency or plugin changes inside a module select that module and

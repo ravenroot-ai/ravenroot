@@ -11,16 +11,17 @@ const graph = version => `<graphml xmlns="http://graphml.graphdrawing.org/xmlns"
 <graph id="orders" edgedefault="directed"><data key="gid">orders</data><data key="ver">${version}</data>
 <node id="start"><data key="kind">START</data></node></graph></graphml>`;
 
-async function setup(page, { initialVersion = 1, canWrite = true, supported = true, authenticated = false, legacy = false, automaticSuccessor = false, configuration = {} } = {}) {
+async function setup(page, { initialVersion = 1, canWrite = true, supported = true, authenticated = false, legacy = false, automaticSuccessor = false, initialGraph = null, releasedVersion = 1, configuration = {} } = {}) {
   await keepAuthenticationInMemory(page);
-  let version = initialVersion, draft = legacy ? graph(version).replace('id="start"', 'id="legacy"') : graph(version), revision = 1;
+  const releaseGraph = initialGraph || graph(releasedVersion);
+  let version = initialVersion, draft = initialGraph || (legacy ? graph(initialVersion).replace('id="start"', 'id="legacy"') : graph(initialVersion)), revision = 1;
   const requests = [];
   requests.setDraft = (nextVersion, xml = graph(nextVersion)) => { version = nextVersion; draft = xml; revision++; };
   const envelope = source => ({ documentId: 'orders.graphml', displayPath: 'orders.graphml', graphId: 'orders',
-    releaseVersion: source === 'release' ? 1 : version, releasedVersion: 1, releasedGraphId: 'orders',
+    releaseVersion: source === 'release' ? releasedVersion : version, releasedVersion, releasedGraphId: 'orders',
     released: true, published: false, draftDeleted: source === 'release', canWrite,
     revision: { draft: `d${revision}`, release: 'r1', publication: 'absent' },
-    graphMl: Buffer.from(source === 'release' ? graph(1) : draft).toString('base64') });
+    graphMl: Buffer.from(source === 'release' ? releaseGraph : draft).toString('base64') });
   await page.route('**/v1/configuration', route => route.fulfill(authenticated
     && route.request().headers().authorization !== 'Bearer managed-token'
     ? { status: 401, json: { error: 'authentication required' } }
@@ -41,8 +42,9 @@ async function setup(page, { initialVersion = 1, canWrite = true, supported = tr
     }
     if (req.method() === 'PUT') {
       draft = req.postData(); revision++;
-      if (automaticSuccessor && version === 1 && draft !== graph(1)) {
-        version = 2; draft = draft.replace(/(<data key="ver">)1(<\/data>)/, '$12$2');
+      if (automaticSuccessor && version === releasedVersion && draft !== releaseGraph) {
+        version = releasedVersion + 1;
+        draft = draft.replace(/(<data key="ver">)\d+(<\/data>)/, (_match, start, end) => `${start}${version}${end}`);
       }
       return route.fulfill({ json: envelope('draft') });
     }
@@ -829,4 +831,94 @@ for (const mode of ['ordinary', 'reconcile', 'refused']) test(`release dialog ob
   await dialog.getByRole('button', { name: 'Close', exact: true }).click();
   await page.clock.install(); const stoppedReads = reads;
   await page.clock.fastForward(65000); expect(reads).toBe(stoppedReads);
+});
+
+
+// A source-only release without saved editor modes or coordinates: opening it must arrange the
+// drawing, while saving without author intent must retain its reviewed bytes and authored version.
+const unpositionedRelease = graph(5).replace('</graph>', `
+<node id="log"><data key="kind">BEHAVIOR</data><data key="behavior">log</data></node>
+<node id="end"><data key="kind">END</data></node>
+<edge id="first" source="start" target="log"/><edge id="last" source="log" target="end"/>
+</graph>`).replace('<graph id="orders"', '<key id="behavior" for="node" attr.name="behavior" attr.type="string"/><graph id="orders"');
+
+async function openUnpositionedRelease(page) {
+  const requests = await setup(page, { initialVersion: 5, releasedVersion: 5,
+    initialGraph: unpositionedRelease, automaticSuccessor: true });
+  await page.goto('/?repositoryDocument=orders.graphml&source=draft');
+  await expect(page.locator('#graph-mode-label')).toContainText('Repository draft · v5');
+  await expect(page.locator('.doc-pane--active')).not.toHaveAttribute('aria-busy', 'true');
+  await expect.poll(() => page.evaluate(() => window.cy?.nodes().length)).toBe(3);
+  return requests;
+}
+
+test('no-op managed save retains reviewed source after automatic initial drawing and reload', async ({ page }) => {
+  const requests = await openUnpositionedRelease(page);
+  expect(await page.evaluate(() => window.cy.nodes().map(node => node.position('x'))))
+    .not.toEqual([0, 0, 0]);
+  expect(await page.evaluate(() => window.ravenroot.activeDocument().history.isDirty())).toBe(false);
+  await page.locator('#btn-export').click();
+  await expect.poll(() => requests.filter(request => request.method === 'PUT').length).toBe(1);
+  expect(requests.find(request => request.method === 'PUT').body).toBe(unpositionedRelease);
+  await expect(page.locator('#graph-mode-label')).toContainText('Repository draft · v5');
+  await page.reload();
+  await expect(page.locator('#graph-mode-label')).toContainText('Repository draft · v5');
+  await page.locator('#btn-export').click();
+  await expect.poll(() => requests.filter(request => request.method === 'PUT').length).toBe(2);
+  expect(requests.filter(request => request.method === 'PUT')[1].body).toBe(unpositionedRelease);
+  await expect(page.locator('#graph-mode-label')).toContainText('Repository draft · v5');
+});
+
+test('explicit Keep positions presentation creates and retains the released successor', async ({ page }) => {
+  const requests = await openUnpositionedRelease(page);
+  await page.locator('#menu-layout').click();
+  await page.locator('[data-command-id="layout.arrange.keep"]').click();
+  await expect(page.locator('#btn-export')).toContainText('Save as draft v6');
+  await page.locator('#btn-export').click();
+  await expect(page.locator('#graph-mode-label')).toContainText('Repository draft · v6');
+  const body = requests.find(request => request.method === 'PUT').body;
+  expect(body).toContain('ravenroot.designArrangement');
+  expect(body).toContain('>keep</data>');
+  expect(body).toContain('layoutX');
+  await page.locator('#btn-export').click();
+  await expect.poll(() => requests.filter(request => request.method === 'PUT').length).toBe(2);
+  await expect(page.locator('#graph-mode-label')).toContainText('Repository draft · v6');
+});
+
+test('authored edit of an automatically drawn release creates one successor', async ({ page }) => {
+  const requests = await openUnpositionedRelease(page);
+  await addUnsavedNode(page, 'Actual authored edit');
+  await page.locator('#btn-export').click();
+  await expect(page.locator('#graph-mode-label')).toContainText('Repository draft · v6');
+  expect(requests.find(request => request.method === 'PUT').body).toContain('Actual authored edit');
+  await page.locator('#btn-export').click();
+  await expect.poll(() => requests.filter(request => request.method === 'PUT').length).toBe(2);
+  await expect(page.locator('#graph-mode-label')).toContainText('Repository draft · v6');
+});
+
+for (const change of ['authored', 'presentation']) test(`no-op acknowledgement preserves an in-flight ${change} edit`, async ({ page }) => {
+  const requests = await openUnpositionedRelease(page);
+  let enter, release;
+  const entered = new Promise(resolve => { enter = resolve; });
+  const gate = new Promise(resolve => { release = resolve; });
+  await page.route('**/v1/graph-authoring/orders.graphml', async route => {
+    if (route.request().method() === 'PUT') { enter(); await gate; }
+    await route.fallback();
+  });
+  try {
+    await page.locator('#btn-export').click();
+    await entered;
+    if (change === 'authored') await addUnsavedNode(page, 'Edited while saving');
+    else {
+      await page.locator('#menu-layout').click();
+      await page.locator('[data-command-id="layout.arrange.keep"]').click();
+    }
+    release();
+    await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().authoring.saveFlight)).toBe(null);
+    expect(requests.find(request => request.method === 'PUT').body).toBe(unpositionedRelease);
+    await expect(page.locator('#graph-mode-label')).toContainText('Repository draft · v5');
+    await expect(page.locator('#btn-export')).toContainText('Save as draft v6');
+    await page.locator('#btn-export').click();
+    await expect(page.locator('#graph-mode-label')).toContainText('Repository draft · v6');
+  } finally { release(); }
 });

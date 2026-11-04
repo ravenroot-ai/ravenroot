@@ -6213,6 +6213,7 @@ function setRenderMode(name, { skipDraftGuard = false } = {}) {
   if (!skipDraftGuard && semanticMode !== renderMode) {
     return runAfterInspectorDraft(() => setRenderMode(name, { skipDraftGuard: true }));
   }
+  if (documentIsEditable(owner)) owner.visualGroupPresentationDirty = true;
   invalidateDocumentLayouts(owner);
   captureDocumentModeView(owner, renderMode);
   if (dragSnapshot?.owner === owner) cancelNodeMoveGesture();
@@ -6244,6 +6245,7 @@ function setRenderMode(name, { skipDraftGuard = false } = {}) {
   syncPaneLayout();
   syncLayoutChrome(owner);
   updateModifyAvailability();
+  updateHistoryUi();
   scheduleWorkspacePersistence();
   return true;
 }
@@ -6254,6 +6256,10 @@ function arrangeDesign(name, { skipDraftGuard = false } = {}) {
   if (!arrangement || renderMode !== 'design' || !owner || !cy) return false;
   if (!skipDraftGuard) {
     return runAfterInspectorDraft(() => arrangeDesign(name, { skipDraftGuard: true }));
+  }
+  if (documentIsEditable(owner)) {
+    owner.visualGroupPresentationDirty = true;
+    updateHistoryUi();
   }
   if (designArrangement === name) {
     designArrangement = null;
@@ -16416,6 +16422,11 @@ async function openRepositoryGraph(requested = null) {
   }
 }
 
+function repositoryPresentationSnapshot(target) {
+  return JSON.stringify([target.renderMode, target.layoutMode, target.designArrangement,
+    target.visualGroupState]);
+}
+
 async function saveRepositoryGraph() {
   const target = workspace.active;
   const client = graphAuthoringClient, authority = workspaceAuthority;
@@ -16425,10 +16436,16 @@ async function saveRepositoryGraph() {
   const providerDocumentId = target.authoring.providerDocumentId
     || globalThis.prompt(uiText("workspace.app.repository.filename"), target.name.endsWith('.graphml') ? target.name : `${target.name}.graphml`)?.trim();
   if (!providerDocumentId) return false;
-  const prepared = prepareDocumentDownload(target.id);
+  // Opening a managed graph may arrange its renderer and choose default view modes. A clean
+  // repository save still submits the exact accepted source, with the normal revision checks;
+  // only authored or explicit presentation edits go through download serialization.
+  const pristineSource = target.authoring.providerDocumentId && !paneIsDirty(target)
+    ? target.graph.sourceXml : null;
+  const prepared = pristineSource ? { xml: pristineSource } : prepareDocumentDownload(target.id);
   if (!prepared) return false;
   const history = target.history;
   const submittedRevision = history.revision();
+  const submittedPresentation = repositoryPresentationSnapshot(target);
   const expected = target.authoring.revision || { draft: 'absent', release: 'absent', publication: 'absent' };
   const flight = crypto.randomUUID();
   target.authoring.saveError = null;
@@ -16444,7 +16461,8 @@ async function saveRepositoryGraph() {
     target.authoring.repositoryScope = scope;
     // Edits made while the request was in flight remain dirty. Only the exact submitted history
     // position becomes the save point.
-    if (target.history === history && history.revision() === submittedRevision) {
+    if (target.history === history && history.revision() === submittedRevision
+        && repositoryPresentationSnapshot(target) === submittedPresentation) {
       history.markSaved(); target.visualGroupPresentationDirty = false;
       target.authoring.localChanges = false;
     }

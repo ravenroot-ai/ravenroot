@@ -10230,6 +10230,9 @@ class PristineSaveFinalReviewCorrespondenceTest(unittest.TestCase):
         source = (ROOT / relative).read_text()
         anchor = audit.committed_source(ROOT, audit.FINAL_REVIEW_UI_SAVE_ANCHOR, relative.as_posix())
         self.assertIsNotNone(anchor)
+        for group in audit.FINAL_REVIEW_UI_SAVE_GROUPS:
+            self.assertTrue(audit.final_review_ui_save_correspondence(
+                ROOT, group, relative, audit.FINAL_REVIEW_UI_SAVE_BEFORE))
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             for path in (relative, Path("ravenroot/ravenroot-ui/src/workspace-persistence.js"),
@@ -10237,6 +10240,11 @@ class PristineSaveFinalReviewCorrespondenceTest(unittest.TestCase):
                          Path("ravenroot/ravenroot-ui/src/workspace.js")):
                 target = root / path; target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text((ROOT / path).read_text())
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(["git", "add", "."], cwd=root, check=True)
+            subprocess.run(["git", "-c", "user.name=Audit Test", "-c",
+                            "user.email=audit@example.invalid", "commit", "-qm", "correspondence fixture"],
+                           cwd=root, check=True)
             target = root / relative
             def matches(group="ui-presentation-copy", path=relative,
                         digest=audit.FINAL_REVIEW_UI_SAVE_BEFORE):

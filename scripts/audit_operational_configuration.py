@@ -3129,8 +3129,10 @@ def final_review_ui_save_correspondence(
         return False
     try:
         raw = (root / relative).read_bytes()
+        head = subprocess.run(["git", "rev-parse", "--verify", "HEAD^{commit}"],
+                              cwd=root, check=True, capture_output=True, text=True).stdout.strip()
         if hashlib.sha256(raw).hexdigest() != FINAL_REVIEW_UI_SAVE_AFTER \
-                or not revision_is_ancestor(root, FINAL_REVIEW_UI_SAVE_ANCHOR, "HEAD"):
+                or not revision_is_ancestor(root, FINAL_REVIEW_UI_SAVE_ANCHOR, head):
             return False
         source = raw.decode("utf-8")
         anchor = committed_source(root, FINAL_REVIEW_UI_SAVE_ANCHOR, relative.as_posix())

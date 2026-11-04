@@ -12,6 +12,18 @@ import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class RunnerPlaneCommandTest {
+    @Test
+    void theSurefireForkPinsTheHeaderCapBeforeAnyBareServerInitializesIt() {
+        var arguments = java.lang.management.ManagementFactory.getRuntimeMXBean().getInputArguments();
+        assertEquals(List.of("-Dsun.net.httpserver.maxReqHeaderSize=2097152"), arguments.stream()
+                .filter(argument -> argument.startsWith("-Dsun.net.httpserver.maxReqHeaderSize="))
+                .toList(), "the CLI test fork must configure the JDK before a bare server can lock its default");
+        assertEquals(1L, arguments.stream().filter(argument -> argument.startsWith("-Duser.language=")).count(),
+                "the module option must compose with the inherited locale flags");
+        assertEquals(1L, arguments.stream().filter(argument -> argument.startsWith("-Duser.country=")).count(),
+                "the module option must compose with the inherited locale flags");
+    }
+
     @Test void operatorCommandsUseAuthenticatedExactResourcesAndNeverWorkerDispatch(@TempDir Path directory) throws Exception {
         var seen = new ArrayList<String>(); var bodies = new ArrayList<String>();
         var server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);

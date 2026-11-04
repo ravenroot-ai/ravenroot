@@ -566288,7 +566288,7 @@
   {
    "id": "oc-966d42616449c8d00def",
    "path": "scripts/tests/test_ci_payload_transport.py",
-   "line": 97,
+   "line": 101,
    "symbol": "test_workflow_requires_typed_file_transport_for_every_large_consumer",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -566303,7 +566303,7 @@
   {
    "id": "oc-8082ccbfc49a294b5f8e",
    "path": "scripts/tests/test_ci_payload_transport.py",
-   "line": 97,
+   "line": 101,
    "symbol": "test_workflow_requires_typed_file_transport_for_every_large_consumer",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -566318,7 +566318,7 @@
   {
    "id": "oc-157d3cadd9f93de2639f",
    "path": "scripts/tests/test_ci_payload_transport.py",
-   "line": 101,
+   "line": 105,
    "symbol": "test_real_producer_and_verifier_with_release_shaped_and_larger_complete_inputs",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -566333,7 +566333,7 @@
   {
    "id": "oc-0d2ea0eff3cd037d1f12",
    "path": "scripts/tests/test_ci_payload_transport.py",
-   "line": 102,
+   "line": 106,
    "symbol": "test_real_producer_and_verifier_with_release_shaped_and_larger_complete_inputs",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -566348,7 +566348,7 @@
   {
    "id": "oc-abe1757326229374deac",
    "path": "scripts/tests/test_ci_payload_transport.py",
-   "line": 106,
+   "line": 110,
    "symbol": "test_real_producer_and_verifier_with_release_shaped_and_larger_complete_inputs",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -566363,7 +566363,7 @@
   {
    "id": "oc-7d2119d427906f270a7a",
    "path": "scripts/tests/test_ci_payload_transport.py",
-   "line": 108,
+   "line": 112,
    "symbol": "test_real_producer_and_verifier_with_release_shaped_and_larger_complete_inputs",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -566378,7 +566378,7 @@
   {
    "id": "oc-001049d2bab8c2a0f552",
    "path": "scripts/tests/test_ci_payload_transport.py",
-   "line": 108,
+   "line": 112,
    "symbol": "test_real_producer_and_verifier_with_release_shaped_and_larger_complete_inputs",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -566393,7 +566393,7 @@
   {
    "id": "oc-08d9111e3ecb5173f8cb",
    "path": "scripts/tests/test_ci_payload_transport.py",
-   "line": 108,
+   "line": 112,
    "symbol": "test_real_producer_and_verifier_with_release_shaped_and_larger_complete_inputs",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -566408,7 +566408,7 @@
   {
    "id": "oc-5f08186288c791c71cd1",
    "path": "scripts/tests/test_ci_payload_transport.py",
-   "line": 108,
+   "line": 112,
    "symbol": "test_real_producer_and_verifier_with_release_shaped_and_larger_complete_inputs",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -566423,7 +566423,7 @@
   {
    "id": "oc-e43b5e4330f29bdc9155",
    "path": "scripts/tests/test_ci_payload_transport.py",
-   "line": 113,
+   "line": 117,
    "symbol": "git",
    "kind": "script-default",
    "role": "paths",
@@ -566438,7 +566438,7 @@
   {
    "id": "oc-8ded35091ff0036454c7",
    "path": "scripts/tests/test_ci_payload_transport.py",
-   "line": 113,
+   "line": 117,
    "symbol": "git",
    "kind": "script-default",
    "role": "paths",
@@ -566453,7 +566453,7 @@
   {
    "id": "oc-95b7efad2eda20e294c2",
    "path": "scripts/tests/test_ci_payload_transport.py",
-   "line": 113,
+   "line": 117,
    "symbol": "git",
    "kind": "script-default",
    "role": "paths",
@@ -566468,7 +566468,7 @@
   {
    "id": "oc-6cd4dd704357acee6ba9",
    "path": "scripts/tests/test_ci_payload_transport.py",
-   "line": 113,
+   "line": 117,
    "symbol": "git",
    "kind": "script-default",
    "role": "paths",
@@ -566483,7 +566483,7 @@
   {
    "id": "oc-ffc5c90cddc92d64657d",
    "path": "scripts/tests/test_ci_payload_transport.py",
-   "line": 113,
+   "line": 117,
    "symbol": "git",
    "kind": "script-default",
    "role": "paths",
@@ -566498,7 +566498,7 @@
   {
    "id": "oc-2266f486cec9da94f4d5",
    "path": "scripts/tests/test_ci_payload_transport.py",
-   "line": 114,
+   "line": 118,
    "symbol": "git",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -566513,7 +566513,7 @@
   {
    "id": "oc-e14d48bd79030419be8a",
    "path": "scripts/tests/test_ci_payload_transport.py",
-   "line": 116,
+   "line": 120,
    "symbol": "git",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -566528,7 +566528,7 @@
   {
    "id": "oc-7bb777027d51d78edfae",
    "path": "scripts/tests/test_ci_payload_transport.py",
-   "line": 116,
+   "line": 120,
    "symbol": "git",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -566543,7 +566543,7 @@
   {
    "id": "oc-b17009f84ec6cb43c179",
    "path": "scripts/tests/test_ci_payload_transport.py",
-   "line": 117,
+   "line": 121,
    "symbol": "git",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -566558,7 +566558,7 @@
   {
    "id": "oc-9d07fb6f10bab6f23667",
    "path": "scripts/tests/test_ci_payload_transport.py",
-   "line": 123,
+   "line": 127,
    "symbol": "git",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -566573,7 +566573,7 @@
   {
    "id": "oc-08b960cfb762ec5d6285",
    "path": "scripts/tests/test_ci_payload_transport.py",
-   "line": 125,
+   "line": 129,
    "symbol": "git",
    "kind": "binding-default",
    "role": "binding-value",
@@ -566588,7 +566588,7 @@
   {
    "id": "oc-9d28bdff206aa5ba5041",
    "path": "scripts/tests/test_ci_payload_transport.py",
-   "line": 125,
+   "line": 129,
    "symbol": "git",
    "kind": "binding-default",
    "role": "binding-value",
@@ -566603,7 +566603,7 @@
   {
    "id": "oc-62af59dc22ded4878a57",
    "path": "scripts/tests/test_ci_payload_transport.py",
-   "line": 125,
+   "line": 129,
    "symbol": "git",
    "kind": "binding-default",
    "role": "binding-value",
@@ -566618,7 +566618,7 @@
   {
    "id": "oc-4146748a110f9d712107",
    "path": "scripts/tests/test_ci_payload_transport.py",
-   "line": 125,
+   "line": 129,
    "symbol": "git",
    "kind": "binding-default",
    "role": "binding-value",
@@ -566633,7 +566633,7 @@
   {
    "id": "oc-5351ad30ee18ec1d7c3f",
    "path": "scripts/tests/test_ci_payload_transport.py",
-   "line": 125,
+   "line": 129,
    "symbol": "git",
    "kind": "environment-binding",
    "role": "RAVENROOT_NEEDS_JSON",
@@ -566648,7 +566648,7 @@
   {
    "id": "oc-04b896a8b7b76bbb11a4",
    "path": "scripts/tests/test_ci_payload_transport.py",
-   "line": 126,
+   "line": 130,
    "symbol": "git",
    "kind": "script-default",
    "role": "stage",
@@ -566663,7 +566663,7 @@
   {
    "id": "oc-a093d3324f9277ca1c78",
    "path": "scripts/tests/test_ci_payload_transport.py",
-   "line": 127,
+   "line": 131,
    "symbol": "git",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -566678,7 +566678,7 @@
   {
    "id": "oc-52a31fd03250d348f6c4",
    "path": "scripts/tests/test_ci_payload_transport.py",
-   "line": 127,
+   "line": 131,
    "symbol": "git",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -566693,7 +566693,7 @@
   {
    "id": "oc-e82d2e0b8088924f4565",
    "path": "scripts/tests/test_ci_payload_transport.py",
-   "line": 128,
+   "line": 132,
    "symbol": "git",
    "kind": "script-default",
    "role": "needs_path",
@@ -566708,7 +566708,7 @@
   {
    "id": "oc-09fec9f357e9cd95ab67",
    "path": "scripts/tests/test_ci_payload_transport.py",
-   "line": 130,
+   "line": 134,
    "symbol": "git",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -566723,7 +566723,7 @@
   {
    "id": "oc-94a141d05ea7cdac396d",
    "path": "scripts/tests/test_ci_payload_transport.py",
-   "line": 130,
+   "line": 134,
    "symbol": "git",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -566738,7 +566738,7 @@
   {
    "id": "oc-5d138b18af5fb9d7919f",
    "path": "scripts/tests/test_ci_payload_transport.py",
-   "line": 137,
+   "line": 141,
    "symbol": "consume",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -566753,7 +566753,7 @@
   {
    "id": "oc-7e7eab99f7bf760fa771",
    "path": "scripts/tests/test_ci_payload_transport.py",
-   "line": 137,
+   "line": 141,
    "symbol": "consume",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -566768,7 +566768,7 @@
   {
    "id": "oc-7738ee0034ba01eee438",
    "path": "scripts/tests/test_ci_payload_transport.py",
-   "line": 147,
+   "line": 151,
    "symbol": "consume",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -566783,7 +566783,7 @@
   {
    "id": "oc-3f9917f47934330520ae",
    "path": "scripts/tests/test_ci_payload_transport.py",
-   "line": 147,
+   "line": 151,
    "symbol": "consume",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -566798,7 +566798,7 @@
   {
    "id": "oc-b93f8fb8b66d7fbefff2",
    "path": "scripts/tests/test_ci_payload_transport.py",
-   "line": 147,
+   "line": 151,
    "symbol": "consume",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -566813,7 +566813,7 @@
   {
    "id": "oc-fd1656cfa290706e955c",
    "path": "scripts/tests/test_ci_payload_transport.py",
-   "line": 147,
+   "line": 151,
    "symbol": "consume",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -566828,7 +566828,7 @@
   {
    "id": "oc-b606fd8caf1e6b40bda9",
    "path": "scripts/tests/test_ci_payload_transport.py",
-   "line": 147,
+   "line": 151,
    "symbol": "consume",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -566843,7 +566843,7 @@
   {
    "id": "oc-377abcc9df44f4745130",
    "path": "scripts/tests/test_ci_payload_transport.py",
-   "line": 147,
+   "line": 151,
    "symbol": "consume",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -566858,7 +566858,7 @@
   {
    "id": "oc-db64f6acbf68c0b42d9c",
    "path": "scripts/tests/test_ci_payload_transport.py",
-   "line": 147,
+   "line": 151,
    "symbol": "consume",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -566873,7 +566873,7 @@
   {
    "id": "oc-a0791847b420dbb77b4e",
    "path": "scripts/tests/test_ci_payload_transport.py",
-   "line": 147,
+   "line": 151,
    "symbol": "consume",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -566888,7 +566888,7 @@
   {
    "id": "oc-4633298ba5207b23a001",
    "path": "scripts/tests/test_ci_payload_transport.py",
-   "line": 147,
+   "line": 151,
    "symbol": "consume",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -566903,7 +566903,7 @@
   {
    "id": "oc-907b8b02a103ff5b8969",
    "path": "scripts/tests/test_ci_payload_transport.py",
-   "line": 147,
+   "line": 151,
    "symbol": "consume",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -566918,7 +566918,7 @@
   {
    "id": "oc-9673cd36bbe660b548f4",
    "path": "scripts/tests/test_ci_payload_transport.py",
-   "line": 151,
+   "line": 155,
    "symbol": "consume",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -566933,7 +566933,7 @@
   {
    "id": "oc-7ad5c4948108cc2ba4d2",
    "path": "scripts/tests/test_ci_payload_transport.py",
-   "line": 153,
+   "line": 157,
    "symbol": "consume",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -566948,7 +566948,7 @@
   {
    "id": "oc-736265d412c3fa998275",
    "path": "scripts/tests/test_ci_payload_transport.py",
-   "line": 153,
+   "line": 157,
    "symbol": "consume",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -566963,7 +566963,7 @@
   {
    "id": "oc-46256d9f5d521440721b",
    "path": "scripts/tests/test_ci_payload_transport.py",
-   "line": 160,
+   "line": 164,
    "symbol": "consume",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -566978,7 +566978,7 @@
   {
    "id": "oc-b363fd9e7cd27646eb88",
    "path": "scripts/tests/test_ci_payload_transport.py",
-   "line": 160,
+   "line": 164,
    "symbol": "consume",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -566993,7 +566993,7 @@
   {
    "id": "oc-6d0827b01bfbda1ffa03",
    "path": "scripts/tests/test_ci_payload_transport.py",
-   "line": 160,
+   "line": 164,
    "symbol": "consume",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -567008,7 +567008,7 @@
   {
    "id": "oc-5222cdf64896edaf7c98",
    "path": "scripts/tests/test_ci_payload_transport.py",
-   "line": 160,
+   "line": 164,
    "symbol": "consume",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -1545951,6 +1545951,18 @@
      }
     }
    ]
+  },
+  {
+   "id": "issue-613-exact-consumer-line-reconciliation-v1",
+   "issue": "#613",
+   "sourceRevision": "19eb5b4a2f581268812ea8688a2c4e0c4b5351a9",
+   "targetRevision": "35d4f47078e86b5b34c8531eaa02f97915b41687",
+   "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+   "sourceInventoryDigest": "bd5558662a349290ebafa40dadbcaec767a32dc77e089db7b473397ebb3da31a",
+   "targetCandidateDigest": "d74dff448d93b3cca58a8b6b9a0f52f5c9117477ef19e5c13bf060c3248f5877",
+   "mappings": [],
+   "retirements": [],
+   "additions": []
   }
  ],
  "semanticReviewHistory": [

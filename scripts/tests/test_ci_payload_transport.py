@@ -88,6 +88,10 @@ class NeedsFileTest(unittest.TestCase):
                 mutations.append(block.replace(' --needs-file "$RUNNER_TEMP/ci-required-needs.json"', ''))
             else:
                 mutations.append(block.replace('.value.result == "success"', '.value.result != "failure"'))
+            consumer = next(line for line in block.splitlines()
+                            if line.startswith('          python3 scripts/ci_required.py --needs-file')
+                            or line.startswith('          jq -e --argjson jobs'))
+            mutations.append(block.replace(consumer, consumer + ' || true', 1))
             for changed in mutations:
                 with self.subTest(job=job, changed=changed[-120:]):
                     self.assertNotEqual(changed, block)

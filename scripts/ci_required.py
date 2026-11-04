@@ -251,7 +251,7 @@ def verify_needs_transport(blocks: dict[str, str]) -> list[str]:
                    if job == GATE_JOB else
                    f'jq -e --argjson jobs "$PLAN_JOBS" \'{predicate}\' '
                    f'"$RUNNER_TEMP/{job}-needs.json" >/dev/null')
-        if indented + "          " + command not in block:
+        if indented + "          " + command + "\n" not in block:
             problems.append(f"{job}: complete typed needs must use the bounded exclusive file transport and exact consumer.")
         if re.search(r"(?m)^          (?:IMPACT_PLAN|NEEDS_JSON|RESULTS):", block):
             problems.append(f"{job}: large JSON must not be transported in an environment value.")

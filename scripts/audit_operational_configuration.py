@@ -3102,6 +3102,66 @@ def reviewed_reappearance_semantic_payload(entry: dict[str, object]) -> dict[str
             if key != "evidence"}
 
 
+# Reviewed #607 correspondence preserves the five frozen #321 decisions; it does not
+# approve the changed save behavior, whose current closed authority and CI remain mandatory.
+FINAL_REVIEW_UI_SAVE_GROUPS = frozenset({
+    "ui-layout-and-rendering-derived-values", "ui-message-catalog-keys", "ui-presentation-copy",
+    "ui-resource-and-safety-bounds", "ui-timing-and-retry-defaults",
+})
+FINAL_REVIEW_UI_SAVE_ANCHOR = "6ca1eac5aa04bc824256f332364f1eab028968a2"
+FINAL_REVIEW_UI_SAVE_BEFORE = "842fd8f12c013baee0a554f1dabb5015680fddf388758f3e0a712dcfecdfdb97"
+FINAL_REVIEW_UI_SAVE_AFTER = "0391356fb02229be57562b3b6ad8b230849d9bb602df8e8d21bc19835eb70e9e"
+# These reviewed replacements are independent of inventory or refreshable method proof metadata.
+FINAL_REVIEW_UI_SAVE_METHODS = {
+    "setRenderMode": "e99c69a84d22bd2e0c0b144f3da370bfbf92887f4038e4bc9e50afd8e95c1ccd",
+    "arrangeDesign": "0eecb17873ccf33f0911b8355a4dc426340197fbb76deb3db28186c7e9b10147",
+    "saveRepositoryGraph": "4c2ac003000fd7dd07d4d0ef14c8213395fc08501c2ade467108e722f256c3cc",
+    "repositoryPresentationSnapshot": "c4bb9b77bcde66b9ae41a9b601feb7b043e76bb84c44bf83814ae4341a03a735",
+}
+
+
+def final_review_ui_save_correspondence(
+        root: Path, group: str, relative: Path, expected_digest: str) -> bool:
+    """Prove only the reviewed save/view delta reconstructs the exact frozen source bytes."""
+    if group not in FINAL_REVIEW_UI_SAVE_GROUPS \
+            or relative != Path("ravenroot/ravenroot-ui/src/app.js") \
+            or expected_digest != FINAL_REVIEW_UI_SAVE_BEFORE:
+        return False
+    try:
+        raw = (root / relative).read_bytes()
+        if hashlib.sha256(raw).hexdigest() != FINAL_REVIEW_UI_SAVE_AFTER \
+                or not revision_is_ancestor(root, FINAL_REVIEW_UI_SAVE_ANCHOR, "HEAD"):
+            return False
+        source = raw.decode("utf-8")
+        anchor = committed_source(root, FINAL_REVIEW_UI_SAVE_ANCHOR, relative.as_posix())
+        if anchor is None or hashlib.sha256(anchor.encode("utf-8")).hexdigest() != expected_digest:
+            return False
+        sources = {path: (root / path).read_text(encoding="utf-8") for path in (
+            Path("ravenroot/ravenroot-ui/src/workspace-persistence.js"),
+            Path("ravenroot/ravenroot-ui/src/document-close-plan.js"),
+            Path("ravenroot/ravenroot-ui/src/workspace.js"))}
+        if not graph_authoring_managed_open_boundary(sources, source):
+            return False
+        for method, digest in FINAL_REVIEW_UI_SAVE_METHODS.items():
+            span = _javascript_function_span(source, method)
+            if span is None or hashlib.sha256(normalized(source[slice(*span)]).encode()).hexdigest() != digest:
+                return False
+        inverse = source
+        for method in ("setRenderMode", "arrangeDesign", "saveRepositoryGraph"):
+            current = _javascript_function_span(inverse, method)
+            prior = _javascript_function_span(anchor, method)
+            if current is None or prior is None:
+                return False
+            inverse = inverse[:current[0]] + anchor[slice(*prior)] + inverse[current[1]:]
+        helper = _javascript_function_span(inverse, "repositoryPresentationSnapshot")
+        if helper is None or inverse[helper[1]:helper[1] + 2] != "\n\n":
+            return False
+        inverse = inverse[:helper[0]] + inverse[helper[1] + 2:]
+        return inverse.encode("utf-8") == anchor.encode("utf-8")
+    except (OSError, UnicodeError, ValueError, subprocess.CalledProcessError):
+        return False
+
+
 def final_review_authority_errors(
         root: Path, document: dict[str, object],
         expected_metadata: dict[str, dict[str, object]],
@@ -3235,7 +3295,9 @@ def final_review_authority_errors(
             proof_path = root / relative
             if relative.is_absolute() or ".." in relative.parts or relative not in tracked \
                     or not proof_path.is_file() \
-                    or hashlib.sha256(proof_path.read_bytes()).hexdigest() != item["digest"]:
+                    or (hashlib.sha256(proof_path.read_bytes()).hexdigest() != item["digest"]
+                        and not final_review_ui_save_correspondence(
+                            root, identifier, relative, str(item["digest"]))):
                 errors.append(f"final review group {identifier} source proof has drifted: {item['path']}")
         foreign = set(str(candidate) for candidate in candidates) - reviewable
         overlap = assigned & set(str(candidate) for candidate in candidates)

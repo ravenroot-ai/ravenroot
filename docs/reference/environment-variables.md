@@ -234,6 +234,7 @@ Detailed contract: [Graph source control and published artifacts](../operator-gu
 | `RAVENROOT_GRAPH_AUTHORING_TENANT_NAMESPACES` | required comma-separated `tenant=relative/path` grants; namespaces are confined, duplicate tenants and colliding derived draft branches are refused, and absent tenants receive no access |
 | `RAVENROOT_GRAPH_AUTHORING_WEBHOOK_AUTH` | webhook authentication enum; unset defaults to `SIGNATURE`: GitHub raw-body HMAC-SHA256 or GitLab Standard Webhooks signing token with a 300-second timestamp window; explicit `TOKEN` selects GitLab legacy token authentication only, with no automatic fallback; bearer and cookie credentials confer no authority; see [provider delivery authentication](../operator-guide/graph-source-control.md#provider-webhook-delivery) |
 | `RAVENROOT_GRAPH_AUTHORING_WEBHOOK_CREDENTIAL_REF` | optional opaque reference to a separate repository-specific webhook secret, at most 512 characters without control characters; unset disables the receiver; resolved fresh at startup and every delivery, including duplicates; see [provider delivery authentication](../operator-guide/graph-source-control.md#provider-webhook-delivery) |
+| `RAVENROOT_GRAPH_RELEASE_AUTOMATION` | Optional GitHub-only JSON binding with exactly label, deploymentId, registrationIdentity, graphVersion and sourceNodeId; unset disables isolated review automation. Existing durable registration and execution-start authority are required. |
 
 ## Graph execution
 

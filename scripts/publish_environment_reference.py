@@ -182,6 +182,9 @@ ROW_BOUNDARIES = {
         "required comma-separated `tenant=relative/path` grants; namespaces are confined, duplicate "
         "tenants and colliding derived draft branches are refused, and absent tenants receive no access"
     ),
+    "RAVENROOT_GRAPH_RELEASE_AUTOMATION": (
+        "Optional GitHub-only JSON binding with exactly label, deploymentId, registrationIdentity, graphVersion and sourceNodeId; unset disables isolated review automation. Existing durable registration and execution-start authority are required."
+    ),
     "RAVENROOT_GRAPH_ARTIFACT_BASE_URL": (
         "required in Git mode; absolute HTTPS immutable-artifact base ending in `/`, without "
         "credentials, query, or fragment; outbound access is confined to this origin"
@@ -364,6 +367,7 @@ ACTIVITY_CAPTURE_VARIABLES = frozenset({
 })
 
 GRAPH_AUTHORING_VARIABLES = frozenset({
+    "RAVENROOT_GRAPH_RELEASE_AUTOMATION",
     "RAVENROOT_GRAPH_ARTIFACT_BASE_URL",
     "RAVENROOT_GRAPH_ARTIFACT_CATALOG_PATH",
     "RAVENROOT_GRAPH_AUTHORING_CREDENTIAL_MODE",

@@ -415,3 +415,26 @@ The operation needs authenticated `GRAPH_WRITE` permission and the complete draf
 A valid release with no draft may create vN+1. With an existing draft, creation requires identical vN release/draft bytes. An existing vN+1 is preserved and must be opened; a different request receives `409`. No release, inconsistent graph/version metadata, a draft below vN or above vN+1, and a release at `9007199254740991` refuse creation. An unreleased v1 stays an ordinary editable initial draft.
 
 For a legacy divergent draft still numbered vN, first download or otherwise back up every unsaved and stored draft edit. Review the differences. Only then explicitly discard the legacy draft changes to the release baseline, create vN+1 and reapply the protected changes. Creation never silently overwrites or relabels legacy work. Publication pending or failed does not prevent successor creation, and never authorizes deployment.
+
+### Optional isolated release automation
+
+Ordinary GitHub and GitLab review proposals continue to use the configured authoring draft branch.
+GitHub can opt into isolated proposals with `RAVENROOT_GRAPH_RELEASE_AUTOMATION`, a JSON object
+containing exactly `label`, `deploymentId`, `registrationIdentity`, `graphVersion`, and `sourceNodeId`.
+The default is disabled. Configure an existing durable deployment registration, its exact SHA-256
+graph version, and an enabled named SOURCE. Partial, null, unknown, or unsupported-provider bindings
+fail startup. Configuration grants no execution or lifecycle permission to the browser user.
+
+An enabled proposal copies only the selected saved GraphML into a deterministic review branch whose
+single parent is the observed reviewed-branch head. Other draft changes remain outside that proposal.
+Source and target refs are checked again before acknowledgement. Only the configured label is added;
+existing unrelated labels are retained. An existing review is reused only for the exact source head,
+repository and source/target branches. A historical PR base SHA may differ from the current target ref;
+current-ref checks still apply.
+
+The browser may separately request one durable event from that bound SOURCE under the caller's
+execution-start authority. It neither creates nor starts/resumes the automation deployment. Durable
+custody acceptance is a queue acknowledgement, not validation, merge, release or publication. A lost
+acknowledgement is reconciled with the same request identity. Closing the dialog stops its bounded
+observation, while accepted durable work remains owned by the runtime. Publication storage remains
+optional; source review and release do not depend on its configuration.

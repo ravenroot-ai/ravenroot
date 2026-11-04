@@ -27,7 +27,8 @@ async function setup(page, { initialVersion = 1, canWrite = true, supported = tr
     : { json: { schemaVersion: 1, graphDocumentMaxBytes: 1048576,
       ...(configuration.tenantId ? { workspace: { tenantId: configuration.tenantId } } : {}),
       graphAuthoring: { mode: 'git', provider: configuration.provider || 'github', operations: ['OPEN', 'SAVE', ...(supported ? ['CREATE_NEXT_VERSION'] : [])],
-        repositoryDisplay: configuration.repositoryDisplay || 'example/graphs', releaseBranch: 'main' } } }));
+        repositoryDisplay: configuration.repositoryDisplay || 'example/graphs', releaseBranch: 'main',
+        ...(configuration.releaseAutomation ? { releaseAutomation: configuration.releaseAutomation } : {}) } } }));
   await page.route('**/v1/node-types', route => route.fulfill({ json: [] }));
   await page.route('**/v1/events**', route => route.fulfill({ status: 204, body: '' }));
   await page.route('**/v1/graph-authoring**', route => {
@@ -650,6 +651,106 @@ test('first repository save renames the active document and browser title immedi
   await expect(page.locator('#graph-title')).toHaveText('orders.graphml');
 });
 
+for (const provider of ['github', 'gitlab']) for (const state of ['after-delete', 'released-only']) {
+  test(`missing draft ordinary review ${provider} ${state} preserves deletion proposal without publication proof`, async ({ page }) => {
+    await setup(page, { initialVersion: 2, configuration: { provider } });
+    let missing = state === 'released-only', releaseReads = 0;
+    const proposals = [];
+    const revision = () => ({ draft: missing ? 'deleted-head' : 'd1', release: 'r1', publication: 'p1' });
+    const document = source => ({ documentId: 'orders.graphml', graphId: 'orders', releaseVersion: source === 'release' ? 1 : 2,
+      releasedVersion: 1, releasedGraphId: 'orders', released: true, published: true, draftDeleted: missing,
+      canWrite: true, revision: revision(), graphMl: Buffer.from(graph(source === 'release' ? 1 : 2)).toString('base64') });
+    await page.route('**/v1/graph-authoring/orders.graphml**', route => {
+      const request = route.request(), url = new URL(request.url());
+      if (request.method() === 'DELETE') { missing = true; return route.fulfill({ status: 204 }); }
+      if (url.pathname.endsWith('/release')) {
+        proposals.push(request.headers());
+        return route.fulfill({ json: { reused: true, url: `https://${provider}.com/example/graphs/${provider === 'github' ? 'pull/11' : '-/merge_requests/11'}` } });
+      }
+      if (url.searchParams.get('source') === 'draft' && missing)
+        return route.fulfill({ status: 404, json: { error: 'NOT_FOUND' } });
+      if (url.searchParams.get('source') === 'release') releaseReads++;
+      return route.fulfill({ json: document(url.searchParams.get('source')) });
+    });
+    await page.goto(`/?repositoryDocument=orders.graphml&source=${missing ? 'release' : 'draft'}`);
+    await expect(page.locator('#graph-mode-label')).toContainText(missing ? 'Released source' : 'Repository draft');
+    if (!missing) {
+      page.once('dialog', dialog => dialog.accept());
+      await page.getByRole('menuitem', { name: 'File', exact: true }).click();
+      await page.getByRole('menuitem', { name: 'Delete repository draft', exact: true }).click();
+      await expect(page.locator('#graph-mode-label')).toContainText('Released source');
+    }
+    const before = releaseReads;
+    await page.getByRole('menuitem', { name: 'File', exact: true }).click();
+    await page.getByRole('menuitem', { name: 'Propose release review', exact: true }).click();
+    const dialog = page.locator('.repository-operation-dialog');
+    await expect(dialog.getByRole('link', { name: 'Open review' })).toBeVisible();
+    expect(proposals).toHaveLength(1);
+    expect(proposals[0]['x-ravenroot-expected-draft']).toBe('deleted-head');
+    expect(proposals[0]['x-ravenroot-expected-release']).toBe('r1');
+    expect(proposals[0]['x-ravenroot-expected-publication']).toBe('p1');
+    await page.clock.install();
+    await page.clock.fastForward(65000);
+    expect(releaseReads).toBe(before);
+    expect(await dialog.textContent()).not.toMatch(/requested version is released|released and published/);
+  });
+}
+
+for (const [status, code, isolated, changed] of [
+  [404, 'NOT_FOUND', true, false], [403, 'NOT_FOUND', false, false],
+  [500, 'NOT_FOUND', false, false], [404, 'FORBIDDEN', false, false], [404, 'NOT_FOUND', false, true],
+]) test(`missing draft refusal ${status} ${code} automation=${isolated} changed=${changed}`, async ({ page }) => {
+  const automation = { mode: 'isolated-automerge', deploymentId: 'ci', registrationIdentity: '11111111-1111-1111-1111-111111111111', graphVersion: 'a'.repeat(64), sourceNodeId: 'schedule' };
+  await setup(page, { initialVersion: 2, configuration: isolated ? { releaseAutomation: automation } : {} });
+  let proposals = 0, triggers = 0, releaseReads = 0;
+  await page.route('**/v1/deployments/**', route => { triggers++; return route.fulfill({ status: 500 }); });
+  await page.goto(`/?repositoryDocument=orders.graphml&source=${isolated ? 'draft' : 'release'}`);
+  await expect(page.locator('#graph-mode-label')).toContainText(isolated ? 'Repository draft' : 'Released source');
+  await page.route('**/v1/graph-authoring/orders.graphml**', async route => {
+    const url = new URL(route.request().url());
+    if (url.pathname.endsWith('/release')) { proposals++; return route.fulfill({ json: { url: 'https://github.com/example/graphs/pull/12' } }); }
+    if (url.searchParams.get('source') === 'release') releaseReads++;
+    if (changed) await page.evaluate(() => { window.ravenroot.workspace.active.incarnation = 'retired'; });
+    return route.fulfill({ status, json: { error: code } });
+  });
+  await page.getByRole('menuitem', { name: 'File', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Propose release review', exact: true }).click();
+  const dialog = page.locator('.repository-operation-dialog');
+  await expect(dialog.getByRole('alert')).toBeVisible();
+  await page.clock.install(); await page.clock.fastForward(65000);
+  expect({ proposals, triggers, releaseReads }).toEqual({ proposals: 0, triggers: 0, releaseReads: 0 });
+  expect(await dialog.textContent()).not.toMatch(/requested version is released|released and published/);
+});
+
+for (const race of ['stale-snapshot', 'deleted-after-snapshot', 'advanced-after-absence']) {
+  test(`release review preserves revision fences through ${race}`, async ({ page }) => {
+    await setup(page, { initialVersion: 2 });
+    await page.goto('/?repositoryDocument=orders.graphml&source=draft');
+    await expect(page.locator('#graph-mode-label')).toContainText('Repository draft');
+    const proposals = []; let releaseReads = 0;
+    await page.route('**/v1/graph-authoring/orders.graphml**', route => {
+      const request = route.request(), url = new URL(request.url());
+      if (url.pathname.endsWith('/release')) {
+        proposals.push(request.headers());
+        return route.fulfill({ status: 409, json: { error: 'CONFLICT' } });
+      }
+      if (url.searchParams.get('source') === 'release') releaseReads++;
+      if (race === 'advanced-after-absence') return route.fulfill({ status: 404, json: { error: 'NOT_FOUND' } });
+      return route.fulfill({ json: { documentId: 'orders.graphml', graphId: 'orders', releaseVersion: 2,
+        revision: { draft: race === 'stale-snapshot' ? 'advanced' : 'd1', release: 'r1', publication: 'absent' },
+        graphMl: Buffer.from(graph(2)).toString('base64') } });
+    });
+    await page.getByRole('menuitem', { name: 'File', exact: true }).click();
+    await page.getByRole('menuitem', { name: 'Propose release review', exact: true }).click();
+    const dialog = page.locator('.repository-operation-dialog');
+    await expect(dialog.getByRole('alert')).toBeVisible();
+    expect(proposals).toHaveLength(race === 'stale-snapshot' ? 0 : 1);
+    if (proposals.length) expect(proposals[0]['x-ravenroot-expected-draft']).toBe('d1');
+    expect(releaseReads).toBe(0);
+    expect(await dialog.textContent()).not.toMatch(/requested version is released|released and published/);
+  });
+}
+
 for (const outcome of ['success', 'failure']) test(`release review modal shows work before ${outcome} and retains the result`, async ({ page }) => {
   await setup(page);
   let finish;
@@ -672,8 +773,60 @@ for (const outcome of ['success', 'failure']) test(`release review modal shows w
   await expect(dialog.getByRole('button', { name: 'Close', exact: true })).toBeEnabled();
   if (outcome === 'success') {
     await expect(dialog.getByRole('link', { name: 'Open review' })).toHaveAttribute('href', 'https://github.com/example/graphs/pull/9');
-    await expect(dialog.getByRole('status')).toContainText('existing release review');
+    await expect(dialog.getByRole('status')).toContainText('requested version is released');
   } else await expect(dialog.getByRole('alert')).toContainText('Your edits are intact');
   await dialog.getByRole('button', { name: 'Close', exact: true }).click();
   await expect(dialog).toHaveCount(0);
+});
+
+for (const mode of ['ordinary', 'reconcile', 'refused']) test(`release dialog observes exact candidate and ${mode} admission`, async ({ page }) => {
+  const automation = { mode: 'isolated-automerge', deploymentId: 'ci', registrationIdentity: '11111111-1111-1111-1111-111111111111', graphVersion: 'a'.repeat(64), sourceNodeId: 'schedule' };
+  await setup(page, { initialVersion: 2, configuration: mode === 'ordinary' ? {} : { releaseAutomation: automation } });
+  const triggers = []; let published = mode === 'ordinary', reads = 0;
+  await page.route('**/v1/deployments/ci', route => route.fulfill({ json: { ...automation, desiredState: 'RUNNING', observedState: 'READY', runtimeIncarnationId: 'physical' } }));
+  await page.route('**/v1/deployments/ci/trigger', route => {
+    triggers.push(route.request().postDataJSON());
+    if (mode === 'refused') return route.fulfill({ status: 409, json: { outcome: 'REFUSED', requestId: triggers.at(-1).requestId } });
+    if (triggers.length === 1) return route.fulfill({ status: 503, json: { outcome: 'RECONCILE', requestId: triggers.at(-1).requestId } });
+    published = true;
+    return route.fulfill({ status: 200, json: { outcome: 'DUPLICATE', requestId: triggers.at(-1).requestId } });
+  });
+  await page.route('**/v1/graph-authoring/orders.graphml/release', route => route.fulfill({ json: {
+    reused: true, url: 'https://github.com/example/graphs/pull/10', draftHead: 'a'.repeat(40), releaseHead: 'b'.repeat(40),
+  } }));
+  await page.route('**/v1/graph-authoring/orders.graphml?source=release', route => {
+    reads++;
+    return route.fulfill({ json: { documentId: 'orders.graphml', graphId: 'orders', releaseVersion: published ? 2 : 3,
+      releasedVersion: published ? 2 : 3, releasedGraphId: 'orders', released: true, published: true,
+      revision: { draft: 'd1', release: 'r2', publication: 'published' }, graphMl: Buffer.from(graph(published ? 2 : 3)).toString('base64') } });
+  });
+  const propose = async () => {
+    await page.getByRole('menuitem', { name: 'File', exact: true }).click();
+    await page.getByRole('menuitem', { name: 'Propose release review', exact: true }).click();
+    await expect(page.locator('.repository-operation-dialog')).toBeVisible();
+  };
+  await page.goto('/?repositoryDocument=orders.graphml&source=draft');
+  await expect(page.locator('#graph-mode-label')).toContainText('Repository draft · v2');
+  await propose();
+  let dialog = page.locator('.repository-operation-dialog');
+  if (mode === 'reconcile') {
+    await expect(dialog.getByRole('status')).toContainText('could not be confirmed');
+    await expect(dialog.getByRole('button', { name: 'Retry acknowledgement' })).toBeVisible();
+    expect(await dialog.textContent()).not.toContain('released and published');
+    await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+    await page.reload();
+    await expect(page.locator('#graph-mode-label')).toContainText('Repository draft · v2');
+    await propose(); dialog = page.locator('.repository-operation-dialog');
+    await expect(dialog.getByRole('status')).toContainText('released and published', { timeout: 15000 });
+    expect(triggers).toHaveLength(2);
+    expect(triggers[0].requestId).toBe(triggers[1].requestId);
+    expect(triggers[0]).toEqual(triggers[1]);
+  } else if (mode === 'refused') {
+    await expect(dialog.getByRole('alert')).toContainText('refused');
+    expect(await dialog.textContent()).not.toContain('released and published');
+  } else await expect(dialog.getByRole('status')).toContainText('released and published');
+  await expect(dialog.getByRole('link', { name: 'Open review' })).toHaveAttribute('href', 'https://github.com/example/graphs/pull/10');
+  await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+  await page.clock.install(); const stoppedReads = reads;
+  await page.clock.fastForward(65000); expect(reads).toBe(stoppedReads);
 });

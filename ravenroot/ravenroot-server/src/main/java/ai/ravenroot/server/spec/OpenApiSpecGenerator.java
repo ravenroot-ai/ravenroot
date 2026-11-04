@@ -137,6 +137,7 @@ public final class OpenApiSpecGenerator {
         }
         if ("POST".equals(method) && ("/v1/deployments/{id}/initial-start".equals(route.path())
                 || "/v1/deployments/{id}/executions".equals(route.path()))) entry.append(jsonRequestBody("InitialStartRequest"));
+        if ("/v1/deployments/{id}/trigger".equals(route.path())) entry.append(jsonRequestBody("DeploymentTriggerRequest"));
         if ("/v1/deployments/{id}/restore".equals(route.path())) entry.append(jsonRequestBody("DeploymentRestoreRequest"));
         if ("/v1/correlation/preview".equals(route.path())) entry.append(jsonRequestBody("CorrelationPreviewRequest"));
         if ("/v1/embed/executions".equals(route.path())) entry.append(jsonRequestBody("EmbedInitialStartRequest"));
@@ -154,6 +155,9 @@ public final class OpenApiSpecGenerator {
         }
         if ("/v1/deployments/{id}/executions".equals(route.path())) {
             responses.add("          \"503\": {\"description\": \"Admission is uncertain; retry the same requestId and input to reconcile.\", \"content\": {\"application/json\": {\"schema\": {\"$ref\": \"#/components/schemas/InitialStartResponse\"}}}}");
+        }
+        if ("/v1/deployments/{id}/trigger".equals(route.path())) {
+            responses.add("          \"503\": {\"description\": \"Admission is uncertain; reconcile with the same requestId.\", \"content\": {\"application/json\": {\"schema\": {\"$ref\": \"#/components/schemas/DeploymentTriggerResponse\"}}}}");
         }
         if ("/v1/deployments/{id}/view".equals(route.path())) {
             responses.add("          \"503\": {\"description\": \"Known deployment definition or projection is unavailable; execution admission remains independent.\"}");
@@ -348,7 +352,7 @@ public final class OpenApiSpecGenerator {
 
     private static boolean isDeploymentCommand(RouteDescriptor route, String method) {
         return ("POST".equals(method) && route.path().startsWith("/v1/deployments/{id}/")
-                && !route.path().endsWith("/initial-start") && !route.path().endsWith("/restore")
+                && !route.path().endsWith("/initial-start") && !route.path().endsWith("/restore") && !route.path().endsWith("/trigger")
                 && !route.path().endsWith("/executions"))
                 || ("DELETE".equals(method) && "/v1/deployments/{id}".equals(route.path()));
     }
@@ -420,6 +424,8 @@ public final class OpenApiSpecGenerator {
             schema = "InitialStartResponse";
         } else if ("/v1/deployments/{id}/history".equals(route.path()) || "/v1/embed/history".equals(route.path())) {
             schema = "DeploymentHistoryPage";
+        } else if ("/v1/deployments/{id}/trigger".equals(route.path())) {
+            schema = "DeploymentTriggerResponse";
         } else if (isDeploymentCommand(route, method)) {
             schema = "DeploymentCommandResponse";
         }

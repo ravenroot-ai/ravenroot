@@ -3704,6 +3704,35 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
     }
 
     @Override
+    public ai.ravenroot.api.deployment.IngressReceipt triggerLocalDeploymentSource(SecurityContext security,
+            String deploymentId, String registrationIdentity, String incarnationId, String graphVersion, String sourceNodeId,
+            String requestId, ai.ravenroot.api.payload.PayloadValue input) {
+        java.util.Objects.requireNonNull(security, "security");
+        java.util.Objects.requireNonNull(input, "input");
+        ai.ravenroot.api.payload.PayloadLimits.DEFAULTS.enforce(input);
+        ai.ravenroot.api.payload.PayloadValue.requireNoReservedKeys(input);
+        if (requestId == null || !requestId.matches("[A-Za-z0-9][A-Za-z0-9._:-]{0,127}")
+                || sourceNodeId == null || sourceNodeId.isBlank())
+            throw new IllegalArgumentException("Invalid deployment trigger");
+        var key = new LocalDeploymentKey(requireTenant(security.tenantId()), requireLocalDeploymentId(deploymentId));
+        LocalDeploymentRecord record = localDeployments.get(key);
+        if (record == null || !record.durableRegistration() || !record.lifecycleId().value().equals(registrationIdentity)
+                || deployments.get(record.engineId()) != record.deployment()
+                || !record.deployment().incarnationId().equals(incarnationId)
+                || !record.graphHash().equals(graphVersion)
+                || executionStore == null || !executionStore.supports(ai.ravenroot.api.persistence.StoreCapability.DURABLE)
+                || !executionStore.supports(ai.ravenroot.api.persistence.StoreCapability.DEPLOYMENT_ENTRY_CUSTODY))
+            return new ai.ravenroot.api.deployment.IngressReceipt.Refused("Deployment binding or durable store unavailable");
+        // register(..., lifecycleId, true) passes this stable registration id as
+        // executionContextDeploymentId. Ingress adds tenant and SOURCE to that namespace.
+        // Version and framed actor/request identity complete the restart-stable binding.
+        String event = java.util.UUID.nameUUIDFromBytes((ai.ravenroot.api.payload.PayloadJson.writeJava(java.util.List.of(security.issuer(), security.principalType().name(), security.subject(), requestId),
+                ai.ravenroot.api.payload.PayloadLimits.DEFAULTS))).toString();
+        return record.deployment().ingress().offerDurably(security,
+                ai.ravenroot.api.deployment.IngressTarget.node(sourceNodeId), input.toJava(), "on-demand-v1:" + graphVersion, event);
+    }
+
+    @Override
     public EmbedDeploymentStart startLocalDeploymentExecution(SecurityContext security,
             String deploymentId, String incarnationId, String graphVersion, String requestId,
             ai.ravenroot.api.payload.PayloadValue input) {

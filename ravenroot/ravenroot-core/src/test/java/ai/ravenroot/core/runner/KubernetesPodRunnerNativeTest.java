@@ -40,6 +40,7 @@ class KubernetesPodRunnerNativeTest {
         var opening = assignment(execution, resource, registration, definition, "open", clock);
         RunnerResult ready;
         try (var driver = driver(directory, registration, settings, image, clock)) {
+            resourceAdmissionControls(driver, opening, settings);
             ready = driver.execute(opening).toCompletableFuture().get(150, TimeUnit.SECONDS);
             assertEquals("ready", ready.outcome()); assertNotNull(ready.workspace().kubernetes());
             assertEquals(KubernetesWorkload.Phase.RUNNING, ready.workspace().kubernetes().phase());
@@ -214,6 +215,41 @@ class KubernetesPodRunnerNativeTest {
         return new KubernetesPodRunner(registration, settings, directory.toRealPath(), Map.of("native", image), clock,
                 (assignment, kind, bytes) -> { throw new AssertionError("lifecycle must not upload artifacts"); }, RunnerWorkerConfiguration.defaults());
     }
+    private static void resourceAdmissionControls(KubernetesPodRunner driver, RunnerAssignment assignment,
+            KubernetesRunnerConfiguration settings) throws Exception {
+        // Server dry-run exercises the real admission policy without creating another workload.
+        for (String change : List.of("valid", "missing-pod-budget", "parent-increase", "equal-child", "duplicate-cpu", "extra-resource")) {
+            var pod = RunnerJson.read(RunnerJson.write(driver.pod(assignment)));
+            var spec = RunnerJson.map(pod.get("spec"));
+            var container = RunnerJson.map(((List<?>) spec.get("containers")).getFirst());
+            var total = RunnerJson.map(spec.get("resources")); var child = RunnerJson.map(container.get("resources"));
+            switch (change) {
+                case "missing-pod-budget" -> spec.remove("resources");
+                case "parent-increase" -> {
+                    for (String boundary : List.of("requests", "limits")) RunnerJson.map(total.get(boundary)).put("cpu", "600m");
+                }
+                case "equal-child" -> {
+                    for (String boundary : List.of("requests", "limits")) RunnerJson.map(child.get(boundary)).put("cpu", "500m");
+                }
+                case "duplicate-cpu" -> {
+                    var env = new ArrayList<Object>((List<?>) container.get("env"));
+                    env.add(Map.of("name", "RAVENROOT_CPU_MILLICORES", "value", "500")); container.put("env", env);
+                }
+                case "extra-resource" -> {
+                    for (String boundary : List.of("requests", "limits")) RunnerJson.map(total.get(boundary)).put("ephemeral-storage", "1Gi");
+                }
+            }
+            var process = new ProcessBuilder(settings.kubectl().toString(), "--kubeconfig=" + settings.kubeconfig(),
+                    "--namespace=" + settings.namespace(), "create", "--dry-run=server", "-f", "-")
+                    .redirectOutput(ProcessBuilder.Redirect.DISCARD).redirectError(ProcessBuilder.Redirect.DISCARD).start();
+            try {
+                try (var input = process.getOutputStream()) { input.write(RunnerJson.write(pod)); }
+                assertTrue(process.waitFor(15, TimeUnit.SECONDS), "bounded resource admission response required");
+                assertEquals(change.equals("valid"), process.exitValue() == 0, "native resource admission: " + change);
+            } finally { if (process.isAlive()) process.destroyForcibly(); }
+        }
+    }
+
     private static RunnerAssignment assignment(ExecutionKey key, WorkspaceResource resource, RunnerRegistration registration,
                                                 AgentDefinition definition, String command, Clock clock) {
         var identity = new RunnerJobIdentity(key, UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID());

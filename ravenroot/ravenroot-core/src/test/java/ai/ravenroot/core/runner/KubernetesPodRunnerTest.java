@@ -225,10 +225,63 @@ class KubernetesPodRunnerTest {
         assertEquals(2, api.creates); assertEquals(0, api.agentCalls); assertEquals(0, api.deletes);
     }
 
-    private WorkspaceResource resource() {
+    @ParameterizedTest @ValueSource(ints = {20, 21, 100, 500, Integer.MAX_VALUE})
+    void podReservationPreservesApprovedCeilingWithStrictlyLowerContainer(int cpu) throws Exception {
+        try (var driver = driver(new Fake(), NOW)) {
+            var spec = RunnerJson.map(driver.pod(assignment(resource(cpu), "open")).get("spec"));
+            var container = RunnerJson.map(((List<?>) spec.get("containers")).getFirst());
+            var total = RunnerJson.map(spec.get("resources")); var child = RunnerJson.map(container.get("resources"));
+            assertEquals(total.get("requests"), total.get("limits"));
+            assertEquals(child.get("requests"), child.get("limits"));
+            assertEquals(cpu + "m", RunnerJson.map(total.get("limits")).get("cpu"));
+            assertEquals((4L * cpu / 5) + "m", RunnerJson.map(child.get("limits")).get("cpu"));
+            assertEquals(RunnerJson.map(total.get("limits")).get("memory"), RunnerJson.map(child.get("limits")).get("memory"));
+        }
+    }
+
+    @ParameterizedTest @ValueSource(ints = {1, 19})
+    void subminimumProfileIsRejectedBeforeAnyResourceEffect(int cpu) throws Exception {
+        var api = new Fake();
+        try (var driver = driver(api, NOW)) {
+            assertThrows(Exception.class, () -> driver.execute(assignment(resource(cpu), "open")).toCompletableFuture().join());
+        }
+        assertEquals(0, api.creates); assertEquals(0, api.attestations);
+    }
+
+    @ParameterizedTest @ValueSource(strings = {"stripped-budget", "parent-increase", "equal-quota", "child-request", "memory-increase", "extra-resource"})
+    void alteredResourceHierarchyIsRefusedBeforeAttestation(String fault) throws Exception {
+        var api = new Fake(); api.fault = fault;
+        try (var driver = driver(api, NOW)) {
+            assertThrows(Exception.class, () -> driver.execute(assignment(resource(), "open")).toCompletableFuture().join());
+        }
+        assertEquals(0, api.attestations); assertEquals(0, api.agentCalls);
+    }
+
+    @ParameterizedTest @ValueSource(strings = {"parent-cpu-proof", "no-own-throttle"})
+    void parentCeilingOrMissingOwnThrottleCannotReplaceChildProof(String fault) throws Exception {
+        var api = new Fake(); api.fault = fault;
+        try (var driver = driver(api, NOW)) {
+            assertThrows(Exception.class, () -> driver.execute(assignment(resource(), "open")).toCompletableFuture().join());
+        }
+        assertEquals(1, api.attestations); assertEquals(0, api.agentCalls);
+    }
+
+    @Test void normalizedQuantitiesAreAcceptedButRetainedResourceDriftIsRefused() throws Exception {
+        var api = new Fake(); api.fault = "normalized"; var first = assignment(resource(), "open");
+        try (var driver = driver(api, NOW)) {
+            driver.execute(first).toCompletableFuture().join();
+            var pod = api.objects.entrySet().stream().filter(e -> e.getKey().startsWith("pod/")).findFirst().orElseThrow().getValue();
+            RunnerJson.map(pod.get("spec")).remove("resources");
+            assertThrows(Exception.class, () -> driver.execute(assignment(first.workspace(), "open")).toCompletableFuture().join());
+        }
+        assertEquals(1, api.attestations); assertEquals(2, api.creates);
+    }
+
+    private WorkspaceResource resource() { return resource(500); }
+    private WorkspaceResource resource(int cpu) {
         var profile = new WorkspaceProfile(new AgentDefinition.Reference("tenant", "native", 1), WorkspaceProfile.Scope.PROCESS_INSTANCE,
                 WorkspaceProfile.RuntimeLifecycle.PER_WORKSPACE, "native", "native", POLICY, CAPACITY, Duration.ZERO,
-                WorkspaceProfile.CompletionPolicy.REQUIRE_CLOSED, Set.of("agent"), RunnerFleetLimits.from(CAPACITY), 500, WorkspaceProfile.Driver.KUBERNETES);
+                WorkspaceProfile.CompletionPolicy.REQUIRE_CLOSED, Set.of("agent"), RunnerFleetLimits.from(CAPACITY), cpu, WorkspaceProfile.Driver.KUBERNETES);
         return new WorkspaceResource("repository", UUID.randomUUID(), profile, "manager", WorkspaceResource.State.OPENING, null, null, false, NOW);
     }
     private RunnerAssignment assignment(WorkspaceResource resource, String operation) {
@@ -247,7 +300,7 @@ class KubernetesPodRunnerTest {
     }
     private static final class Fake implements KubernetesTransport {
         final Map<String, Map<String, Object>> objects = new LinkedHashMap<>();
-        String fault = ""; int creates, deletes, agentCalls;
+        String fault = ""; int creates, deletes, agentCalls, attestations;
         public Map<String, Object> create(Map<String, Object> raw) throws Exception {
             String kind = raw.get("kind").equals("Pod") ? "pod" : "pvc"; creates++;
             if (fault.equals("before-" + kind)) throw new java.io.IOException("uncertain create");
@@ -255,6 +308,24 @@ class KubernetesPodRunnerTest {
             metadata.put("uid", UUID.randomUUID().toString()); metadata.put("resourceVersion", "1");
             value.put("status", Map.of("phase", kind.equals("pod") ? fault.equals("pending") ? "Pending" : "Running" : "Bound"));
             if (kind.equals("pvc")) RunnerJson.map(value.get("spec")).put("volumeName", "fixed-volume");
+            if (kind.equals("pod")) {
+                var spec = RunnerJson.map(value.get("spec")); var total = RunnerJson.map(spec.get("resources"));
+                var child = RunnerJson.map(RunnerJson.map(((List<?>) spec.get("containers")).getFirst()).get("resources"));
+                switch (fault) {
+                    case "stripped-budget" -> spec.remove("resources");
+                    case "parent-increase" -> RunnerJson.map(total.get("limits")).put("cpu", "600m");
+                    case "equal-quota" -> RunnerJson.map(child.get("limits")).put("cpu", "500m");
+                    case "child-request" -> RunnerJson.map(child.get("requests")).put("cpu", "200m");
+                    case "memory-increase" -> RunnerJson.map(child.get("limits")).put("memory", "256Mi");
+                    case "extra-resource" -> RunnerJson.map(total.get("limits")).put("ephemeral-storage", "1Gi");
+                    case "normalized" -> {
+                        for (String boundary : List.of("requests", "limits")) {
+                            RunnerJson.map(total.get(boundary)).putAll(Map.of("cpu", "0.5", "memory", "128Mi"));
+                            RunnerJson.map(child.get(boundary)).putAll(Map.of("cpu", "0.4", "memory", "128Mi"));
+                        }
+                    }
+                }
+            }
             assertNull(objects.putIfAbsent(kind + "/" + metadata.get("name"), value), "duplicate create is never allowed");
             if (fault.equals("after-" + kind)) throw new java.io.IOException("acknowledgement lost");
             return value;
@@ -277,11 +348,14 @@ class KubernetesPodRunnerTest {
             assertEquals(revision, RunnerJson.map(value.get("metadata")).get("resourceVersion"));
         }
         public Map<String, Object> attest(String pod) {
+            attestations++;
             var proof = new LinkedHashMap<String, Object>();
             for (String key : Set.of("withinQuotaWrite", "beyondQuotaRejected", "networkBlocked", "nonRoot", "capabilitiesDropped",
                     "noNewPrivileges", "readOnlyRoot", "serviceAccountAbsent", "withinMemoryAllocation", "processBoundaryRejected", "cpuThrottlingObserved")) proof.put(key, true);
             proof.putAll(Map.of("backend", "fixed-filesystem-v1", "protocolVersion", 1L, "landlockAbi", 3L, "processLimit", 256L,
-                    "requestedBytes", 67_108_864L, "enforcedBytes", 60_000_000L, "memoryLimitBytes", 134_217_728L, "cpuMillicores", 500L));
+                    "requestedBytes", 67_108_864L, "enforcedBytes", 60_000_000L, "memoryLimitBytes", 134_217_728L, "cpuMillicores", 400L));
+            if (fault.equals("parent-cpu-proof")) proof.put("cpuMillicores", 500L);
+            if (fault.equals("no-own-throttle")) proof.put("cpuThrottlingObserved", false);
             proof.put("beyondQuotaRejected", !fault.equals("attestation")); return proof;
         }
         public Map<String, Object> networkControl(String pod) { return Map.of("networkReachable", true); }

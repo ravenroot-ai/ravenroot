@@ -952,6 +952,7 @@ jobs:
         with:
           name: native-kubernetes-results
           path: |
+            ravenroot/ravenroot-core/target/native-kubernetes-reports/NativeCpuHierarchyProbe.json
             ravenroot/ravenroot-core/target/native-kubernetes-reports/KubernetesPodRunnerNativeTest.json
             ravenroot/ravenroot-core/target/native-kubernetes-reports/KubernetesWorkspaceGraphNativeTest.json
           if-no-files-found: warn

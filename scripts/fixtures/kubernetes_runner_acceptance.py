@@ -9,6 +9,7 @@ capabilities are fatal, and exact Surefire reports must have zero skips.
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -16,6 +17,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 import uuid
 import xml.etree.ElementTree as ET
 
@@ -42,6 +44,41 @@ def command(argv, *, data=None, timeout=300, quiet=False):
     if len(result.stdout) > 1_048_576:
         raise RuntimeError("fixture command exceeded its output ceiling")
     return result.stdout
+
+
+def verify_admission_typechecking(policies):
+    """Refuse every warning; print only a bounded closed diagnostic projection."""
+    records = []
+    failed = False
+    truncated = False
+    roles = {"native-ravenroot-agent-native": "POD", "native-ravenroot-agent-native-channel": "CHANNEL"}
+    classes = {"undefined field": "UNDEFINED_FIELD", "undeclared reference": "UNDECLARED_REFERENCE",
+               "found no matching overload for": "NO_MATCHING_OVERLOAD"}
+    identifiers = {"resources", "limits", "requests", "cpu", "memory", "quantity", "compareTo"}
+    for policy in policies["items"]:
+        warnings = policy.get("status", {}).get("typeChecking", {}).get("expressionWarnings")
+        if not warnings:
+            continue
+        failed = True
+        role = roles.get(policy.get("metadata", {}).get("name"), "FOREIGN")
+        truncated = truncated or isinstance(warnings, list) and len(warnings) > 8
+        for warning in (warnings[:8] if isinstance(warnings, list) else [{}]):
+            if len(records) >= 8:
+                truncated = True
+                break
+            warning = warning if isinstance(warning, dict) else {}
+            text = warning.get("warning", "")
+            text = text if isinstance(text, str) else ""
+            field = warning.get("fieldRef", "")
+            field = field if isinstance(field, str) and re.fullmatch(r"spec\.validations\[[0-9]{1,2}\]\.(expression|messageExpression)", field) else "UNKNOWN"
+            match = re.search(r"(undefined field|undeclared reference|found no matching overload for) ['\"]([A-Za-z_][A-Za-z0-9_]*)['\"](?=\s|$)", text[:4096]) if role != "FOREIGN" else None
+            records.append({"role": role, "fieldRef": field,
+                            "class": classes[match[1]] if match else "UNKNOWN",
+                            "identifier": match[2] if match and match[2] in identifiers else "UNKNOWN",
+                            "digest": hashlib.sha256(text.encode()).hexdigest()})
+    if failed:
+        print("NATIVE_ADMISSION_TYPECHECKING=" + json.dumps({"schemaVersion": 1, "warnings": records, "truncated": truncated}), flush=True)
+        raise RuntimeError("native admission policy has a type-checking warning")
 
 
 def resources(node, count=16):
@@ -172,6 +209,132 @@ def retain_reports(source=None, destination=None):
         (destination / (name.rsplit(".", 1)[1] + ".json")).write_text(json.dumps(report, sort_keys=True) + "\n")
 
 
+def cpu_hierarchy_report(raw, evidence=None):
+    """Decode finite measurements before validation; never retain arbitrary node output."""
+    def refuse(reason, case="UNKNOWN", group="UNKNOWN", counter="UNKNOWN"):
+        if evidence is not None:
+            evidence.update(reason=reason, failure={"case": case, "group": group, "counter": counter})
+        raise ValueError("CPU hierarchy " + reason)
+    if len(raw) > 4096:
+        refuse("OVERSIZED_OUTPUT")
+    try:
+        lines = raw.decode("ascii").splitlines()
+    except UnicodeError:
+        refuse("MALFORMED_OUTPUT")
+    result = {"schemaVersion": 1, "approvedMillicores": 100, "outerMillicores": 500,
+              "memoryBytes": 67108864, "pids": 16, "cases": [], "cleanup": False}
+    keys = ("PARENT", "CHILD", "NOISE", "PARENT_BEFORE", "CHILD_BEFORE", "NOISE_BEFORE",
+            "WORKER", "PARENT_AFTER", "CHILD_AFTER", "NOISE_AFTER")
+    for label in ("equal", "stricter"):
+        if not lines or lines.pop(0) != "CASE " + label:
+            refuse("MISSING_CASE", label)
+        case = {"case": label}
+        for key in keys:
+            parts = lines.pop(0).split() if lines else []
+            width = 2 if key in ("PARENT", "CHILD", "NOISE") else 3 if key == "WORKER" else 4
+            if len(parts) != width + 1 or parts[0] != key or any(not re.fullmatch(r"[0-9]{1,19}", x) or int(x) > 2**63 - 1 for x in parts[1:]):
+                refuse("MALFORMED_MEASUREMENT", label, key)
+            case[key] = list(map(int, parts[1:]))
+        result["cases"].append(case)
+    result["probeCleanup"] = result["cleanup"] = lines == ["CLEANUP"]
+    # All retained fields now have fixed keys/labels and bounded integer arrays.
+    # Preserve them even when a later semantic check rejects this measurement.
+    if evidence is not None:
+        evidence.update(result)
+    if not lines:
+        refuse("CLEANUP_MISSING")
+    if not result["probeCleanup"]:
+        refuse("MALFORMED_TRAILER")
+    fields = ("usage_usec", "nr_periods", "nr_throttled", "throttled_usec")
+    for case, quota in zip(result["cases"], (10000, 8000)):
+        label = case["case"]
+        for name, expected in (("PARENT", [10000, 100000]), ("CHILD", [quota, 100000]), ("NOISE", [1000, 100000])):
+            if case[name] != expected:
+                refuse("QUOTA_MISMATCH", label, name, "quota_period")
+            before, after = case[name + "_BEFORE"], case[name + "_AFTER"]
+            # Enabling a quota starts its timer: nr_periods can advance while idle.
+            # Fresh exclusive groups still have no pre-work CPU usage or throttling.
+            for index in (0, 2, 3):
+                if before[index] != 0:
+                    refuse("STALE_BASELINE", label, name, fields[index])
+            for index, (baseline, final) in enumerate(zip(before, after)):
+                if baseline > final:
+                    refuse("COUNTER_BACKWARDS", label, name, fields[index])
+            if after[0] <= before[0]:
+                refuse("NO_WORKLOAD", label, name, "usage_usec")
+        baseline, final, elapsed = case["WORKER"]
+        if baseline > final or baseline < case["CHILD_BEFORE"][2] or final > case["CHILD_AFTER"][2]:
+            refuse("OWN_COUNTER_WINDOW", label, "CHILD", "nr_throttled")
+        if not 0 < elapsed <= 10_200_000:
+            refuse("INVALID_DURATION", label, "WORKER", "elapsed_usec")
+        positive = final > baseline and elapsed <= 10_000_000
+        case["ownThrottlingWithinTenSeconds"] = positive
+        case["outcome"] = ("NOT_REPRODUCED" if positive else "OWN_THROTTLING_MISSING") if label == "equal" else ("VERIFIED" if positive else "OWN_THROTTLING_MISSING")
+    return result
+
+
+def prepare_cpu_probe_node(profile):
+    """Establish the requested two-CPU cap on this invocation's private node only."""
+    if not re.fullmatch(r"rr-native-[0-9a-f]{12}", profile):
+        raise RuntimeError("CPU probe node ownership differs")
+    def inspect_node(reference, expected=None):
+        nodes = json.loads(command(["docker", "inspect", reference], timeout=10, quiet=True))
+        if not isinstance(nodes, list) or len(nodes) != 1 or not isinstance(nodes[0], dict):
+            raise RuntimeError("CPU probe node ownership differs")
+        node = nodes[0]
+        identity = node.get("Id", "")
+        if not isinstance(identity, str) or not re.fullmatch(r"[0-9a-f]{64}", identity) \
+                or expected is not None and identity != expected \
+                or node.get("Name") != "/" + profile or node.get("Config", {}).get("Image") != CLUSTER_IMAGE \
+                or node.get("State", {}).get("Running") is not True \
+                or node.get("HostConfig", {}).get("CgroupnsMode") != "private" \
+                or node.get("HostConfig", {}).get("Memory") != 2147483648:
+            raise RuntimeError("CPU probe node identity or resource isolation differs")
+        return node
+    identity = inspect_node(profile)["Id"]
+    # Pinned Minikube can omit --cpus on pure cgroup v2. Never relax the probe's
+    # finite-root check; set only this owned node's already-requested budget.
+    command(["docker", "update", "--cpus=2", identity], timeout=10, quiet=True)
+    if inspect_node(identity, identity)["HostConfig"].get("NanoCpus") != 2000000000:
+        raise RuntimeError("CPU probe node CPU cap differs")
+    return identity
+
+
+def verify_cpu_hierarchy(profile):
+    # Existing privileged disposable node only; no new image, host mount or authority.
+    identity = prepare_cpu_probe_node(profile)
+    name = "rr-cpu-" + uuid.uuid4().hex
+    nonce = uuid.uuid4().hex
+    payload = Path(__file__).with_name("kubernetes_cpu_hierarchy_probe.sh").read_bytes()
+    started = time.monotonic()
+    report = {"schemaVersion": 1, "status": "FAILED", "reason": "PROBE_UNAVAILABLE", "cleanup": False}
+    try:
+        raw = command(["docker", "exec", "-i", identity, "timeout", "--signal=TERM", "--kill-after=2", "43",
+                       "bash", "-s", "--", name, "run", nonce], data=payload, timeout=45, quiet=True)
+        report.update(cpu_hierarchy_report(raw, evidence=report))
+        if not report["cases"][1]["ownThrottlingWithinTenSeconds"]:
+            report.update(reason="OWN_THROTTLING_MISSING", failure={"case": "stricter", "group": "CHILD", "counter": "nr_throttled"})
+            raise RuntimeError("fresh own-child throttling proof missing")
+        report.update(status="VERIFIED", reason="NONE")
+    finally:
+        try:
+            # Independent remaining budget, even if the main 45-second deadline expired.
+            remaining = 60 - (time.monotonic() - started)
+            if remaining <= 1:
+                raise RuntimeError("CPU probe cleanup deadline expired")
+            cleaned = command(["docker", "exec", "-i", identity, "timeout", "--signal=TERM", "--kill-after=1", "10",
+                               "bash", "-s", "--", name, "cleanup", nonce], data=payload, timeout=min(12, remaining), quiet=True)
+            if cleaned != b"CLEANUP\n":
+                raise RuntimeError("CPU probe cleanup unconfirmed")
+            report["cleanup"] = True
+        except Exception:
+            report.update(primaryReason=report["reason"], status="FAILED", reason="CLEANUP_UNCONFIRMED", cleanup=False)
+            raise
+        finally:
+            REPORT_DIRECTORY.mkdir(parents=True, exist_ok=True)
+            (REPORT_DIRECTORY / "NativeCpuHierarchyProbe.json").write_text(json.dumps(report, indent=2) + "\n")
+
+
 def run():
     for tool in ("docker", "minikube", "kubectl", "helm", "mvn"):
         if not shutil.which(tool):
@@ -193,7 +356,8 @@ def run():
             print("Native Kubernetes preflight: creating isolated containerd/Calico cluster", flush=True)
             command(["minikube", "start", "--profile=" + profile, "--driver=docker", "--container-runtime=containerd",
                      "--kubernetes-version=" + KUBERNETES, "--base-image=" + CLUSTER_IMAGE,
-                     "--cni=calico", "--cpus=2", "--memory=2048",
+                     "--cni=calico", "--cpus=2", "--memory=2048", "--feature-gates=PodLevelResources=true",
+                     "--extra-config=kubelet.cpu-cfs-quota-period=100ms",
                      "--extra-config=kubelet.pod-max-pids=256", "--keep-context", "--embed-certs", "--install-addons=false"], timeout=600)
             kubectl = ["kubectl", "--context=" + profile]
             # Pin one policy backend. Calico Auto can change its choice during initial kube-proxy
@@ -226,8 +390,8 @@ def run():
             command(kubectl + ["rollout", "status", "deployment/native-ravenroot-agent-native-network-control", "--timeout=90s"])
             control = command(kubectl + ["get", "service/native-ravenroot-agent-native-network-control", "-o", "jsonpath={.spec.clusterIP}"]).decode()
             policies = json.loads(command(kubectl + ["get", "validatingadmissionpolicies", "-o", "json"]))
-            if any(policy.get("status", {}).get("typeChecking", {}).get("expressionWarnings") for policy in policies["items"]):
-                raise RuntimeError("native admission policy has a type-checking warning")
+            verify_admission_typechecking(policies)
+            verify_cpu_hierarchy(profile)
             for name in CLASSES:
                 (ROOT / "ravenroot/ravenroot-core/target/surefire-reports" / ("TEST-" + name + ".xml")).unlink(missing_ok=True)
             with endpoint_module.ModelProtocolEndpoint() as endpoint:

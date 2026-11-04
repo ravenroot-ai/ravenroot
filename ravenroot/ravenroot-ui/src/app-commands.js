@@ -114,7 +114,7 @@ export function createAppCommands(actions, { t = uiText } = {}) {
       isEnabled: context => context.gitAuthoring && context.repositoryDocument && !context.authoringSaveFlight }, t),
     localizeCommand({ id: 'file.repositoryRelease', group: 'repository', order: 46,
       placements: ['menu.file'], execute: actions.repositoryRelease,
-      isEnabled: context => context.gitAuthoring && context.repositoryDocument && !context.authoringSaveFlight }, t),
+      isEnabled: context => context.gitAuthoring && context.repositoryDocument && !context.authoringSaveFlight && context.repositoryReleaseEligible !== false }, t),
     localizeCommand({ id: 'file.publishedArtifacts', group: 'repository', order: 47,
       placements: ['menu.file'], execute: actions.publishedArtifacts,
       isEnabled: context => context.gitAuthoring }, t),

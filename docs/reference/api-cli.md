@@ -407,3 +407,24 @@ No GraphML request body is needed. `GRAPH_WRITE` is required. A `200` response i
 An identical successful request identity reconciles the same result. Reuse with changed expected state is refused. A competing request, stale draft/release/publication token, existing successor, legacy divergent same-version draft, absent release, inconsistent metadata or maximum authored version receives `409 CONFLICT`; protect local edits and reopen current state. A missing draft with valid release can create vN+1. An initial unreleased v1 cannot increment. Unsupported capability returns `501 UNSUPPORTED_PROVIDER`, denied authorization `403 FORBIDDEN`, and incomplete revision headers `400 INVALID_REQUEST`. Publication observations remain mandatory even though release, independently of publication, makes vN immutable. This operation never publishes or deploys.
 
 A changed save based on released vN creates draft vN+1 in the same revision-checked write; unchanged saves retain vN and an existing successor keeps its assigned version. Back up legacy divergent vN edits before explicit discard/reconciliation, create vN+1, then reapply protected edits. Explicit discard restores released content but retains an already assigned successor version. Repository inventory `GET /v1/graph-authoring?cursor=<nextCursor>` is authenticated and tenant scoped; continue until `nextCursor` is empty.
+
+### Durable named SOURCE trigger
+
+`POST /v1/deployments/{id}/trigger` requires execution-start authorization and a JSON body with exactly
+`registrationIdentity`, `incarnationId`, `graphVersion`, `sourceNodeId`, `requestId`, and `input`.
+Read the durable registration identity and current runtime incarnation from the deployment response;
+`graphVersion` pins the exact graph. `requestId` is a caller-owned token matching
+`[A-Za-z0-9][A-Za-z0-9._:-]{0,127}`. Input is bounded structured JSON and cannot contain reserved security keys.
+
+The target must already be durably registered, active and admitting input, with an enabled named
+SOURCE and a store supporting durable deployment-entry custody. Arbitrary nodes, START substitution,
+stale bindings, volatile registrations, paused/stopped admission and unsupported stores are refused.
+This endpoint never starts or resumes a deployment.
+
+The response contains `requestId` and `outcome`: `202 ACCEPTED`, `200 DUPLICATE`, `409 REFUSED`, or
+`503 RECONCILE`. A transport failure after send is also uncertain. Retry with the same request identity;
+reconfirm the same registration/version before refreshing a runtime incarnation after restart. Durable
+deduplication binds tenant, registration, graph version, SOURCE, issuer, principal type, subject and
+request identity. The original accepted actor, input and correlation remain authoritative on replay,
+even if retry input differs. A queued event does not establish successful graph execution or publication.
+Authorization failures use `403`; malformed requests and non-SOURCE targets use `400`.

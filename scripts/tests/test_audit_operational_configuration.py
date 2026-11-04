@@ -2262,12 +2262,12 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as location:
             root = Path(location)
             authority, entries, candidates, details = self.route_table_authority_fixture(root)
-            self.assertEqual(130, len(details))
+            self.assertEqual(131, len(details))
             self.assertEqual(
-                {'methods': 143, 'path': 130, 'summary': 482, 'successStatuses': 135},
+                {'methods': 144, 'path': 131, 'summary': 485, 'successStatuses': 137},
                 {role: len(ids) for role, ids in authority["candidateIdsByRole"].items()},
             )
-            self.assertEqual(890, len(entries))
+            self.assertEqual(897, len(entries))
             self.assertEqual([], self.route_table_errors(root, authority, entries, candidates))
             self.assertEqual({
                 "StableEdgeId.MAX_UTF8_BYTES": 8192,
@@ -4681,7 +4681,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             document = {"entries": list(entries.values()), "retiredEntries": [],
                         "migrationHistory": []}
             self.assertIn(
-                "| Retained published contract descriptions | 482 |",
+                "| Retained published contract descriptions | 485 |",
                 audit.render_report(document),
             )
             deferred = copy.deepcopy(document)
@@ -4689,7 +4689,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                              if entry["classification"] == "published-contract-description")
             published.update(status="deferred", followUp="#225")
             self.assertIn(
-                "| Retained published contract descriptions | 481 |",
+                "| Retained published contract descriptions | 484 |",
                 audit.render_report(deferred),
             )
         self.assertIn(
@@ -6878,6 +6878,58 @@ class GraphAuthoringPolicyAuditTest(unittest.TestCase):
     @classmethod
     def tearDownClass(cls) -> None:
         cls.temporary.cleanup()
+
+    def test_release_binding_custody_actor_and_exact_observation_guards_survive_digest_reattest(self) -> None:
+        sources = {path: (self.root / path).read_text(encoding="utf-8")
+                   for path in (*audit.GRAPH_AUTHORING_FILE_PROOFS, *audit.GRAPH_AUTHORING_SUPPORT_FILE_PROOFS)}
+        ui = (self.root / audit.GRAPH_AUTHORING_UI_PATH).read_text(encoding="utf-8")
+        application = (self.root / audit.GRAPH_AUTHORING_APPLICATION_PATH).read_text(encoding="utf-8")
+        self.assertTrue(audit.graph_authoring_release_boundary(sources, ui, application))
+        for before, after in (
+                ('!record.durableRegistration()', 'false'),
+                ('!record.lifecycleId().value().equals(registrationIdentity)', 'false'),
+                ('!record.graphHash().equals(graphVersion)', 'false'),
+                ('StoreCapability.DEPLOYMENT_ENTRY_CUSTODY', 'StoreCapability.INITIAL_START_ADMISSION'),
+                ('security.principalType().name(), security.subject(), requestId', 'security.principalType().name(), security.subject(), "fresh"'),
+                ('IngressTarget.node(sourceNodeId)', 'IngressTarget.start()')):
+            with self.subTest(guard=before):
+                self.assertIn(before, application)
+                self.assertFalse(audit.graph_authoring_release_boundary(sources, ui, application.replace(before, after)))
+        for filename, before, after in (
+                ('release-proposal-progress.js', 'observed.releaseVersion === candidate.releaseVersion', 'observed.releaseVersion >= candidate.releaseVersion'),
+                ('release-proposal-progress.js', 'decode(observed) === candidate.graphMl', 'true'),
+                ('release-proposal-progress.js', 'feedback.signal, AbortSignal.timeout(timeout)', 'new AbortController().signal'),
+                ('graph-authoring-client.js', 'registrationIdentity: binding.registrationIdentity', 'registrationIdentity: deployment.registrationIdentity'),
+                ('ReleaseAutomationPolicy.java', 'if (raw.isBlank()) return disabled();', 'if (raw.isBlank()) return null;'),
+                ('ReleaseAutomationPolicy.java', 'new PayloadLimits(4096, 4, 20, 20, 1024, 64)', 'new PayloadLimits(8192, 4, 20, 20, 1024, 64)')):
+            path = next(path for path in sources if path.name == filename)
+            self.assertIn(before, sources[path])
+            mutated = {**sources, path: sources[path].replace(before, after)}
+            with self.subTest(guard=before):
+                self.assertFalse(audit.graph_authoring_release_boundary(mutated, ui, application))
+
+    def test_missing_draft_review_exception_stays_ordinary_exact_and_unobserved(self) -> None:
+        sources = {path: (self.root / path).read_text(encoding="utf-8")
+                   for path in (*audit.GRAPH_AUTHORING_FILE_PROOFS, *audit.GRAPH_AUTHORING_SUPPORT_FILE_PROOFS)}
+        ui = (self.root / audit.GRAPH_AUTHORING_UI_PATH).read_text(encoding="utf-8")
+        span = audit._javascript_function_span(ui, "repositoryRelease")
+        body = ui[slice(*span)]
+        self.assertTrue(audit.graph_authoring_managed_open_boundary(sources, ui))
+        for before, after in (
+                ("error.status !== 404", "error.status !== 403"),
+                ("error.code !== 'NOT_FOUND'", "false"),
+                ("|| automation?.mode === 'isolated-automerge'", "|| false"),
+                ("} catch (error) {\n      requireRepositoryOperationBinding(target, binding);", "} catch (error) {"),
+                ("saved.revision?.[key] !== binding.expected[key]", "false"),
+                ("if (candidate) void observeReleaseProposal", "void observeReleaseProposal"),
+                ("if (candidate && automation?.mode", "if (automation?.mode"),
+                ("feedback.success(result);", "feedback.success(result); feedback.published();"),
+                ("let candidate = null;", "let candidate = { graphMl: 'old release' };"),
+                ("if (error.status !== 404", "throw error; if (error.status !== 404")):
+            with self.subTest(guard=before):
+                self.assertEqual(1, body.count(before))
+                mutated = ui[:span[0]] + body.replace(before, after, 1) + ui[span[1]:]
+                self.assertFalse(audit.graph_authoring_managed_open_boundary(sources, mutated))
 
     def test_authoring_evidence_reorders_only_live_ids_and_retains_closed_membership(self) -> None:
         evidence = ["oc-before-a", "oc-before-z", "oc-before-a"]

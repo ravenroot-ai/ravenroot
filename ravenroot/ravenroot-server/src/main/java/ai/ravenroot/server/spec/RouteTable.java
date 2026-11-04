@@ -511,6 +511,12 @@ public final class RouteTable {
                     "Explicitly restores only an exact retained durable registration and canonical graph under registration and lifecycle authority; creates no registration or initial START.",
                     true, false, 200, concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(), ErrorCode.UNKNOWN_RESOURCE.code(),
                             ErrorCode.CONFLICT.code()), NEVER, false),
+            new RouteDescriptor(Set.of("POST"), "/v1/deployments/{id}/trigger",
+                    "Durably offers an idempotent event to an enabled named SOURCE on the exact "
+                            + "current deployment incarnation and graph version. Requires execution-start authority. "
+                            + "Paused/stopped deployments remain closed; repeating a request reconciles original custody.",
+                    true, false, Set.of(200, 202), concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
+                            ErrorCode.CONFLICT.code(), ErrorCode.UNKNOWN_RESOURCE.code()), NEVER, false),
             new RouteDescriptor(Set.of("GET"), "/v1/deployments/{id}/initial-start",
                     "Reads the retained permanent initial START marker under current incarnation/version observation authority. "
                             + "Requires incarnationId, graphVersion and requestId query fields. Returns original process/traversal IDs "

@@ -72,6 +72,64 @@ class DeploymentLifecycleHttpTest {
     private static final String CORRELATION_PLACEHOLDER = "<correlation>";
 
     @Test
+    void namedTriggerRefusesUnsupportedStoresAndDisabledSources() throws Exception {
+        for (boolean custody : List.of(false, true)) try (var fixture = new Fixture(true, null, custody)) {
+            String graph = custody ? SOURCE_GRAPH.replace("<graph id=", "<key id=\"bypass\" for=\"node\" attr.name=\"execution.bypass\" attr.type=\"boolean\"/><graph id=")
+                    .replace("<node id=\"listener\">", "<node id=\"listener\"><data key=\"bypass\">true</data>") : SOURCE_GRAPH;
+            var registered = fixture.request("POST", "/v1/deployments?id=closed", graph, "tenant-a");
+            assertEquals(200, fixture.command("/v1/deployments/closed/start", "tenant-a", "start-closed", 0, null).statusCode());
+            var view = fixture.application.localDeploymentView("tenant-a", "closed").orElseThrow().source();
+            String body = "{\"registrationIdentity\":\"" + field(registered.body(), "registrationIdentity")
+                    + "\",\"incarnationId\":\"" + view.incarnationId() + "\",\"graphVersion\":\"" + view.graphVersion()
+                    + "\",\"sourceNodeId\":\"listener\",\"requestId\":\"one\",\"input\":{}}";
+            assertEquals(custody ? 400 : 409, fixture.request("POST", "/v1/deployments/closed/trigger", body, "tenant-a").statusCode());
+        }
+    }
+
+    @Test
+    void namedTriggerRequiresDurableRegistrationAuthorityAndOpenAdmission() throws Exception {
+        try (var fixture = new Fixture(true, null, true)) {
+            var registered = fixture.request("POST", "/v1/deployments?id=demand", SOURCE_GRAPH, "tenant-a");
+            String registration = field(registered.body(), "registrationIdentity");
+            assertEquals(200, fixture.command("/v1/deployments/demand/start", "tenant-a", "start-demand", 0, null).statusCode());
+            var binding = fixture.application.localDeploymentView("tenant-a", "demand").orElseThrow().source();
+            String body = "{\"registrationIdentity\":\"" + registration + "\",\"incarnationId\":\"" + binding.incarnationId()
+                    + "\",\"graphVersion\":\"" + binding.graphVersion()
+                    + "\",\"sourceNodeId\":\"listener\",\"requestId\":\"demand-one\",\"input\":{\"original\":true}}";
+            assertEquals(202, fixture.request("POST", "/v1/deployments/demand/trigger", body, "tenant-a").statusCode());
+            var repeated = fixture.request("POST", "/v1/deployments/demand/trigger", body.replace("true", "false"), "tenant-a");
+            assertTrue(Set.of(200, 503).contains(repeated.statusCode()), repeated.body());
+            var concurrent = new java.util.ArrayList<CompletableFuture<HttpResponse<String>>>();
+            for (int index = 0; index < 2; index++) concurrent.add(CompletableFuture.supplyAsync(() -> {
+                try { return fixture.request("POST", "/v1/deployments/demand/trigger", body.replace("demand-one", "concurrent-operation"), "tenant-a"); }
+                catch (Exception failure) { throw new java.util.concurrent.CompletionException(failure); }
+            }));
+            var arrivals = concurrent.stream().map(CompletableFuture::join).toList();
+            assertEquals(1, arrivals.stream().filter(response -> response.statusCode() == 202).count(), arrivals.toString());
+            assertTrue(arrivals.stream().allMatch(response -> Set.of(200, 202, 503).contains(response.statusCode())));
+            assertEquals(403, fixture.request("POST", "/v1/deployments/demand/trigger", body, "tenant-a-viewer").statusCode());
+            assertEquals(409, fixture.request("POST", "/v1/deployments/demand/trigger", body, "tenant-b").statusCode());
+            for (String wrong : List.of(registration, binding.incarnationId(), binding.graphVersion()))
+                assertEquals(409, fixture.request("POST", "/v1/deployments/demand/trigger", body.replace(wrong, "stale"), "tenant-a").statusCode());
+            for (String wrong : List.of("end", "start", "missing"))
+                assertEquals(400, fixture.request("POST", "/v1/deployments/demand/trigger", body.replace("listener", wrong), "tenant-a").statusCode());
+            assertEquals(1, fixture.source.starts.get(), "a trigger never starts a source or the deployment");
+            assertEquals(200, fixture.command("/v1/deployments/demand/pause", "tenant-a", "pause-demand", 1, "hold").statusCode());
+            assertEquals(409, fixture.request("POST", "/v1/deployments/demand/trigger", body.replace("demand-one", "paused"), "tenant-a").statusCode());
+            assertEquals(200, fixture.command("/v1/deployments/demand/stop", "tenant-a", "stop-demand", 2, "stop").statusCode());
+            assertEquals(409, fixture.request("POST", "/v1/deployments/demand/trigger", body.replace("demand-one", "stopped"), "tenant-a").statusCode());
+        }
+        try (var fixture = new Fixture(false, null, true)) {
+            var registered = fixture.request("POST", "/v1/deployments?id=volatile", SOURCE_GRAPH, "tenant-a");
+            assertState(fixture.request("POST", "/v1/deployments/volatile/start", "", "tenant-a"), "READY");
+            String body = "{\"registrationIdentity\":\"unregistered\",\"incarnationId\":\"" + field(registered.body(), "runtimeIncarnationId")
+                    + "\",\"graphVersion\":\"" + field(registered.body(), "graphVersion")
+                    + "\",\"sourceNodeId\":\"listener\",\"requestId\":\"one\",\"input\":{}}";
+            assertEquals(409, fixture.request("POST", "/v1/deployments/volatile/trigger", body, "tenant-a").statusCode());
+        }
+    }
+
+    @Test
     void exactSourceIsCompleteReadOnlyAndIndependentOfRepositoryOrActivation() throws Exception {
         try (var fixture = new Fixture()) {
             var registered = fixture.request("POST", "/v1/deployments?id=source-copy", SOURCE_GRAPH, "tenant-a");

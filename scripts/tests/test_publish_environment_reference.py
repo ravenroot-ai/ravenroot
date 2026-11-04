@@ -107,6 +107,7 @@ class PublishEnvironmentReferenceTest(unittest.TestCase):
             name for name in names
             if name.startswith("RAVENROOT_GRAPH_AUTHORING_")
             or name.startswith("RAVENROOT_GRAPH_ARTIFACT_")
+            or name == "RAVENROOT_GRAPH_RELEASE_AUTOMATION"
         }
         self.assertEqual(GRAPH_AUTHORING_VARIABLES, actual)
         for name in GRAPH_AUTHORING_VARIABLES:

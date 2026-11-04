@@ -1,5 +1,6 @@
 import { createDeploymentObservationBarrier } from './deployment-observation.js';
 import { repositoryOperationDialog } from './repository-operation-dialog.js';
+import { releaseOperationIdentity, observeReleaseProposal } from './release-proposal-progress.js';
 import { readSavedDeploymentView } from './saved-deployment-view.js';
 import { requireHistorySource } from './deployment-history-model.js';
 import { deploymentGraphSignature } from './deployment-graph-match.js';
@@ -16549,9 +16550,48 @@ async function repositoryRelease() {
   const reviewKey = repositoryReviewMessageKey(graphAuthoringCapability.provider);
   try {
     requireRepositoryOperationBinding(target, binding);
-    const result = await client.release(id, binding.expected);
+    const automation = runtimeConfiguration?.configuration?.graphAuthoring?.releaseAutomation;
+    let candidate = null;
+    try {
+      const saved = await client.open(id, 'draft');
+      requireRepositoryOperationBinding(target, binding);
+      if (['draft', 'release', 'publication'].some(key => saved.revision?.[key] !== binding.expected[key]))
+        throw new Error(uiText('repository.error.operationChanged'));
+      candidate = Object.freeze({ documentId: id, graphId: saved.graphId,
+        releaseVersion: saved.releaseVersion, revision: structuredClone(binding.expected), graphMl: decodeGraphMl(saved) });
+    } catch (error) {
+      requireRepositoryOperationBinding(target, binding);
+      if (error.status !== 404 || error.code !== 'NOT_FOUND' || automation?.mode === 'isolated-automerge') throw error;
+      // Ordinary review also supports draft deletion. Retained release bytes cannot prove that proposal completed.
+    }
+    const operation = await releaseOperationIdentity([client.baseUrl, id,
+      candidate || { documentId: id, revision: binding.expected, draftAbsent: true }]);
     requireRepositoryOperationBinding(target, binding);
+    const result = await client.release(id, binding.expected, operation);
+    requireRepositoryOperationBinding(target, binding);
+    Object.freeze(result);
     feedback.success(result);
+    if (candidate && automation?.mode === 'isolated-automerge') {
+      const requestId = await releaseOperationIdentity([operation, result.url, result.draftHead, result.releaseHead, automation]);
+      const queue = async () => {
+        try {
+          requireRepositoryOperationBinding(target, binding);
+          const receipt = await client.triggerAutomation(automation, requestId, {
+            requestType: 'release-request', documentId: id, graphId: candidate.graphId,
+            releaseVersion: candidate.releaseVersion, proposalUrl: result.url, draftHead: result.draftHead,
+            releaseHead: result.releaseHead,
+          });
+          requireRepositoryOperationBinding(target, binding);
+          if (!feedback.isOpen()) return;
+          if (receipt.outcome === 'RECONCILE') feedback.reconcile(queue);
+          else if (receipt.outcome === 'REFUSED') feedback.refused();
+          else feedback.automationQueued();
+        } catch (error) { if (feedback.isOpen()) feedback.automationFailed(uiErrorReason(error)); }
+      };
+      await queue();
+    }
+    if (candidate) void observeReleaseProposal({ client, candidate, feedback, decode: decodeGraphMl,
+      assertCurrent: () => requireRepositoryOperationBinding(target, binding) });
     const reviewType = uiMessage(reviewKey);
     addActivityMessage(uiMessage("workspace.notice.editor.23"), uiMessage("workspace.notice.graph.review", {
       detail1: uiMessage(result.reused ? "workspace.app.existing" : "workspace.app.new"),
@@ -16767,6 +16807,8 @@ function commandContext() {
     gitAuthoring: graphAuthoringCapability.state === AUTHORING_CAPABILITY_STATE.GIT,
     repositoryDocument: Boolean(activeAuthoring?.providerDocumentId),
     repositoryReleasedSource: Boolean(activeAuthoring?.providerDocumentId && activeAuthoring?.draftDeleted),
+    repositoryReleaseEligible: !runtimeConfiguration?.configuration?.graphAuthoring?.releaseAutomation
+      || !activeAuthoring?.released || activeAuthoring.releaseVersion > activeAuthoring.releasedVersion,
     repositoryDraftAvailable: Boolean(activeAuthoring?.providerDocumentId && activeAuthoring?.draftDeleted
       && activeAuthoring?.successor),
     authoringSaveFlight: Boolean(activeAuthoring?.saveFlight || activeAuthoring?.releaseFlight),

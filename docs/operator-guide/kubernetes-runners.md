@@ -53,6 +53,37 @@ than the profile ceiling; merely labeling a larger directory as a 64 MiB PV fail
 the kubelet PID limit to fit the approved profile (native CI uses 256); a larger unenforced allowance
 fails the positive fork boundary. Reference profiles use 500 millicores and 128 MiB memory.
 
+### CPU hierarchy prerequisite
+
+The Kubernetes pool requires `PodLevelResources` enabled on the API server, scheduler and
+kubelet (beta, enabled by default since Kubernetes 1.34), and a 100 ms CFS quota period.
+For an approved CPU ceiling `P >= 20` millicores, the Pod's CPU request and limit remain `P`;
+the sole Agent container's request and limit are `floor(4 * P / 5)`. For example, the 500m
+reference profile reserves at most 500m in total and limits active Agent execution to 400m;
+the 100m workspace acceptance profile uses an 80m container. Memory requests and limits
+remain unchanged at both levels. The 20m minimum avoids kubelet's 1 ms minimum quota
+rounding at this period. Other drivers' profile minimums are unchanged.
+
+This deliberately reduces the Agent's maximum CPU throughput within the approved ceiling.
+It gives the child's own quota room to expire before the Pod's quota: Linux hierarchical
+CFS can otherwise exhaust a parent while the child still has runtime available. It does
+not guarantee CPU delivery under contention. The manager rejects absent or changed Pod
+and container budgets, and still requires a fresh increase in the **own container's**
+throttling counter within the unchanged ten-second probe for fractional CPU limits.
+Resource readback validates the API resource shape, not kubelet feature configuration or
+the ancestor cgroup layout. Operators must enable the feature consistently on every pool
+node. The manager has no node/configuration inspection permission; API-pruned budgets and
+missing own-child enforcement fail preflight. There is no ancestor-counter, elapsed-time
+or availability substitute. The hosted fixture separately pins the platform configuration
+and measures a controlled physical hierarchy.
+
+The existing hosted native fixture records finite equal-quota and stricter-child control
+measurements before its five native cases. A control that throttles its own child is
+reported as not reproducing the hazard; it is not evidence of a historical failure's cause.
+Only the stricter case's fresh own-counter proof and verified cleanup permit acceptance.
+See [Linux CFS bandwidth hierarchy](https://www.kernel.org/doc/html/latest/scheduler/sched-bwc.html)
+and [Pod-level resources](https://v1-35.docs.kubernetes.io/docs/tasks/configure-pod-container/assign-pod-level-resources/).
+
 ## Install and preflight
 
 1. Provision a dedicated workload namespace per pool/tenant trust boundary and the finite approved

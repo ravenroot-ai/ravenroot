@@ -256984,28 +256984,28 @@
       "rationale": "Personal account display or worker diagnostic text Reviewed source atom: \"personal-provider-deadlines\"."
     },
     {
-      "id": "oc-86ebb0b62b771737d452",
+      "id": "oc-558dadb9ffb0fbbde945",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 49,
+      "line": 74,
       "symbol": "PersonalOAuthService",
       "kind": "inline-operational-call",
       "role": "Duration.ofSeconds",
       "expression": "10",
       "expressionDigest": "4a44dc15364204a80fe80e9039455cc1608281820fe2b24f1e5233ade6af1dd5",
-      "evidenceDigest": "d894ce8f7247439d4f3e5a1f3fdf2a14be328b3a7359882c4434e0c18695e8a2",
+      "evidenceDigest": "768fa73fcc2ee183f62f8d055ef45011fd5041ed2cecb98dacb932ea397409af",
       "surface": "java",
       "status": "retained",
       "classification": "security-ceiling-or-default",
       "rationale": "Finite local browser/grant/registration lifetime, provider deadline or response envelope; no indefinite personal authority Reviewed source atom: 10.",
       "identityMigration": {
-        "history": "issue-599-invalid-grant-single-recovery-v1",
-        "fromId": "oc-660a4cbdb848addcdca9"
+        "history": "issue-599-personal-final-authority-admission-v1",
+        "fromId": "oc-86ebb0b62b771737d452"
       }
     },
     {
       "id": "oc-7cdd8feba8e18d50fdc0",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 93,
+      "line": 118,
       "symbol": "callback",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -257020,7 +257020,7 @@
     {
       "id": "oc-909cd941b86b961ab817",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 93,
+      "line": 118,
       "symbol": "callback",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -257035,7 +257035,7 @@
     {
       "id": "oc-2a09e64fd503a3b85af9",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 140,
+      "line": 164,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -257050,7 +257050,7 @@
     {
       "id": "oc-61a8b0e0106a2d9bbe3d",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 140,
+      "line": 164,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -257065,7 +257065,7 @@
     {
       "id": "oc-2522cd5d1bb081935a80",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 140,
+      "line": 164,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -257078,159 +257078,142 @@
       "rationale": "Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: \"label\"."
     },
     {
-      "id": "oc-9f4b965fc7ecaca68689",
+      "id": "oc-a342a4ccd0b9cf3f298a",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 160,
-      "symbol": "if",
-      "kind": "inline-operational-call",
-      "role": "Duration.ofHours",
-      "expression": "\"connection\"",
-      "expressionDigest": "9c7a30718516f5cee228d1d5141cda75511670842c25011a3481e6d7111f2c52",
-      "evidenceDigest": "3252bbe565fc68ccd2807dda01ec774a272902245f6224d813831f03dfd00bf3",
-      "surface": "java",
-      "status": "retained",
-      "classification": "protocol-or-format-invariant",
-      "rationale": "Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: \"connection\"."
-    },
-    {
-      "id": "oc-fe24a34bd4f74dbee071",
-      "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 160,
-      "symbol": "if",
-      "kind": "inline-operational-call",
-      "role": "Duration.ofHours",
-      "expression": "\"owner\"",
-      "expressionDigest": "622f06cbcd2e7e61637e17212e714e6c721d2dd5a9f7bc1aec911b65b34edcf5",
-      "evidenceDigest": "3252bbe565fc68ccd2807dda01ec774a272902245f6224d813831f03dfd00bf3",
-      "surface": "java",
-      "status": "retained",
-      "classification": "protocol-or-format-invariant",
-      "rationale": "Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: \"owner\"."
-    },
-    {
-      "id": "oc-68fe10e4fdea2e63b2cf",
-      "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 160,
+      "line": 181,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "Duration.ofHours",
       "expression": "8",
       "expressionDigest": "2c624232cdd221771294dfbb310aca000a0df6ac8b66b696d90ef06fdefb64a3",
-      "evidenceDigest": "3252bbe565fc68ccd2807dda01ec774a272902245f6224d813831f03dfd00bf3",
+      "evidenceDigest": "3c33abe088b26af4b6272566041387b6d8821a40f4fb95f2be764a13681d3f5c",
       "surface": "java",
       "status": "retained",
       "classification": "security-ceiling-or-default",
-      "rationale": "Finite local browser/grant/registration lifetime, provider deadline or response envelope; no indefinite personal authority Reviewed source atom: 8."
+      "rationale": "Finite local browser/grant/registration lifetime, provider deadline or response envelope; no indefinite personal authority Reviewed source atom: 8.",
+      "identityMigration": {
+        "history": "issue-599-personal-final-authority-admission-v1",
+        "fromId": "oc-68fe10e4fdea2e63b2cf"
+      }
     },
     {
-      "id": "oc-a3c0942b6edd73f7c22f",
+      "id": "oc-73705d2290f8ad6a3740",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 167,
+      "line": 186,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "Duration.ofDays",
       "expression": "\"connection\"",
       "expressionDigest": "9c7a30718516f5cee228d1d5141cda75511670842c25011a3481e6d7111f2c52",
-      "evidenceDigest": "8f264e56167fe35ac84f38c85457c58cd4f517c320dd671c6b89296af4008b17",
+      "evidenceDigest": "10526f712904a88bf7f826c06237a71dc01b3f5bda461a446c4b35ed8ac3dfa7",
       "surface": "java",
       "status": "retained",
       "classification": "protocol-or-format-invariant",
-      "rationale": "Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: \"connection\"."
+      "rationale": "Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: \"connection\".",
+      "identityMigration": {
+        "history": "issue-599-personal-final-authority-admission-v1",
+        "fromId": "oc-a3c0942b6edd73f7c22f"
+      }
     },
     {
-      "id": "oc-50de8f9d7b17741de20e",
+      "id": "oc-64cef54d9aaa6f16212e",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 167,
-      "symbol": "if",
-      "kind": "inline-operational-call",
-      "role": "Duration.ofDays",
-      "expression": "\"connection\"",
-      "expressionDigest": "9c7a30718516f5cee228d1d5141cda75511670842c25011a3481e6d7111f2c52",
-      "evidenceDigest": "8f264e56167fe35ac84f38c85457c58cd4f517c320dd671c6b89296af4008b17",
-      "surface": "java",
-      "status": "retained",
-      "classification": "protocol-or-format-invariant",
-      "rationale": "Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: \"connection\"."
-    },
-    {
-      "id": "oc-a494c4571b38c77a4bd5",
-      "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 168,
+      "line": 187,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "Duration.ofDays",
       "expression": "\"expires\"",
       "expressionDigest": "f2d5a18af04438585581b0acc03e2ae4b027abc152b2fbdbd7e59c6db5b0ea12",
-      "evidenceDigest": "8f264e56167fe35ac84f38c85457c58cd4f517c320dd671c6b89296af4008b17",
+      "evidenceDigest": "10526f712904a88bf7f826c06237a71dc01b3f5bda461a446c4b35ed8ac3dfa7",
       "surface": "java",
       "status": "retained",
       "classification": "protocol-or-format-invariant",
-      "rationale": "Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: \"expires\"."
+      "rationale": "Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: \"expires\".",
+      "identityMigration": {
+        "history": "issue-599-personal-final-authority-admission-v1",
+        "fromId": "oc-a494c4571b38c77a4bd5"
+      }
     },
     {
-      "id": "oc-83f15abe2af5ba270490",
+      "id": "oc-613678b6b75cd8732aa9",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 168,
+      "line": 187,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "Duration.ofDays",
       "expression": "\"perimeter\"",
       "expressionDigest": "fd7dc63865852a5c6f29ea59ec82912869f2605340131ffad7a83f1c5ef655f6",
-      "evidenceDigest": "8f264e56167fe35ac84f38c85457c58cd4f517c320dd671c6b89296af4008b17",
+      "evidenceDigest": "10526f712904a88bf7f826c06237a71dc01b3f5bda461a446c4b35ed8ac3dfa7",
       "surface": "java",
       "status": "retained",
       "classification": "protocol-or-format-invariant",
-      "rationale": "Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: \"perimeter\"."
+      "rationale": "Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: \"perimeter\".",
+      "identityMigration": {
+        "history": "issue-599-personal-final-authority-admission-v1",
+        "fromId": "oc-83f15abe2af5ba270490"
+      }
     },
     {
-      "id": "oc-07333769bc25c2a88d20",
+      "id": "oc-bcaa302c46d7926a4122",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 168,
+      "line": 187,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "Duration.ofDays",
       "expression": "30",
       "expressionDigest": "624b60c58c9d8bfb6ff1886c2fd605d2adeb6ea4da576068201b6c6958ce93f4",
-      "evidenceDigest": "8f264e56167fe35ac84f38c85457c58cd4f517c320dd671c6b89296af4008b17",
+      "evidenceDigest": "10526f712904a88bf7f826c06237a71dc01b3f5bda461a446c4b35ed8ac3dfa7",
       "surface": "java",
       "status": "retained",
       "classification": "security-ceiling-or-default",
-      "rationale": "Finite local browser/grant/registration lifetime, provider deadline or response envelope; no indefinite personal authority Reviewed source atom: 30."
+      "rationale": "Finite local browser/grant/registration lifetime, provider deadline or response envelope; no indefinite personal authority Reviewed source atom: 30.",
+      "identityMigration": {
+        "history": "issue-599-personal-final-authority-admission-v1",
+        "fromId": "oc-07333769bc25c2a88d20"
+      }
     },
     {
-      "id": "oc-34bb47598bdd3a56c0e6",
+      "id": "oc-ce1b85fae4075fe0ec07",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 286,
+      "line": 310,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "attempt",
       "expression": "600",
       "expressionDigest": "284b7e6d788f363f910f7beb1910473e23ce9d6c871f1ce0f31f22a982d48ad4",
-      "evidenceDigest": "0b8d7a4e52af056dc0c6ce1aed4975206bb5d7d6c337fea734d46f340f5f1d54",
+      "evidenceDigest": "72b871ff913d98e0fd728f2f46085fc9ff3c6211cc85473094f16b18027fb331",
       "surface": "java",
       "status": "retained",
       "classification": "security-ceiling-or-default",
-      "rationale": "The initial pending attempt retains its existing ten-minute bound; automatic invalid_grant recovery copies this original deadline and never extends it. This is no new operator setting."
+      "rationale": "The initial pending attempt retains its existing ten-minute bound; automatic invalid_grant recovery copies this original deadline and never extends it. This is no new operator setting.",
+      "identityMigration": {
+        "history": "issue-599-personal-final-authority-admission-v1",
+        "fromId": "oc-34bb47598bdd3a56c0e6"
+      }
     },
     {
-      "id": "oc-908dbf1fc833883dc011",
+      "id": "oc-eb2ad1bb9bb696eaceca",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 287,
+      "line": 311,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "attempt",
       "expression": "\"host\"",
       "expressionDigest": "e62c1c090b46507d918567756c90b6547e348e779338fc6cf38a10de2b109e62",
-      "evidenceDigest": "0b8d7a4e52af056dc0c6ce1aed4975206bb5d7d6c337fea734d46f340f5f1d54",
+      "evidenceDigest": "72b871ff913d98e0fd728f2f46085fc9ff3c6211cc85473094f16b18027fb331",
       "surface": "java",
       "status": "retained",
       "classification": "protocol-or-format-invariant",
-      "rationale": "Protected installation-state key for the stable OpenAI host ID captured in the pending proof and checked before its single retry; this value confers no verified account or model authority."
+      "rationale": "Protected installation-state key for the stable OpenAI host ID captured in the pending proof and checked before its single retry; this value confers no verified account or model authority.",
+      "identityMigration": {
+        "history": "issue-599-personal-final-authority-admission-v1",
+        "fromId": "oc-908dbf1fc833883dc011"
+      }
     },
     {
       "id": "oc-d67042e992b4f4cbd394",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 341,
+      "line": 368,
       "symbol": "for",
       "kind": "operational-declaration",
       "role": "health",
@@ -257245,7 +257228,7 @@
     {
       "id": "oc-7ebf9355faceb4cf516d",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 341,
+      "line": 368,
       "symbol": "for",
       "kind": "operational-declaration",
       "role": "health",
@@ -257260,7 +257243,7 @@
     {
       "id": "oc-e4e37887bd7d37869b4f",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 345,
+      "line": 372,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "usage",
@@ -257275,7 +257258,7 @@
     {
       "id": "oc-9df43de8512504fd0c4f",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 346,
+      "line": 373,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "health",
@@ -257290,7 +257273,7 @@
     {
       "id": "oc-6978193c863835c8cd4f",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 346,
+      "line": 373,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "health",
@@ -257305,7 +257288,7 @@
     {
       "id": "oc-2494f556dfd7d4b14f98",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 347,
+      "line": 374,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "health",
@@ -257320,7 +257303,7 @@
     {
       "id": "oc-8b88fb0e76a088144f1b",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 348,
+      "line": 375,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "health",
@@ -257335,7 +257318,7 @@
     {
       "id": "oc-3756a3a5674993bdd417",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 348,
+      "line": 375,
       "symbol": "if",
       "kind": "operational-declaration",
       "role": "health",
@@ -257350,7 +257333,7 @@
     {
       "id": "oc-210cc5025e6676aa538e",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 487,
+      "line": 526,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -257365,7 +257348,7 @@
     {
       "id": "oc-aab4fbef3c56f4c7b588",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 487,
+      "line": 526,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -257380,7 +257363,7 @@
     {
       "id": "oc-7dd338cad9a34336b488",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 487,
+      "line": 526,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -257395,7 +257378,7 @@
     {
       "id": "oc-4f5e9d047e87b1a31fd9",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 488,
+      "line": 527,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -257410,7 +257393,7 @@
     {
       "id": "oc-200c5694eb6b66f745fd",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 488,
+      "line": 527,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -257425,7 +257408,7 @@
     {
       "id": "oc-a99706cc437829826295",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 488,
+      "line": 527,
       "symbol": "if",
       "kind": "inline-operational-call",
       "role": "getOrDefault",
@@ -257440,7 +257423,7 @@
     {
       "id": "oc-5224ff6132464eff872d",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 636,
+      "line": 734,
       "symbol": "request",
       "kind": "operational-declaration",
       "role": "deadline",
@@ -257455,7 +257438,7 @@
     {
       "id": "oc-8d1dcb7f9b161dd5ee24",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 637,
+      "line": 735,
       "symbol": "request",
       "kind": "inline-operational-call",
       "role": "Duration.ofSeconds",
@@ -257468,9 +257451,24 @@
       "rationale": "Finite local browser/grant/registration lifetime, provider deadline or response envelope; no indefinite personal authority Reviewed source atom: 90."
     },
     {
+      "id": "oc-9609b512a646187c119b",
+      "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
+      "line": 742,
+      "symbol": "if",
+      "kind": "inline-operational-call",
+      "role": "timeunit-get",
+      "expression": "1",
+      "expressionDigest": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "evidenceDigest": "554ef3eaea75fe123061a12b4f9a5d84e38349243f15a9cf90d16f1a2d9c3fa4",
+      "surface": "java",
+      "status": "retained",
+      "classification": "security-ceiling-or-default",
+      "rationale": "Positive one-nanosecond floor for CompletableFuture.get with the remaining time from the existing monotonic ninety-second provider request/body deadline. The original HttpRequest timeout and body-close deadline are unchanged; elapsed refresh/catalog work is outside this request as before. This is an internal bounded wait carrier, no new operator setting, timeout extension, retry or authority."
+    },
+    {
       "id": "oc-73c2c95662134223407f",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 647,
+      "line": 753,
       "symbol": "while",
       "kind": "operational-declaration",
       "role": "size",
@@ -257485,7 +257483,7 @@
     {
       "id": "oc-a594de2999cb466bfc73",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 703,
+      "line": 809,
       "symbol": "setCookie",
       "kind": "operational-declaration",
       "role": "Path",
@@ -257500,7 +257498,7 @@
     {
       "id": "oc-e0f18eac16dbb8000002",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 703,
+      "line": 809,
       "symbol": "setCookie",
       "kind": "operational-declaration",
       "role": "Path",
@@ -257515,7 +257513,7 @@
     {
       "id": "oc-733621ce8d48ad3f7068",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 703,
+      "line": 809,
       "symbol": "setCookie",
       "kind": "operational-declaration",
       "role": "Path",
@@ -257530,7 +257528,7 @@
     {
       "id": "oc-6363f47b22d338016432",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 703,
+      "line": 809,
       "symbol": "setCookie",
       "kind": "operational-declaration",
       "role": "Path",
@@ -257545,7 +257543,7 @@
     {
       "id": "oc-19f22515028ffc8fed2c",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 703,
+      "line": 809,
       "symbol": "setCookie",
       "kind": "operational-declaration",
       "role": "Path",
@@ -257560,7 +257558,7 @@
     {
       "id": "oc-0199aadc16526c4de74e",
       "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
-      "line": 740,
+      "line": 846,
       "symbol": "query",
       "kind": "inline-operational-call",
       "role": "readNBytes",
@@ -663097,6 +663095,57 @@
       "rationale": "Issue #475 test fixture candidate.",
       "retirementRationale": "Issue #475 supersedes this CI scope atom.",
       "evidence": "with patch(\"scripts.select_backend_tests.changed_paths\", return_value=[\".github/workflows/ci.yml\"]), patch("
+    },
+    {
+      "id": "oc-9f4b965fc7ecaca68689",
+      "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
+      "line": 160,
+      "symbol": "if",
+      "kind": "inline-operational-call",
+      "role": "Duration.ofHours",
+      "expression": "\"connection\"",
+      "expressionDigest": "9c7a30718516f5cee228d1d5141cda75511670842c25011a3481e6d7111f2c52",
+      "evidenceDigest": "3252bbe565fc68ccd2807dda01ec774a272902245f6224d813831f03dfd00bf3",
+      "surface": "java",
+      "status": "retained",
+      "classification": "protocol-or-format-invariant",
+      "rationale": "Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: \"connection\".",
+      "retirementRationale": "Lexical connection selector overlap at old BrowserSession construction disappears when the same owner-checked connectionId local replaces text(linked, connection); identity binding remains explicit.",
+      "evidence": "sessions.put(next, new BrowserSession(text(linked, \"owner\"), text(linked, \"connection\"), clock.instant().plus(Duration.ofHours(8)), attempt.perimeter()));"
+    },
+    {
+      "id": "oc-fe24a34bd4f74dbee071",
+      "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
+      "line": 160,
+      "symbol": "if",
+      "kind": "inline-operational-call",
+      "role": "Duration.ofHours",
+      "expression": "\"owner\"",
+      "expressionDigest": "622f06cbcd2e7e61637e17212e714e6c721d2dd5a9f7bc1aec911b65b34edcf5",
+      "evidenceDigest": "3252bbe565fc68ccd2807dda01ec774a272902245f6224d813831f03dfd00bf3",
+      "surface": "java",
+      "status": "retained",
+      "classification": "protocol-or-format-invariant",
+      "rationale": "Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: \"owner\".",
+      "retirementRationale": "Lexical owner selector overlap at old BrowserSession construction disappears when the same verified owner local replaces text(linked, owner); exact-session and owner checks remain.",
+      "evidence": "sessions.put(next, new BrowserSession(text(linked, \"owner\"), text(linked, \"connection\"), clock.instant().plus(Duration.ofHours(8)), attempt.perimeter()));"
+    },
+    {
+      "id": "oc-50de8f9d7b17741de20e",
+      "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
+      "line": 167,
+      "symbol": "if",
+      "kind": "inline-operational-call",
+      "role": "Duration.ofDays",
+      "expression": "\"connection\"",
+      "expressionDigest": "9c7a30718516f5cee228d1d5141cda75511670842c25011a3481e6d7111f2c52",
+      "evidenceDigest": "8f264e56167fe35ac84f38c85457c58cd4f517c320dd671c6b89296af4008b17",
+      "surface": "java",
+      "status": "retained",
+      "classification": "protocol-or-format-invariant",
+      "rationale": "Fixed OAuth/Responses/HTTP cookie schema, state or verified local identity vocabulary; possession of a selector grants no execution authority Reviewed source atom: \"connection\".",
+      "retirementRationale": "Second lexical connection selector in returning-registration construction disappears when connectionId replaces text(linked, connection); the actual registration schema key is migrated separately.",
+      "evidence": "hints.put(digest(registration), Map.of(\"connection\", text(linked, \"connection\"), \"perimeter\", attempt.perimeter(), \"expires\", clock.instant().plus(Duration.ofDays(30)).getEpochSecond()));"
     }
   ],
   "evidenceRecords": {
@@ -663606,7 +663655,6 @@
     "0b6ae2b1b893c6a54149c23c0e9a62da7e96dea14025626063d418b0cd5883b6": "for relative in (\"ravenroot/ravenroot-ui/package.json\", \"ravenroot/ravenroot-ui/package-lock.json\"):",
     "0b6ff46b885e74b945ba134812eb38ea9eebccd934a7a8f9265da21a92441f96": "path = next(path for path in sorted(self.files) if path.startswith(owner + '/src/main/java/') and path.endswith('.java'))",
     "0b709d0ccacb884b181a411d21de98337b71febbb5cadd3a68305cc54bc3596d": "self.assertEqual(\"b\" * 40, release[\"sourceCommit\"])",
-    "0b8d7a4e52af056dc0c6ce1aed4975206bb5d7d6c337fea734d46f340f5f1d54": "var attempt = new Pending(browser, owner, selected, client, pkce, nonce, clock.instant().plusSeconds(600), perimeterKey(perimeter), planUse, store.transaction(data -> text(data, \"host\")), configuration.callback(), configuration.mode(), session, false);",
     "0b97aed5d4d8488badd435bb38223b9dad3c4a8f53c80018b24b92f98afeeef2": "} private static byte[] hexToBytes(String hex) { byte[] bytes = new byte[hex.length() / 2];",
     "0ba3f6d35ac0eaa5aa5eea3d339a6c25e68c180e2de616c4a344d680c5760771": "PID_FILE=\"$RUNTIME_DIR/ravenroot.pid\"",
     "0ba85104635e72f5de9ff15e3f7a115d414c3f33b3553007fd5229e878256358": "assertTrue(executed.await(5, TimeUnit.SECONDS));",
@@ -663803,6 +663851,7 @@
     "104326d92504edb558d54b438aa4e1bed9d0d631f576290e37934f1b496291ba": "} } private static void await(CountDownLatch latch) { try { if (!latch.await(10, TimeUnit.SECONDS)) { throw new IllegalStateException(\"Conformance latch was never released\");",
     "104ad0633ed55eecd4e8519a2675f2784d0f6235d14bbdd60dcdf194581d3eb3": "RAVENROOT_PROGRAM_AUTHORING_MAX_SOURCE_BYTES: ${RAVENROOT_PROGRAM_AUTHORING_MAX_SOURCE_BYTES:-}",
     "104afa66073a9ee47c5151f96cccb0b2652c1bbba2c50967f5a96d0b16e2d65b": "set -- upgrade --install \"$HELM_RELEASE\" \"$HELM_CHART_DIR\" \\",
+    "10526f712904a88bf7f826c06237a71dc01b3f5bda461a446c4b35ed8ac3dfa7": "hints.put(digest(registration), Map.of(\"connection\", connectionId, \"perimeter\", attempt.perimeter(), \"expires\", clock.instant().plus(Duration.ofDays(30)).getEpochSecond()));",
     "10565ffab801f91d5b227cbabd4b6c13721b52f2ffe347e1ded2a911317381d4": "raise SystemExit(\"catalog exceeds the supported release count; begin a new retained catalog series\")",
     "105b4765ed6660139167354163e17e2adace38c3ca9ce66a4e173a9dc4c2ddba": "try (var input = exchange.getRequestBody()) { bytes = input.readNBytes(maximumBytes + 1);",
     "1069b9dd2be01fd94aa8093fb818e8ede623fa947d0814662cb56ece3a860cc8": "\"if (leaseTtl.compareTo(store.maxLeaseTtl()) >= 0) {\")",
@@ -665263,7 +665312,6 @@
     "3237975fc5e539166cb4e6f7c20bf1b777d981360744f41f925d3a560c2ed728": "value: {{ include \"ravenroot.graphLimitValue\" .Values.rateLimit.globalActiveExecutions }}",
     "323b0f0cd3966ac98992ff8a843344a967a0f1b213593cdabb8fd76f7e5d1bf8": "const setLocale = message?.type === 'SET_LOCALE';",
     "323d52abe99f5b24fbe83524cf428bae889ebdd99ef0717984d2cfdb0d9ebb04": "byte[] bytes = new byte[16];",
-    "3252bbe565fc68ccd2807dda01ec774a272902245f6224d813831f03dfd00bf3": "sessions.put(next, new BrowserSession(text(linked, \"owner\"), text(linked, \"connection\"), clock.instant().plus(Duration.ofHours(8)), attempt.perimeter()));",
     "32576a21c84b7d367f3096198f19110579ee84405f3e7ceb79570fa56bf6404b": "image: ${RAVENROOT_IMAGE:-ravenroot:local}",
     "325a40cc0b365a4e6dafc344f39f9d759d98b7a494e1e70df862718b76bbbf9d": "source = open(root + \"/ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java\",",
     "325be8a5876c89da6a44bd7e7bc258277138fd9ca9badfde8c63bf2c6a5b0a30": "const form = element(document_, 'form', { method: 'dialog', className: 'language-dialog-form' });",
@@ -665730,6 +665778,7 @@
     "3c29b9323cd3fc6fe0ab7c373164c52e34cb419bf703191e6199847e90a08d32": "const status = root?.querySelector('[data-viewer-status]');",
     "3c2d5e3ade6a9fe36362c1d794bf7351d68a3b77fc21195a3669f0ece793f4c9": "return \"agent\"",
     "3c2f12275e8ff958cb1b2c99c32330364279f5ea4b7dc6bff9634fe3c679ce64": "RAVENROOT_HOST_BIND_ADDRESS=\"$LOCAL_HOST_BIND_ADDRESS\" \\",
+    "3c33abe088b26af4b6272566041387b6d8821a40f4fb95f2be764a13681d3f5c": "sessions.put(next, new BrowserSession(owner, connectionId, clock.instant().plus(Duration.ofHours(8)), attempt.perimeter()));",
     "3c33f97b2801bf3673c4032371c078830a5536f26c6691e6c2d88b7da5f1ce39": "if isinstance(coverage, dict) and coverage.get(\"kind\") == \"graph-platform-carriers-v1\":",
     "3c399f91752ed3cb0992d26fcca32a352634b4f9ca42a2418562749dc3779073": "RAVENROOT_RATELIMIT_ADDRESS_BURST addressBurst rateLimit.addressBurst 1000000",
     "3c3e8c460b0f04019315f3294055db71761426881d750eea8982777a18fd5efb": "public static final String MAX_PAYLOAD_BYTES_VARIABLE = \"RAVENROOT_GRAPH_MAX_PAYLOAD_BYTES\";",
@@ -666880,6 +666929,7 @@
     "55227d87cb0c01c607ec3fc844663d9de512da3722ec8051e95e8a78689da714": "final class StorageAdmission { private static final int MAX_GATES = 4096;",
     "55297f93e235145250545141e225aab22c92182d7628f2012a9fd7e3903a3228": "public static final String ANTHROPIC_DEFAULT_MODEL = \"claude-opus-5\";",
     "554581e4f105e71e4d8ad69a652f0b7c07366ca909ec0a2e889e388dce353354": "mvn -B --no-transfer-progress -f \"$HARNESS_DIR/pom.xml\" verify",
+    "554ef3eaea75fe123061a12b4f9a5d84e38349243f15a9cf90d16f1a2d9c3fa4": "try { response = admitted.get(Math.max(1, deadline - System.nanoTime()), java.util.concurrent.TimeUnit.NANOSECONDS);",
     "5555c87bbe08f289f3f78f3d6739d910787f63a19c360f099d3dbf80abb28ae8": "'--set-string image.digest= \\\\\\n >\"$TEMP_DIR/tag-only.yaml\"',",
     "55572752cc5f45db83fbca5d42f79db78d09d879901e4c195af200ddc8c9dbea": "generated_source = resolved.with_suffix(\".md\") if resolved.suffix == \".html\" else None",
     "555b208bcd48fe1088840a7bdd1866947671c814d6af1e144eb24501b04039cf": "self.assertEqual(verify_attestation.call_count, 2)",
@@ -668189,6 +668239,7 @@
     "72ae6f77c9424bc007c39120cb155a2d47a6da9344f8829570cdf3ce193c3e73": "const commentMaxUtf8Bytes = integer(capability.commentMaxUtf8Bytes, 'comment maximum', 1);",
     "72af7f3a7861962bad0a3459ad96d27fa2316320de31f81e04d6dbc78c2543a0": "public final class NodePackageEgressPolicy { private static final Set<String> FORBIDDEN_CREDENTIAL_HEADERS = Set.of( \"host\", \"content-length\", \"connection\", \"upgrade\", \"transfer-encoding\", \"te\", \"trailer\", \"proxy-authorization\", \"proxy-connection\", \"sec-websocket-key\", \"sec-websocket-accept\", \"sec-websocket-version\", \"sec-websocket-protocol\", \"sec-websocket-extensions\", \"x-amz-date\", \"x-amz-content-sha256\", \"x-amz-security-token\");",
     "72b259f9c5da3c956ccb4f655cf14165236f6d4dd25c048be4353ad6e88b1295": "const name = requireText(group?.name, 'group.name');",
+    "72b871ff913d98e0fd728f2f46085fc9ff3c6211cc85473094f16b18027fb331": "var attempt = new Pending(browser, owner, selected, client, pkce, nonce, clock.instant().plusSeconds(600), perimeterKey(perimeter), planUse, text(data, \"host\"), configuration.callback(), configuration.mode(), session, false);",
     "72bc106c63525780f3def7b79743e0d25f5fe2e8de324567845a6920033e7ffc": "const v1Keys = ['acknowledgementId', 'challenge', 'channelId', 'exchangeId', 'expiresAt', 'grantRevision', 'parentOrigin', 'theme', 'viewerOrigin'];",
     "72d1af2d46016ffeb23345e02d7d1ae79c00ee551efd4671e5bf7b04967229d0": "const close = () => finish(dialog.returnValue === 'remember');",
     "72d4292f904cee3acbfe42faef96e48679581cf01df4d92540706085d727ce95": "direct_and_nested, \"Outer\"))",
@@ -668368,6 +668419,7 @@
     "768c1bfb9e05b7913d88968fc8d379e1418c8bd3c8ea20d52453bb3c65706316": "BASE_IMAGE = \"python@sha256:e81548ac35b07a3bd4805f275107592ef458b1e893c0e04d45aedaa19416cca5\"",
     "768d4fcb4257798fedc0f5f3a5ab2851a36a1a4c31dae349cda10ea31689c68c": "private static final Pattern CONFINED = Pattern.compile(\"[A-Za-z0-9][A-Za-z0-9._/-]{0,511}\");",
     "768f1c9f913efb158f1d59aa9b4d7b1b70622dfa511c0c057aec2ffdba3fce1d": "\"llm-prompt\": \"ai\", \"agent\": \"ai\", \"amqp.publish\": \"amqp091\", \"amqp.consume\": \"amqp091\",",
+    "768fa73fcc2ee183f62f8d055ef45011fd5041ed2cecb98dacb932ea397409af": "} public PersonalOAuthService(PersonalOAuthConfiguration configuration, TenantCredentialResolver system) { this(configuration, system, HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)) .followRedirects(HttpClient.Redirect.NEVER).build(), new OpenAiIdentityVerifier(), Clock.systemUTC());",
     "769113eccb993fb57e8add07ba50815aeeba56a217ce4792a62373e5ebe9c7a4": "static final String EVENT = \"x-github-event\";",
     "76a33cafc4cf70864c6dd35fa4fb6b416c61d3159eca3029bd910b817aed9849": "private static final PayloadLimits LIMITS = new PayloadLimits(MAX_PROFILE_BYTES, 8, 64, 256, 4096, 64);",
     "76abce3b95341744734cadf525b4c6661b7edce39690c36755c7caa050147556": "patch.object(fixture, \"mounted_paths\", return_value=set()):",
@@ -669484,7 +669536,6 @@
     "8eface7ebc1647f53161ca8a10e78ba016a1aef2ed2fc3bdb0ab6c0119bb6521": "const scaled = value => Number((value * factor).toFixed(4));",
     "8f12e24af051cbd8f0b4e657301f74da7cea6f4daee8cb644942cb3336f46e87": "sed -n 's/^.*RAVENROOT_CPU_AUXILIARY=//p' \"$auxiliary_log\" >\"$auxiliary_marker\"",
     "8f1f52133ba4884463300363f24c360cf0e937ba7d50dbfbd96ec474dd62825f": "} static boolean anyConfigured(Map<String, String> properties, Map<String, String> environment) { return properties.entrySet().stream().anyMatch(entry -> entry.getKey().startsWith(\"ravenroot.postgresql.\") && nonblank(entry.getValue())) || environment.entrySet().stream().anyMatch(entry -> entry.getKey().startsWith(\"RAVENROOT_POSTGRES_\") && nonblank(entry.getValue()));",
-    "8f264e56167fe35ac84f38c85457c58cd4f517c320dd671c6b89296af4008b17": "hints.put(digest(registration), Map.of(\"connection\", text(linked, \"connection\"), \"perimeter\", attempt.perimeter(), \"expires\", clock.instant().plus(Duration.ofDays(30)).getEpochSecond()));",
     "8f27b2ab06f3d452b30f640a60e33c701ca89b4d1a00bfb5650520eed116486c": "\"RAVENROOT_JDBC_\", \"RAVENROOT_KAFKA_\", \"RAVENROOT_LLM_\", \"RAVENROOT_MAIL_\",",
     "8f322b4c6e412834fd5f5ccff56e2f08698b088fa0c45f5094b0531dfc1cf31a": "public final class EnvironmentNodePackageServiceGrants { public static final String VARIABLE_PREFIX = \"RAVENROOT_NODE_PACKAGE_SERVICES_\";",
     "8f32352c67afa0848095db540119837484454630cc2d6a321a1b638e2ee72e09": "private static final int MAX_MESSAGE_ID_BYTES = 128;",
@@ -672819,7 +672870,6 @@
     "d882dd253e70ad2d2ba74f62cb174565439ddd05f9655dbcd800820d9972f3df": "final class AngusImapConsumerProtocol implements ImapConsumerProtocol { static final int MAX_IO_TIMEOUT_MS = 30_000;",
     "d88dfd5a42ec1d1f5ee79d47fa0df38cdab08d09aeb39df941648ede277e5843": "const list = document.createElement('ul');",
     "d891290a2624dddfa16e2074235ae6cfe7857376ce5846234875e439ff98a072": "RAVENROOT_HUMAN_TASK_DEFAULT_ATTENTION_PAGE_SIZE",
-    "d894ce8f7247439d4f3e5a1f3fdf2a14be328b3a7359882c4434e0c18695e8a2": "private record BrowserSession(String owner, String connection, Instant expires, String perimeter) { } private record Pending(String browser, String owner, String connection, String client, String verifier, String nonce, Instant expires, String perimeter, boolean planUse, String host, URI callback, String mode, BrowserSession session, boolean retried) { } private record Unlocked(String owner, String connection, byte[] key, Instant expires, String purpose) { } public PersonalOAuthService(PersonalOAuthConfiguration configuration, TenantCredentialResolver system) { this(configuration, system, HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)) .followRedirects(HttpClient.Redirect.NEVER).build(), new OpenAiIdentityVerifier(), Clock.systemUTC());",
     "d899bc2212d421e9433d1544c3bc327470253f0803eed770f693523c0974853f": "const halfH = node.height / 2;",
     "d8a99ce89cc58c6795e6c8e0a165b1b9b1e83a8bece1bd4c69890327923bd54d": "{\"pointer\":\"/properties/assistant/properties/maxOutputTokens/oneOf/1/$ref\",\"reference\":\"#/definitions/graphBlank\",\"required\":true,\"resolutionError\":null,\"resolved\":{\"pattern\":\"^[\\t-\\r\\u001c- \\u1680\\u2000-\\u2006\\u2008-\\u200a\\u2028-\\u2029\\u205f\\u3000]*$\",\"type\":\"string\"}}",
     "d8ae8a5df249ddba2923d0d9fa4ae974aa51da5caba03aebc02dd065145cee14": "public final class StandardPublicationPolicyEvaluator implements PublicationPolicyEvaluator { private static final int MAX_LOGICAL_PATH_CHARACTERS = 2_048;",
@@ -1209425,6 +1209475,156 @@
       "mappings": [],
       "retirements": [],
       "additions": []
+    },
+    {
+      "id": "issue-599-personal-final-authority-admission-v1",
+      "issue": "#599",
+      "sourceRevision": "69b5fc6d55fc12fc5180fda9ecb28da81027c750",
+      "targetRevision": "418304e4cc9dd0ee57dd8f892cd73707cc0cbbbe",
+      "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+      "sourceInventoryDigest": "5a96ac1c7bdebfbdcc26ac287af68ae544534263e7619b2af4b2da27f63249e6",
+      "targetCandidateDigest": "1312e6a0e3191729cb4ea0e30debde0f5d7102f728578611350af1b4a1b942f3",
+      "mappings": [
+        {
+          "fromId": "oc-86ebb0b62b771737d452",
+          "toId": "oc-558dadb9ffb0fbbde945",
+          "approved": true,
+          "rationale": "Unchanged ten-second connect timeout; helpers inserted before constructor.",
+          "equivalence": {
+            "kind": "same-expression-location-v1",
+            "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
+            "beforeLine": 49,
+            "afterLine": 74,
+            "beforeEvidenceDigest": "d894ce8f7247439d4f3e5a1f3fdf2a14be328b3a7359882c4434e0c18695e8a2",
+            "afterEvidenceDigest": "768fa73fcc2ee183f62f8d055ef45011fd5041ed2cecb98dacb932ea397409af"
+          }
+        },
+        {
+          "fromId": "oc-68fe10e4fdea2e63b2cf",
+          "toId": "oc-a342a4ccd0b9cf3f298a",
+          "approved": true,
+          "rationale": "Unchanged eight-hour authenticated browser lifetime; callback uses local owner/connection values in the same atomic completion.",
+          "equivalence": {
+            "kind": "same-expression-location-v1",
+            "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
+            "beforeLine": 160,
+            "afterLine": 181,
+            "beforeEvidenceDigest": "3252bbe565fc68ccd2807dda01ec774a272902245f6224d813831f03dfd00bf3",
+            "afterEvidenceDigest": "3c33abe088b26af4b6272566041387b6d8821a40f4fb95f2be764a13681d3f5c"
+          }
+        },
+        {
+          "fromId": "oc-a3c0942b6edd73f7c22f",
+          "toId": "oc-73705d2290f8ad6a3740",
+          "approved": true,
+          "rationale": "Same returning-registration connection schema key; registration insertion joins callback completion.",
+          "equivalence": {
+            "kind": "same-expression-location-v1",
+            "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
+            "beforeLine": 167,
+            "afterLine": 186,
+            "beforeEvidenceDigest": "8f264e56167fe35ac84f38c85457c58cd4f517c320dd671c6b89296af4008b17",
+            "afterEvidenceDigest": "10526f712904a88bf7f826c06237a71dc01b3f5bda461a446c4b35ed8ac3dfa7"
+          }
+        },
+        {
+          "fromId": "oc-a494c4571b38c77a4bd5",
+          "toId": "oc-64cef54d9aaa6f16212e",
+          "approved": true,
+          "rationale": "Same registration expires schema key in combined callback transaction.",
+          "equivalence": {
+            "kind": "same-expression-location-v1",
+            "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
+            "beforeLine": 168,
+            "afterLine": 187,
+            "beforeEvidenceDigest": "8f264e56167fe35ac84f38c85457c58cd4f517c320dd671c6b89296af4008b17",
+            "afterEvidenceDigest": "10526f712904a88bf7f826c06237a71dc01b3f5bda461a446c4b35ed8ac3dfa7"
+          }
+        },
+        {
+          "fromId": "oc-83f15abe2af5ba270490",
+          "toId": "oc-613678b6b75cd8732aa9",
+          "approved": true,
+          "rationale": "Same registration perimeter schema key in combined callback transaction.",
+          "equivalence": {
+            "kind": "same-expression-location-v1",
+            "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
+            "beforeLine": 168,
+            "afterLine": 187,
+            "beforeEvidenceDigest": "8f264e56167fe35ac84f38c85457c58cd4f517c320dd671c6b89296af4008b17",
+            "afterEvidenceDigest": "10526f712904a88bf7f826c06237a71dc01b3f5bda461a446c4b35ed8ac3dfa7"
+          }
+        },
+        {
+          "fromId": "oc-07333769bc25c2a88d20",
+          "toId": "oc-bcaa302c46d7926a4122",
+          "approved": true,
+          "rationale": "Same thirty-day non-authorizing registration hint lifetime in combined callback transaction.",
+          "equivalence": {
+            "kind": "same-expression-location-v1",
+            "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
+            "beforeLine": 168,
+            "afterLine": 187,
+            "beforeEvidenceDigest": "8f264e56167fe35ac84f38c85457c58cd4f517c320dd671c6b89296af4008b17",
+            "afterEvidenceDigest": "10526f712904a88bf7f826c06237a71dc01b3f5bda461a446c4b35ed8ac3dfa7"
+          }
+        },
+        {
+          "fromId": "oc-34bb47598bdd3a56c0e6",
+          "toId": "oc-ce1b85fae4075fe0ec07",
+          "approved": true,
+          "rationale": "Same initial ten-minute pending proof lifetime; host value read from the enclosing store transaction.",
+          "equivalence": {
+            "kind": "same-expression-location-v1",
+            "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
+            "beforeLine": 286,
+            "afterLine": 310,
+            "beforeEvidenceDigest": "0b8d7a4e52af056dc0c6ce1aed4975206bb5d7d6c337fea734d46f340f5f1d54",
+            "afterEvidenceDigest": "72b871ff913d98e0fd728f2f46085fc9ff3c6211cc85473094f16b18027fb331"
+          }
+        },
+        {
+          "fromId": "oc-908dbf1fc833883dc011",
+          "toId": "oc-eb2ad1bb9bb696eaceca",
+          "approved": true,
+          "rationale": "Same stable host state key, now read directly from the enclosing store transaction.",
+          "equivalence": {
+            "kind": "same-expression-location-v1",
+            "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthService.java",
+            "beforeLine": 287,
+            "afterLine": 311,
+            "beforeEvidenceDigest": "0b8d7a4e52af056dc0c6ce1aed4975206bb5d7d6c337fea734d46f340f5f1d54",
+            "afterEvidenceDigest": "72b871ff913d98e0fd728f2f46085fc9ff3c6211cc85473094f16b18027fb331"
+          }
+        }
+      ],
+      "retirements": [
+        {
+          "id": "oc-9f4b965fc7ecaca68689",
+          "approved": true,
+          "rationale": "Lexical connection selector overlap at old BrowserSession construction disappears when the same owner-checked connectionId local replaces text(linked, connection); identity binding remains explicit."
+        },
+        {
+          "id": "oc-fe24a34bd4f74dbee071",
+          "approved": true,
+          "rationale": "Lexical owner selector overlap at old BrowserSession construction disappears when the same verified owner local replaces text(linked, owner); exact-session and owner checks remain."
+        },
+        {
+          "id": "oc-50de8f9d7b17741de20e",
+          "approved": true,
+          "rationale": "Second lexical connection selector in returning-registration construction disappears when connectionId replaces text(linked, connection); the actual registration schema key is migrated separately."
+        }
+      ],
+      "additions": [
+        {
+          "id": "oc-9609b512a646187c119b",
+          "metadata": {
+            "status": "retained",
+            "classification": "security-ceiling-or-default",
+            "rationale": "Positive one-nanosecond floor for CompletableFuture.get with the remaining time from the existing monotonic ninety-second provider request/body deadline. The original HttpRequest timeout and body-close deadline are unchanged; elapsed refresh/catalog work is outside this request as before. This is an internal bounded wait carrier, no new operator setting, timeout extension, retry or authority."
+          }
+        }
+      ]
     }
   ],
   "semanticReviewHistory": [

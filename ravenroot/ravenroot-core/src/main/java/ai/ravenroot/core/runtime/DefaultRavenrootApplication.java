@@ -3174,6 +3174,15 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
             var traversal = stored.state().traversals().get(executionId);
             if (traversal == null) return lookup;
             var durableStatus = ProcessInstanceStatus.valueOf(traversal.status().name());
+            if (durableStatus == ProcessInstanceStatus.COMPLETED && !outcome.status().terminal()) {
+                // Aggregate completion can race this read or precede result publication. Refresh
+                // once, without manufacturing successful output from the earlier running entry.
+                // A published null payload is valid; readiness belongs to the typed result.
+                var refreshed = executionResults.lookup(new ExecutionResultRegistry.Key(tenantId, executionId));
+                if (refreshed instanceof ai.ravenroot.api.application.ExecutionLookup.Found current
+                        && !current.outcome().status().terminal()) return lookup;
+                return refreshed;
+            }
             if (durableStatus == outcome.status()) return lookup;
             // A graph can finish before its durable participant receipts do.  The initial result
             // record then describes graph completion, while the aggregate remains WAITING and may

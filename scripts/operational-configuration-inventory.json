@@ -479165,7 +479165,7 @@
   {
    "id": "oc-8eb9a5fc85e5cd87e87d",
    "path": "scripts/fixtures/kubernetes_cpu_hierarchy_probe.sh",
-   "line": 109,
+   "line": 111,
    "symbol": "module",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -479180,7 +479180,7 @@
   {
    "id": "oc-c01e16a68b20975184cb",
    "path": "scripts/fixtures/kubernetes_cpu_hierarchy_probe.sh",
-   "line": 109,
+   "line": 111,
    "symbol": "module",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -479195,7 +479195,7 @@
   {
    "id": "oc-b22de690d2119ea4f0df",
    "path": "scripts/fixtures/kubernetes_cpu_hierarchy_probe.sh",
-   "line": 112,
+   "line": 114,
    "symbol": "module",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -479210,7 +479210,7 @@
   {
    "id": "oc-cd35fa9bcea078cb390b",
    "path": "scripts/fixtures/kubernetes_cpu_hierarchy_probe.sh",
-   "line": 112,
+   "line": 114,
    "symbol": "module",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -479225,7 +479225,7 @@
   {
    "id": "oc-116f92029a5d8d94c405",
    "path": "scripts/fixtures/kubernetes_cpu_hierarchy_probe.sh",
-   "line": 112,
+   "line": 114,
    "symbol": "module",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -479240,7 +479240,7 @@
   {
    "id": "oc-b415949f7ca0c89062e5",
    "path": "scripts/fixtures/kubernetes_cpu_hierarchy_probe.sh",
-   "line": 113,
+   "line": 115,
    "symbol": "module",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -479255,7 +479255,7 @@
   {
    "id": "oc-ebd5fc72c7b86aa4990d",
    "path": "scripts/fixtures/kubernetes_cpu_hierarchy_probe.sh",
-   "line": 113,
+   "line": 115,
    "symbol": "module",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -479270,7 +479270,7 @@
   {
    "id": "oc-fcf97937c377c799ce16",
    "path": "scripts/fixtures/kubernetes_cpu_hierarchy_probe.sh",
-   "line": 114,
+   "line": 116,
    "symbol": "module",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -479285,7 +479285,7 @@
   {
    "id": "oc-a21b0905f5cd726d76d4",
    "path": "scripts/fixtures/kubernetes_cpu_hierarchy_probe.sh",
-   "line": 114,
+   "line": 116,
    "symbol": "module",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -479300,7 +479300,7 @@
   {
    "id": "oc-b22a3f5a85ad5ec9b39f",
    "path": "scripts/fixtures/kubernetes_cpu_hierarchy_probe.sh",
-   "line": 116,
+   "line": 118,
    "symbol": "module",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -479315,7 +479315,7 @@
   {
    "id": "oc-2450aea6c389010d3a59",
    "path": "scripts/fixtures/kubernetes_cpu_hierarchy_probe.sh",
-   "line": 116,
+   "line": 118,
    "symbol": "module",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -479330,7 +479330,7 @@
   {
    "id": "oc-3f5110691dcb49a047e3",
    "path": "scripts/fixtures/kubernetes_cpu_hierarchy_probe.sh",
-   "line": 117,
+   "line": 119,
    "symbol": "module",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -479345,7 +479345,7 @@
   {
    "id": "oc-f9e58900151d48663bea",
    "path": "scripts/fixtures/kubernetes_cpu_hierarchy_probe.sh",
-   "line": 117,
+   "line": 119,
    "symbol": "module",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -479360,7 +479360,7 @@
   {
    "id": "oc-33d4cde20ad9addc558a",
    "path": "scripts/fixtures/kubernetes_cpu_hierarchy_probe.sh",
-   "line": 119,
+   "line": 121,
    "symbol": "module",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -479375,7 +479375,7 @@
   {
    "id": "oc-3500c5a02867ec5767cf",
    "path": "scripts/fixtures/kubernetes_cpu_hierarchy_probe.sh",
-   "line": 119,
+   "line": 121,
    "symbol": "module",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -479390,7 +479390,7 @@
   {
    "id": "oc-912ad57ac9314680f69c",
    "path": "scripts/fixtures/kubernetes_cpu_hierarchy_probe.sh",
-   "line": 120,
+   "line": 122,
    "symbol": "module",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -479405,7 +479405,7 @@
   {
    "id": "oc-a217f9fa9e545749a1c3",
    "path": "scripts/fixtures/kubernetes_cpu_hierarchy_probe.sh",
-   "line": 120,
+   "line": 122,
    "symbol": "module",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -479420,7 +479420,7 @@
   {
    "id": "oc-f7c4ed65577dae682b57",
    "path": "scripts/fixtures/kubernetes_cpu_hierarchy_probe.sh",
-   "line": 121,
+   "line": 123,
    "symbol": "module",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -479435,7 +479435,7 @@
   {
    "id": "oc-1d9c4671322de635f1ae",
    "path": "scripts/fixtures/kubernetes_cpu_hierarchy_probe.sh",
-   "line": 121,
+   "line": 123,
    "symbol": "module",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -479450,7 +479450,7 @@
   {
    "id": "oc-9b7e46af5e651d653d17",
    "path": "scripts/fixtures/kubernetes_cpu_hierarchy_probe.sh",
-   "line": 126,
+   "line": 128,
    "symbol": "module",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -479465,7 +479465,7 @@
   {
    "id": "oc-80fc740e50ccc24e6006",
    "path": "scripts/fixtures/kubernetes_cpu_hierarchy_probe.sh",
-   "line": 126,
+   "line": 128,
    "symbol": "module",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -479480,7 +479480,7 @@
   {
    "id": "oc-d60c360d71890c82c27d",
    "path": "scripts/fixtures/kubernetes_cpu_hierarchy_probe.sh",
-   "line": 126,
+   "line": 128,
    "symbol": "module",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -479495,7 +479495,7 @@
   {
    "id": "oc-452d10bb55d1e8ff4abc",
    "path": "scripts/fixtures/kubernetes_cpu_hierarchy_probe.sh",
-   "line": 126,
+   "line": 128,
    "symbol": "module",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -479510,7 +479510,7 @@
   {
    "id": "oc-27c5b7d427acfd19ebf7",
    "path": "scripts/fixtures/kubernetes_cpu_hierarchy_probe.sh",
-   "line": 126,
+   "line": 128,
    "symbol": "module",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -479525,7 +479525,7 @@
   {
    "id": "oc-b72ccb6ad5ccc7c53b3b",
    "path": "scripts/fixtures/kubernetes_cpu_hierarchy_probe.sh",
-   "line": 128,
+   "line": 130,
    "symbol": "module",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -479540,7 +479540,7 @@
   {
    "id": "oc-51a063652baea5c9dc53",
    "path": "scripts/fixtures/kubernetes_cpu_hierarchy_probe.sh",
-   "line": 128,
+   "line": 130,
    "symbol": "module",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -479555,7 +479555,7 @@
   {
    "id": "oc-d90c8db724b69b619142",
    "path": "scripts/fixtures/kubernetes_cpu_hierarchy_probe.sh",
-   "line": 128,
+   "line": 130,
    "symbol": "module",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -479570,7 +479570,7 @@
   {
    "id": "oc-690ee43216ca1e467864",
    "path": "scripts/fixtures/kubernetes_cpu_hierarchy_probe.sh",
-   "line": 128,
+   "line": 130,
    "symbol": "module",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -479585,7 +479585,7 @@
   {
    "id": "oc-eb389c7f5a674332a155",
    "path": "scripts/fixtures/kubernetes_cpu_hierarchy_probe.sh",
-   "line": 128,
+   "line": 130,
    "symbol": "module",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -595597,9 +595597,594 @@
    "rationale": "Reviewed issue #446 CI repair atom 2 in scripts/tests/test_kubernetes_runner_acceptance.py#command: invocation-owned bridge identity/lifecycle, positive preservation check, pinned supported cluster/tool identity, or negative fixture assertion; no production configuration default or authority is introduced."
   },
   {
+   "id": "oc-57911bebb3e40e552c2d",
+   "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+   "line": 417,
+   "symbol": "run_cpu_worker_timing",
+   "kind": "inline-script-operational",
+   "role": "inline",
+   "expression": "\"scripts/fixtures/kubernetes_cpu_hierarchy_probe.sh\"",
+   "expressionDigest": "5b82d623c2f7c6c9b40a471d79ddac72680c98e1731163779ac34ffd2bad0248",
+   "evidenceDigest": "799a56154eafb972316743eb9fc26ebce3e460c0acd62e705a4c3bb8b5d948d3",
+   "surface": "test-fixture",
+   "status": "retained",
+   "classification": "test-fixture",
+   "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+  },
+  {
+   "id": "oc-aed3ec6258f8b940d011",
+   "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+   "line": 421,
+   "symbol": "run_cpu_worker_timing",
+   "kind": "inline-script-operational",
+   "role": "inline",
+   "expression": "\"</proc/uptime\"",
+   "expressionDigest": "39438ca535a234b3454a857ec93e2e4385e8ad79f219e05e1f174c72c7096e5e",
+   "evidenceDigest": "57708a63351ee8a0a0e45e5d8165d4845e5c52fcd645d462874f9bf7b33276ed",
+   "surface": "test-fixture",
+   "status": "retained",
+   "classification": "test-fixture",
+   "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+  },
+  {
+   "id": "oc-df27b419450d1c66be3a",
+   "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+   "line": 421,
+   "symbol": "run_cpu_worker_timing",
+   "kind": "inline-script-operational",
+   "role": "inline",
+   "expression": "2",
+   "expressionDigest": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35",
+   "evidenceDigest": "57708a63351ee8a0a0e45e5d8165d4845e5c52fcd645d462874f9bf7b33276ed",
+   "surface": "test-fixture",
+   "status": "retained",
+   "classification": "test-fixture",
+   "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+  },
+  {
+   "id": "oc-aeb99dd7a8f0c324174d",
+   "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+   "line": 424,
+   "symbol": "run_cpu_worker_timing",
+   "kind": "inline-script-operational",
+   "role": "inline",
+   "expression": "\"</proc/uptime\"",
+   "expressionDigest": "39438ca535a234b3454a857ec93e2e4385e8ad79f219e05e1f174c72c7096e5e",
+   "evidenceDigest": "51e6bd97f3d755af44da62cf7b29b00a2e115b36d5a8744d773581f5126182b0",
+   "surface": "test-fixture",
+   "status": "retained",
+   "classification": "test-fixture",
+   "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+  },
+  {
+   "id": "oc-531521215e01f37b4b42",
+   "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+   "line": 424,
+   "symbol": "run_cpu_worker_timing",
+   "kind": "inline-script-operational",
+   "role": "inline",
+   "expression": "'<\"$path/clock\"'",
+   "expressionDigest": "b61fca0ad54988537d428953ac138085e716543eb8ec122b877d5aa0c8646270",
+   "evidenceDigest": "51e6bd97f3d755af44da62cf7b29b00a2e115b36d5a8744d773581f5126182b0",
+   "surface": "test-fixture",
+   "status": "retained",
+   "classification": "test-fixture",
+   "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+  },
+  {
+   "id": "oc-4ecf466af0de3f0f58c6",
+   "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+   "line": 426,
+   "symbol": "run_cpu_worker_timing",
+   "kind": "script-default",
+   "role": "path",
+   "expression": "1",
+   "expressionDigest": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+   "evidenceDigest": "515a008ea7723f02ccd34075046928ae08c4ed38926ff262e66749f9935f2ac5",
+   "surface": "test-fixture",
+   "status": "retained",
+   "classification": "test-fixture",
+   "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+  },
+  {
+   "id": "oc-665f99f2e7acaddfb9ea",
+   "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+   "line": 426,
+   "symbol": "run_cpu_worker_timing",
+   "kind": "script-default",
+   "role": "path",
+   "expression": "2",
+   "expressionDigest": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35",
+   "evidenceDigest": "515a008ea7723f02ccd34075046928ae08c4ed38926ff262e66749f9935f2ac5",
+   "surface": "test-fixture",
+   "status": "retained",
+   "classification": "test-fixture",
+   "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+  },
+  {
+   "id": "oc-91f226548b9adcf8b6f2",
+   "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+   "line": 426,
+   "symbol": "run_cpu_worker_timing",
+   "kind": "script-default",
+   "role": "path",
+   "expression": "3",
+   "expressionDigest": "4e07408562bedb8b60ce05c1decfe3ad16b72230967de01f640b7e4729b49fce",
+   "evidenceDigest": "515a008ea7723f02ccd34075046928ae08c4ed38926ff262e66749f9935f2ac5",
+   "surface": "test-fixture",
+   "status": "retained",
+   "classification": "test-fixture",
+   "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+  },
+  {
+   "id": "oc-26344da0d2ae9eebe462",
+   "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+   "line": 426,
+   "symbol": "run_cpu_worker_timing",
+   "kind": "script-default",
+   "role": "path",
+   "expression": "4",
+   "expressionDigest": "4b227777d4dd1fc61c6f884f48641d02b4d121d3fd328cb08b5531fcacdabf8a",
+   "evidenceDigest": "515a008ea7723f02ccd34075046928ae08c4ed38926ff262e66749f9935f2ac5",
+   "surface": "test-fixture",
+   "status": "retained",
+   "classification": "test-fixture",
+   "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+  },
+  {
+   "id": "oc-4da897eb974e5998e15e",
+   "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+   "line": 427,
+   "symbol": "run_cpu_worker_timing",
+   "kind": "inline-script-operational",
+   "role": "inline",
+   "expression": "0",
+   "expressionDigest": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+   "evidenceDigest": "a36b6fb48c5720497b3ec0e40f4adc69c56097da28322000e1b91c1de3018514",
+   "surface": "test-fixture",
+   "status": "retained",
+   "classification": "test-fixture",
+   "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+  },
+  {
+   "id": "oc-c9a91fffa3be6a3e2ae8",
+   "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+   "line": 427,
+   "symbol": "run_cpu_worker_timing",
+   "kind": "inline-script-operational",
+   "role": "inline",
+   "expression": "0",
+   "expressionDigest": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+   "evidenceDigest": "a36b6fb48c5720497b3ec0e40f4adc69c56097da28322000e1b91c1de3018514",
+   "surface": "test-fixture",
+   "status": "retained",
+   "classification": "test-fixture",
+   "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+  },
+  {
+   "id": "oc-f2dd1a144c702d6cccbf",
+   "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+   "line": 434,
+   "symbol": "run_cpu_worker_timing",
+   "kind": "inline-script-operational",
+   "role": "inline",
+   "expression": "'-r key value'",
+   "expressionDigest": "3d0a904a123bf1eddf39b183284746fbe600fbf357752e1f447e3e3ce0223691",
+   "evidenceDigest": "af6d986a12096da4c5d147ad8c83051e77fa2d4f55fe3ff9766c16b4ed9cf0a7",
+   "surface": "test-fixture",
+   "status": "retained",
+   "classification": "test-fixture",
+   "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+  },
+  {
+   "id": "oc-09298af2964d41c84e7f",
+   "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+   "line": 435,
+   "symbol": "run_cpu_worker_timing",
+   "kind": "inline-script-operational",
+   "role": "inline",
+   "expression": "0",
+   "expressionDigest": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+   "evidenceDigest": "7021e25b403e9a03572402539620667632664e8f438d02fa5231202a20e9c48a",
+   "surface": "test-fixture",
+   "status": "retained",
+   "classification": "test-fixture",
+   "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+  },
+  {
+   "id": "oc-5c99e36ae76434ea7f5f",
+   "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+   "line": 435,
+   "symbol": "run_cpu_worker_timing",
+   "kind": "inline-script-operational",
+   "role": "inline",
+   "expression": "0",
+   "expressionDigest": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+   "evidenceDigest": "7021e25b403e9a03572402539620667632664e8f438d02fa5231202a20e9c48a",
+   "surface": "test-fixture",
+   "status": "retained",
+   "classification": "test-fixture",
+   "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+  },
+  {
+   "id": "oc-58040486aadf3dde9fd6",
+   "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+   "line": 436,
+   "symbol": "run_cpu_worker_timing",
+   "kind": "script-default",
+   "role": "counter_reads",
+   "expression": "1",
+   "expressionDigest": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+   "evidenceDigest": "032403226555d37cc978e9fd30c96b8a079b1dda58205309ef1af817e6b7638a",
+   "surface": "test-fixture",
+   "status": "retained",
+   "classification": "test-fixture",
+   "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+  },
+  {
+   "id": "oc-b982149fab8abdee87c3",
+   "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+   "line": 445,
+   "symbol": "run_cpu_worker_timing",
+   "kind": "inline-script-operational",
+   "role": "inline",
+   "expression": "\"clock\"",
+   "expressionDigest": "49f3c56ed1545326eb00bc3db6a1338baba9977b9b1b5783d80ed76ad45b2851",
+   "evidenceDigest": "a5c85ca7ce8fa672c627c988dcbb2d1acd84e70e96d7efd52a5991f09f27ac7c",
+   "surface": "test-fixture",
+   "status": "retained",
+   "classification": "test-fixture",
+   "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+  },
+  {
+   "id": "oc-6a36065ca66bf515da88",
+   "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+   "line": 445,
+   "symbol": "run_cpu_worker_timing",
+   "kind": "inline-script-operational",
+   "role": "inline",
+   "expression": "\"controlled clock input\\n\"",
+   "expressionDigest": "c56d7fec996cae0c62a9a44b9b8b25ddd5e54c5fa7dae6da7afa6cc0c701de08",
+   "evidenceDigest": "a5c85ca7ce8fa672c627c988dcbb2d1acd84e70e96d7efd52a5991f09f27ac7c",
+   "surface": "test-fixture",
+   "status": "retained",
+   "classification": "test-fixture",
+   "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+  },
+  {
+   "id": "oc-00be598a4c1ba80a03be",
+   "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+   "line": 446,
+   "symbol": "run_cpu_worker_timing",
+   "kind": "inline-script-operational",
+   "role": "inline",
+   "expression": "\"cpu.stat\"",
+   "expressionDigest": "32a48679e695515e55267d5c5c0288af3092c991abcb1be0fcfcc02fb7c1faf1",
+   "evidenceDigest": "2cd3af8377f73d8a133eeb72efbd7658d2aa4941e980d857e1755338b7f0ccc3",
+   "surface": "test-fixture",
+   "status": "retained",
+   "classification": "test-fixture",
+   "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+  },
+  {
+   "id": "oc-4bb15962d561adf28722",
+   "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+   "line": 446,
+   "symbol": "run_cpu_worker_timing",
+   "kind": "inline-script-operational",
+   "role": "inline",
+   "expression": "\"nr_throttled 1\\n\"",
+   "expressionDigest": "acf766629f7add36d47755f26f92faca25e2ba8314324576416aab3f29be0089",
+   "evidenceDigest": "2cd3af8377f73d8a133eeb72efbd7658d2aa4941e980d857e1755338b7f0ccc3",
+   "surface": "test-fixture",
+   "status": "retained",
+   "classification": "test-fixture",
+   "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+  },
+  {
+   "id": "oc-fc008a5a1978767b1ed3",
+   "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+   "line": 447,
+   "symbol": "run_cpu_worker_timing",
+   "kind": "inline-script-operational",
+   "role": "inline",
+   "expression": "\"-c\"",
+   "expressionDigest": "542dff0a22abbcc83d69ee1c947ea3e8f95d5df5563752987e8041c84a0ff06a",
+   "evidenceDigest": "d057a1a3a1ad6ad3864ce3cb51ec1b02a270396477ed13c416d25a6d86177fcc",
+   "surface": "test-fixture",
+   "status": "retained",
+   "classification": "test-fixture",
+   "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+  },
+  {
+   "id": "oc-20c5d4f782c62778a2c7",
+   "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+   "line": 447,
+   "symbol": "run_cpu_worker_timing",
+   "kind": "inline-script-operational",
+   "role": "inline",
+   "expression": "\"bash\"",
+   "expressionDigest": "9b40441ac1aa53b6cd7fc50670476a42f0e1b5fa3944934a329334217bbc709e",
+   "evidenceDigest": "d057a1a3a1ad6ad3864ce3cb51ec1b02a270396477ed13c416d25a6d86177fcc",
+   "surface": "test-fixture",
+   "status": "retained",
+   "classification": "test-fixture",
+   "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+  },
+  {
+   "id": "oc-dfe90f4b2aff830630f9",
+   "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+   "line": 447,
+   "symbol": "run_cpu_worker_timing",
+   "kind": "inline-script-operational",
+   "role": "inline",
+   "expression": "\"timing-test\"",
+   "expressionDigest": "8b174a5e0c47de7a2f5750edc3e01a102ad61edba9edec14355f0197b20f8363",
+   "evidenceDigest": "d057a1a3a1ad6ad3864ce3cb51ec1b02a270396477ed13c416d25a6d86177fcc",
+   "surface": "test-fixture",
+   "status": "retained",
+   "classification": "test-fixture",
+   "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+  },
+  {
+   "id": "oc-36bedaf96c80b142c19d",
+   "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+   "line": 449,
+   "symbol": "run_cpu_worker_timing",
+   "kind": "script-default",
+   "role": "timeout",
+   "expression": "5",
+   "expressionDigest": "ef2d127de37b942baad06145e54b0c619a1f22327b2ebbcfbec78f5564afe39d",
+   "evidenceDigest": "c8f0b6ba134b10bdf74dc4d247e5466b2d628ce12ed4b8a0a0d0b885d4ed81fe",
+   "surface": "test-fixture",
+   "status": "retained",
+   "classification": "test-fixture",
+   "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+  },
+  {
+   "id": "oc-ee6defdc57aa4ae21aac",
+   "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+   "line": 454,
+   "symbol": "test_native_cpu_probe_shell_syntax_is_valid",
+   "kind": "inline-script-operational",
+   "role": "inline",
+   "expression": "\"-n\"",
+   "expressionDigest": "e56a46f6e3e8abd3eff04c9b3579ee1b4bb946295e52cf59e1e528b42205fa44",
+   "evidenceDigest": "79f495982716cc92f28905b5f3e1ef5836daf6dcd7678dbb0e89871fb39d227a",
+   "surface": "test-fixture",
+   "status": "retained",
+   "classification": "test-fixture",
+   "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+  },
+  {
+   "id": "oc-33ac9871473f22481ef6",
+   "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+   "line": 454,
+   "symbol": "test_native_cpu_probe_shell_syntax_is_valid",
+   "kind": "inline-script-operational",
+   "role": "inline",
+   "expression": "\"bash\"",
+   "expressionDigest": "9b40441ac1aa53b6cd7fc50670476a42f0e1b5fa3944934a329334217bbc709e",
+   "evidenceDigest": "79f495982716cc92f28905b5f3e1ef5836daf6dcd7678dbb0e89871fb39d227a",
+   "surface": "test-fixture",
+   "status": "retained",
+   "classification": "test-fixture",
+   "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+  },
+  {
+   "id": "oc-88686cc866c8e53b40f2",
+   "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+   "line": 454,
+   "symbol": "test_native_cpu_probe_shell_syntax_is_valid",
+   "kind": "inline-script-operational",
+   "role": "inline",
+   "expression": "\"scripts/fixtures/kubernetes_cpu_hierarchy_probe.sh\"",
+   "expressionDigest": "5b82d623c2f7c6c9b40a471d79ddac72680c98e1731163779ac34ffd2bad0248",
+   "evidenceDigest": "79f495982716cc92f28905b5f3e1ef5836daf6dcd7678dbb0e89871fb39d227a",
+   "surface": "test-fixture",
+   "status": "retained",
+   "classification": "test-fixture",
+   "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+  },
+  {
+   "id": "oc-5c483c962f92f9986fcb",
+   "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+   "line": 455,
+   "symbol": "test_native_cpu_probe_shell_syntax_is_valid",
+   "kind": "inline-script-operational",
+   "role": "inline",
+   "expression": "5",
+   "expressionDigest": "ef2d127de37b942baad06145e54b0c619a1f22327b2ebbcfbec78f5564afe39d",
+   "evidenceDigest": "110566ebcfc1e08fb60654b219431a5f7e236d10e7f451566398bd7878a7cbb1",
+   "surface": "test-fixture",
+   "status": "retained",
+   "classification": "test-fixture",
+   "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+  },
+  {
+   "id": "oc-b1fe559cf62506d2022c",
+   "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+   "line": 462,
+   "symbol": "test_quantized_worker_time_is_a_conservative_strict_ten_second_bound",
+   "kind": "inline-script-operational",
+   "role": "inline",
+   "expression": "\"100.00\"",
+   "expressionDigest": "451795fec7bc40ebfb086d5fa0d1c7f16d7fb5918a7d9edf7f21fa21b92cdc3e",
+   "evidenceDigest": "65f2ce88c8fb41a219810632ebf071736e6a61d7dd205fd852b5610c251dba08",
+   "surface": "test-fixture",
+   "status": "retained",
+   "classification": "test-fixture",
+   "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+  },
+  {
+   "id": "oc-042cbc0d4d1a5b56e838",
+   "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+   "line": 462,
+   "symbol": "test_quantized_worker_time_is_a_conservative_strict_ten_second_bound",
+   "kind": "inline-script-operational",
+   "role": "inline",
+   "expression": "\"110.00\"",
+   "expressionDigest": "18593a9763316b5a150c187bf0a7bd43ff0543118551793037e9ae3e40c1b984",
+   "evidenceDigest": "65f2ce88c8fb41a219810632ebf071736e6a61d7dd205fd852b5610c251dba08",
+   "surface": "test-fixture",
+   "status": "retained",
+   "classification": "test-fixture",
+   "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+  },
+  {
+   "id": "oc-b4490a7717b3dd0b9c94",
+   "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+   "line": 462,
+   "symbol": "test_quantized_worker_time_is_a_conservative_strict_ten_second_bound",
+   "kind": "inline-script-operational",
+   "role": "inline",
+   "expression": "\"no own throttling\"",
+   "expressionDigest": "3274ab3229c8f979cf3d05457832587d56677886aa2823c816e77308e79ad75c",
+   "evidenceDigest": "65f2ce88c8fb41a219810632ebf071736e6a61d7dd205fd852b5610c251dba08",
+   "surface": "test-fixture",
+   "status": "retained",
+   "classification": "test-fixture",
+   "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+  },
+  {
+   "id": "oc-9ef62e49a08eb8a013d4",
+   "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+   "line": 462,
+   "symbol": "test_quantized_worker_time_is_a_conservative_strict_ten_second_bound",
+   "kind": "inline-script-operational",
+   "role": "inline",
+   "expression": "0",
+   "expressionDigest": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+   "evidenceDigest": "65f2ce88c8fb41a219810632ebf071736e6a61d7dd205fd852b5610c251dba08",
+   "surface": "test-fixture",
+   "status": "retained",
+   "classification": "test-fixture",
+   "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+  },
+  {
+   "id": "oc-10c53dc8ea248e61496b",
+   "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+   "line": 462,
+   "symbol": "test_quantized_worker_time_is_a_conservative_strict_ten_second_bound",
+   "kind": "inline-script-operational",
+   "role": "inline",
+   "expression": "0",
+   "expressionDigest": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+   "evidenceDigest": "65f2ce88c8fb41a219810632ebf071736e6a61d7dd205fd852b5610c251dba08",
+   "surface": "test-fixture",
+   "status": "retained",
+   "classification": "test-fixture",
+   "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+  },
+  {
+   "id": "oc-fd155ca9405fdc0ac410",
+   "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+   "line": 462,
+   "symbol": "test_quantized_worker_time_is_a_conservative_strict_ten_second_bound",
+   "kind": "inline-script-operational",
+   "role": "inline",
+   "expression": "0",
+   "expressionDigest": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+   "evidenceDigest": "65f2ce88c8fb41a219810632ebf071736e6a61d7dd205fd852b5610c251dba08",
+   "surface": "test-fixture",
+   "status": "retained",
+   "classification": "test-fixture",
+   "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+  },
+  {
+   "id": "oc-2d5e70eeb0d03fbbfd93",
+   "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+   "line": 462,
+   "symbol": "test_quantized_worker_time_is_a_conservative_strict_ten_second_bound",
+   "kind": "inline-script-operational",
+   "role": "inline",
+   "expression": "10010000",
+   "expressionDigest": "809c8f259f563c0dd284523f0c336c86af08555565e94430e5d1aa85a83ef50b",
+   "evidenceDigest": "65f2ce88c8fb41a219810632ebf071736e6a61d7dd205fd852b5610c251dba08",
+   "surface": "test-fixture",
+   "status": "retained",
+   "classification": "test-fixture",
+   "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+  },
+  {
+   "id": "oc-f944ea4ab9cf94bd6d54",
+   "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+   "line": 468,
+   "symbol": "test_quantized_worker_time_is_a_conservative_strict_ten_second_bound",
+   "kind": "inline-script-operational",
+   "role": "inline",
+   "expression": "\"WORKER 0 1 100000\"",
+   "expressionDigest": "5bc57c6d55ba0240126e9c7030bd53ba010a7906621c6cdab4f17db175b6c76c",
+   "evidenceDigest": "254c909eeb88b68e0fd0f7312898c9970c62956bbc1eef7985620bcd4dfcb7ed",
+   "surface": "test-fixture",
+   "status": "retained",
+   "classification": "test-fixture",
+   "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+  },
+  {
+   "id": "oc-507a281bd5438956a84e",
+   "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+   "line": 471,
+   "symbol": "test_quantized_worker_time_is_a_conservative_strict_ten_second_bound",
+   "kind": "inline-script-operational",
+   "role": "inline",
+   "expression": "\"cases\"",
+   "expressionDigest": "2b469e2ae20c002467d350290cf13255d1a820d2482d6eb7fc8f359afac58c90",
+   "evidenceDigest": "0d4834e40cad0e161c2f599503f0c77b57f3f6b4c042aabb046f60481345adf2",
+   "surface": "test-fixture",
+   "status": "retained",
+   "classification": "test-fixture",
+   "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+  },
+  {
+   "id": "oc-861823feae9f8b4bde05",
+   "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+   "line": 471,
+   "symbol": "test_quantized_worker_time_is_a_conservative_strict_ten_second_bound",
+   "kind": "inline-script-operational",
+   "role": "inline",
+   "expression": "\"ownThrottlingWithinTenSeconds\"",
+   "expressionDigest": "e0aef7e79b21f413454567f9af94d3376739c2c0604a5b0722ccd29ea3d4c2c4",
+   "evidenceDigest": "0d4834e40cad0e161c2f599503f0c77b57f3f6b4c042aabb046f60481345adf2",
+   "surface": "test-fixture",
+   "status": "retained",
+   "classification": "test-fixture",
+   "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+  },
+  {
+   "id": "oc-4fc27b23af5e87e8a7d9",
+   "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+   "line": 471,
+   "symbol": "test_quantized_worker_time_is_a_conservative_strict_ten_second_bound",
+   "kind": "inline-script-operational",
+   "role": "inline",
+   "expression": "1",
+   "expressionDigest": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+   "evidenceDigest": "0d4834e40cad0e161c2f599503f0c77b57f3f6b4c042aabb046f60481345adf2",
+   "surface": "test-fixture",
+   "status": "retained",
+   "classification": "test-fixture",
+   "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+  },
+  {
+   "id": "oc-f01263ebe0566aeec1d4",
+   "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
+   "line": 472,
+   "symbol": "test_quantized_worker_time_is_a_conservative_strict_ten_second_bound",
+   "kind": "inline-script-operational",
+   "role": "inline",
+   "expression": "\"cleanup\"",
+   "expressionDigest": "6b6ba85cae4bca7c5ab15d3626b2a3742a33d579af24774c789a64c3c64cc6c7",
+   "evidenceDigest": "56d8e97cca9ec644364963dc1948f2f0f2c40279dd50c61f7ba0d6d39dda42e0",
+   "surface": "test-fixture",
+   "status": "retained",
+   "classification": "test-fixture",
+   "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+  },
+  {
    "id": "oc-f99f92a3362d2b8d71ac",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 419,
+   "line": 481,
    "symbol": "test_probe_records_both_control_outcomes_and_refuses_malformed_or_stale_evidence",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -595614,7 +596199,7 @@
   {
    "id": "oc-bb55809a373106bb5d71",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 419,
+   "line": 481,
    "symbol": "test_probe_records_both_control_outcomes_and_refuses_malformed_or_stale_evidence",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -595629,7 +596214,7 @@
   {
    "id": "oc-67b02c5197df99338c34",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 419,
+   "line": 481,
    "symbol": "test_probe_records_both_control_outcomes_and_refuses_malformed_or_stale_evidence",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -595644,7 +596229,7 @@
   {
    "id": "oc-28714ca83c91d949a8cf",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 419,
+   "line": 481,
    "symbol": "test_probe_records_both_control_outcomes_and_refuses_malformed_or_stale_evidence",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -595659,7 +596244,7 @@
   {
    "id": "oc-2fbeb95eddaa420b1857",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 419,
+   "line": 481,
    "symbol": "test_probe_records_both_control_outcomes_and_refuses_malformed_or_stale_evidence",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -595674,7 +596259,7 @@
   {
    "id": "oc-6c077affcace845c77b8",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 420,
+   "line": 482,
    "symbol": "test_probe_records_both_control_outcomes_and_refuses_malformed_or_stale_evidence",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -595689,7 +596274,7 @@
   {
    "id": "oc-969625488bf3205870c0",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 420,
+   "line": 482,
    "symbol": "test_probe_records_both_control_outcomes_and_refuses_malformed_or_stale_evidence",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -595704,7 +596289,7 @@
   {
    "id": "oc-7794d0d3ff674f8ba813",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 420,
+   "line": 482,
    "symbol": "test_probe_records_both_control_outcomes_and_refuses_malformed_or_stale_evidence",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -595719,7 +596304,7 @@
   {
    "id": "oc-7c21853ca72076b64d3b",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 421,
+   "line": 483,
    "symbol": "test_probe_records_both_control_outcomes_and_refuses_malformed_or_stale_evidence",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -595734,7 +596319,7 @@
   {
    "id": "oc-c0dfb6f9c54feee7b3df",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 425,
+   "line": 487,
    "symbol": "test_probe_records_both_control_outcomes_and_refuses_malformed_or_stale_evidence",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -595749,7 +596334,7 @@
   {
    "id": "oc-8928adb81717fd9e5f8e",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 425,
+   "line": 487,
    "symbol": "test_probe_records_both_control_outcomes_and_refuses_malformed_or_stale_evidence",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -595764,7 +596349,7 @@
   {
    "id": "oc-cec8bf979cfe31d4b90d",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 425,
+   "line": 487,
    "symbol": "test_probe_records_both_control_outcomes_and_refuses_malformed_or_stale_evidence",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -595779,7 +596364,7 @@
   {
    "id": "oc-ac76d4fcb318e7880df9",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 425,
+   "line": 487,
    "symbol": "test_probe_records_both_control_outcomes_and_refuses_malformed_or_stale_evidence",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -595794,7 +596379,7 @@
   {
    "id": "oc-949fa799876e521232f0",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 433,
+   "line": 495,
    "symbol": "test_fresh_idle_periods_are_valid_but_reuse_backwards_and_zero_work_are_not",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -595809,7 +596394,7 @@
   {
    "id": "oc-193405f876239796459c",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 433,
+   "line": 495,
    "symbol": "test_fresh_idle_periods_are_valid_but_reuse_backwards_and_zero_work_are_not",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -595824,7 +596409,7 @@
   {
    "id": "oc-06ca9715a0f32a83370a",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 433,
+   "line": 495,
    "symbol": "test_fresh_idle_periods_are_valid_but_reuse_backwards_and_zero_work_are_not",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -595839,7 +596424,7 @@
   {
    "id": "oc-3dc91ea7057c9e2221f1",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 436,
+   "line": 498,
    "symbol": "test_fresh_idle_periods_are_valid_but_reuse_backwards_and_zero_work_are_not",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -595854,7 +596439,7 @@
   {
    "id": "oc-c1eeda06a66816dfcec4",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 436,
+   "line": 498,
    "symbol": "test_fresh_idle_periods_are_valid_but_reuse_backwards_and_zero_work_are_not",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -595869,7 +596454,7 @@
   {
    "id": "oc-9015de2a675c64cff991",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 436,
+   "line": 498,
    "symbol": "test_fresh_idle_periods_are_valid_but_reuse_backwards_and_zero_work_are_not",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -595884,7 +596469,7 @@
   {
    "id": "oc-b22429932871568815ff",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 436,
+   "line": 498,
    "symbol": "test_fresh_idle_periods_are_valid_but_reuse_backwards_and_zero_work_are_not",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -595899,7 +596484,7 @@
   {
    "id": "oc-3387ae52bc0cbae6458e",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 436,
+   "line": 498,
    "symbol": "test_fresh_idle_periods_are_valid_but_reuse_backwards_and_zero_work_are_not",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -595914,7 +596499,7 @@
   {
    "id": "oc-c469b89ca1a81e3fd9f5",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 437,
+   "line": 499,
    "symbol": "test_fresh_idle_periods_are_valid_but_reuse_backwards_and_zero_work_are_not",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -595929,7 +596514,7 @@
   {
    "id": "oc-3a4a14689f168111a0ca",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 437,
+   "line": 499,
    "symbol": "test_fresh_idle_periods_are_valid_but_reuse_backwards_and_zero_work_are_not",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -595944,7 +596529,7 @@
   {
    "id": "oc-3a73ece73969a19a267e",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 437,
+   "line": 499,
    "symbol": "test_fresh_idle_periods_are_valid_but_reuse_backwards_and_zero_work_are_not",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -595959,7 +596544,7 @@
   {
    "id": "oc-938eea4b0eedb7dc14ac",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 437,
+   "line": 499,
    "symbol": "test_fresh_idle_periods_are_valid_but_reuse_backwards_and_zero_work_are_not",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -595974,7 +596559,7 @@
   {
    "id": "oc-57165907686f7570ba2d",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 437,
+   "line": 499,
    "symbol": "test_fresh_idle_periods_are_valid_but_reuse_backwards_and_zero_work_are_not",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -595989,7 +596574,7 @@
   {
    "id": "oc-dcd58d44f0d85d4b7471",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 438,
+   "line": 500,
    "symbol": "test_fresh_idle_periods_are_valid_but_reuse_backwards_and_zero_work_are_not",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596004,7 +596589,7 @@
   {
    "id": "oc-c4f980f1b975fffc9783",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 438,
+   "line": 500,
    "symbol": "test_fresh_idle_periods_are_valid_but_reuse_backwards_and_zero_work_are_not",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596019,7 +596604,7 @@
   {
    "id": "oc-55b7e80aebcc5d79e34c",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 438,
+   "line": 500,
    "symbol": "test_fresh_idle_periods_are_valid_but_reuse_backwards_and_zero_work_are_not",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596034,7 +596619,7 @@
   {
    "id": "oc-c7a240c852f8d3d53b86",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 438,
+   "line": 500,
    "symbol": "test_fresh_idle_periods_are_valid_but_reuse_backwards_and_zero_work_are_not",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596049,7 +596634,7 @@
   {
    "id": "oc-cd76fe460ad3cd41241a",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 438,
+   "line": 500,
    "symbol": "test_fresh_idle_periods_are_valid_but_reuse_backwards_and_zero_work_are_not",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596064,7 +596649,7 @@
   {
    "id": "oc-0722aedaf8cb9b220c81",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 439,
+   "line": 501,
    "symbol": "test_fresh_idle_periods_are_valid_but_reuse_backwards_and_zero_work_are_not",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596079,7 +596664,7 @@
   {
    "id": "oc-e28458422dbe9c08bcca",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 439,
+   "line": 501,
    "symbol": "test_fresh_idle_periods_are_valid_but_reuse_backwards_and_zero_work_are_not",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596094,7 +596679,7 @@
   {
    "id": "oc-803810b17f3cf23762a1",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 439,
+   "line": 501,
    "symbol": "test_fresh_idle_periods_are_valid_but_reuse_backwards_and_zero_work_are_not",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596109,7 +596694,7 @@
   {
    "id": "oc-955cf040920889dfd1e5",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 439,
+   "line": 501,
    "symbol": "test_fresh_idle_periods_are_valid_but_reuse_backwards_and_zero_work_are_not",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596124,7 +596709,7 @@
   {
    "id": "oc-3055977471e9a912da8a",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 439,
+   "line": 501,
    "symbol": "test_fresh_idle_periods_are_valid_but_reuse_backwards_and_zero_work_are_not",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596139,7 +596724,7 @@
   {
    "id": "oc-16989ac45696ef5eb141",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 440,
+   "line": 502,
    "symbol": "test_fresh_idle_periods_are_valid_but_reuse_backwards_and_zero_work_are_not",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596154,7 +596739,7 @@
   {
    "id": "oc-031292271ffa79cfd214",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 440,
+   "line": 502,
    "symbol": "test_fresh_idle_periods_are_valid_but_reuse_backwards_and_zero_work_are_not",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596169,7 +596754,7 @@
   {
    "id": "oc-2959c6df4e1445b2486e",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 440,
+   "line": 502,
    "symbol": "test_fresh_idle_periods_are_valid_but_reuse_backwards_and_zero_work_are_not",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596184,7 +596769,7 @@
   {
    "id": "oc-5f5a5822f4c5da093a51",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 440,
+   "line": 502,
    "symbol": "test_fresh_idle_periods_are_valid_but_reuse_backwards_and_zero_work_are_not",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596199,7 +596784,7 @@
   {
    "id": "oc-205f2fd38e2c481eb57a",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 440,
+   "line": 502,
    "symbol": "test_fresh_idle_periods_are_valid_but_reuse_backwards_and_zero_work_are_not",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596214,7 +596799,7 @@
   {
    "id": "oc-331d375fe7e05696e594",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 441,
+   "line": 503,
    "symbol": "test_fresh_idle_periods_are_valid_but_reuse_backwards_and_zero_work_are_not",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596229,7 +596814,7 @@
   {
    "id": "oc-140a0d11d40a27b20bdb",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 441,
+   "line": 503,
    "symbol": "test_fresh_idle_periods_are_valid_but_reuse_backwards_and_zero_work_are_not",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596244,7 +596829,7 @@
   {
    "id": "oc-3092553768f14e3b3a85",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 441,
+   "line": 503,
    "symbol": "test_fresh_idle_periods_are_valid_but_reuse_backwards_and_zero_work_are_not",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596259,7 +596844,7 @@
   {
    "id": "oc-f66d90a42cd7397b1fcc",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 441,
+   "line": 503,
    "symbol": "test_fresh_idle_periods_are_valid_but_reuse_backwards_and_zero_work_are_not",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596274,7 +596859,7 @@
   {
    "id": "oc-0e3fdca13cf20ab2aac2",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 441,
+   "line": 503,
    "symbol": "test_fresh_idle_periods_are_valid_but_reuse_backwards_and_zero_work_are_not",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596289,7 +596874,7 @@
   {
    "id": "oc-6c0050e535216a4b50ab",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 453,
+   "line": 515,
    "symbol": "test_fresh_idle_periods_are_valid_but_reuse_backwards_and_zero_work_are_not",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596304,7 +596889,7 @@
   {
    "id": "oc-e666dc0f7d33a45d39d0",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 453,
+   "line": 515,
    "symbol": "test_fresh_idle_periods_are_valid_but_reuse_backwards_and_zero_work_are_not",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596319,7 +596904,7 @@
   {
    "id": "oc-85d2b217e7ad4fb400c2",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 453,
+   "line": 515,
    "symbol": "test_fresh_idle_periods_are_valid_but_reuse_backwards_and_zero_work_are_not",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596334,7 +596919,7 @@
   {
    "id": "oc-7328afac5c4dca79fae8",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 453,
+   "line": 515,
    "symbol": "test_fresh_idle_periods_are_valid_but_reuse_backwards_and_zero_work_are_not",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596349,7 +596934,7 @@
   {
    "id": "oc-87d54afb23cd9fa9e8b8",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 455,
+   "line": 517,
    "symbol": "test_fresh_idle_periods_are_valid_but_reuse_backwards_and_zero_work_are_not",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596364,7 +596949,7 @@
   {
    "id": "oc-34947b6ad5b7d52864f8",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 458,
+   "line": 520,
    "symbol": "test_probe_decoder_refuses_malformed_or_oversized_output_without_raw_leaks",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596379,7 +596964,7 @@
   {
    "id": "oc-f5a9a73757c4dc50429c",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 458,
+   "line": 520,
    "symbol": "test_probe_decoder_refuses_malformed_or_oversized_output_without_raw_leaks",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596394,7 +596979,7 @@
   {
    "id": "oc-2a365f290de050227e25",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 458,
+   "line": 520,
    "symbol": "test_probe_decoder_refuses_malformed_or_oversized_output_without_raw_leaks",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596409,7 +596994,7 @@
   {
    "id": "oc-b37be9078488073df220",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 458,
+   "line": 520,
    "symbol": "test_probe_decoder_refuses_malformed_or_oversized_output_without_raw_leaks",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596424,7 +597009,7 @@
   {
    "id": "oc-f3af489f9013c91d7c0b",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 458,
+   "line": 520,
    "symbol": "test_probe_decoder_refuses_malformed_or_oversized_output_without_raw_leaks",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596439,7 +597024,7 @@
   {
    "id": "oc-0aef35297b8cdd6e7d23",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 459,
+   "line": 521,
    "symbol": "test_probe_decoder_refuses_malformed_or_oversized_output_without_raw_leaks",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596454,7 +597039,7 @@
   {
    "id": "oc-3aa969cc35e2aebb27fb",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 459,
+   "line": 521,
    "symbol": "test_probe_decoder_refuses_malformed_or_oversized_output_without_raw_leaks",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596469,7 +597054,7 @@
   {
    "id": "oc-d6a05b9851d38daff179",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 459,
+   "line": 521,
    "symbol": "test_probe_decoder_refuses_malformed_or_oversized_output_without_raw_leaks",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596484,7 +597069,7 @@
   {
    "id": "oc-8b1c15cd33400e691ba3",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 460,
+   "line": 522,
    "symbol": "test_probe_decoder_refuses_malformed_or_oversized_output_without_raw_leaks",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596499,7 +597084,7 @@
   {
    "id": "oc-4c8611ece4b282126859",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 460,
+   "line": 522,
    "symbol": "test_probe_decoder_refuses_malformed_or_oversized_output_without_raw_leaks",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596514,7 +597099,7 @@
   {
    "id": "oc-7e410f9c17e5243e4558",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 460,
+   "line": 522,
    "symbol": "test_probe_decoder_refuses_malformed_or_oversized_output_without_raw_leaks",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596529,7 +597114,7 @@
   {
    "id": "oc-ecaf11056691b64032b3",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 461,
+   "line": 523,
    "symbol": "test_probe_decoder_refuses_malformed_or_oversized_output_without_raw_leaks",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596544,7 +597129,7 @@
   {
    "id": "oc-dc6110e1f7af16b410ac",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 461,
+   "line": 523,
    "symbol": "test_probe_decoder_refuses_malformed_or_oversized_output_without_raw_leaks",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596559,7 +597144,7 @@
   {
    "id": "oc-a331906296eb19b91dcb",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 473,
+   "line": 535,
    "symbol": "test_semantic_probe_failure_keeps_vectors_and_primary_reason_through_cleanup",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596574,7 +597159,7 @@
   {
    "id": "oc-f8bf7600f3ccaed390ab",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 474,
+   "line": 536,
    "symbol": "test_semantic_probe_failure_keeps_vectors_and_primary_reason_through_cleanup",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596589,7 +597174,7 @@
   {
    "id": "oc-3ca7e66824e8fc75032b",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 474,
+   "line": 536,
    "symbol": "test_semantic_probe_failure_keeps_vectors_and_primary_reason_through_cleanup",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596604,7 +597189,7 @@
   {
    "id": "oc-f93368d4ddf119a53edc",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 474,
+   "line": 536,
    "symbol": "test_semantic_probe_failure_keeps_vectors_and_primary_reason_through_cleanup",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596619,7 +597204,7 @@
   {
    "id": "oc-9c98ae394013e289d0d2",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 477,
+   "line": 539,
    "symbol": "test_semantic_probe_failure_keeps_vectors_and_primary_reason_through_cleanup",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596634,7 +597219,7 @@
   {
    "id": "oc-5cecdce1f8317083888a",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 477,
+   "line": 539,
    "symbol": "test_semantic_probe_failure_keeps_vectors_and_primary_reason_through_cleanup",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596649,7 +597234,7 @@
   {
    "id": "oc-fef90c9f4f9c16c77c56",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 477,
+   "line": 539,
    "symbol": "test_semantic_probe_failure_keeps_vectors_and_primary_reason_through_cleanup",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596664,7 +597249,7 @@
   {
    "id": "oc-45cdf74b4907467bdb4c",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 479,
+   "line": 541,
    "symbol": "test_semantic_probe_failure_keeps_vectors_and_primary_reason_through_cleanup",
    "kind": "script-default",
    "role": "report",
@@ -596679,7 +597264,7 @@
   {
    "id": "oc-21b3c84b0d39dbf51250",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 480,
+   "line": 542,
    "symbol": "test_semantic_probe_failure_keeps_vectors_and_primary_reason_through_cleanup",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596694,7 +597279,7 @@
   {
    "id": "oc-92a1eb549b53922d63f4",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 480,
+   "line": 542,
    "symbol": "test_semantic_probe_failure_keeps_vectors_and_primary_reason_through_cleanup",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596709,7 +597294,7 @@
   {
    "id": "oc-62cd2d8eaef159f0f687",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 481,
+   "line": 543,
    "symbol": "test_semantic_probe_failure_keeps_vectors_and_primary_reason_through_cleanup",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596724,7 +597309,7 @@
   {
    "id": "oc-396be4f86722bdebc795",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 481,
+   "line": 543,
    "symbol": "test_semantic_probe_failure_keeps_vectors_and_primary_reason_through_cleanup",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596739,7 +597324,7 @@
   {
    "id": "oc-067b87011d39ec8eb4e0",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 482,
+   "line": 544,
    "symbol": "test_semantic_probe_failure_keeps_vectors_and_primary_reason_through_cleanup",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596754,7 +597339,7 @@
   {
    "id": "oc-564d6f2c05778487ce7e",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 482,
+   "line": 544,
    "symbol": "test_semantic_probe_failure_keeps_vectors_and_primary_reason_through_cleanup",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596769,7 +597354,7 @@
   {
    "id": "oc-14c1c776c67416577375",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 482,
+   "line": 544,
    "symbol": "test_semantic_probe_failure_keeps_vectors_and_primary_reason_through_cleanup",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596784,7 +597369,7 @@
   {
    "id": "oc-d0134476edff9ebfdca6",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 482,
+   "line": 544,
    "symbol": "test_semantic_probe_failure_keeps_vectors_and_primary_reason_through_cleanup",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596799,7 +597384,7 @@
   {
    "id": "oc-9b1c80313bdf84b066fd",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 482,
+   "line": 544,
    "symbol": "test_semantic_probe_failure_keeps_vectors_and_primary_reason_through_cleanup",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596814,7 +597399,7 @@
   {
    "id": "oc-0eca706c8df39341c88f",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 482,
+   "line": 544,
    "symbol": "test_semantic_probe_failure_keeps_vectors_and_primary_reason_through_cleanup",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596829,7 +597414,7 @@
   {
    "id": "oc-1eaf0a3e8e4ec3faa2a6",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 482,
+   "line": 544,
    "symbol": "test_semantic_probe_failure_keeps_vectors_and_primary_reason_through_cleanup",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596844,7 +597429,7 @@
   {
    "id": "oc-a4eb9f88c9717d35b648",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 483,
+   "line": 545,
    "symbol": "test_semantic_probe_failure_keeps_vectors_and_primary_reason_through_cleanup",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596859,7 +597444,7 @@
   {
    "id": "oc-2386049994a1981e1129",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 483,
+   "line": 545,
    "symbol": "test_semantic_probe_failure_keeps_vectors_and_primary_reason_through_cleanup",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596874,7 +597459,7 @@
   {
    "id": "oc-a9259ab631c30d8b0055",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 483,
+   "line": 545,
    "symbol": "test_semantic_probe_failure_keeps_vectors_and_primary_reason_through_cleanup",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596889,7 +597474,7 @@
   {
    "id": "oc-1292d05a9b43dfe8be3e",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 483,
+   "line": 545,
    "symbol": "test_semantic_probe_failure_keeps_vectors_and_primary_reason_through_cleanup",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596904,7 +597489,7 @@
   {
    "id": "oc-3c3e9f8cac716023e276",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 483,
+   "line": 545,
    "symbol": "test_semantic_probe_failure_keeps_vectors_and_primary_reason_through_cleanup",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596919,7 +597504,7 @@
   {
    "id": "oc-8ffca534afd0ea5532ab",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 483,
+   "line": 545,
    "symbol": "test_semantic_probe_failure_keeps_vectors_and_primary_reason_through_cleanup",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596934,7 +597519,7 @@
   {
    "id": "oc-85fe5d62fd529c0df9f6",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 483,
+   "line": 545,
    "symbol": "test_semantic_probe_failure_keeps_vectors_and_primary_reason_through_cleanup",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596949,7 +597534,7 @@
   {
    "id": "oc-7a23b2215f010b6a0534",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 484,
+   "line": 546,
    "symbol": "test_semantic_probe_failure_keeps_vectors_and_primary_reason_through_cleanup",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596964,7 +597549,7 @@
   {
    "id": "oc-6c1e9fefd64fb6d5496f",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 485,
+   "line": 547,
    "symbol": "test_semantic_probe_failure_keeps_vectors_and_primary_reason_through_cleanup",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596979,7 +597564,7 @@
   {
    "id": "oc-fbf90b67e5a1ce696204",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 485,
+   "line": 547,
    "symbol": "test_semantic_probe_failure_keeps_vectors_and_primary_reason_through_cleanup",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -596994,7 +597579,7 @@
   {
    "id": "oc-cc40bba47a884cb972c3",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 485,
+   "line": 547,
    "symbol": "test_semantic_probe_failure_keeps_vectors_and_primary_reason_through_cleanup",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597009,7 +597594,7 @@
   {
    "id": "oc-e8e0bdc1f992b9666b4f",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 486,
+   "line": 548,
    "symbol": "test_semantic_probe_failure_keeps_vectors_and_primary_reason_through_cleanup",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597024,7 +597609,7 @@
   {
    "id": "oc-6dfce4ac0499cd9cbc48",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 488,
+   "line": 550,
    "symbol": "cpu_probe_node",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597039,7 +597624,7 @@
   {
    "id": "oc-c5b887d862aa3ba957b4",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 489,
+   "line": 551,
    "symbol": "cpu_probe_node",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597054,7 +597639,7 @@
   {
    "id": "oc-451f72a5531b30b36e1b",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 489,
+   "line": 551,
    "symbol": "cpu_probe_node",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597069,7 +597654,7 @@
   {
    "id": "oc-5549135109b1699dd6a7",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 489,
+   "line": 551,
    "symbol": "cpu_probe_node",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597084,7 +597669,7 @@
   {
    "id": "oc-72c7a2291a1c6160fa5b",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 489,
+   "line": 551,
    "symbol": "cpu_probe_node",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597099,7 +597684,7 @@
   {
    "id": "oc-ad845d5f24484e49d578",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 489,
+   "line": 551,
    "symbol": "cpu_probe_node",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597114,7 +597699,7 @@
   {
    "id": "oc-77452f5e65ff7ac3f14c",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 489,
+   "line": 551,
    "symbol": "cpu_probe_node",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597129,7 +597714,7 @@
   {
    "id": "oc-df4331081a878c89ae00",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 491,
+   "line": 553,
    "symbol": "cpu_probe_node",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597144,7 +597729,7 @@
   {
    "id": "oc-a5aab3abab3ec10db4f6",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 491,
+   "line": 553,
    "symbol": "cpu_probe_node",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597159,7 +597744,7 @@
   {
    "id": "oc-96cdf28e9606f04454e2",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 491,
+   "line": 553,
    "symbol": "cpu_probe_node",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597174,7 +597759,7 @@
   {
    "id": "oc-b3df67803cb12fd67bc7",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 491,
+   "line": 553,
    "symbol": "cpu_probe_node",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597189,7 +597774,7 @@
   {
    "id": "oc-52294a92492ed74c27a1",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 491,
+   "line": 553,
    "symbol": "cpu_probe_node",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597204,7 +597789,7 @@
   {
    "id": "oc-c42b2b14c4a3ad7c397e",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 491,
+   "line": 553,
    "symbol": "cpu_probe_node",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597219,7 +597804,7 @@
   {
    "id": "oc-33de2b5d090906a99414",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 495,
+   "line": 557,
    "symbol": "test_hosted_probe_missing_own_evidence_stops_acceptance_but_retains_counters",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597234,7 +597819,7 @@
   {
    "id": "oc-13a348d4b2d19f6bb317",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 496,
+   "line": 558,
    "symbol": "test_hosted_probe_missing_own_evidence_stops_acceptance_but_retains_counters",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597249,7 +597834,7 @@
   {
    "id": "oc-c6f4b1debfd22797e794",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 496,
+   "line": 558,
    "symbol": "test_hosted_probe_missing_own_evidence_stops_acceptance_but_retains_counters",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597268,7 +597853,7 @@
   {
    "id": "oc-43a69f4e90480a630a10",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 496,
+   "line": 558,
    "symbol": "test_hosted_probe_missing_own_evidence_stops_acceptance_but_retains_counters",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597287,7 +597872,7 @@
   {
    "id": "oc-fe2178465d8bbe8f6079",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 496,
+   "line": 558,
    "symbol": "test_hosted_probe_missing_own_evidence_stops_acceptance_but_retains_counters",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597302,7 +597887,7 @@
   {
    "id": "oc-08f64d3d3acd898a7356",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 498,
+   "line": 560,
    "symbol": "test_hosted_probe_missing_own_evidence_stops_acceptance_but_retains_counters",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597317,7 +597902,7 @@
   {
    "id": "oc-5770e33162dab19258a9",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 498,
+   "line": 560,
    "symbol": "test_hosted_probe_missing_own_evidence_stops_acceptance_but_retains_counters",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597332,7 +597917,7 @@
   {
    "id": "oc-6d77bc7eb51f51631dfb",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 498,
+   "line": 560,
    "symbol": "test_hosted_probe_missing_own_evidence_stops_acceptance_but_retains_counters",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597347,7 +597932,7 @@
   {
    "id": "oc-b49424ea8b4816799386",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 501,
+   "line": 563,
    "symbol": "test_hosted_probe_missing_own_evidence_stops_acceptance_but_retains_counters",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597362,7 +597947,7 @@
   {
    "id": "oc-e1eb58f5536a04ebb822",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 501,
+   "line": 563,
    "symbol": "test_hosted_probe_missing_own_evidence_stops_acceptance_but_retains_counters",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597377,7 +597962,7 @@
   {
    "id": "oc-6086fc647f130a0fa021",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 501,
+   "line": 563,
    "symbol": "test_hosted_probe_missing_own_evidence_stops_acceptance_but_retains_counters",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597392,7 +597977,7 @@
   {
    "id": "oc-7854bf53698093ad1c66",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 502,
+   "line": 564,
    "symbol": "test_hosted_probe_missing_own_evidence_stops_acceptance_but_retains_counters",
    "kind": "script-default",
    "role": "report",
@@ -597407,7 +597992,7 @@
   {
    "id": "oc-6e13230326bb59aec612",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 503,
+   "line": 565,
    "symbol": "test_hosted_probe_missing_own_evidence_stops_acceptance_but_retains_counters",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597422,7 +598007,7 @@
   {
    "id": "oc-dbdee350b96a3e8511e5",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 503,
+   "line": 565,
    "symbol": "test_hosted_probe_missing_own_evidence_stops_acceptance_but_retains_counters",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597437,7 +598022,7 @@
   {
    "id": "oc-ccc9ebceb937e7ad6a7a",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 503,
+   "line": 565,
    "symbol": "test_hosted_probe_missing_own_evidence_stops_acceptance_but_retains_counters",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597452,7 +598037,7 @@
   {
    "id": "oc-3bcb659d47b252567d21",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 504,
+   "line": 566,
    "symbol": "test_hosted_probe_missing_own_evidence_stops_acceptance_but_retains_counters",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597467,7 +598052,7 @@
   {
    "id": "oc-207915e4e4d7bfa53d7f",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 504,
+   "line": 566,
    "symbol": "test_hosted_probe_missing_own_evidence_stops_acceptance_but_retains_counters",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597482,7 +598067,7 @@
   {
    "id": "oc-40c5ff325c1195df5c9b",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 505,
+   "line": 567,
    "symbol": "test_hosted_probe_missing_own_evidence_stops_acceptance_but_retains_counters",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597497,7 +598082,7 @@
   {
    "id": "oc-95caf5bac6990d6b2878",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 510,
+   "line": 572,
    "symbol": "test_probe_cleanup_has_its_own_budget_after_main_timeout_and_cannot_hide_failure",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597512,7 +598097,7 @@
   {
    "id": "oc-84d5acb6d6b31515d4f9",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 512,
+   "line": 574,
    "symbol": "test_probe_cleanup_has_its_own_budget_after_main_timeout_and_cannot_hide_failure",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597527,7 +598112,7 @@
   {
    "id": "oc-74f0928a0feacfe77bd1",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 512,
+   "line": 574,
    "symbol": "test_probe_cleanup_has_its_own_budget_after_main_timeout_and_cannot_hide_failure",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597546,7 +598131,7 @@
   {
    "id": "oc-11f6fe410d820572f38e",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 512,
+   "line": 574,
    "symbol": "test_probe_cleanup_has_its_own_budget_after_main_timeout_and_cannot_hide_failure",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597565,7 +598150,7 @@
   {
    "id": "oc-94da9a0089cefdcb17eb",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 512,
+   "line": 574,
    "symbol": "test_probe_cleanup_has_its_own_budget_after_main_timeout_and_cannot_hide_failure",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597580,7 +598165,7 @@
   {
    "id": "oc-1466bdde8ad8426ffb00",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 512,
+   "line": 574,
    "symbol": "test_probe_cleanup_has_its_own_budget_after_main_timeout_and_cannot_hide_failure",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597599,7 +598184,7 @@
   {
    "id": "oc-3555d7f2b8c849540a52",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 514,
+   "line": 576,
    "symbol": "test_probe_cleanup_has_its_own_budget_after_main_timeout_and_cannot_hide_failure",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597614,7 +598199,7 @@
   {
    "id": "oc-53633d55def6736b1fc2",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 514,
+   "line": 576,
    "symbol": "test_probe_cleanup_has_its_own_budget_after_main_timeout_and_cannot_hide_failure",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597629,7 +598214,7 @@
   {
    "id": "oc-73b1425ea3bf6af7fe5f",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 514,
+   "line": 576,
    "symbol": "test_probe_cleanup_has_its_own_budget_after_main_timeout_and_cannot_hide_failure",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597648,7 +598233,7 @@
   {
    "id": "oc-cc103f37550ffc234bcc",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 515,
+   "line": 577,
    "symbol": "test_probe_cleanup_has_its_own_budget_after_main_timeout_and_cannot_hide_failure",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597663,7 +598248,7 @@
   {
    "id": "oc-f157d32719557bb55cd2",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 515,
+   "line": 577,
    "symbol": "test_probe_cleanup_has_its_own_budget_after_main_timeout_and_cannot_hide_failure",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597678,7 +598263,7 @@
   {
    "id": "oc-c6f2ad7bb51c25be9af3",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 516,
+   "line": 578,
    "symbol": "test_probe_cleanup_has_its_own_budget_after_main_timeout_and_cannot_hide_failure",
    "kind": "script-default",
    "role": "report",
@@ -597693,7 +598278,7 @@
   {
    "id": "oc-0352a64ff8e9ec7cc966",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 517,
+   "line": 579,
    "symbol": "test_probe_cleanup_has_its_own_budget_after_main_timeout_and_cannot_hide_failure",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597708,7 +598293,7 @@
   {
    "id": "oc-2d2b49eae9ad87357300",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 517,
+   "line": 579,
    "symbol": "test_probe_cleanup_has_its_own_budget_after_main_timeout_and_cannot_hide_failure",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597723,7 +598308,7 @@
   {
    "id": "oc-23ca711f985d3bf47c72",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 518,
+   "line": 580,
    "symbol": "test_probe_cleanup_has_its_own_budget_after_main_timeout_and_cannot_hide_failure",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597738,7 +598323,7 @@
   {
    "id": "oc-6d35db7c14c56f9f9876",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 522,
+   "line": 584,
    "symbol": "test_node_cpu_preparation_updates_only_exact_owned_private_node_and_refuses_drift",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597753,7 +598338,7 @@
   {
    "id": "oc-0afa00c1cba26c7c3679",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 524,
+   "line": 586,
    "symbol": "test_node_cpu_preparation_updates_only_exact_owned_private_node_and_refuses_drift",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597768,7 +598353,7 @@
   {
    "id": "oc-9b3ed0d7b4e8319d4c43",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 524,
+   "line": 586,
    "symbol": "test_node_cpu_preparation_updates_only_exact_owned_private_node_and_refuses_drift",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597783,7 +598368,7 @@
   {
    "id": "oc-24a58ba498617b484302",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 525,
+   "line": 587,
    "symbol": "test_node_cpu_preparation_updates_only_exact_owned_private_node_and_refuses_drift",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597798,7 +598383,7 @@
   {
    "id": "oc-5c2a1bb7e42c7deddd0e",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 525,
+   "line": 587,
    "symbol": "test_node_cpu_preparation_updates_only_exact_owned_private_node_and_refuses_drift",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597813,7 +598398,7 @@
   {
    "id": "oc-2b190ac4f255311da95f",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 525,
+   "line": 587,
    "symbol": "test_node_cpu_preparation_updates_only_exact_owned_private_node_and_refuses_drift",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597828,7 +598413,7 @@
   {
    "id": "oc-94376b76b8203bfe2469",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 525,
+   "line": 587,
    "symbol": "test_node_cpu_preparation_updates_only_exact_owned_private_node_and_refuses_drift",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597843,7 +598428,7 @@
   {
    "id": "oc-0716b92304c840a812f0",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 525,
+   "line": 587,
    "symbol": "test_node_cpu_preparation_updates_only_exact_owned_private_node_and_refuses_drift",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597858,7 +598443,7 @@
   {
    "id": "oc-5891a6b963360d45d4cc",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 525,
+   "line": 587,
    "symbol": "test_node_cpu_preparation_updates_only_exact_owned_private_node_and_refuses_drift",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597873,7 +598458,7 @@
   {
    "id": "oc-71e72fc3264e4d066c83",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 525,
+   "line": 587,
    "symbol": "test_node_cpu_preparation_updates_only_exact_owned_private_node_and_refuses_drift",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597888,7 +598473,7 @@
   {
    "id": "oc-e913b687b7a96a1b699a",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 527,
+   "line": 589,
    "symbol": "test_node_cpu_preparation_updates_only_exact_owned_private_node_and_refuses_drift",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597903,7 +598488,7 @@
   {
    "id": "oc-6b3ddd17c00fa424171f",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 527,
+   "line": 589,
    "symbol": "test_node_cpu_preparation_updates_only_exact_owned_private_node_and_refuses_drift",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597918,7 +598503,7 @@
   {
    "id": "oc-bb10a745e6a4280495c7",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 527,
+   "line": 589,
    "symbol": "test_node_cpu_preparation_updates_only_exact_owned_private_node_and_refuses_drift",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597933,7 +598518,7 @@
   {
    "id": "oc-5d10efbd91731aa9838f",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 529,
+   "line": 591,
    "symbol": "test_node_cpu_preparation_updates_only_exact_owned_private_node_and_refuses_drift",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597948,7 +598533,7 @@
   {
    "id": "oc-c64bc5300b1414206c86",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 529,
+   "line": 591,
    "symbol": "test_node_cpu_preparation_updates_only_exact_owned_private_node_and_refuses_drift",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597963,7 +598548,7 @@
   {
    "id": "oc-250e658b10087e159001",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 529,
+   "line": 591,
    "symbol": "test_node_cpu_preparation_updates_only_exact_owned_private_node_and_refuses_drift",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597978,7 +598563,7 @@
   {
    "id": "oc-da4b42f77dc9cf859148",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 529,
+   "line": 591,
    "symbol": "test_node_cpu_preparation_updates_only_exact_owned_private_node_and_refuses_drift",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -597993,7 +598578,7 @@
   {
    "id": "oc-efcd5d18905820c464f9",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 529,
+   "line": 591,
    "symbol": "test_node_cpu_preparation_updates_only_exact_owned_private_node_and_refuses_drift",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598008,7 +598593,7 @@
   {
    "id": "oc-354841a355ed127bd739",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 531,
+   "line": 593,
    "symbol": "test_node_cpu_preparation_updates_only_exact_owned_private_node_and_refuses_drift",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598023,7 +598608,7 @@
   {
    "id": "oc-c65a0b49e039f86f0002",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 531,
+   "line": 593,
    "symbol": "test_node_cpu_preparation_updates_only_exact_owned_private_node_and_refuses_drift",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598038,7 +598623,7 @@
   {
    "id": "oc-7db33044cac5239e9aaf",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 531,
+   "line": 593,
    "symbol": "test_node_cpu_preparation_updates_only_exact_owned_private_node_and_refuses_drift",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598053,7 +598638,7 @@
   {
    "id": "oc-4b891381604c17bbeb16",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 531,
+   "line": 593,
    "symbol": "test_node_cpu_preparation_updates_only_exact_owned_private_node_and_refuses_drift",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598068,7 +598653,7 @@
   {
    "id": "oc-d392dbfca1fada21f9ba",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 531,
+   "line": 593,
    "symbol": "test_node_cpu_preparation_updates_only_exact_owned_private_node_and_refuses_drift",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598083,7 +598668,7 @@
   {
    "id": "oc-7cca6a033331ee2eb6b1",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 531,
+   "line": 593,
    "symbol": "test_node_cpu_preparation_updates_only_exact_owned_private_node_and_refuses_drift",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598098,7 +598683,7 @@
   {
    "id": "oc-452683d013a98bde3783",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 534,
+   "line": 596,
    "symbol": "test_node_cpu_preparation_updates_only_exact_owned_private_node_and_refuses_drift",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598113,7 +598698,7 @@
   {
    "id": "oc-e6b3dedc6885c636c169",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 534,
+   "line": 596,
    "symbol": "test_node_cpu_preparation_updates_only_exact_owned_private_node_and_refuses_drift",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598128,7 +598713,7 @@
   {
    "id": "oc-e568feeb985a6a155026",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 534,
+   "line": 596,
    "symbol": "test_node_cpu_preparation_updates_only_exact_owned_private_node_and_refuses_drift",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598143,7 +598728,7 @@
   {
    "id": "oc-fb9d6597cbf607f86bc9",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 534,
+   "line": 596,
    "symbol": "test_node_cpu_preparation_updates_only_exact_owned_private_node_and_refuses_drift",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598158,7 +598743,7 @@
   {
    "id": "oc-dbd6f922933ca4e133e7",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 544,
+   "line": 606,
    "symbol": "test_node_cpu_preparation_updates_only_exact_owned_private_node_and_refuses_drift",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598173,7 +598758,7 @@
   {
    "id": "oc-ee5cf5036a0c92345f8a",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 544,
+   "line": 606,
    "symbol": "test_node_cpu_preparation_updates_only_exact_owned_private_node_and_refuses_drift",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598188,7 +598773,7 @@
   {
    "id": "oc-66c40f2aa662fb9e2369",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 546,
+   "line": 608,
    "symbol": "test_node_cpu_preparation_updates_only_exact_owned_private_node_and_refuses_drift",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598203,7 +598788,7 @@
   {
    "id": "oc-c6d065057914694ec562",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 550,
+   "line": 612,
    "symbol": "test_node_cpu_preparation_updates_only_exact_owned_private_node_and_refuses_drift",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598218,7 +598803,7 @@
   {
    "id": "oc-6f2200a1eca29b85c839",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 555,
+   "line": 617,
    "symbol": "test_native_cpu_fixture_keeps_real_boundary_positive_proof_and_zero_skip_gates",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598233,7 +598818,7 @@
   {
    "id": "oc-23146f7bc388315882de",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 559,
+   "line": 621,
    "symbol": "test_native_cpu_fixture_keeps_real_boundary_positive_proof_and_zero_skip_gates",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598248,7 +598833,7 @@
   {
    "id": "oc-cc983156e9dc873332a0",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 561,
+   "line": 623,
    "symbol": "test_native_cpu_fixture_keeps_real_boundary_positive_proof_and_zero_skip_gates",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598263,7 +598848,7 @@
   {
    "id": "oc-756f5311735169911f4b",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 561,
+   "line": 623,
    "symbol": "test_native_cpu_fixture_keeps_real_boundary_positive_proof_and_zero_skip_gates",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598278,7 +598863,7 @@
   {
    "id": "oc-291d65686003bb2c5ed6",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 565,
+   "line": 627,
    "symbol": "test_native_cpu_fixture_keeps_real_boundary_positive_proof_and_zero_skip_gates",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598293,7 +598878,7 @@
   {
    "id": "oc-e14cf42500d5c3ff2374",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 565,
+   "line": 627,
    "symbol": "test_native_cpu_fixture_keeps_real_boundary_positive_proof_and_zero_skip_gates",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598308,7 +598893,7 @@
   {
    "id": "oc-9fe79cfa8699aa1bf047",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 565,
+   "line": 627,
    "symbol": "test_native_cpu_fixture_keeps_real_boundary_positive_proof_and_zero_skip_gates",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598323,7 +598908,7 @@
   {
    "id": "oc-a6ee828648d38427f653",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 569,
+   "line": 631,
    "symbol": "test_native_cpu_fixture_keeps_real_boundary_positive_proof_and_zero_skip_gates",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598338,7 +598923,7 @@
   {
    "id": "oc-e4dd6676aea675ab6896",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 569,
+   "line": 631,
    "symbol": "test_native_cpu_fixture_keeps_real_boundary_positive_proof_and_zero_skip_gates",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598353,7 +598938,7 @@
   {
    "id": "oc-a2af44bcdf53bcf217fd",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 573,
+   "line": 635,
    "symbol": "verify",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598368,7 +598953,7 @@
   {
    "id": "oc-467208e5aaae90da34b0",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 578,
+   "line": 640,
    "symbol": "verify",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598383,7 +598968,7 @@
   {
    "id": "oc-adfb9f57a94951b58f5a",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 584,
+   "line": 646,
    "symbol": "test_admission_typechecking_keeps_only_closed_bounded_warning_evidence_and_refuses",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598398,7 +598983,7 @@
   {
    "id": "oc-2fa9c05f237b43af49d0",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 584,
+   "line": 646,
    "symbol": "test_admission_typechecking_keeps_only_closed_bounded_warning_evidence_and_refuses",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598413,7 +598998,7 @@
   {
    "id": "oc-9b0a9e8e0504effae78f",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 584,
+   "line": 646,
    "symbol": "test_admission_typechecking_keeps_only_closed_bounded_warning_evidence_and_refuses",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598428,7 +599013,7 @@
   {
    "id": "oc-0ac339c7dd5f4664819c",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 584,
+   "line": 646,
    "symbol": "test_admission_typechecking_keeps_only_closed_bounded_warning_evidence_and_refuses",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598443,7 +599028,7 @@
   {
    "id": "oc-06cb65097df132ff7052",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 584,
+   "line": 646,
    "symbol": "test_admission_typechecking_keeps_only_closed_bounded_warning_evidence_and_refuses",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598458,7 +599043,7 @@
   {
    "id": "oc-22da378f5432d41c1b1c",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 585,
+   "line": 647,
    "symbol": "test_admission_typechecking_keeps_only_closed_bounded_warning_evidence_and_refuses",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598473,7 +599058,7 @@
   {
    "id": "oc-84b6a329fe240593f1d8",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 585,
+   "line": 647,
    "symbol": "test_admission_typechecking_keeps_only_closed_bounded_warning_evidence_and_refuses",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598488,7 +599073,7 @@
   {
    "id": "oc-0f5d9224383cd289e95f",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 585,
+   "line": 647,
    "symbol": "test_admission_typechecking_keeps_only_closed_bounded_warning_evidence_and_refuses",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598503,7 +599088,7 @@
   {
    "id": "oc-90c9c86855e6243c7686",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 585,
+   "line": 647,
    "symbol": "test_admission_typechecking_keeps_only_closed_bounded_warning_evidence_and_refuses",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598518,7 +599103,7 @@
   {
    "id": "oc-857dd3638e9e102dbdfa",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 585,
+   "line": 647,
    "symbol": "test_admission_typechecking_keeps_only_closed_bounded_warning_evidence_and_refuses",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598533,7 +599118,7 @@
   {
    "id": "oc-27acd1488ca59cfdf84b",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 586,
+   "line": 648,
    "symbol": "test_admission_typechecking_keeps_only_closed_bounded_warning_evidence_and_refuses",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598548,7 +599133,7 @@
   {
    "id": "oc-dfae485ac221d6a273bc",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 586,
+   "line": 648,
    "symbol": "test_admission_typechecking_keeps_only_closed_bounded_warning_evidence_and_refuses",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598563,7 +599148,7 @@
   {
    "id": "oc-204bb4628c3dc80ec573",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 586,
+   "line": 648,
    "symbol": "test_admission_typechecking_keeps_only_closed_bounded_warning_evidence_and_refuses",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598578,7 +599163,7 @@
   {
    "id": "oc-419aef7fe8d4ee90594b",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 586,
+   "line": 648,
    "symbol": "test_admission_typechecking_keeps_only_closed_bounded_warning_evidence_and_refuses",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598593,7 +599178,7 @@
   {
    "id": "oc-abb73f397f72eeba7a4f",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 586,
+   "line": 648,
    "symbol": "test_admission_typechecking_keeps_only_closed_bounded_warning_evidence_and_refuses",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598608,7 +599193,7 @@
   {
    "id": "oc-eee4ecda1401efa2d6bf",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 587,
+   "line": 649,
    "symbol": "test_admission_typechecking_keeps_only_closed_bounded_warning_evidence_and_refuses",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598623,7 +599208,7 @@
   {
    "id": "oc-e446a8f260322a2fd541",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 587,
+   "line": 649,
    "symbol": "test_admission_typechecking_keeps_only_closed_bounded_warning_evidence_and_refuses",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598638,7 +599223,7 @@
   {
    "id": "oc-fd823973b04cd4ca3c10",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 587,
+   "line": 649,
    "symbol": "test_admission_typechecking_keeps_only_closed_bounded_warning_evidence_and_refuses",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598653,7 +599238,7 @@
   {
    "id": "oc-cb71172cbac08ba440ef",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 587,
+   "line": 649,
    "symbol": "test_admission_typechecking_keeps_only_closed_bounded_warning_evidence_and_refuses",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598668,7 +599253,7 @@
   {
    "id": "oc-791310e1e41ca246926f",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 587,
+   "line": 649,
    "symbol": "test_admission_typechecking_keeps_only_closed_bounded_warning_evidence_and_refuses",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598683,7 +599268,7 @@
   {
    "id": "oc-30faf653053acfde35c5",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 587,
+   "line": 649,
    "symbol": "test_admission_typechecking_keeps_only_closed_bounded_warning_evidence_and_refuses",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598698,7 +599283,7 @@
   {
    "id": "oc-4d73bdc21ffd65425e5b",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 588,
+   "line": 650,
    "symbol": "test_admission_typechecking_keeps_only_closed_bounded_warning_evidence_and_refuses",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598713,7 +599298,7 @@
   {
    "id": "oc-ab8444e02fa43355b622",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 588,
+   "line": 650,
    "symbol": "test_admission_typechecking_keeps_only_closed_bounded_warning_evidence_and_refuses",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598728,7 +599313,7 @@
   {
    "id": "oc-7fab8e182aabe1f28e56",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 588,
+   "line": 650,
    "symbol": "test_admission_typechecking_keeps_only_closed_bounded_warning_evidence_and_refuses",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598743,7 +599328,7 @@
   {
    "id": "oc-409898ae9d485fd8782d",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 596,
+   "line": 658,
    "symbol": "test_admission_typechecking_keeps_only_closed_bounded_warning_evidence_and_refuses",
    "kind": "script-default",
    "role": "report",
@@ -598758,7 +599343,7 @@
   {
    "id": "oc-147f2244a4da6c5f9519",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 596,
+   "line": 658,
    "symbol": "test_admission_typechecking_keeps_only_closed_bounded_warning_evidence_and_refuses",
    "kind": "script-default",
    "role": "report",
@@ -598773,7 +599358,7 @@
   {
    "id": "oc-89b37ab0ad375f47e355",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 596,
+   "line": 658,
    "symbol": "test_admission_typechecking_keeps_only_closed_bounded_warning_evidence_and_refuses",
    "kind": "script-default",
    "role": "report",
@@ -598788,7 +599373,7 @@
   {
    "id": "oc-f26bb1cf77fdcda05d6a",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 597,
+   "line": 659,
    "symbol": "test_admission_typechecking_keeps_only_closed_bounded_warning_evidence_and_refuses",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598803,7 +599388,7 @@
   {
    "id": "oc-aa7c68608cbbf34818b8",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 597,
+   "line": 659,
    "symbol": "test_admission_typechecking_keeps_only_closed_bounded_warning_evidence_and_refuses",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598818,7 +599403,7 @@
   {
    "id": "oc-3374148c2827dfcb3ae0",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 598,
+   "line": 660,
    "symbol": "test_admission_typechecking_keeps_only_closed_bounded_warning_evidence_and_refuses",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598833,7 +599418,7 @@
   {
    "id": "oc-c488ea5419986fb3462e",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 598,
+   "line": 660,
    "symbol": "test_admission_typechecking_keeps_only_closed_bounded_warning_evidence_and_refuses",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598848,7 +599433,7 @@
   {
    "id": "oc-b1d72fd44007d70def3e",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 602,
+   "line": 664,
    "symbol": "test_admission_typechecking_keeps_only_closed_bounded_warning_evidence_and_refuses",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598863,7 +599448,7 @@
   {
    "id": "oc-5629334b8cbb094121da",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 602,
+   "line": 664,
    "symbol": "test_admission_typechecking_keeps_only_closed_bounded_warning_evidence_and_refuses",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598878,7 +599463,7 @@
   {
    "id": "oc-a9bb27e23af9de6a0a35",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 602,
+   "line": 664,
    "symbol": "test_admission_typechecking_keeps_only_closed_bounded_warning_evidence_and_refuses",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598893,7 +599478,7 @@
   {
    "id": "oc-645dc557882f5eec8f41",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 602,
+   "line": 664,
    "symbol": "test_admission_typechecking_keeps_only_closed_bounded_warning_evidence_and_refuses",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598908,7 +599493,7 @@
   {
    "id": "oc-4a395b7a0f054eab44aa",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 611,
+   "line": 673,
    "symbol": "test_admission_typechecking_keeps_only_closed_bounded_warning_evidence_and_refuses",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598923,7 +599508,7 @@
   {
    "id": "oc-3da0c4e7d7ea7f5a290a",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 613,
+   "line": 675,
    "symbol": "test_admission_typechecking_keeps_only_closed_bounded_warning_evidence_and_refuses",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598938,7 +599523,7 @@
   {
    "id": "oc-0eaff486f5c23017cce9",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 613,
+   "line": 675,
    "symbol": "test_admission_typechecking_keeps_only_closed_bounded_warning_evidence_and_refuses",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598953,7 +599538,7 @@
   {
    "id": "oc-82214dd48ca418e80bcf",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 613,
+   "line": 675,
    "symbol": "test_admission_typechecking_keeps_only_closed_bounded_warning_evidence_and_refuses",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598968,7 +599553,7 @@
   {
    "id": "oc-5c5b06c27ea1babae8ab",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 614,
+   "line": 676,
    "symbol": "test_admission_typechecking_keeps_only_closed_bounded_warning_evidence_and_refuses",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -598983,7 +599568,7 @@
   {
    "id": "oc-c380d712fba6b8a819a6",
    "path": "scripts/tests/test_kubernetes_runner_acceptance.py",
-   "line": 614,
+   "line": 676,
    "symbol": "test_admission_typechecking_keeps_only_closed_bounded_warning_evidence_and_refuses",
    "kind": "inline-script-operational",
    "role": "inline",
@@ -706124,6 +706709,7 @@
   "031ca1de81a81f639cd8a4dca35ebb26f29fa21fb1931138ee858054fd4f23cf": "const id = String(values.get('id') || '').trim();",
   "031f03881f4d2910e469fb14d9b0adc14601368b7d0611d84d2df87e1951a909": "static final String INTERNAL_ROOT_SCOPE = \"runtime:root\";",
   "0321e11ba15e6fcb8c0f15ed25e377bf54cd235897e0c8ff3c2365ce3a0b7fd0": "own.stop(ref).toCompletableFuture().get(5, TimeUnit.SECONDS);",
+  "032403226555d37cc978e9fd30c96b8a079b1dda58205309ef1af817e6b7638a": "counter_reads=$((counter_reads+1))",
   "0326931bccb03929bdd2eca635cef03e9d346d15da8b8c8688e9c55f174b45fc": "with self.assertRaisesRegex(SystemExit, \"different bytes|exceeds\"):",
   "032887fcd0dacfcae5a0849ddd7cc68b326b2c16cda1fad145cdf9e664143b5f": "\"RAVENROOT_POSTGRES_JOURNAL_RETENTION_SECONDS\": (",
   "032b6e37421da5580b8dee909ca4a3eb0ab3ed080241f6b9bf5aa57e17169091": "private static final int MAX_IDENTITY_LENGTH = 128;",
@@ -706595,6 +707181,7 @@
   "0d36a66e9ea34af21e28af215c94911ae7abcb37cd1a154314580a7010e88d4b": "const maxDistance = Math.max(state.maxDistance || 0, distance);",
   "0d3946ea4526546d267e6e093a29c6fd849a4f2c7228551eaa2ff40f10b02747": "LABEL org.opencontainers.image.source=\"https://github.com/ravenroot-ai/ravenroot\" \\\\",
   "0d43984012bccaa40bcace3cdcbf21699cdfff492e78707e1a418ad29a88b9c9": "static final String INSUFFICIENT_PRIVILEGE = \"42501\";",
+  "0d4834e40cad0e161c2f599503f0c77b57f3f6b4c042aabb046f60481345adf2": "self.assertEqual(positive, report[\"cases\"][1][\"ownThrottlingWithinTenSeconds\"])",
   "0d5142796db16dd8d150b99e00fe35e4c992f06d0f161bc2866b60e4bda4f394": "org.opencontainers.image.documentation=\"https://docs.ravenroot.ai\"",
   "0d55ade50ac6941cecdf3b24e8186087aec6f48190b9671c2022d6e43ebc9a0d": "raise SystemExit(\"empty default storage class must delegate to the cluster\")",
   "0d5e0c884c668f74262724ac11ce7451e0a3d4262284cf1444d916fba93776cc": "if (!address.getHostAddress().equals(value) && !\"localhost\".equalsIgnoreCase(value)) { throw new IllegalArgumentException(\"RAVENROOT_BIND_ADDRESS must be an IP literal or localhost\");",
@@ -706766,6 +707353,7 @@
   "110076d30d2f52f3382011ba5f24920442e2e6f6392c28a5b3a6f347e4896c8c": "jar=$(adapter_jar_of_dir \"$dir\" || true)",
   "1101dc1928ed76724d444224ac3213b368b78621dda3d4b9c25af0d01ca24d92": "extra_required[\"properties\"][\"assistant\"][\"required\"].append(\"alienLimit\")",
   "11043bedeb399c83265c7188f6ecab3c56372b9c9ca4504cf835662c4bccf629": "const EDGE_KNOWN_NAMES = new Set([ ...KNOWN_EDGE_FIELDS.map(field => field.name.toLowerCase()), 'edgename', 'label', ]);",
+  "110566ebcfc1e08fb60654b219431a5f7e236d10e7f451566398bd7878a7cbb1": "capture_output=True, text=True, timeout=5, check=True)",
   "11065ee061f7cbf077fe9b01d18ad99cd1b4d87560000c37f11235770298137a": "const wrapAt = displayName.length <= 14 ? -1 : Math.max(displayName.lastIndexOf(' ', 14), 0) || 14;",
   "110e021f5b317feff5cca650dbcbe68d6325ee4ca639a58ff1c0670d026fa4e6": "UI_PORT=\"${RR_UI_PORT:-$(node e2e/ports.mjs --print-ui-port 2>/dev/null)}\"",
   "11103a9ace54205c311beabea506835d4da67b0d5835529303e1644b113a8528": "\"\"\"Return the release intent a change from `old_version` to `new_version` actually carries.",
@@ -707696,6 +708284,7 @@
   "25394d89fccdc9e95424ba9bd0b6620b1049221ff2df6486c0248fe7566a091a": "def verdict(self, message: str, name: str = \"Polaris\", email: str = \"agents@ravenroot.ai\") -> list[str]:",
   "25411f55c9d18a5aa15cc83be179e62b5f3d4b971e3ba7db9b0d9678c3d06d62": ">\"$TEMP_DIR/authoring-invalid-storage.out\" 2>&1; then",
   "254b48de7361c8f71cafa9c1246fe95a1e3a0d4503d9e8c2bfffe9fda0449737": "const status = parseInt(dataValByName(edgeEl, 'status', 'd13') || '0') || 0;",
+  "254c909eeb88b68e0fd0f7312898c9970c62956bbc1eef7985620bcd4dfcb7ed": "raw = self.cpu_probe_output().replace(b\"WORKER 0 1 100000\",",
   "254eadd334d6b4ee66df451650c79a8ac25b40df1d4136609bd1c5745bfda1d3": "(path, None, 'requireExpected(request.expected(), initial.revision());', ';'),",
   "254f6e990a4ced21ac90ad4d811a1eccdd2d217f5be92fce21e3dbdc57bb3454": "const check = () => { if (!binding || owner.incarnation !== incarnation || owner.deploymentRun !== binding || !isCurrent(owner, client)) throw failure('STOP_ORIGIN_AUTHORITY_CHANGED');",
   "25537c22d0e474d1fae56cd6c88d9c603d1c8a5e9556035eaac3737a2275ae68": "expected_next(ReleaseVersion.parse(INITIAL_VERSION), \"none\")",
@@ -708030,6 +708619,7 @@
   "2cc598d2002d123c24c30079b83c8190dc8a9a9e5d062b548d48fd69016d5b9d": "path.relative_to(root), source, start, end, \"fixed-declaration\", field, discovered)",
   "2ccef10995521d0ae2ac671f6850a6e12b4a386c87a00c84b3163ef857aadcf1": "} private static final Set<String> REVOKE_FLAGS = Set.of(\"store-dir\", \"audit-dir\", \"tenant\", \"registration-id\", \"expected-revision\", \"operator\");",
   "2ccf87340b9dc12234af0dd7b1f331c36988135415915436e49710c4c49b7d77": "AGGREGATOR_CONDITION = f\"always() && {PRODUCT_CONDITION}\"",
+  "2cd3af8377f73d8a133eeb72efbd7658d2aa4941e980d857e1755338b7f0ccc3": "(path / \"cpu.stat\").write_text(\"nr_throttled 1\\n\")",
   "2cdd3c3fd74c5eed84d135d9d681898bc778300ab34f734a0e137cfd6711c939": "check \"an invalid JDBC checksum creates no install directory\" test ! -e \"$BAD_SHA_DIR\"",
   "2cdece956f643661c81d80cb53f99ba4037efe3eac202db46dbc54ca0f8e2394": "AgentBudgetVector parentCeiling = new AgentBudgetVector(100, 100, 100, 100, 100, 100, 5, 1, 1);",
   "2ce2f232b2768a6866b8411d62474723e0456fb47e9627bc95a104522846a974": "const cancelled = retire(prior, 'replaced');",
@@ -709825,6 +710415,7 @@
   "514dd5108e5c02c0386ac6b94d2e1fad38e1135b1461b51db4f433e722f0c38b": "RAVENROOT_EGRESS_RESERVED_EXCEPTIONS=$BENCH_EXCEPTIONS\"",
   "51507b31e5f386306d7e40ed06a3a2e4d203510265ca76f6c74692433c9b2779": "const loopClearance = cytoMode ? Math.max(88, Math.round(Math.max(source.outerWidth(), source.outerHeight()) * 0.85)) : 40;",
   "5156eb211ef73687e6391033f34a6b43274bd91d4a46656275b444197c297de3": "const result = await this.#json(`/v1/deployments/${encodeURIComponent(id)}`, { method: 'GET', headers: { Accept: 'application/json' }, signal, });",
+  "515a008ea7723f02ccd34075046928ae08c4ed38926ff262e66749f9935f2ac5": "path=$1; role=child; first=$2; last=$3; own_after=$4",
   "515abeafd6ac9e90c6b8873fbe46c721adbd3a94565433dc759b4e453b6a52c5": "public static final int HARD_MAX_INBOX_PAGE_SIZE = 1_000;",
   "515bdc84a79743560de8371b5949dcc6f41fbb6b334cf233a8c1c259f51e83f7": "let maximizeGeneration = 0;",
   "516062c64d44b9fb7eeb5275cdaf62fdde036a2223bd9286d746b7d227f7656b": "public final class SqliteDeploymentRegistry implements DeploymentRegistry { private static final int SQLITE_CORRUPT = 11;",
@@ -709850,6 +710441,7 @@
   "51d8a9ac6229d4b6b74af8ee22709bdf77a5684200a9ec6417f0cd714835ec52": "\"StableEdgeId.SSE_FRAME_MAX_BYTES\": 65536,",
   "51db2cf1406c5a96dd30d872b8ca2d549c17f659f4eaed023ade890ce08603d5": "const action = stageTapAction({ editing: modifyEnabled, navigating: navigationEnabled, gestureStarted: stageGestureStarted, gestureMoved: stageGestureMoved, hasSelection: e.cy.scratch('_rrStageGestureHadSelection'), });",
   "51e2db5e3c33285c2c82a4df4e900495a012e90b07eedbc29e154479fb872b0d": "static final String ENVIRONMENT = \"RAVENROOT_MATTERMOST_CONFIG\";",
+  "51e6bd97f3d755af44da62cf7b29b00a2e115b36d5a8744d773581f5126182b0": "measured = measured.replace(\"</proc/uptime\", '<\"$path/clock\"')",
   "51ed4444bbd71974a366653b092719ac01c48ff4042b4567efc9fab775ac8822": "RAVENROOT_LOCAL_RUNNER_DIR=\"/operator/local-runner\", RAVENROOT_LOCAL_DOCKER_SOCKET=\"/var/run/dedicated-docker.sock\",",
   "51f20af877d44c4e225c18632815cc99f54abcc74a9a9dfdb4335e6e3125b74c": "{\"pointer\":\"/properties/humanTask/properties/maxDecisionBodyBytes/$ref\",\"reference\":\"#/definitions/positiveInt64MiB\",\"required\":true,\"resolutionError\":null,\"resolved\":{\"oneOf\":[{\"maximum\":67108864,\"minimum\":1,\"type\":\"integer\"},{\"$ref\":\"#/definitions/humanTaskBlank\",\"resolved\":{\"pattern\":\"^[\\t-\\r\\u001c- \\u00a0\\u1680\\u2000-\\u200a\\u2028-\\u2029\\u202f\\u205f\\u3000]*$\",\"type\":\"string\"}}]}}",
   "5204a6a23f59dceb566aa37852fb02396e74fc9b370422f05cc4600f813bbdd9": "auxiliary_log=\"$output_dir/logs/$condition-$sample_id-auxiliary.log\"",
@@ -710108,6 +710700,7 @@
   "5764788b350eadd6e6f8e19691f94b32458d51118ec5267b55ecdd28b8773cdf": "\"RAVENROOT_GRAPH_AUTHORING_REPOSITORY_OWNER\": (",
   "5766f560ff8483794b436dc727220a688347c2f82de56a3e87306f386ddb8515": "+ (\"needs.release-classification.result == 'success' && \"",
   "576ba49ac1658c6f02f3ebfb2816c8056b8841f3a7d94875e37e121a80b800df": "value: {{ include \"ravenroot.humanTaskValue\" .Values.humanTask.attentionPollMillis }}",
+  "57708a63351ee8a0a0e45e5d8165d4845e5c52fcd645d462874f9bf7b33276ed": "self.assertEqual(2, measured.count(\"</proc/uptime\"))",
   "577140ac5a8ec2ad3fc141711e299a68b7a1ff71e929e92aa86f01da87afe142": "try { if (currentRecoveryGeneration(generation)) { Duration delay = Duration.ofNanos(Math.max(1, executionLeaseTtl.toNanos() / 3));",
   "5777557ce81d5f163f7e35a031d9c0071a601ce1a267c572079ca070ff4e62bf": "engine().stop(transient1).toCompletableFuture().get(10, TimeUnit.SECONDS);",
   "577bc771a152e8a40ea6b78afe511b919da547892f7257f2e0dde08a762de1c2": "private static final Pattern PRIVATE_KEY_BLOCK = Pattern.compile( \"(?s)-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?-----END [A-Z0-9 ]*PRIVATE KEY-----\");",
@@ -710781,6 +711374,7 @@
   "65e25a32b61817e02591a4d8f87bca1e8a1ebdeb2c525a3b7527bd8201b217f2": "raise AssertionError(\"The exact agent budget setting must derive before negative tests\")",
   "65e3a783cc87049a58103a020bb24119d4ca7d92e7a5ba6d17e418857a478100": "const catalog = uiLocaleCandidates(activeLocale) .filter(candidate => candidate !== 'en' || language === 'en') .map(candidate => available.get(candidate)).find(Boolean);",
   "65e765044cf011555d25ebea9d4f5ebac86c65ac16bf279989a9fea9392c0e30": "{\"pointer\":\"/definitions/aiConfiguration/properties/defaultMcpTimeoutMs/$ref\",\"reference\":\"#/definitions/aiPositive\",\"required\":true,\"resolutionError\":\"unsupported sibling next to $ref\",\"resolved\":null}",
+  "65f2ce88c8fb41a219810632ebf071736e6a61d7dd205fd852b5610c251dba08": "(\"no own throttling\", \"100.00\", \"110.00\", 0, [0, 0, 10010000], False),",
   "65f65ac0357adb224410042cfd67a420b0b017a5520404c7a8bad5fcd6f4c5c3": "actual_id=$(extension_id_of_dir \"$module_dir\")",
   "65f827bd363c5a5a08fed91ea69806d3356cf52fa83331cc1bb3055c694b8f4f": "\"maxSystemPreambleChars\": { \"x-ravenroot-environment\": \"RAVENROOT_AI_MAX_SYSTEM_PREAMBLE_CHARS\", \"$ref\": \"#/definitions/aiPositive\" },",
   "65fae9db95fca823843c830b30369533f9a64a03392988308a36dde577e3041c": "raise ValueError(\"CPU hierarchy \" + reason)",
@@ -711289,6 +711883,7 @@
   "701dfee312bb7af07c7a24598c26a2b7db3289e07a42fb0ac7f5460f3cf65dca": "static final List<String> ALLOWED_PROTOCOLS = List.of(\"TLSv1.3\", \"TLSv1.2\");",
   "701fbe1b13b26aa060283ca19cdf770bb6ec9585ef48c931ec7a3518e2cedc86": "while IFS= read -r flag; do set -- \"$@\" \"$flag\"; done <\"$TEMP_DIR/helm-$tuple-flags\"",
   "701fd699a0fb82249db080011c00d681db2a9bb85b22cf0c014ab77e886411c1": "raise OciRegistryError(\"GHCR tag does not resolve to an OCI image index\")",
+  "7021e25b403e9a03572402539620667632664e8f438d02fa5231202a20e9c48a": "if ((counter_reads==0)); then value=0; else value=$own_after; fi",
   "7024d4063d01a8f12a0ffb036f0a9d51e0edda2de9dda01d8b0129f19742a8c2": "alternates.write_text(str(common_path / \"objects\") + \"\\n\", encoding=\"utf-8\")",
   "702bdd64e7f77d8fe9866d70213163b37a8b52f4d915b36320e143986960e53e": "\"RAVENROOT_ASSISTANT_ALLOWED_PORTS\": \"11434\",",
   "703045e5e89770fc37c89e4c713439fa8b70e50d96faa42f583a1abaf24ecc39": "\"AuditTrailDirectory.resolve(environment.get(AUDIT_DIR_VARIABLE)).path()\",",
@@ -711717,6 +712312,7 @@
   "79832a4a49337af3ea56128df955e8302b71bfab27757e2e16b61ba77eb75e3b": "runnerShutdownStepSeconds: \"\"",
   "798b6a900a810a0c8f2001c871a4deddef555036a2585627aae408085d10a8ad": "(ui_path, \"repositoryScope\", \"workspaceAuthority.scope?.tenantId ?? null\", \"null\"),",
   "7995c9ab9e56a146794e57e60cd9eaae2f8c4be8ae65445b518ceaeaf9d06795": "RAVENROOT_AUTH_MODE: ${RAVENROOT_AUTH_MODE:-disabled}",
+  "799a56154eafb972316743eb9fc26ebce3e460c0acd62e705a4c3bb8b5d948d3": "source = (fixture.ROOT / \"scripts/fixtures/kubernetes_cpu_hierarchy_probe.sh\").read_text()",
   "799a762eec71a76de83125765ebff046c946e53197bd3fd3273d59b420ec9ea0": "expression_digest=\"expression\", evidence=\"unsupported\",",
   "799cc02ab0e54e2e503b7c378ea70a3f517bdbc3fdab84d6db9d925e287d9b2e": "{\"pointer\":\"/properties/rateLimit/properties/maxTrackedClients/oneOf/1/$ref\",\"reference\":\"#/definitions/graphBlank\",\"required\":true,\"resolutionError\":null,\"resolved\":{\"pattern\":\"^[\\t-\\r\\u001c- \\u1680\\u2000-\\u2006\\u2008-\\u200a\\u2028-\\u2029\\u205f\\u3000]*$\",\"type\":\"string\"}}",
   "79a24ff76d1a8b51ca4d3cb69b5570b16081ee7d3db69fda32c7cd63fa43135b": "self.assertIn(\"/opt/ravenroot/plugins\", boundary(\"RAVENROOT_PLUGINS_INSTALL_DIR\"))",
@@ -711735,6 +712331,7 @@
   "79dd637499aecf3704b7446b8c71058e725594fbd2378b669641cd937167633a": "public final class AssistantService { static final int MAX_PROPOSAL_RECOVERIES = 2;",
   "79e9b77508f4ac0be57ca8468ce688eca59d943f4c2c4d3337a5c292515fc203": "} } static final class Control { private static final String GROUP_SUPERVISOR = \"\"\" control=$1 shift leader= cleanup() { trap - EXIT HUP INT TERM if [ -n \"$leader\" ]; then kill -KILL -\"$leader\" 2>/dev/null || :; fi } trap cleanup EXIT HUP INT TERM set -m || exit 125 exec 3>&1 4>&2 exec 1>/dev/null 2>/dev/null while :; do :; done & leader=$! kill -0 -\"$leader\" 2>/dev/null || exit 125 kill -KILL -\"$leader\" 2>/dev/null || exit 125 wait \"$leader\" 2>/dev/null || : leader= \"$@\" 1>&3 2>&4 3>&- 4>&- & leader=$! printf '%s\\\\n' \"$leader\" > \"$control\" || exit 125 wait \"$leader\" result=$? exit \"$result\" \"\"\";",
   "79ed92102e1716891ba46f26cfe29414aad28cc83b2c981831c5366834f0f57d": "duplicate_urls = sorted({url for url in navigation if navigation.count(url) > 1})",
+  "79f495982716cc92f28905b5f3e1ef5836daf6dcd7678dbb0e89871fb39d227a": "subprocess.run([\"bash\", \"-n\", str(fixture.ROOT / \"scripts/fixtures/kubernetes_cpu_hierarchy_probe.sh\")],",
   "79f5833563bbf883aea57d1ec9750306c70f7dcf0dc516540e245b015024a275": "echo \"Helm accepted configured non-HTTPS publication storage\" >&2",
   "79f7738f1aa506772d583fc1dbfda182da3f21b69b94732ac495685383d028f7": "CORE_FACTORIES = ROOT / \"ravenroot\" / \"ravenroot-core\" / \"src\" / \"main\" / \"java\" / \"ai\" / \"ravenroot\" / \"core\" / \"runtime\" / \"builtin\" / \"StandardBehaviorFactories.java\"",
   "79ff6f870463587acd1a9ad685cb92358ef3d21894f6ba1dbed9369828276d25": "self.assertEqual([], [path for path in (prepared_source / \".changes\").glob(\"*.md\")",
@@ -713760,6 +714357,7 @@
   "a35c654e84a5deeaf604ed0b9d9b1a2a50cc99d3deec32d442cc23203c971b57": "if count != 1:",
   "a3663965335636bb1e775bb19112193fbb596e1ee90acc9ef1813e9b3bfe90c9": "(dockerfile, \"RAVENROOT_BIND_ADDRESS=0.0.0.0\"),",
   "a369b4fe3948ec592203feaaca8bb206476fc7d3bed06184e0b5829683f50320": "self.assertEqual(\"RAVENROOT_RUNNER_INSTANCE=%i\", worker[\"Service\"][\"Environment\"])",
+  "a36b6fb48c5720497b3ec0e40f4adc69c56097da28322000e1b91c1de3018514": "clock_reads=0; counter_reads=0",
   "a37235f57218e52c42b2932c1e36e7977cf51bc7849b44429c64f1c899e7a951": "{\"pointer\":\"/definitions/positive65536/oneOf/1/$ref\",\"reference\":\"#/definitions/humanTaskBlank\",\"required\":false,\"resolutionError\":null,\"resolved\":{\"pattern\":\"^[\\t-\\r\\u001c- \\u00a0\\u1680\\u2000-\\u200a\\u2028-\\u2029\\u202f\\u205f\\u3000]*$\",\"type\":\"string\"}}",
   "a3739d0584da2b7551b6e658b367ee47ee2d2f383e4caa48246e5a24eab75e39": "public static final String TIMEOUT_PROPERTY = \"joinTimeout\";",
   "a3761b09b096ea00a2d02213d21ac0cd18504490e4c2edc19ec64c42bb3434e7": "RAVENROOT_EGRESS_RESERVED_EXCEPTIONS: ${RAVENROOT_EGRESS_RESERVED_EXCEPTIONS:-localhost:LOOPBACK}",
@@ -713867,6 +714465,7 @@
   "a5b4fd2d19584ca424db023b02bcc9082fb33bf351e9a9d7226a69128d491992": "const mode = supportedVersion && WORKSPACE_LAYOUT_MODES.includes(value?.mode) ? value.mode : 'horizontal';",
   "a5b8c6417c77269d37d7ceb6d50f4e1aef9fcc9737a55a3c617edfa01accd670": "private static final int MAXIMUM_TIFF_PAGES = 1_024;",
   "a5c3179857c873717a7ed7d9ab63d3861c40def6b1765a25ed9ce79a00e88af0": "RAVENROOT_UI_FRAME_ANCESTORS",
+  "a5c85ca7ce8fa672c627c988dcbb2d1acd84e70e96d7efd52a5991f09f27ac7c": "(path / \"clock\").write_text(\"controlled clock input\\n\")",
   "a5cb878b618c7aad83bf97eac8d5719614deaa03fa7466a76e0efd4287450b80": "RAVENROOT_RATELIMIT_IDLE_TTL_SECONDS: ${RAVENROOT_RATELIMIT_IDLE_TTL_SECONDS:-}",
   "a5d04f8321824ae0a1ec68eac9db8d96a159b1293e040199575c0ce4f3153db6": "\" positive(\\\"RAVENROOT_SYNTHETIC_MAX_RETRIES\\\", maxRetries);\\n\"",
   "a5d33cf3a5e5ac0bd7305cd068da06b9d25605b73168fc5259c17f56c48f9ac3": "final class RabbitMqAmqpConsumerProtocol implements AmqpConsumerProtocol { static final int REQUESTED_HEARTBEAT_SECONDS = 30;",
@@ -714323,6 +714922,7 @@
   "af6878452d0e3413512f27f1eb7f17554eab7358527209b6a93c3de1ad576ff5": "RAVENROOT_ENGINE_TERMINAL_HISTORY_CAPACITY: ${RAVENROOT_ENGINE_TERMINAL_HISTORY_CAPACITY:-}",
   "af6a2d69d8b8dbb9ae0441a28ed47bd22560e3fbe8cebb7aba5c2062238573c5": "- name: RAVENROOT_ACTIVITY_CAPTURE_MAX_PAGE_SIZE",
   "af6a9f7fa43bdbc4f5c4a6b43bf143342c1acc7658d9712541cad8417fc5b383": "| $port.host_ip == \"127.0.0.1\"",
+  "af6d986a12096da4c5d147ad8c83051e77fa2d4f55fe3ff9766c16b4ed9cf0a7": "if [[ $* == '-r key value' && $key == nr_throttled ]]; then",
   "af73479e0131fee118c9d934f37294b2f95396f7d2cdeb5880f198791983c9c2": "private static final int MAX_MESSAGE_ID_BYTES = 512;",
   "af7da06649cf0a19ce94898acc2a4ecc5c2b5e7995bb6392e5838b6e6247e1dc": "--wait-timeout \"$COMPOSE_WAIT_TIMEOUT\"; then",
   "af84677a6ade5c42aac0304cd60cb74627f08076647c95f4f5b6f62ae2aba6f8": "const links = snapshot.edges.map(edge => ({ id: edge.id, runtimeIdentity: edge.runtimeIdentity, source: edge.source, target: edge.target, baseWidth: 1.8, restLen: 130, color: palette.edgeType[edge.visualType] ?? palette.edgeType.default, label: edge.label || '', traffic: null, }));",
@@ -715527,6 +716127,7 @@
   "c8e265b21db410b83956bc6c1ac31076164185eeea1b3f1eac4debff3f1ad5bf": "try (CredentialLease lease = resolving.completion().toCompletableFuture() .get(Math.max(1, remaining(window, deadlineNanos).toMillis()), TimeUnit.MILLISECONDS)) { if (!live(window, deadlineNanos)) return empty(503);",
   "c8e64b92fabf6b3bd494f551d7863594b94cd50ee87b1c981d1cd96e52f1ec75": "root, retired[\"id\"], retired, wrong_path, active)",
   "c8eff46ec7a0b9466fe589f0756037409a3839128ae52caa402f75bc9bf6208a": "assertEquals(\"second\", second.toCompletableFuture().get(5, TimeUnit.SECONDS).payload());",
+  "c8f0b6ba134b10bdf74dc4d247e5466b2d628ce12ed4b8a0a0d0b885d4ed81fe": "timeout=5, check=True)",
   "c909fe8e9a3b11604f18880461f2c891203dc9e0e36847ab49b0110bbb61c1d9": "docker build -t \"$BASELINE_IMAGE\" \"$BASELINE_WORKTREE\" >&2",
   "c91288c6de9c4b67afeef127cea2c2396962cb8d34c30ea33344cdf998d652f0": "message: \"This pool approves only its default attested RuntimeClass\"",
   "c920b09f89ea14dbe117b89b7387f3db415afb942246985497fbe9af209f24d9": "<nav aria-label=\"Primary\"><a href=\"/\" aria-current=\"page\">Home</a></nav>",
@@ -715918,6 +716519,7 @@
   "d0440e64b455aa2175ae753bdd8ebe1c7a204c3cb37996ed25b17a9d2937a20b": "const top = Number(value.top) || 0;",
   "d04ace98f3a9d79e986acb774fb1fd86e53a4b3cdb6d0e735898e6f505a8fb8e": "- name: RAVENROOT_AUTH_ISSUER",
   "d050a04fd9344c5d03783e801bcf43d36d812c434ec23cdeeca4b1c3ff19e1a9": "--dependency-tree \"$STAGE/dependency-tree.txt\"",
+  "d057a1a3a1ad6ad3864ce3cb51ec1b02a270396477ed13c416d25a6d86177fcc": "result = subprocess.run([\"bash\", \"-c\", harness + measured, \"timing-test\", directory,",
   "d0696ce4dbcfda8810081b0b2c99bdee4fda6f3da85692efa8631004da2ab7f8": "intent = selected[0].removeprefix(\"release:\")",
   "d070e6e24b635eb5cc00ab9b39739ef0cdf4a2e41d3e65c56209bda4916619e6": "if (pollMs > 0) pollHandle = doc.defaultView?.setInterval(() => { void refresh();",
   "d07753787a365747403b962463e94543a1eeb8bacb0b2f1f8f193e66179a31d4": "ARG RAVENROOT_PLUGINS_DIR=ravenroot-plugins",
@@ -1545975,6 +1546577,331 @@
    "mappings": [],
    "retirements": [],
    "additions": []
+  },
+  {
+   "id": "issue-613-native-cpu-timing-reconciliation-v1",
+   "issue": "#613",
+   "sourceRevision": "51be09e452847fb28a44851a122fe5755f59acc4",
+   "targetRevision": "3e7f42c5ef51b27de90722e9fe439e8215de42b3",
+   "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+   "sourceInventoryDigest": "6b1e21129d8c42ccc083371c53f23c5002dc0b69857448b53e0908cdf26ca345",
+   "targetCandidateDigest": "c7174c5bfc3460346e109ca0cc8be4b7f01ce3c571487c5888985d948fbe4e4b",
+   "mappings": [],
+   "retirements": [],
+   "additions": [
+    {
+     "id": "oc-57911bebb3e40e552c2d",
+     "metadata": {
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+     }
+    },
+    {
+     "id": "oc-aed3ec6258f8b940d011",
+     "metadata": {
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+     }
+    },
+    {
+     "id": "oc-df27b419450d1c66be3a",
+     "metadata": {
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+     }
+    },
+    {
+     "id": "oc-aeb99dd7a8f0c324174d",
+     "metadata": {
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+     }
+    },
+    {
+     "id": "oc-531521215e01f37b4b42",
+     "metadata": {
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+     }
+    },
+    {
+     "id": "oc-4ecf466af0de3f0f58c6",
+     "metadata": {
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+     }
+    },
+    {
+     "id": "oc-665f99f2e7acaddfb9ea",
+     "metadata": {
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+     }
+    },
+    {
+     "id": "oc-91f226548b9adcf8b6f2",
+     "metadata": {
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+     }
+    },
+    {
+     "id": "oc-26344da0d2ae9eebe462",
+     "metadata": {
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+     }
+    },
+    {
+     "id": "oc-4da897eb974e5998e15e",
+     "metadata": {
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+     }
+    },
+    {
+     "id": "oc-c9a91fffa3be6a3e2ae8",
+     "metadata": {
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+     }
+    },
+    {
+     "id": "oc-f2dd1a144c702d6cccbf",
+     "metadata": {
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+     }
+    },
+    {
+     "id": "oc-09298af2964d41c84e7f",
+     "metadata": {
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+     }
+    },
+    {
+     "id": "oc-5c99e36ae76434ea7f5f",
+     "metadata": {
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+     }
+    },
+    {
+     "id": "oc-58040486aadf3dde9fd6",
+     "metadata": {
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+     }
+    },
+    {
+     "id": "oc-b982149fab8abdee87c3",
+     "metadata": {
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+     }
+    },
+    {
+     "id": "oc-6a36065ca66bf515da88",
+     "metadata": {
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+     }
+    },
+    {
+     "id": "oc-00be598a4c1ba80a03be",
+     "metadata": {
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+     }
+    },
+    {
+     "id": "oc-4bb15962d561adf28722",
+     "metadata": {
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+     }
+    },
+    {
+     "id": "oc-fc008a5a1978767b1ed3",
+     "metadata": {
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+     }
+    },
+    {
+     "id": "oc-20c5d4f782c62778a2c7",
+     "metadata": {
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+     }
+    },
+    {
+     "id": "oc-dfe90f4b2aff830630f9",
+     "metadata": {
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+     }
+    },
+    {
+     "id": "oc-36bedaf96c80b142c19d",
+     "metadata": {
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+     }
+    },
+    {
+     "id": "oc-ee6defdc57aa4ae21aac",
+     "metadata": {
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+     }
+    },
+    {
+     "id": "oc-33ac9871473f22481ef6",
+     "metadata": {
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+     }
+    },
+    {
+     "id": "oc-88686cc866c8e53b40f2",
+     "metadata": {
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+     }
+    },
+    {
+     "id": "oc-5c483c962f92f9986fcb",
+     "metadata": {
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+     }
+    },
+    {
+     "id": "oc-b1fe559cf62506d2022c",
+     "metadata": {
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+     }
+    },
+    {
+     "id": "oc-042cbc0d4d1a5b56e838",
+     "metadata": {
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+     }
+    },
+    {
+     "id": "oc-b4490a7717b3dd0b9c94",
+     "metadata": {
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+     }
+    },
+    {
+     "id": "oc-9ef62e49a08eb8a013d4",
+     "metadata": {
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+     }
+    },
+    {
+     "id": "oc-10c53dc8ea248e61496b",
+     "metadata": {
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+     }
+    },
+    {
+     "id": "oc-fd155ca9405fdc0ac410",
+     "metadata": {
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+     }
+    },
+    {
+     "id": "oc-2d5e70eeb0d03fbbfd93",
+     "metadata": {
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+     }
+    },
+    {
+     "id": "oc-f944ea4ab9cf94bd6d54",
+     "metadata": {
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+     }
+    },
+    {
+     "id": "oc-507a281bd5438956a84e",
+     "metadata": {
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+     }
+    },
+    {
+     "id": "oc-861823feae9f8b4bde05",
+     "metadata": {
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+     }
+    },
+    {
+     "id": "oc-4fc27b23af5e87e8a7d9",
+     "metadata": {
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+     }
+    },
+    {
+     "id": "oc-f01263ebe0566aeec1d4",
+     "metadata": {
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "Deterministic native CPU timing regression fixture; values supply controlled quantized clock and own-counter samples, expected elapsed upper bounds, or bounded local test execution. They do not configure production quotas, lifecycle, retries, or watchdog deadlines."
+     }
+    }
+   ]
   }
  ],
  "semanticReviewHistory": [

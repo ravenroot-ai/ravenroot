@@ -297,7 +297,7 @@ final class KafkaConsumerSource implements InboundSource {
                         KafkaRecordEvent.correlation(pending.record));
             } catch (KafkaRecordEvent.InvalidRecord invalid) { reason = invalid.safeReason(); }
             if (reason == null) {
-                IngressReceipt receipt = context.ingress().offerDurably(context.identity(), IngressTarget.start(), event,
+                IngressReceipt receipt = context.ingress().offerDurably(context.identity(), IngressTarget.node(context.nodeId()), event,
                         context.nodeId(), KafkaRecordEvent.idempotentKey(settings.profile, pending.record));
                 if (receipt instanceof IngressReceipt.DurablyCommitted || receipt instanceof IngressReceipt.Duplicate) {
                     pending.safe = true;

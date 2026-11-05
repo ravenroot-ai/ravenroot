@@ -4,6 +4,35 @@
 
 `POST /v1/executions` accepts `mode=test` or `mode=run`; Test is the HTTP default. Acceptance returns HTTP 202 and an execution ID. Test preserves traversal visibility while bypassing behavior effects. Run dispatches real behavior and therefore requires every relevant adapter, credential, tool, and egress policy to be usable.
 
+## Native deployment observation
+
+The editor observes hosted traversals through
+`GET /v1/deployments/{id}/events?graphVersion=...&include=diagnostics`, with the captured
+`X-Ravenroot-Deployment-Incarnation` header. The optional diagnostics selector adds the same
+bounded author message, trusted Log output, and process/traversal/invocation identifiers as the
+native execution stream. It requires execution-read authority in addition to deployment observation;
+authority and the captured deployment binding are rechecked before each event. Raw diagnostic
+`detail` and arbitrary execution payloads are excluded. The default stream and embedded viewer
+retain their content-free projection. This live channel does not recover historical output that
+was not retained.
+
+The first lifecycle frame contains the exact deployment, graph version and incarnation, together
+with an opaque `cursor`. A first attachment starts at the live tail. A reconnect sends that cursor
+in `Last-Event-ID`; its lifecycle handshake anchors the resolved replay position before delivering
+backlog. Retention gaps, foreign or expired cursors remain explicit failures. Credentials travel in
+headers, never in the URL. The observation source and lifecycle do not require a usable drawing;
+the full drawing endpoint keeps its separate projection validation.
+
+The editor waits for a matching READY or DEGRADED lifecycle handshake before initial START. A
+connection notification, retry, timeout or missing drawing does not establish observation. A
+10-second observation deadline leaves the deployment's actual lifecycle intact and retains its
+saved execution request for an explicit **Run** retry. Disconnecting revokes admission confirmation;
+only another valid handshake restores it. Stop and document retirement cancel pending admission.
+
+Completing the initial START traversal does not stop a deployment or its listening sources.
+The editor displays the deployment lifecycle separately. Durable Human Task attention is scoped
+by the registration identity and graph version, rather than by the deployment's public alias.
+
 ## Control transitions
 
 | Operation | Contract |
@@ -73,6 +102,36 @@ broke" and "this traversal could never settle" is carried by `terminationReason`
 the failure classification on the event.
 
 ## Event delivery
+
+### SOURCE boundaries and business context
+
+`SOURCE_BOUNDARY` records a graph edge reaching an enabled SOURCE and stopping that branch. It
+retains the actual node/visit/attempt identity; it does not mean a listener failed or emitted another
+event. Only an accepted event whose actual entry is that SOURCE emits its admitted input through
+`continue`. Read the traversal entry and boundary event together when a source node appears in
+several histories. SOURCE readiness is deployment lifecycle state, separate from path activity.
+
+`EDGE_TRAVERSED` identifies the actual stable edge ID, including loop edges. Node/edge summary counts
+are scoped to the selected actual traversal; they do not establish a flattened chain across parallel
+branches or external processing. A correlated join arrival completes at its receiving node with
+`correlated-waiting` or `correlated-ready`. The eventual join continuation has a separate
+process/traversal identity with original contributions retained as causal evidence.
+
+Execution SSE variants add nullable `applicationCorrelationId`, `contributionId`, `contributionKind`,
+`roundId` and `publicReference` scalars from established runtime context. The additive
+`applicationCorrelationAvailability` is `AVAILABLE` when the complete context is projected,
+`NOT_RECORDED` when this event supplies no retained typed context, or `NOT_PROJECTED` when including it would reach the
+65,536-byte complete SSE frame ceiling. The last two states leave all five projection fields null;
+they are distinct from each other. Older producers may omit the availability field. No identity
+string is shortened: full immutable context remains in authorized scoped history when recorded.
+If the existing event fields alone cannot fit the complete frame, projection refuses before writing
+an oversized event; execution state and retained identity are unchanged. A disconnected stream still
+requires reconciliation and is not evidence of completion.
+Stable edge, process and traversal identities remain intact. These fields do not replace request, process, traversal, invocation, attempt or
+protocol waiter IDs, and are not extracted heuristically from payloads. Durable event projection
+reads the retained relationship; live dispatch preserves the same immutable context. Event streams
+and history queries retain their existing tenant/source authorization. Captured input/output content
+remains a separate policy-governed read, not an event metadata copy.
 
 `GET /v1/events` is an authenticated SSE stream. Without a selector, it serves the durable journal when available and otherwise the process-local ring. `include=diagnostics` selects the ring for the whole connection. The source does not change within a connection.
 
@@ -145,10 +204,17 @@ When durable replay or recent-event polling declares that a cursor predates reta
 
 Durable replay survives a restart within retained history. RING eviction and restart can lose observations; the process-local stream cannot prove complete history across a restart. A closed connection or a clean end of a captured file is not evidence that an execution finished. The journal also has narrower event coverage and no live author diagnostics; do not fill gaps by interleaving ring and journal cursor domains.
 
-Raw `detail`, tenant attributes, correlation strings and journal payloads are not published in this envelope. Live message/output fields are already bounded and targeted-redacted at their producing boundary. They remain author diagnostics, never assistant/provider context. The stable-edge limit remains 8192 UTF-8 bytes, auxiliary traversal strings share the 12287-byte escaped budget, and the complete traversal SSE frame remains below 65536 bytes.
+Raw `detail`, tenant attributes, transport correlation strings and journal payloads are not published in this envelope. The explicitly named application-context scalars follow the availability contract above. Live message/output fields are already bounded and targeted-redacted at their producing boundary. They remain author diagnostics, never assistant/provider context. The stable-edge limit remains 8192 UTF-8 bytes, existing auxiliary traversal strings share the 12287-byte escaped budget, and complete-frame accounting keeps the traversal SSE frame below 65536 bytes when projecting application context.
 
 The optional [authenticated interaction WebSocket](interactions-websocket.md) reuses this durable
 journal projection and adds bounded acknowledgement flow control plus durable Human Task commands.
 It does not change the SSE representation or create server-side cursor state.
 
 For API paths see [HTTP API and CLI](api-cli.md). For diagnosis see [Events and persistence](../troubleshooting/events-persistence.md).
+
+The server audit line also carries the same five typed, bounded business-context scalars and
+`applicationCorrelationAvailability` (`AVAILABLE` or `NOT_RECORDED`). These explicit fields preserve
+correlation when optional activity capture is disabled. They do not serialize arbitrary payload,
+attributes, credentials or nested metadata; a public reference must be non-secret. The audit line
+retains its separate operator identity/detail fields, while browser presentation/redaction fields
+remain SSE-only.

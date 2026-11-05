@@ -107,16 +107,17 @@ class DefaultGraphDeploymentObservabilityTest {
             }
         })) {
             var deployment = new DefaultGraphDeployment(DeploymentId.of("orders"), engine,
-                    BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults()), monitor,
-                    ExecutionIdentitySource.randomUuids(), graphBytes(),
+                    ManualSourceFixture.register(BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults())), monitor,
+                    ExecutionIdentitySource.randomUuids(), ManualSourceFixture.graph(GRAPH).getBytes(StandardCharsets.UTF_8),
                     DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY);
             var status = deployment.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
             assertEquals(DeploymentState.READY, status.state());
+            assertTrue(byTraversal.isEmpty(), "Deploy must open the SOURCE without initial work");
 
             assertEquals(IngressDisposition.ACCEPTED,
-                    deployment.ingress().offer(IDENTITY, IngressTarget.start(), "first"));
+                    deployment.ingress().offer(IDENTITY, IngressTarget.node("start"), "first"));
             assertEquals(IngressDisposition.ACCEPTED,
-                    deployment.ingress().offer(IDENTITY, IngressTarget.start(), "second"));
+                    deployment.ingress().offer(IDENTITY, IngressTarget.node("start"), "second"));
 
             assertTrue(completed.await(10, TimeUnit.SECONDS), "both traversals must complete");
             deployment.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
@@ -125,7 +126,7 @@ class DefaultGraphDeploymentObservabilityTest {
         }
 
         assertEquals(2, byTraversal.size(), "two ingress offers must start two distinct traversals");
-        String expectedGraphVersion = sha256Hex(graphBytes());
+        String expectedGraphVersion = sha256Hex(ManualSourceFixture.graph(GRAPH).getBytes(StandardCharsets.UTF_8));
         List<String> workloadIdsSeen = new java.util.ArrayList<>();
         for (var events : byTraversal.values()) {
             assertTrue(events.size() >= 4, "expected at least EXECUTION_STARTED/NODE_*/EXECUTION_COMPLETED: "

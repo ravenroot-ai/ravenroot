@@ -448,7 +448,7 @@ for (const [id, runtime] of Object.entries(RUNTIMES)) {
       `${id}.negative.${index}.expected=${property(negative.expected ?? "empty")}`);
   });
 }
-const coreIds = ["bundle.service-grant", "core.http", "core.program", "core.human-task", "core.publication-policies", "core.runner"];
+const coreIds = ["bundle.service-grant", "core.http", "core.history", "core.program", "core.human-task", "core.publication-policies", "core.runner"];
 lines.push(`core.ids=${coreIds.join(",")}`);
 const runnerExample = JSON.parse(await readFile(fileURLToPath(new URL("../../docs/examples/governed-runner/control-plane.json", import.meta.url)), "utf8")) as Record<string, unknown>;
 const resolveFixtureSecrets = (value: unknown): unknown => {
@@ -482,6 +482,26 @@ for (const id of coreIds) {
       negativeEnvironments.push({ environment: { [key]: Buffer.from(JSON.stringify(mutation.value), "utf8").toString("base64") }, label: mutation.label });
     }
     negativeEnvironments.push({ environment: { [key]: Buffer.from(JSON.stringify(document), "utf8").toString("base64") }, label: "unknown-field" });
+  } else if (id === "core.history") {
+    lines.push(`core.${id}.invalidEnvironmentKey=RAVENROOT_HISTORY_MAX_PAGE_SIZE`, `core.${id}.invalidEnvironmentValue=1001`);
+    const contract = CONTRACTS.find((candidate) => candidate.id === id)!;
+    for (const field of contract.fields) {
+      for (const value of [0, Number(field.maximum) + 1]) {
+        const values = { ...selection.values, [field.name]: value };
+        try { serializeSelection({ ...selection, values }); throw new Error(`${id} accepted invalid ${field.name}=${value}`); }
+        catch (error) { if (error instanceof Error && error.message.includes("accepted invalid")) throw error; }
+        negativeEnvironments.push({ environment: { ...environment, [field.name]: String(value) }, label: `${field.name}:${value === 0 ? "minimum" : "maximum"}` });
+      }
+    }
+    for (const [key, value, label] of [
+      ["RAVENROOT_HISTORY_MAX_RETAINED_JOINS", "1", "retained-below-open"],
+      ["RAVENROOT_HISTORY_JOIN_DEADLINE_SECONDS", "2592001", "deadline-after-retention"],
+      ["RAVENROOT_HISTORY_RESPONSE_MAX_VALUES", "3263", "response-below-max-page"]
+    ] as const) {
+      try { serializeSelection({ ...selection, values: { ...selection.values, [key]: Number(value) } }); throw new Error(`${id} accepted invalid ${label}`); }
+      catch (error) { if (error instanceof Error && error.message.includes("accepted invalid")) throw error; }
+      negativeEnvironments.push({ environment: { ...environment, [key]: value }, label });
+    }
   } else if (id === "core.http") {
     lines.push(`core.${id}.invalidEnvironmentKey=RAVENROOT_HTTP_ALLOWED_PORTS`, `core.${id}.invalidEnvironmentValue=70000`);
     for (const [value, label] of [["0", "ports:minimum"], ["65536", "ports:maximum"], ["not-a-port", "ports:integer"], ["0", "max-request:minimum"], ["0", "max-response:minimum"]] as const) {

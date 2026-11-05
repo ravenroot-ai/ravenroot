@@ -107,10 +107,10 @@ public final class ExecutionStoreBootstrap {
         try {
             return switch (configuration) {
                 case ExecutionStoreConfiguration.Disabled disabled ->
-                        openSingleHost(disabled.location(), false, clock, graphMlLimits, humanTaskPolicy,
+                        openSingleHost(disabled.location(), ai.ravenroot.persistence.sqlite.SqliteStoreConfig.defaults(), false, clock, graphMlLimits, humanTaskPolicy,
                                 activityConfiguration);
                 case ExecutionStoreConfiguration.SingleHost singleHost ->
-                        openSingleHost(singleHost.location(), true, clock, graphMlLimits, humanTaskPolicy,
+                        openSingleHost(singleHost.location(), singleHost.storeConfig(), true, clock, graphMlLimits, humanTaskPolicy,
                                 activityConfiguration);
                 case ExecutionStoreConfiguration.Shared shared ->
                         openShared(shared, clock, graphMlLimits, humanTaskPolicy, activityConfiguration);
@@ -120,7 +120,7 @@ public final class ExecutionStoreBootstrap {
         }
     }
 
-    private static Opened openSingleHost(SqliteStoreLocation location, boolean enabled, Clock clock,
+    private static Opened openSingleHost(SqliteStoreLocation location, ai.ravenroot.persistence.sqlite.SqliteStoreConfig storeConfig, boolean enabled, Clock clock,
                                          GraphMlLimits graphMlLimits,
                                          ai.ravenroot.api.persistence.HumanTaskPolicy humanTaskPolicy,
                                          ActivityCaptureConfiguration activityConfiguration) {
@@ -137,7 +137,7 @@ public final class ExecutionStoreBootstrap {
                         activity == null ? () -> { } : activity::close, maintenanceLock::close);
             }
             var store = new SqliteExecutionStore(location, clock,
-                    ai.ravenroot.persistence.sqlite.SqliteStoreConfig.defaults(), humanTaskPolicy);
+                    storeConfig, humanTaskPolicy);
             // Same database file as the executions that pin these definitions, which is what puts
             // both into one backup snapshot and lets retention decide reachability from the
             // execution rows in the transaction that removes a definition. The store's own

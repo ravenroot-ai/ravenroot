@@ -49,6 +49,8 @@ describe('application command catalog', () => {
     expect(byId['file.replaceActive'].isEnabled({ ...context, documentEditable: false }))
       .toBe(true);
     expect(byId['file.fork'].isEnabled(context)).toBe(false);
+    expect(byId['file.localSave'].isEnabled({ ...context, editable: false, hasDocument: true, documentFormat: 'graphml' })).toBe(true);
+    expect(byId['file.localSave'].isEnabled({ ...context, editable: false, hasDocument: true, documentFormat: 'deployment' })).toBe(false);
     expect(byId['file.fork'].isEnabled({ ...context, documentEditable: false, documentMode: 'test' })).toBe(true);
     expect(byId['file.fork'].isEnabled({ ...context, documentEditable: false,
       documentMode: 'deployed', documentFormat: 'deployment' })).toBe(false);
@@ -83,6 +85,14 @@ describe('application command catalog', () => {
     expect(byId['run.play'].isEnabled({ ...context, running: true })).toBe(false);
     expect(byId['run.play'].isEnabled({ ...context, running: true, executionUnknown: true })).toBe(true);
     expect(byId['run.start'].isEnabled({ ...context, running: true, executionUnknown: true })).toBe(true);
+    const unknownDeployment = { ...context, running: true, deploymentUnknown: true };
+    expect(byId['run.start'].isEnabled(unknownDeployment)).toBe(true);
+    expect(byId['run.play'].isEnabled(unknownDeployment)).toBe(false);
+    expect(byId['run.newDeployment'].isEnabled({ ...unknownDeployment, hasOriginDeployment: true })).toBe(true);
+    expect(byId['run.newDeployment'].isEnabled({ ...unknownDeployment, hasOriginDeployment: true, executionCommandInFlight: true })).toBe(false);
+    expect(byId['run.start'].isEnabled({ ...unknownDeployment, tenantAuthority: false })).toBe(false);
+    expect(byId['run.start'].isEnabled({ ...unknownDeployment, executionCommandInFlight: true })).toBe(false);
+    expect(byId['run.start'].isEnabled({ ...unknownDeployment, sourceSessionStopInFlight: true })).toBe(false);
     expect(byId['run.play'].label).toBe('Test');
     expect(byId['run.play'].help).toMatch(/pass-through/);
     expect(byId['canvas.cancel'].isEnabled({ ...context, edgeGestureActive: true })).toBe(true);

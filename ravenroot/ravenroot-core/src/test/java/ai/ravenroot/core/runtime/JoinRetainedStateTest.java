@@ -1,5 +1,6 @@
 package ai.ravenroot.core.runtime;
 
+import ai.ravenroot.api.application.ExecutionEventType;
 import ai.ravenroot.api.execution.NodeResult;
 import ai.ravenroot.api.persistence.JoinStore;
 import ai.ravenroot.core.graph.GraphManager;
@@ -200,6 +201,23 @@ class JoinRetainedStateTest {
     void closeCancelsATimeoutThatWasStillBeingScheduledWhenCloseRan() throws Exception {
         var store = new InMemoryJoinStore();
         var blocked = new CompletableFuture<NodeResult>();
+        var blockedBranchEntered = new CountDownLatch(1);
+        var registry = new BehaviorRegistry();
+        registry.register("b0", message -> {
+            try {
+                if (!blockedBranchEntered.await(5, TimeUnit.SECONDS)) {
+                    return CompletableFuture.failedFuture(new AssertionError("b1 did not reach its controlled boundary"));
+                }
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                return CompletableFuture.failedFuture(interrupted);
+            }
+            return CompletableFuture.completedFuture(NodeResult.continueWith("from-b0"));
+        });
+        registry.register("b1", message -> {
+            blockedBranchEntered.countDown();
+            return blocked;
+        });
         var graph = JoinMiniGraphs.fanIn(2, JoinMiniGraphs.quorumWithTimeout(2, "PT30S"));
         var timeoutRelinquished = new CountDownLatch(1);
         var releaseRelinquishment = new CountDownLatch(1);
@@ -207,7 +225,7 @@ class JoinRetainedStateTest {
         engine.manualScheduler().blockInsideSchedule();
 
         var manager = GraphManager.from(graph);
-        var runner = new GraphRunner(manager, engine, gated(blocked), monitor,
+        var runner = new GraphRunner(manager, engine, registry, monitor,
                 ai.ravenroot.api.application.ExecutionIdentitySource.randomUuids(), store,
                 java.time.Clock.systemUTC(), GraphRunner.DEFAULT_SHUTDOWN_BOUND, () -> {
                     timeoutRelinquished.countDown();
@@ -246,6 +264,73 @@ class JoinRetainedStateTest {
         assertFalse(execution.isDone() && !execution.isCompletedExceptionally(),
                 "close() must not make a traversal with a blocked branch report success");
         blocked.complete(NodeResult.continueWith("from-b1"));
+        assertThrows(java.util.concurrent.ExecutionException.class,
+                () -> execution.get(5, TimeUnit.SECONDS),
+                "settling an abandoned branch after close must not publish traversal success");
+        assertEquals(0, monitor.eventsAfter(0).stream()
+                .filter(event -> event.type() == ExecutionEventType.EXECUTION_COMPLETED).count());
+        assertEquals(1, monitor.eventsAfter(0).stream()
+                .filter(event -> event.type().isTraversalTerminal()).count());
+    }
+
+    @Test
+    void closeDoesNotReportSuccessWhenUnstartedBranchesAreRetired() throws Exception {
+        assertUnstartedBranchesRetired(false);
+    }
+
+    @Test
+    void operatorCancellationSurvivesRetiringUnstartedBranches() throws Exception {
+        assertUnstartedBranchesRetired(true);
+    }
+
+    private void assertUnstartedBranchesRetired(boolean operatorCancellation) throws Exception {
+        var store = new InMemoryJoinStore();
+        var first = engine.holdBeforeSend("b0");
+        var second = engine.holdBeforeSend("b1");
+        var invoked = new java.util.concurrent.atomic.AtomicInteger();
+        var registry = new BehaviorRegistry();
+        for (String branch : List.of("b0", "b1")) {
+            registry.register(branch, message -> {
+                invoked.incrementAndGet();
+                return CompletableFuture.completedFuture(NodeResult.continueWith(branch));
+            });
+        }
+        try (var manager = GraphManager.from(JoinMiniGraphs.fanIn(2, JoinMiniGraphs.quorum(2)));
+             var runner = new GraphRunner(manager, engine, registry, monitor,
+                     ai.ravenroot.api.application.ExecutionIdentitySource.randomUuids(), store, java.time.Clock.systemUTC())) {
+            var execution = runner.execute(TestIdentities.TENANT_A, "in").toCompletableFuture();
+            try {
+                assertTrue(first.entered.await(5, TimeUnit.SECONDS));
+                assertTrue(second.entered.await(5, TimeUnit.SECONDS));
+                assertEquals(0, store.totalRecordCount(), "no branch has reached its join");
+                if (operatorCancellation) {
+                    var traversalId = monitor.eventsAfter(0).stream()
+                            .filter(event -> event.type() == ExecutionEventType.EXECUTION_STARTED)
+                            .findFirst().orElseThrow().traversalId();
+                    assertTrue(runner.cancelTraversal(traversalId));
+                }
+                runner.close();
+                runner.close(); // An unresolved late branch must retain its first stop's origin.
+            } finally {
+                first.release();
+                second.release();
+            }
+            var failure = assertThrows(java.util.concurrent.ExecutionException.class,
+                    () -> execution.get(5, TimeUnit.SECONDS),
+                    "retiring every unstarted branch must not become successful fan-in completion");
+            assertEquals(operatorCancellation ? TraversalCancelledException.class : IllegalStateException.class,
+                    failure.getCause().getClass());
+            assertEquals(0, invoked.get(), "retired actors must not enter their handlers");
+            assertEquals(0, monitor.eventsAfter(0).stream()
+                    .filter(event -> event.type() == ExecutionEventType.EXECUTION_COMPLETED).count());
+            assertEquals(operatorCancellation ? 1 : 0, monitor.eventsAfter(0).stream()
+                    .filter(event -> event.type() == ExecutionEventType.EXECUTION_CANCELLED).count());
+            assertEquals(operatorCancellation ? 0 : 1, monitor.eventsAfter(0).stream()
+                    .filter(event -> event.type() == ExecutionEventType.EXECUTION_FAILED).count());
+            assertEquals(0, store.totalRecordCount());
+            assertEquals(0, runner.liveCoordinatorCount());
+            assertEquals(0, runner.liveJoinTimeoutCount());
+        }
     }
 
     /**

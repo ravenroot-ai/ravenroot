@@ -857,7 +857,7 @@ test('Git authoring keeps a URL import unbound while repository Open and Save re
     }
     if (url.pathname === '/v1/graph-authoring') {
       return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
-        items: [{ documentId: 'managed.graphml', releaseVersion: 7, releasedVersion: 7,
+        nextCursor: '', items: [{ documentId: 'managed.graphml', releaseVersion: 7, releasedVersion: 7,
           released: true, published: true, draftDeleted: false }],
       }) });
     }
@@ -891,13 +891,9 @@ test('Git authoring keeps a URL import unbound while repository Open and Save re
   }))).toEqual({ name: 'git-import.graphml', providerDocumentId: null, nodes: 2 });
   expect(new URL(page.url()).searchParams.get('file')).toBe('/git-import.graphml');
 
-  page.once('dialog', async dialog => {
-    expect(dialog.type()).toBe('prompt');
-    expect(dialog.message()).toContain('Open a repository graph');
-    await dialog.accept('managed.graphml [released]');
-  });
   await page.locator('#menu-file').click();
   await page.getByRole('menuitem', { name: 'Open from repository…' }).click();
+  await page.getByRole('button', { name: /managed.graphml · Read-only release/ }).click();
   await expect.poll(() => graphAuthoringRequests.some(request => request.method === 'GET'
     && request.pathname.endsWith('/managed.graphml') && request.source === 'release')).toBe(true);
   await expect.poll(() => page.evaluate(() => ({

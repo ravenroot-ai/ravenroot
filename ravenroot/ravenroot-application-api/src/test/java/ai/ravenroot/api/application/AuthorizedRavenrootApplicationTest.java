@@ -29,11 +29,38 @@ import java.util.concurrent.CompletionStage;
 import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AuthorizedRavenrootApplicationTest {
+    @Test
+    void observationKeepsItsOwnAuthorityAndDoesNotRequireDrawingOrExecutionRead() {
+        var calls = new ArrayList<String>();
+        RavenrootApplication raw = (RavenrootApplication) java.lang.reflect.Proxy.newProxyInstance(
+                RavenrootApplication.class.getClassLoader(), new Class<?>[]{RavenrootApplication.class},
+                (proxy, method, arguments) -> {
+                    calls.add(method.getName());
+                    if (method.getName().equals("localDeployment")) {
+                        return arguments[0].equals("tenant-a") && arguments[1].equals("observed")
+                                ? java.util.Optional.of(LocalDeploymentStatus.withGraph("observed", LocalDeploymentState.READY, 0, "graph")
+                                        .withRuntimeIncarnationId("runtime")) : java.util.Optional.empty();
+                    }
+                    throw new AssertionError("observation must not call " + method.getName());
+                });
+        var facade = new AuthorizedRavenrootApplication(raw, new DefaultAuthorizationService(event -> {}), event -> {}, true);
+        var observation = context("tenant-a", Role.OPERATOR, "ravenroot.deployment.observe");
+        var value = facade.localDeploymentObservation(observation, "observed").orElseThrow();
+        assertEquals(DeploymentViewerView.Source.deployment("observed", "runtime", "graph"), value.source());
+        assertEquals(LocalDeploymentState.READY, value.lifecycle());
+        assertEquals(List.of("localDeployment"), calls);
+        assertThrows(AuthorizationDeniedException.class, () -> facade.localDeploymentObservation(
+                context("tenant-a", Role.OPERATOR, "ravenroot.observe"), "observed"));
+        assertTrue(facade.localDeploymentObservation(
+                context("tenant-b", Role.OPERATOR, "ravenroot.deployment.observe"), "observed").isEmpty());
+    }
+
     @Test
     void derivedExternalOutcomeDecisionCannotBypassExecutionControl() {
         var raw = new FakeApplication();
@@ -95,6 +122,23 @@ class AuthorizedRavenrootApplicationTest {
      * the callers' own. A sibling asking for the same id gets the same empty answer an unknown id
      * gets.</p>
      */
+    @Test
+    void boundStopPreservesControlAuthorizationAndExactTenantAndIdentityArguments() throws Exception {
+        var raw = new FakeApplication();
+        var facade = new AuthorizedRavenrootApplication(raw, new DefaultAuthorizationService(event -> { }), event -> { }, true);
+        var operator = context("tenant-a", Role.OPERATOR, "ravenroot.execute", "ravenroot.execution.control");
+        facade.registerLocalDeployment(operator, "deployment", new ByteArrayInputStream(new byte[0]));
+        assertEquals(LocalDeploymentState.READY, facade.startLocalDeployment(operator, "deployment", "runtime", "graph")
+                .toCompletableFuture().get().orElseThrow().state());
+        assertThrows(AuthorizationDeniedException.class, () -> facade.startLocalDeployment(
+                context("tenant-a", Role.OPERATOR, "ravenroot.observe"), "deployment", "runtime", "graph"));
+        assertEquals(LocalDeploymentState.STOPPED, facade.stopLocalDeployment(operator, "deployment", "runtime", "graph")
+                .toCompletableFuture().get().orElseThrow().state());
+        assertThrows(AuthorizationDeniedException.class, () -> facade.stopLocalDeployment(
+                context("tenant-a", Role.OPERATOR, "ravenroot.observe"), "deployment", "runtime", "graph"));
+        assertEquals(List.of("tenant-a", "tenant-a", "tenant-a"), raw.observedDeploymentTenants);
+    }
+
     @Test
     void localDeploymentsRequireDistinctPermissionsAndAlwaysDelegateTheAuthenticatedTenant() throws Exception {
         var raw = new FakeApplication();
@@ -189,6 +233,17 @@ class AuthorizedRavenrootApplicationTest {
                 new ai.ravenroot.api.security.SecurityContext("request", "tenant", "subject",
                         PrincipalType.USER, "issuer"), UUID.randomUUID(),
                 new ByteArrayInputStream(new byte[0]), "payload", ExecutionPolicy.TEST_PASSTHROUGH));
+    }
+
+    @Test
+    void legacyLifecycleImplementationsCannotSilentlyDropExactRuntimeFences() {
+        RavenrootApplication legacy = new LegacyApplication();
+        var security = new ai.ravenroot.api.security.SecurityContext("request", "tenant", "subject", PrincipalType.USER, "issuer");
+        for (var result : List.of(legacy.startLocalDeployment(security, "deployment", "runtime", "graph"),
+                legacy.stopLocalDeployment("tenant", "deployment", "runtime", "graph"))) {
+            var failure = assertThrows(java.util.concurrent.CompletionException.class, () -> result.toCompletableFuture().join());
+            assertInstanceOf(UnsupportedOperationException.class, failure.getCause());
+        }
     }
 
     @Test
@@ -1212,6 +1267,20 @@ class AuthorizedRavenrootApplicationTest {
         @Override
         public CompletionStage<java.util.Optional<LocalDeploymentStatus>> stopLocalDeployment(
                 String tenantId, String deploymentId) {
+            return deploymentCommand(tenantId, deploymentId, LocalDeploymentState.STOPPED);
+        }
+
+        @Override
+        public CompletionStage<java.util.Optional<LocalDeploymentStatus>> startLocalDeployment(
+                ai.ravenroot.api.security.SecurityContext security, String deploymentId, String incarnationId, String graphVersion) {
+            assertEquals("runtime", incarnationId); assertEquals("graph", graphVersion);
+            return deploymentCommand(security.tenantId(), deploymentId, LocalDeploymentState.READY);
+        }
+
+        @Override
+        public CompletionStage<java.util.Optional<LocalDeploymentStatus>> stopLocalDeployment(
+                String tenantId, String deploymentId, String incarnationId, String graphVersion) {
+            assertEquals("runtime", incarnationId); assertEquals("graph", graphVersion);
             return deploymentCommand(tenantId, deploymentId, LocalDeploymentState.STOPPED);
         }
 

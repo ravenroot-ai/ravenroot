@@ -1445,9 +1445,13 @@ def java_record_components(source: str, symbol: str) -> tuple[str, ...]:
 
 
 def java_record_default_expression_span(source: str, symbol: str, instance_symbol: str,
-                                        field: str) -> tuple[str, int, int] | None:
+                                        field: str, *, compatible_components: tuple[str, ...] | None = None) -> tuple[str, int, int] | None:
     """Read one positional component expression and span from a unique direct record default."""
     components = java_record_components(source, symbol)
+    if compatible_components is not None:
+        if components != compatible_components + ("businessHistories",):
+            return None
+        components = compatible_components
     if field not in components:
         return None
     span = java_type_span(source, symbol)
@@ -3098,6 +3102,68 @@ def reviewed_reappearance_semantic_payload(entry: dict[str, object]) -> dict[str
             if key != "evidence"}
 
 
+# Reviewed #607 correspondence preserves the five frozen #321 decisions; it does not
+# approve the changed save behavior, whose current closed authority and CI remain mandatory.
+FINAL_REVIEW_UI_SAVE_GROUPS = frozenset({
+    "ui-layout-and-rendering-derived-values", "ui-message-catalog-keys", "ui-presentation-copy",
+    "ui-resource-and-safety-bounds", "ui-timing-and-retry-defaults",
+})
+FINAL_REVIEW_UI_SAVE_ANCHOR = "6ca1eac5aa04bc824256f332364f1eab028968a2"
+FINAL_REVIEW_UI_SAVE_BEFORE = "842fd8f12c013baee0a554f1dabb5015680fddf388758f3e0a712dcfecdfdb97"
+FINAL_REVIEW_UI_SAVE_AFTER = "00da74a8f8862de91ce136897edc3e7d5be61078acf1eb72751d9229e42aac05"
+# These reviewed replacements are independent of inventory or refreshable method proof metadata.
+FINAL_REVIEW_UI_SAVE_METHODS = {
+    "setRenderMode": "7959c6e6b5bfc85bffc8f79977e9c30ef3fac63ed5e74920c31a6ba1d07c5150",
+    "arrangeDesign": "6d64169eeb44be8cc48d0cc6dfeefc20c061d1b209d13278402a34155edece5f",
+    "saveRepositoryGraph": "4c2ac003000fd7dd07d4d0ef14c8213395fc08501c2ade467108e722f256c3cc",
+    "repositoryPresentationSnapshot": "c4bb9b77bcde66b9ae41a9b601feb7b043e76bb84c44bf83814ae4341a03a735",
+}
+
+
+def final_review_ui_save_correspondence(
+        root: Path, group: str, relative: Path, expected_digest: str) -> bool:
+    """Prove only the reviewed save/view delta reconstructs the exact frozen source bytes."""
+    if group not in FINAL_REVIEW_UI_SAVE_GROUPS \
+            or relative != Path("ravenroot/ravenroot-ui/src/app.js") \
+            or expected_digest != FINAL_REVIEW_UI_SAVE_BEFORE:
+        return False
+    try:
+        raw = (root / relative).read_bytes()
+        head = subprocess.run(["git", "rev-parse", "--verify", "HEAD^{commit}"],
+                              cwd=root, check=True, capture_output=True, text=True).stdout.strip()
+        if hashlib.sha256(raw).hexdigest() != FINAL_REVIEW_UI_SAVE_AFTER \
+                or not revision_is_ancestor(root, FINAL_REVIEW_UI_SAVE_ANCHOR, head):
+            return False
+        source = raw.decode("utf-8")
+        anchor = committed_source(root, FINAL_REVIEW_UI_SAVE_ANCHOR, relative.as_posix())
+        if anchor is None or hashlib.sha256(anchor.encode("utf-8")).hexdigest() != expected_digest:
+            return False
+        sources = {path: (root / path).read_text(encoding="utf-8") for path in (
+            Path("ravenroot/ravenroot-ui/src/workspace-persistence.js"),
+            Path("ravenroot/ravenroot-ui/src/document-close-plan.js"),
+            Path("ravenroot/ravenroot-ui/src/workspace.js"))}
+        if not graph_authoring_managed_open_boundary(sources, source):
+            return False
+        for method, digest in FINAL_REVIEW_UI_SAVE_METHODS.items():
+            span = _javascript_function_span(source, method)
+            if span is None or hashlib.sha256(normalized(source[slice(*span)]).encode()).hexdigest() != digest:
+                return False
+        inverse = source
+        for method in ("setRenderMode", "arrangeDesign", "saveRepositoryGraph"):
+            current = _javascript_function_span(inverse, method)
+            prior = _javascript_function_span(anchor, method)
+            if current is None or prior is None:
+                return False
+            inverse = inverse[:current[0]] + anchor[slice(*prior)] + inverse[current[1]:]
+        helper = _javascript_function_span(inverse, "repositoryPresentationSnapshot")
+        if helper is None or inverse[helper[1]:helper[1] + 2] != "\n\n":
+            return False
+        inverse = inverse[:helper[0]] + inverse[helper[1] + 2:]
+        return inverse.encode("utf-8") == anchor.encode("utf-8")
+    except (OSError, UnicodeError, ValueError, subprocess.CalledProcessError):
+        return False
+
+
 def final_review_authority_errors(
         root: Path, document: dict[str, object],
         expected_metadata: dict[str, dict[str, object]],
@@ -3231,7 +3297,9 @@ def final_review_authority_errors(
             proof_path = root / relative
             if relative.is_absolute() or ".." in relative.parts or relative not in tracked \
                     or not proof_path.is_file() \
-                    or hashlib.sha256(proof_path.read_bytes()).hexdigest() != item["digest"]:
+                    or (hashlib.sha256(proof_path.read_bytes()).hexdigest() != item["digest"]
+                        and not final_review_ui_save_correspondence(
+                            root, identifier, relative, str(item["digest"]))):
                 errors.append(f"final review group {identifier} source proof has drifted: {item['path']}")
         foreign = set(str(candidate) for candidate in candidates) - reviewable
         overlap = assigned & set(str(candidate) for candidate in candidates)
@@ -3551,6 +3619,10 @@ def remap_declared_candidate_references(document: dict[str, object],
             if not isinstance(entry, dict):
                 continue
             remap_list(entry, "defaultEvidence")
+            if entry.get("graphAuthoringAuthority") == GRAPH_AUTHORING_AUTHORITY_ID:
+                evidence = entry.get("defaultEvidence")
+                if isinstance(evidence, list) and all(isinstance(value, str) for value in evidence):
+                    evidence.sort()
             binding = entry.get("bindingAuthority")
             if isinstance(binding, dict):
                 for field in ("environmentCandidateId", "propertyCandidateId"):
@@ -3785,7 +3857,7 @@ def remap_declared_candidate_references(document: dict[str, object],
 
     graph_authoring_authorities = document.get("graphAuthoringAuthorities")
     if isinstance(graph_authoring_authorities, dict):
-        for authority in graph_authoring_authorities.values():
+        for authority_id, authority in graph_authoring_authorities.items():
             if not isinstance(authority, dict):
                 continue
             remap_list(authority, "candidateIds")
@@ -3795,6 +3867,10 @@ def remap_declared_candidate_references(document: dict[str, object],
                         remap_list(row, "candidateIds")
                         if field == "contracts":
                             remap_list(row, "defaultEvidence")
+                            evidence = row.get("defaultEvidence")
+                            if authority_id == GRAPH_AUTHORING_AUTHORITY_ID and isinstance(evidence, list) \
+                                    and all(isinstance(value, str) for value in evidence):
+                                evidence.sort()
 
     domains = document.get("remediationDomains")
     domain_rows = domains.get("domains") if isinstance(domains, dict) else None
@@ -4036,6 +4112,11 @@ def apply_reconciliation(root: Path, document: dict[str, object], candidates: tu
     refreshed["routeTableAuthorities"] = {
         ROUTE_TABLE_AUTHORITY_ID: current_route_table_authority(root),
     }
+    if (root / next(iter(HISTORY_POLICY_SOURCE_LOCKS))).is_file():
+        history_authority = history_policy_authority_from_source(root, current)
+        if history_authority is None:
+            return None, ["cannot derive the reviewed business history policy authority"]
+        refreshed["businessHistoryAuthorities"] = {HISTORY_POLICY_AUTHORITY_ID: history_authority}
     chart_present = helm_chart_present(root, candidates)
     if chart_present:
         helm_authority = helm_authority_from_source(root, candidates)
@@ -5662,6 +5743,110 @@ def deployment_carrier_evidence_errors(setting: str, contract: dict[str, object]
 
 
 PERSISTENCE_POLICY_AUTHORITY_ID = "ravenroot-persistence-policy-v1"
+HISTORY_POLICY_AUTHORITY_ID = "ravenroot-business-history-policy-v1"
+HISTORY_POLICY_SOURCE_LOCKS = {'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/correlation/BusinessHistoryPolicy.java': '12a8db0efaca7d441cc599656110db9aaeaa892a081afeb16b9eb68a0038a1b9',
+ 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/correlation/CorrelationLimits.java': 'ba91eba4ba08fd00607fd05ad1ab7e93a189bdbc6baf75076a7ee29962d673f4',
+ 'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/persistence/BusinessHistoryConfiguration.java': 'de5caa2a572d31a6bd2af100f08a0b5e8e083e6031060ec911bf4cade7b80d04',
+ 'ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/persistence/InMemoryExecutionStorePolicy.java': '60d7d3d81e89d0f427407db92427608b1c70a340d44fa01b68a6dad640d201d5',
+ 'ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteStoreConfig.java': '08df36cb5d53a6d3a870c1d96c0d02cec88a1fa63496d19bfb18c02f6181d7d8',
+ 'ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/postgresql/PostgresStoreConfig.java': 'c8bd164325090978da0e07f17fb4fa6eb3ab294b8528523277ffea2e859554d7',
+ 'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/persistence/ExecutionStoreConfiguration.java': '4776fad161017b979debc96383b9afdb705c5fedd4afc5395a5ee5f0104c6eab',
+ 'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/persistence/ExecutionStoreBootstrap.java': '58507f92ec4e0bd3190aba108134d815589b6d68847474ce5a97730a484870d7'}
+HISTORY_POLICY_REVIEW = {'status': 'already-centralized',
+ 'classification': 'operator-configurable',
+ 'validation': 'Positive finite value within BusinessHistoryPolicy, CorrelationLimits and PayloadLimits '
+               'constructor ceilings; retained joins >= open joins, join deadline <= retention and response '
+               'projection must cover the requested page.',
+ 'scope': 'Execution-store history policy shared by deployments using that store; response and selection '
+          'limits are dedicated history policy values.',
+ 'pinning': 'Resolved once at store/server composition; an authored graph cannot alter this policy.',
+ 'coverage': 'BusinessHistoryConfigurationTest, DeploymentHistoryHttpIntegrationTest, '
+             'BusinessHistoryContract, ExecutionHistoryContract and CoreSettingsPublicationContractTest '
+             'execute bounds/defaults and generated configuration. SDK-only response tree dimensions are '
+             'constrained by the typed PayloadLimits constructor.',
+ 'historyPolicyAuthority': 'ravenroot-business-history-policy-v1'}
+HISTORY_POLICY_SETTINGS = (
+    ('history.response-max-values', 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/payload/PayloadLimits.java#PayloadLimits', 'maxValueCount', '100000', ['ravenroot.history.response-max-values', 'RAVENROOT_HISTORY_RESPONSE_MAX_VALUES'], ['oc-f04d08c5b1aa69b9946e'], ['oc-f04d08c5b1aa69b9946e', 'oc-e29efec895607177d9cf']),
+    ('history.response-max-bytes', 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/payload/PayloadLimits.java#PayloadLimits', 'maxEncodedBytes', '4194304', ['ravenroot.history.response-max-bytes', 'RAVENROOT_HISTORY_RESPONSE_MAX_BYTES'], ['oc-b3c10967fdbd397e5ab2', 'oc-97408d0cc104796179cf', 'oc-b5005c679beee2ff36de'], ['oc-97408d0cc104796179cf', 'oc-b5005c679beee2ff36de', 'oc-b3c10967fdbd397e5ab2', 'oc-3449f08b8f081f8b063c']),
+    ('history.response-max-collection-size', 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/payload/PayloadLimits.java#PayloadLimits', 'maxCollectionSize', '2000', ['BusinessHistoryPolicy.response / PayloadLimits SDK composition'], ['oc-ff1361a6c999254b8c71'], ['oc-ff1361a6c999254b8c71']),
+    ('history.response-max-key-length', 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/payload/PayloadLimits.java#PayloadLimits', 'maxKeyLength', '256', ['BusinessHistoryPolicy.response / PayloadLimits SDK composition'], ['oc-4dfc03fbe1984bbbd48b'], ['oc-4dfc03fbe1984bbbd48b']),
+    ('history.response-max-text-length', 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/payload/PayloadLimits.java#PayloadLimits', 'maxTextLength', '262144', ['BusinessHistoryPolicy.response / PayloadLimits SDK composition'], ['oc-c62fe5fe92b8f6e256ea'], ['oc-c62fe5fe92b8f6e256ea']),
+    ('history.response-max-depth', 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/payload/PayloadLimits.java#PayloadLimits', 'maxDepth', '64', ['BusinessHistoryPolicy.response / PayloadLimits SDK composition'], ['oc-bb9ffdbdfc7dcf720736'], ['oc-bb9ffdbdfc7dcf720736']),
+    ('history.max-histories-per-scope', 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/correlation/BusinessHistoryPolicy.java#BusinessHistoryPolicy', 'maxHistoriesPerScope', '100000', ['ravenroot.history.max-histories-per-scope', 'RAVENROOT_HISTORY_MAX_HISTORIES_PER_SCOPE'], ['oc-e4f03313723b19baae95'], ['oc-e4f03313723b19baae95', 'oc-d2f4fe23b7ecfcfb23af']),
+    ('history.max-retained-joins', 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/correlation/BusinessHistoryPolicy.java#BusinessHistoryPolicy', 'maxRetainedJoinsPerHistory', '1024', ['ravenroot.history.max-retained-joins', 'RAVENROOT_HISTORY_MAX_RETAINED_JOINS'], ['oc-4ec8dfe31922dd12b2ec'], ['oc-4ec8dfe31922dd12b2ec', 'oc-7b013a0728695830dcf7']),
+    ('history.max-contributions', 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/correlation/BusinessHistoryPolicy.java#BusinessHistoryPolicy', 'maxContributionsPerJoin', '1024', ['ravenroot.history.max-contributions', 'RAVENROOT_HISTORY_MAX_CONTRIBUTIONS'], ['oc-5470a3a61fbf7d1b85a8'], ['oc-5470a3a61fbf7d1b85a8', 'oc-e4f70605c07789ca6e42']),
+    ('history.max-join-payload-bytes', 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/correlation/BusinessHistoryPolicy.java#BusinessHistoryPolicy', 'maxJoinPayloadBytes', '16777216', ['ravenroot.history.max-join-payload-bytes', 'RAVENROOT_HISTORY_MAX_JOIN_PAYLOAD_BYTES'], ['oc-d7cf92f376cbc462c658', 'oc-e38270eea94eb5d00af3', 'oc-52d3a8bde58bd7be4c7f'], ['oc-e38270eea94eb5d00af3', 'oc-52d3a8bde58bd7be4c7f', 'oc-d7cf92f376cbc462c658', 'oc-14344e9dfd06c5b288e6']),
+    ('history.max-open-joins', 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/correlation/BusinessHistoryPolicy.java#BusinessHistoryPolicy', 'maxOpenJoinsPerHistory', '64', ['ravenroot.history.max-open-joins', 'RAVENROOT_HISTORY_MAX_OPEN_JOINS'], ['oc-84bafee6a0c78da43a1a'], ['oc-84bafee6a0c78da43a1a', 'oc-06d23297c8f75047f4da']),
+    ('history.max-page-size', 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/correlation/BusinessHistoryPolicy.java#BusinessHistoryPolicy', 'maxPageSize', '100', ['ravenroot.history.max-page-size', 'RAVENROOT_HISTORY_MAX_PAGE_SIZE'], ['oc-715e3adf8b8c6d254afc'], ['oc-715e3adf8b8c6d254afc', 'oc-6f6aca1094618f9a1565']),
+    ('history.max-cas-attempts', 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/correlation/BusinessHistoryPolicy.java#BusinessHistoryPolicy', 'maxJoinCasAttempts', '128', ['ravenroot.history.max-cas-attempts', 'RAVENROOT_HISTORY_MAX_CAS_ATTEMPTS'], ['oc-cfeaef7d595a75b11b24'], ['oc-cfeaef7d595a75b11b24', 'oc-1a8e40dfe48ffb62e399']),
+    ('history.join-deadline-seconds', 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/correlation/BusinessHistoryPolicy.java#BusinessHistoryPolicy', 'joinDeadline', '86400', ['ravenroot.history.join-deadline-seconds', 'RAVENROOT_HISTORY_JOIN_DEADLINE_SECONDS'], ['oc-ad6f7c0124de50a2c50c'], ['oc-ad6f7c0124de50a2c50c', 'oc-9685402d88aa59c5cf01']),
+    ('history.retention-seconds', 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/correlation/BusinessHistoryPolicy.java#BusinessHistoryPolicy', 'historyRetention', '2592000', ['ravenroot.history.retention-seconds', 'RAVENROOT_HISTORY_RETENTION_SECONDS'], ['oc-60d865b65a4de0d41736'], ['oc-60d865b65a4de0d41736', 'oc-aa6bbf9e0240b32bf19f']),
+    ('history.read-timeout-ms', 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/correlation/BusinessHistoryPolicy.java#BusinessHistoryPolicy', 'readTimeout', '10000', ['ravenroot.history.read-timeout-ms', 'RAVENROOT_HISTORY_READ_TIMEOUT_MS'], ['oc-26239eaf1c8f97502a01'], ['oc-26239eaf1c8f97502a01', 'oc-ecc231c0339353a41907']),
+    ('history.max-selector-characters', 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/correlation/CorrelationLimits.java#CorrelationLimits', 'maxSelectorCharacters', '1024', ['ravenroot.history.max-selector-characters', 'RAVENROOT_HISTORY_MAX_SELECTOR_CHARACTERS'], ['oc-0efc705ce3c680ab19d0'], ['oc-0efc705ce3c680ab19d0', 'oc-1527abd06b79ca01108b']),
+    ('history.max-manifest-items', 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/correlation/CorrelationLimits.java#CorrelationLimits', 'maxManifestItems', '1024', ['ravenroot.history.max-manifest-items', 'RAVENROOT_HISTORY_MAX_MANIFEST_ITEMS'], ['oc-a2ba29e920cc6e971d10'], ['oc-a2ba29e920cc6e971d10', 'oc-c30f3fa923f3aae61ed2']),
+    ('history.max-id-characters', 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/correlation/CorrelationLimits.java#CorrelationLimits', 'maxIdCharacters', '256', ['ravenroot.history.max-id-characters', 'RAVENROOT_HISTORY_MAX_ID_CHARACTERS'], ['oc-c30bb46065c3ee7e2dd1'], ['oc-c30bb46065c3ee7e2dd1', 'oc-377918c79869d13fd670']),
+    ('history.max-selector-segments', 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/correlation/CorrelationLimits.java#CorrelationLimits', 'maxSelectorSegments', '32', ['ravenroot.history.max-selector-segments', 'RAVENROOT_HISTORY_MAX_SELECTOR_SEGMENTS'], ['oc-b875fa4cc310b07559e8'], ['oc-b875fa4cc310b07559e8', 'oc-d5e5852c859609ca1522']),
+    ('history.max-pending-entries', 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/correlation/BusinessHistoryPolicy.java#BusinessHistoryPolicy', 'maxPendingEntriesPerScope', '1024', ['ravenroot.history.max-pending-entries', 'RAVENROOT_HISTORY_MAX_PENDING_ENTRIES'], ['oc-46e354595466fcbaefec'], ['oc-46e354595466fcbaefec']),
+    ('history.max-pending-entry-bytes', 'ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/correlation/BusinessHistoryPolicy.java#BusinessHistoryPolicy', 'maxPendingEntryBytesPerScope', '16777216', ['ravenroot.history.max-pending-entry-bytes', 'RAVENROOT_HISTORY_MAX_PENDING_ENTRY_BYTES'], ['oc-97ceb106d8bbb0cb8759'], ['oc-97ceb106d8bbb0cb8759']),
+)
+
+
+def history_policy_authority_from_source(root: Path, discovered: dict[str, Candidate]) -> dict[str, object] | None:
+    """Lock the reviewed computed bindings, nested budgets and source-compatible constructors.
+
+    Unlike the generic direct environment adapter, these eighteen bindings compose their names
+    and delegate defaults through nested records. Exact reviewed source locks prevent a refresh
+    from approving changed precedence, defaults, constructor order or ignored configuration.
+    The four remaining response dimensions are explicit SDK-only PayloadLimits composition.
+    """
+    proofs = []
+    for path, digest in HISTORY_POLICY_SOURCE_LOCKS.items():
+        try:
+            actual = hashlib.sha256((root / path).read_bytes()).hexdigest()
+        except OSError:
+            return None
+        if actual != digest:
+            return None
+        proofs.append({"path": path, "digest": actual})
+    contracts = []
+    for setting, owner, field, default, bindings, default_ids, reviewed_ids in HISTORY_POLICY_SETTINGS:
+        metadata = {**HISTORY_POLICY_REVIEW, "setting": setting, "owner": owner, "field": field,
+                    "default": default, "bindings": bindings, "defaultEvidence": default_ids,
+                    "rationale": "Typed history policy owns this finite " + field + " budget; the server resolves its documented property/environment binding before deployment and graph content cannot raise it."}
+        identifiers = sorted(reviewed_ids)
+        if any(identifier not in discovered for identifier in identifiers):
+            return None
+        contracts.append({"setting": setting, "metadata": metadata, "candidateIds": identifiers})
+    return {"kind": "java-business-history-policy-family-v1", "sourceDigests": proofs,
+            "contracts": contracts}
+
+
+def history_policy_authority_errors(root: Path, authorities: object,
+                                    entries: dict[str, dict[str, object]],
+                                    discovered: dict[str, Candidate]) -> list[str]:
+    present = (root / next(iter(HISTORY_POLICY_SOURCE_LOCKS))).is_file()
+    if not present:
+        return [] if authorities in (None, {}) else ["history authority exists without its policy source"]
+    expected = history_policy_authority_from_source(root, discovered)
+    if expected is None:
+        return ["business history policy source, nested defaults or composition has drifted"]
+    errors = []
+    if authorities != {HISTORY_POLICY_AUTHORITY_ID: expected}:
+        errors.append("history settings require the exact reviewed source-derived authority")
+    expected_ids = {identifier for contract in expected["contracts"] for identifier in contract["candidateIds"]}
+    actual_ids = {identifier for identifier, entry in entries.items()
+                  if entry.get("historyPolicyAuthority") is not None
+                  or str(entry.get("setting", "")).startswith("history.")}
+    if actual_ids != expected_ids:
+        errors.append("history policy candidate partition is incomplete or foreign")
+    for contract in expected["contracts"]:
+        for identifier in contract["candidateIds"]:
+            entry = entries.get(identifier, {})
+            if any(entry.get(key) != value for key, value in contract["metadata"].items()):
+                errors.append(f"{identifier}: history setting owner, field, binding, default or coverage has drifted")
+    return errors
+
+
 EXTERNAL_IO_POLICY_AUTHORITY_ID = "ravenroot-external-io-policy-v1"
 EXTERNAL_IO_LIMITS_PATH = Path(
     "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/node/service/ExternalIoLimits.java")
@@ -6217,18 +6402,18 @@ def persistence_policy_authority_from_source(
     default_application = sources[PERSISTENCE_DEFAULT_APPLICATION_PATH]
     pg_components = tuple(field for _setting, field, _property, _environment, _helper, _constraint, _default
                           in PERSISTENCE_POSTGRES_FIELDS)
-    if java_record_components(pg, "PostgresStoreConfig") != pg_components \
+    if java_record_components(pg, "PostgresStoreConfig") != pg_components + ("businessHistories",) \
             or java_record_components(in_memory, "InMemoryExecutionStorePolicy") != tuple(
-                field for _setting, field, _default in PERSISTENCE_IN_MEMORY_FIELDS) \
+                field for _setting, field, _default in PERSISTENCE_IN_MEMORY_FIELDS) + ("businessHistories",) \
             or java_record_components(sqlite, "SqliteStoreConfig") != tuple(
-                field for _setting, field, _default in PERSISTENCE_SQLITE_FIELDS) \
+                field for _setting, field, _default in PERSISTENCE_SQLITE_FIELDS) + ("businessHistories",) \
             or java_record_components(registry, "DeploymentRegistryPolicy") != ("commandRetention", "limits") \
             or java_record_components(sqlite_connection, "SqliteConnectionPolicy") != ("busyTimeout",):
         return None
-    resolver_components = java_record_components(pg, "PostgresStoreConfig")
+    resolver_components = pg_components
     contracts: list[dict[str, object]] = []
     for setting, field, property_name, environment, helper, constraint, approved_default in PERSISTENCE_POSTGRES_FIELDS:
-        default_span = java_record_default_expression_span(pg, "PostgresStoreConfig", "DEFAULTS", field)
+        default_span = java_record_default_expression_span(pg, "PostgresStoreConfig", "DEFAULTS", field, compatible_components=pg_components)
         call = java_constructor_component_call(
             resolver, "PostgresStoreConfiguration", "fromSources", "PostgresStoreConfig",
             resolver_components, field)
@@ -6261,7 +6446,8 @@ def persistence_policy_authority_from_source(
         })
     for setting, field, approved_default in PERSISTENCE_IN_MEMORY_FIELDS:
         span = java_record_default_expression_span(
-            in_memory, "InMemoryExecutionStorePolicy", "DEFAULTS", field)
+            in_memory, "InMemoryExecutionStorePolicy", "DEFAULTS", field,
+            compatible_components=tuple(item[1] for item in PERSISTENCE_IN_MEMORY_FIELDS))
         if span is None or normalized(span[0]) != normalized(approved_default):
             return None
         contracts.append({
@@ -6274,7 +6460,8 @@ def persistence_policy_authority_from_source(
                 PERSISTENCE_IN_MEMORY_POLICY_PATH, in_memory, span[1], span[2], discovered)),
         })
     for setting, field, approved_default in PERSISTENCE_SQLITE_FIELDS:
-        span = java_record_default_expression_span(sqlite, "SqliteStoreConfig", "DEFAULTS", field)
+        span = java_record_default_expression_span(sqlite, "SqliteStoreConfig", "DEFAULTS", field,
+            compatible_components=tuple(item[1] for item in PERSISTENCE_SQLITE_FIELDS))
         if span is None or normalized(span[0]) != normalized(approved_default):
             return None
         default_ids = numeric_candidate_ids_in_source_span(
@@ -6361,7 +6548,7 @@ def persistence_policy_authority_from_source(
     # generated whole-file digest in inventory metadata.
     approved_method_digests = (
         (PERSISTENCE_STORE_CONFIGURATION_PATH, "ExecutionStoreConfiguration", "fromSources",
-         "a039ad53983628039513d754eab7915736c73ae4fd62d5a3622070cae12ecf3d"),
+         "1e9fd9817f0dd53f5f71b61aec3c185365f7cdecf11feccdde321605cd6c81a9"),
         (PERSISTENCE_STORE_CONFIGURATION_PATH, "ExecutionStoreConfiguration", "selectorIn",
          "7c2c5afebf35bf617e1cc3ed71e83f8ee0389484a80a32457ffdc2af54ef6af7"),
         (PERSISTENCE_SHARED_CONNECTION_PATH, "SharedStoreConnection", "fromSources",
@@ -8038,7 +8225,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'java',
   'RavenrootServer',
   'RavenrootServer',
-  '3da9dcec77fd23ed8906261c49dfe509e86215015d09ff2584bb73278e0239b2',
+  'daa9dc1df7af2d606a1d8d4a01d263d529e4651f80f6c6e6a8a928dcf983a563',
   20),
  ('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java',
   'java',
@@ -8141,7 +8328,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'file',
   '',
   '',
-  '157cb1046dce59a60d99e99c73cd6285e578f28bc7c148ac9392a63af14acee9',
+  '4362709d7bb460555de4291defdbae9eb1d83d0d64265c35f24b54b95a259dce',
   1),
  ('deploy/helm/ravenroot/values.yaml',
   'file',
@@ -8231,7 +8418,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'file',
   '',
   '',
-  'f2755bd419d88c18c57e4536a188a70a44f5f61296865b394dc72074621f4dc6',
+  'd5076c6b1423c88f58ed87c53470af1bee2ae01563fa18494c17024cfafdb440',
   1),
  ('ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubOperationStore.java',
   'file',
@@ -8327,7 +8514,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'file',
   '',
   '',
-  '7ff4016e93d11fc32d88ba79c8545f83ba873af8433ffaa870b27ae8d03cded4',
+  '09c6ae706b22fc76bc4aaa0a4384be8f3014408ce1c893d13e5745f9a7e96eed',
   1),
  ('ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmRuntimeConfiguration.java',
   'file',
@@ -8405,7 +8592,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'file',
   '',
   '',
-  '616f66c6c74cb0bc8444180d63de21e62feb98233854ff9a994f15cd88aea0d0',
+  '21ebe41b18a079e1c3b91df5648a62be859afcf9e3eb68971b46ac30009ec504',
   1),
  ('scripts/tests/test_program_authoring_platform_configuration.sh',
   'file',
@@ -11072,7 +11259,7 @@ PROGRAM_GITHUB_RETAINED_PARTITIONS = {'program.runtime.extension-parser-state': 
                                          'oc-9f6632280bd5f9ba3096',
                                          'oc-7e6b45de3e179c7b3d85',
                                          'oc-5b73e4544bd834e64749',
-                                         'oc-351a2899d8713a810f5b',
+                                         'oc-b6663a01a5d8b145dd81', 'oc-25b5dcce6cacf712878d',
                                          'oc-488bafb5cb7c8dbdc3b1',
                                          'oc-7531d78311d9fedec439',
                                          'oc-c70ddd4a4628b8e0e999',
@@ -12917,8 +13104,8 @@ INTERACTION_WEBSOCKET_PUBLISHER_TEST_PATH = 'scripts/tests/test_publish_environm
 INTERACTION_WEBSOCKET_FILE_PROOFS = {'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionWebSocketConfiguration.java': 'a49ee156e9490deaa52ff71ecb6878b3d799a4aa387dbc75399f3dd1aa4528ce',
  'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionWebSocketServer.java': 'a5a4d9c8f5ece7bb562e83e3a20ce792ef96c0d6794d9676eb9a544cc5a51886',
  'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionProtocol.java': '4f719d5bf41335dd52dca43e444c18ccd03e730e48a4b0350a9d6108e317a2d2',
- 'scripts/publish_environment_reference.py': '33c990d111d4ab8182dbf3786e307c4531aca7bf6bf67f7e8819788bf2fc616b',
- 'scripts/tests/test_publish_environment_reference.py': '38e51901e3903ee3b4edae4cf3aab9084cf31e7583e29700df51d49d81a2f525',
+ 'scripts/publish_environment_reference.py': 'c42ed0efa122eee0018fa119846a3fbfde2e6e459494795a37370caa2160e718',
+ 'scripts/tests/test_publish_environment_reference.py': '30c28704e85f9d2fde948070938d193cbeef9d3d0ec3735cc2878f8a19a578ef',
  'ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/interaction/InteractionWebSocketConfigurationTest.java': '7563c54e2cbab0dcaca696fbc7457fbe712ab78c9bf5112750ebf93d4d9d71de',
  'ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/RavenrootServerInteractionLifecycleTest.java': '7073eb7ae8dc4a0b5da058ed74dfaf31698e10f1eb261ef8a6ad448f6a542e3f'}
 
@@ -12937,7 +13124,7 @@ INTERACTION_WEBSOCKET_METHOD_PROOFS = [('ravenroot/ravenroot-server/src/main/jav
  ('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java',
   'RavenrootServer',
   'close',
-  'e85e56ec94274395713ec4141701749be63ad0a8f8e1392eb72a0cad9fbfd288')]
+  'e3a2d2dce84b079c587ec20ca6e07e41f649bf4fd86246d3d23a2125f25cc42f')]
 
 INTERACTION_WEBSOCKET_TEST_PROOFS = [('ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/interaction/InteractionWebSocketConfigurationTest.java',
   'InteractionWebSocketConfigurationTest',
@@ -13905,13 +14092,13 @@ SAGA_OUTBOX_CAPACITY_SOURCE_PROOFS = {
         "159cf602178d4cd65038cdbc1949fd2f1d097826fde3a2c52a3347fb5dddaa93",
     "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/persistence/"
     "InMemoryExecutionStore.java":
-        "690aaed8f9a257fc33a3d32567d6a2e585916a1d81725feaa98fa84897890235",
+        "7d3e4de5e0b68cc646628c3f4fc850c36449d29e2b5b1b2dd5e659478c91020c",
     "ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/"
     "SqliteExecutionStore.java":
-        "4da9cc0c08f46491f7c65a2dae5cf63d78a98339e0c9d65a09a68c63b69c7b48",
+        "7c3eec67692602d3837ecb838d40527de6a52161906d85bd09d8a96b8d1bbcc3",
     "ravenroot/ravenroot-persistence-postgresql/src/main/java/ai/ravenroot/persistence/"
     "postgresql/PostgresExecutionStore.java":
-        "c40b44108a1f6dac54d025495c8da0923c77a08d64e80937bb194596d9cfba85",
+        "63b6423c24837893bf1498fb79f47fadb9965cf4677cab0fb7c83d63ff8f6a5d",
     "ravenroot/ravenroot-persistence-testkit/src/main/java/ai/ravenroot/testkit/persistence/"
     "ExecutionStoreContract.java":
         "5ee3bc4bd46a9aad8f11c59071c5004f5b21469dfb3dceefe03e171b85a0a5c0",
@@ -14514,7 +14701,7 @@ ACTIVITY_CAPTURE_SOURCE_PROOFS = {
     ACTIVITY_CAPTURE_TEST_PATH: "bc0c980884dcac6cbef97bc3867efacbb44a0428de8bcfdd6c2c7866743c6046",
     ACTIVITY_CAPTURE_CARRIER_PATHS[0]: "5267de14045b1c0ad52de0d3518fcc9d66bfd782e6e4d1aeda03273c7535a127",
     ACTIVITY_CAPTURE_CARRIER_PATHS[1]: "545c8b57083051abbbfe60cb19e987925d2056f273bf7ccb9f163ca8ced3698c",
-    ACTIVITY_CAPTURE_CARRIER_PATHS[2]: "157cb1046dce59a60d99e99c73cd6285e578f28bc7c148ac9392a63af14acee9",
+    ACTIVITY_CAPTURE_CARRIER_PATHS[2]: "4362709d7bb460555de4291defdbae9eb1d83d0d64265c35f24b54b95a259dce",
     ACTIVITY_CAPTURE_CARRIER_PATHS[3]: "957882edc5e3ccaae07374755a85f9a8dea8c542eef117eacb1bbb2ecc1e491f",
 }
 ROUTE_TABLE_PATH = Path(
@@ -14534,22 +14721,22 @@ STABLE_EDGE_TEST_PATH = Path(
 STABLE_EDGE_WIRE_TEST_PATH = Path(
     "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/StableEdgeIdWireContractTest.java")
 ROUTE_BOUND_CANDIDATES = {
-    "oc-ea00b99bbe41ad4b06c3": ("StableEdgeId.MAX_UTF8_BYTES",),
-    "oc-135e67fc3370f38d8b75":
+    "oc-03fbbe33ce337c8677ba": ("StableEdgeId.MAX_UTF8_BYTES",),
+    "oc-084e2c19b7628653479c":
         ("EdgeTraversalWireBudget.MAX_AUXILIARY_ESCAPED_VALUE_BYTES",),
-    "oc-ec005816961871c98610": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
-    "oc-0bf6a519fab1c305c2c6": (
+    "oc-e96c292555421fce6f8e": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
+    "oc-092469b3c68fe31fae09": (
         "StableEdgeId.MAX_UTF8_BYTES",
         "EdgeTraversalWireBudget.MAX_AUXILIARY_ESCAPED_VALUE_BYTES",
     ),
-    "oc-14f0fd6f72463e865d79": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
+    "oc-6f39b00dc143c1e601af": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
 }
 ROUTE_BOUND_PATHS = {
-    "oc-ea00b99bbe41ad4b06c3": "/v1/events",
-    "oc-135e67fc3370f38d8b75": "/v1/events",
-    "oc-ec005816961871c98610": "/v1/events",
-    "oc-0bf6a519fab1c305c2c6": "/v1/events/recent",
-    "oc-14f0fd6f72463e865d79": "/v1/events/recent",
+    "oc-03fbbe33ce337c8677ba": "/v1/events",
+    "oc-084e2c19b7628653479c": "/v1/events",
+    "oc-e96c292555421fce6f8e": "/v1/events",
+    "oc-092469b3c68fe31fae09": "/v1/events/recent",
+    "oc-6f39b00dc143c1e601af": "/v1/events/recent",
 }
 
 
@@ -14740,6 +14927,7 @@ GRAPH_AUTHORING_UI_PATH = Path("ravenroot/ravenroot-ui/src/app.js")
 GRAPH_AUTHORING_GRAPH_DOCUMENT_PATH = Path("ravenroot/ravenroot-ui/src/graph-document.js")
 GRAPH_AUTHORING_GRAPH_PARSERS_PATH = Path("ravenroot/ravenroot-ui/src/graph-parsers.js")
 GRAPH_AUTHORING_STARTUP_IMPORT_PATH = Path("ravenroot/ravenroot-ui/src/startup-import.js")
+GRAPH_AUTHORING_PICKER_PATH = Path("ravenroot/ravenroot-ui/src/repository-picker.js")
 GRAPH_AUTHORING_CLIENT_PATH = Path("ravenroot/ravenroot-ui/src/graph-authoring-client.js")
 GRAPH_AUTHORING_AUTHORIZATION_PATH = Path(
     "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/security/AuthorizationAction.java")
@@ -14747,37 +14935,54 @@ GRAPH_AUTHORING_RAW_KUBERNETES_PATH = Path("deploy/kubernetes/ravenroot.yaml")
 GRAPH_AUTHORING_PUBLISHER_PATH = Path("scripts/publish-graph-artifacts.py")
 
 GRAPH_AUTHORING_FILE_PROOFS = {
+    Path("ravenroot/ravenroot-ui/src/release-proposal-progress.js"): "4fde0adf7cf040b64f9ddb9e1e3772e8f94dc3fc5a3db4b5793688598054298d",
+    Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/ReleaseAutomationPolicy.java"): "323524f84ee020ac190b37cd79eb94ced462445ec3a7fe53e44ab1e7e5aaaae2",
+    GRAPH_AUTHORING_PICKER_PATH: '89c086fbed7c513b61cd175a073bf2d72e0edfcca85a3640d503c330d47180ad',
+    Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/AuthoringAdmission.java"): "e950a102a34193495486211b8acbad937d1fe8003af6cd8c5d977bf2dfce3db4",
+    Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/AuthoringIndexReader.java"): "d980dc48fb9573dc43cd882d169d3eb47cf38afa653a2da67dfa01cd52709ced",
+    Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/AuthoringRetry.java"): "bd6945a394d73b338a9a624b8727a8525e761b413f27078b40c44845b9e487bb",
+    Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/ConditionalProviderReads.java"): "00e15ef3b3511f6c67d116d22e87e7d30c87db4240ae22dd31162402394e86f8",
+    Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/ForwardingGraphAuthoringRepository.java"): '448e8b6fc6c7db36901f6c7a8a31cfd9f70ff78a1b030edc45511fb8f15ba9cf',
+    Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GraphAuthoringReadIndex.java"): "38bdcf0c881971d04dc2be475ab968005288fcc621a4fded5f1457c11d1ea240",
+    Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/JdbcGraphAuthoringReadIndex.java"): "628b62802405b37d77ccd8036d9212af962b2ac2624e062b6e3608d2853e2b44",
+    Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/PostgresGraphAuthoringReadIndex.java"): "2d0f9d7994be2f67ba5d4c830bbe666a056fb8e0711f4f65be9d5a4896727d6d",
+    Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/ReadObjects.java"): "e0488622a8b43588b6a5733f3fd562f7f929c0496e3280f3bb53d14edeaec07b",
+    Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/ReadResults.java"): "99b3ee2be9bad5b096a4383c9bd9fc78eb533d26a4ffa815fa9940bdac78d97b",
+    Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/ReconciledGraphAuthoringRepository.java"): "3422a5fd9071e187c8ee0f730b78815ddda98531c9c871293539cf689176093c",
+    Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/SqliteGraphAuthoringReadIndex.java"): "6a508f233c6d8143f15ff25dc0b29a81e793d80b18f0e9e63b5de9c5d5caa0bc",
+    Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/VolatileGraphAuthoringReadIndex.java"): "de6b5b73835425aeb95f42e892e01a109b8b5ae3837b2a9f387a19c494773d68",
+
     GRAPH_AUTHORING_EMBEDDED_CONFIGURATION_PATH:
-        "362b4ab765803b46f5ac6a1082edde10e6439a00fac880b30e3e4e5a2de12be3",
-    Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GitlabAuthoringRepository.java"): "c059c79e39ad04c4352057d227a8719532493cdf64b3bcbfdefb715fbdfb3cd5",
-    Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GraphAuthoringRepositories.java"): "36c56d5a54111abdbe2a1e6b442e7827dd023ce18e86a9fff917690a238e34d6",
+        "d7d057fb02ccb5ecd55fe469e94a4ea775cf0dc2f2a34011c71f2e028aec50fb",
+    Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GitlabAuthoringRepository.java"): 'e8fd1d84be088bfade72476d5281203519be7f4afad620654ffddbb2d4cf6eec',
+    Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GraphAuthoringRepositories.java"): "6ac51219d9548e6ea592a851b184b543d587421124aa50b9065eb1577c4b2d4f",
     Path("docs/examples/graph-authoring/gitlab-ci.yml"): "d49fa1887422a5bf726ad2c55e08b9f29185438314b626d9fd7e5feeb9c268b7",
     GRAPH_AUTHORING_CONFIGURATION_PATH:
-        "2456dfb6352ec34dbbd3311ef90ef6fbeaa29f7e258d984acab5e9c743215d71",
+        "921ae057efe40a409f06e4faa88ec1b46f2d8791de3a91d290afcf34936a99a1",
     Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GraphAuthoringHttpApi.java"):
-        "1e9c0556aa07810c653faed15cb78a8ec8cb1a292306d3294e69f7230903602b",
+        '5be8b672b5eada05c4ea9bca39aeb4a82428cfb0adf12b2fe7f02a7985869ea7',
     Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/PublishedGraphArtifactHttpApi.java"):
         "f650313217b4c9c1269ebcec23da67ea74b3755b1e33e03f936fe19cf429cd1d",
     Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/PublishedGraphArtifactCatalog.java"):
-        "76bf28aa5ce89947a4abbad59db03a5d16cd30b37d62071100c4827cbfa4ffc5",
+        "ca6dde21f69459583d52003afdceb915c9d37ebd11f225b207741a5e9425272d",
     Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/PublicationEvidence.java"):
-        "49ee907c02fc15c6f9e0f60fa22c48f9a39b2129814d3a10029fd598e4735463",
+        "e506cf232f2b304fe0329a9677d6c671fe7093bd96330b5d4b3c3aba39664c32",
     Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/BoundedHttpResponseBody.java"):
         "6fb605ab94be203f277359d51668ea9c7079406aaba61093805fe52828535aba",
     Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GithubAuthoringRepository.java"):
-        "814551f6eccddab4a387755e165befc9447f5e260b0297097ace785a993ca042",
+        'b13439a13be17e3e54ad057c442cdb7c967f96b5e4a15f94f8aa4665246fb302',
     Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GithubTokenSource.java"):
-        "5fa84e15b6ec9d94935966ff75e026084968381766988c3641aa59c4e26e983b",
+        "5bfedea43db11109056bc7988e2eb23246568973d3eab7249ad6bd54fd0a4b0f",
     Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GraphReleaseMetadata.java"):
         "574b3bf8e2c5bb3761a3ed7d3cecce0fb720abbfc330dc319ae29f596e797df4",
     Path("ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/authoring/GraphAuthoringRepository.java"):
-        "19ab514cc2ab4e48dfe354ce9e57a012af7f11db2f6a3ba43c28dff5c2ca1818",
+        'f87f4734c38584b7902dbb54a195ed7616a47d8eccfb0083408f4d69498a852f',
     Path("ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/GraphArtifactDependencies.java"):
         "c5d81882097df2bdb57ed362df71af1124027bb659bd6ac4ea4a429afd2485e2",
     Path("ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/GraphProgramDependency.java"):
         "02ca6b2a286e62a9cd18c213bf2c1e628d2c6f686b44fee922ec48bbc59db2b4",
     GRAPH_AUTHORING_CLIENT_PATH:
-        "fab6a44f0461e127f0f01fb69c2c986f8b6ca59ed922ea4d5564f4d8429626e9",
+        '18e2a8281f9edc7fb00b941db136d6f8bc22503bb7c32b2db0f5e9332316b2b0',
     Path("ravenroot/ravenroot-ui/src/authoring-capability.js"):
         "8a5a2334231db4dbf2b9aa2209b66311b7ee7d64c34e34c238473e5553ade7c1",
 
@@ -14785,35 +14990,54 @@ GRAPH_AUTHORING_FILE_PROOFS = {
         "db25d5fe4f9560ef350bb332f7cc9c0b394105c1b136f1d47318ebe7d7c29b3c",
     GRAPH_AUTHORING_PUBLISHER_PATH:
         "d0419b38a9b27141904f35c58e589e88ed924fd6e746f088a57f86fd81511dc8",
+    Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GraphAuthoringWebhookConfiguration.java"): "66a9c743cd5677350af9690ffae0d140a9c4dda0f3810c23394b0d99a4e5cf44",
+    Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GraphAuthoringWebhookHttpApi.java"): "02d9d6a30e586c905a7cce1a4d92ab25d8bf0d6fa343eed0720d4425d13764bc",
 }
 # These shared public/server surfaces are exact source evidence for the boundary, but their
 # unrelated candidates retain their existing semantic authorities rather than being claimed by
 # graph authoring as a whole file.
 GRAPH_AUTHORING_SUPPORT_FILE_PROOFS = {
+    Path("ravenroot/ravenroot-ui/src/workspace.js"): "60a4a94f101fc97740f483e03f89e90ee9c47730557399543b3176f487c82cd8",
+    Path("ravenroot/ravenroot-ui/src/workspace-persistence.js"): "872be46e50fc3a9b4091799989a861b7bb789786deb99f813ba3d9e2522928d0",
+    Path("ravenroot/ravenroot-ui/src/document-close-plan.js"): "b51b09fd522f5ebb27ee9b0bad667100122b6191a8b37d22daffd0af0336ead7",
+    Path("ravenroot/ravenroot-ui/test/workspace.test.js"): "b31f96126323ebb60c7a97d5d0209510b5518326e9985ce6620f9d4118970698",
+    Path("ravenroot/ravenroot-ui/test/workspace-persistence.test.js"): "487de769b69c53fc2cb01fad065becba263e798cb382b0fea40725e489b57e2d",
+    Path("ravenroot/ravenroot-ui/test/document-close-plan.test.js"): "bf00fb125e359ca7bfc0cfbdf6a32f1226310b3a63746412565090dfff516403",
     Path("ravenroot/ravenroot-ui/src/credential-request.js"): "240501ee73c4068eabbd52540de39d4813b59f7a7c6d2a44bed297c33eb91c90",
     Path("ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/RavenrootApplication.java"):
-        "adf1b3bcee37848577c343c78f8e1ae3fe4c4efe3fe9ab62aaef92ca5b0a0333",
+        "e80b8a849c0f1b03836f3d5e65e725bee874788b71736c034a5178371f6596d3",
     Path("ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/AuthorizedRavenrootApplication.java"):
-        "753cf2cb56afd581e1ed341ca518cd88ed103aa3c764f835a6902a0839ab1f06",
+        "df2fc444ac4aab4157fce9fca2dddce6a42e38b6ad80beeca99ef1d097bbe792",
     Path("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/WireErrorCodes.java"):
         "71b0aa2cdfdbbd0964c1e4a4aae9c29e6736ad1be2ee9f4d27f868b61d5e7299",
 }
 GRAPH_AUTHORING_TEST_PROOFS = {
+    Path("ravenroot/ravenroot-ui/test/release-proposal-progress.test.js"): "73281595637e9c21f9044c2109bae7a103dd60170ada604d7cc33f9fbb91d80f",
+    Path("ravenroot/ravenroot-ui/test/repository-picker.test.js"): 'bdbdcec0431ce60bc55578cf6310f7d730ac17ff6bdc7d4aea176b1241872fb0',
+    Path("ravenroot/ravenroot-ui/e2e/managed-repository.spec.js"): '7583b454a512b69989780d78ac1dee950efa3d147f989ac1d80c3988851c677f',
+    Path("ravenroot/ravenroot-ui/e2e/activity-localization.spec.js"): '420078563f5c9e1c3b0365828066c9a8df354a0c00d1e733f64ef2345a0612c4',
+    Path("ravenroot/ravenroot-ui/e2e/startup-import.spec.js"): '4117b49e63dbb83c325650f1788f21ccb6bbcc80f86b7cbea71956475756eeb0',
+    Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/AuthoringPublicationIndexTest.java"): "64bd2a9f1cd7a82af8442fa2be71a7e84833582ba6aee133dbe8ed395d475afd",
+    Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/AuthoringReadBaselineTest.java"): "9cb70ae35e84149d70a87bd6c180b7a48775754dc988dfde8f788235e5ef553e",
+    Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/AuthoringReadConcurrencyTest.java"): "f5492368de94f6416d2e9b258964831ebb3596df90b140a31cafeac00e698e8d",
+    Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/AuthoringReadIdentityTest.java"): "3267ce878217bd5b48d2c4c8893bfa9e2daf7c17ae716463a78f60c2aacd62e3",
+    Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/AuthoringReadIndexIntegrationTest.java"): "38081bd45faab0a7891eb170adfd8248dc6a35e3c774591212d14c341c8c0000",
+
     GRAPH_AUTHORING_EMBEDDED_TEST_PATH:
-        "a5b56a3f2c1794b2252ebc748c2419900c8887ec4c5eaae60d8554beb9c38a8e",
-    Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/GitlabAuthoringRepositoryTest.java"): "0ec29db6cab49b7ad89853e8201b6515b9f8619798fccee11c2c012e56fa95ea",
+        "67e7c7d8f9df192cfddf972b07730ca282a24b69ae5a31651c1ebe78a7fc62b2",
+    Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/GitlabAuthoringRepositoryTest.java"): 'bc352bae9f1fb6a1b130789c7d6c28ede65e6956cc6f1c08a97a4f5fecf395ef',
     Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/GraphAuthoringHttpIntegrationTest.java"):
-        "5f00033d6093669f0dbb8f41ab188eb4e19650eb88e0a4e7ef370f16ad4306e8",
+        'e3ec4d1066f58f129d7fb558a471dc0e7965e5d8fd35b8fa87375af977d115ae',
     Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/GithubAuthoringRepositoryTest.java"):
-        "b3b81d489d93ac3255ff7d5a433defbdea7100e8a14fafd385979fa2ba736565",
+        '66bf74cb062435340f66cabb7e6f381f463e883ae9bd82461774cdb995fe8c60',
     Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/GithubTokenSourceTest.java"):
         "523700c1d4dc5463e7df96b7ae0b0487690c2c868e4169800db060a9d462aeff",
     Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/BoundedHttpResponseBodyTest.java"):
         "8de6368ff8a8bfc6714b6ba993747c844966cfc870d2069467a3cc85f4f71edb",
     Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/GraphAuthoringConfigurationTest.java"):
-        "365e63c8229ee79416ebb8c940462cb4043af010f3a332c86e6009bb7f9b3894",
+        "4ea668eab26b2548d3e56cd78c6f2b6391f6db05b84d04dd44d21cde83f1a181",
     Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/PublishedGraphArtifactCatalogTest.java"):
-        "853ffb8058623c9a89d830c90c367968e5e88bbeb97ad1495da846b1af434da4",
+        "327f6232c54a5373ea74c8535fa9c92d4685686a276620fb0e73093550e0cef9",
     Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/GraphReleaseMetadataTest.java"):
         "caf72c4ea24e6b7a80b0665c397f4053950e7bb1718ac69c52e1208685bcf890",
     Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/PublishedGraphArtifactHttpApiTest.java"):
@@ -14821,9 +15045,9 @@ GRAPH_AUTHORING_TEST_PROOFS = {
     Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/runtime/GraphArtifactDependencyResolutionTest.java"):
         "b9af762c8ac692b000591000f6bf55061818c7013812a1693d67e17fcc0b9b0d",
     Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/runtime/DefaultRavenrootApplicationLocalDeploymentTest.java"):
-        "440f5e358571d6fa36a786913aa9e447de0017deb0f82f20f4f5e3ffb679b26e",
+        "4c20f118d272404245152758fe2ad131795cb24867df38971cbc27893f1be4e7",
     Path("ravenroot/ravenroot-ui/test/graph-authoring-client.test.js"):
-        "c66eb2f94d97691475d63e3617b37c83ee729ab6cf7e42846bf5b5b783b41321",
+        '4ae786a92b01fb6c2e56512019822ae49af443ddf5bcc53846b1353afb495ff7',
     Path("ravenroot/ravenroot-ui/test/authoring-capability.test.js"):
         "d6e2dc02e534f903d71bc3042f5d1f551e8a0bad09cedc90627fee4d38873ac0",
     Path("ravenroot/ravenroot-ui/test/startup-import.test.js"):
@@ -14832,11 +15056,13 @@ GRAPH_AUTHORING_TEST_PROOFS = {
         "98be53710364e17721a2dbeca5a02b88ed400ffdeb5d6352b3ed4216d6d70e65",
     Path("scripts/test_publish_graph_artifacts.py"):
         "ae2cdb72c8aade6e319e717eac8cf267cdb14f2d7af98bbf918e27476b159986",
+    Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/GraphAuthoringWebhookIntegrationTest.java"): "44809db6e49bf3d1c3ab81d1fcaac334a1efe7a17fb5394abb6d8413bea0c874",
+    Path("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/authoring/GitlabAuthoringTransportTest.java"): "f897f4aeaf056b82647e3d86c2069c50dbab6e808d0118ff7a902abcaf60185d",
 }
 GRAPH_AUTHORING_JAVA_METHOD_PROOFS = {
     (GRAPH_AUTHORING_EMBEDDED_CONFIGURATION_PATH, "EmbeddedGraphAuthoringConfiguration",
      "fromEnvironment"):
-        "bed301e4c06fd86473d366d7c70be85682dd580002223f1b08d3c55199963ac1",
+        "9ae2b465365cce9a7ce4ae428b40c4f82122e9b7a0563cd40c4c8379e77f5ee7",
     (GRAPH_AUTHORING_EMBEDDED_CONFIGURATION_PATH, "EmbeddedGraphAuthoringConfiguration", "of"):
         "36b332cb270fea42c7f84b21c22238730456e4a77693c870fddc3edba4e806e7",
     (GRAPH_AUTHORING_EMBEDDED_CONFIGURATION_PATH, "EmbeddedGraphAuthoringConfiguration",
@@ -14845,11 +15071,11 @@ GRAPH_AUTHORING_JAVA_METHOD_PROOFS = {
     (GRAPH_AUTHORING_MAIN_PATH, "RavenrootServerMain", "run"):
         "48304fd3f668a7d542c055c452f1ac814695507e03bb8401adfb4f0b667723cb",
     (GRAPH_AUTHORING_SERVER_PATH, "RavenrootServer", "configureGraphAuthoring"):
-        "88408f397407131e0898ee913cf595d12c1766203b8d09ce31a31ce267e8cd00",
+        "b977d5c22a19b342d089a457adc7216a278e8a527a15dc1b78f640c17bbf1b46",
     (GRAPH_AUTHORING_SERVER_PATH, "RavenrootServer", "start"):
         "331ee9c47489d9cd62fec499e63c30266cae473b5f5d2ea6a46ca89cb1c05272",
     (GRAPH_AUTHORING_SERVER_PATH, "RavenrootServer", "close"):
-        "e85e56ec94274395713ec4141701749be63ad0a8f8e1392eb72a0cad9fbfd288",
+        "e3a2d2dce84b079c587ec20ca6e07e41f649bf4fd86246d3d23a2125f25cc42f",
     (GRAPH_AUTHORING_SERVER_PATH, "RavenrootServer", "installGraphAuthoring"):
         "e55468297916b313cd7e6b993d50867e25a3679ba7aa6b6e3d78e9bc57232366",
     (GRAPH_AUTHORING_SERVER_PATH, "RavenrootServer", "graphAuthoring"):
@@ -14893,18 +15119,29 @@ GRAPH_AUTHORING_CANDIDATE_JAVA_METHODS = (
      "registerPublishedLocalDeployment"),
 )
 GRAPH_AUTHORING_UI_METHOD_PROOFS = {
+    "repositoryOperationBinding": "c080a886d57aa3ca8cd787e59db8aaeef6e3d625d74b6f880c4a18a7de5bc6cf",
+    "requireRepositoryOperationBinding": "f70159f27a004e17b205a08cbc35e1e90b88da44760515ccadfb9242f0e08e60",
+    "repositoryScope": "b1d565af51b48c26f3950067f8a1230c16844e44eed616c92dc144f18f9685bb",
+    "repositoryDocumentBindingIsCurrent": "079d4c99e87c164ce8c33f863c15e6d31b1a2101666c1da1accf6dc09600e5a1",
+    "openRepositorySource": "da2f1bf487fba2bdac1235d213a7aeeb4ef33ae24adea5dbc059078d3fc9fa51",
+    "repositoryDocumentHasLocalWork": "04b62ec30fe72dcaeb435e37931495f1cc403e83a4e9910e3f133f70268ea743",
+    "preserveOpenRepositoryGraph": "2369215bbbf76a07956b7b2c91b548b71eeb133bf5f06dfa4c9255c34369988a",
+    "requireRepositoryBinding": '737b223a89d251e3348ac954942cb21612b4facc74bb55e901a06c88b3fd78ae',
+    "repositoryNotice": '84d6859ede9f5ea9640dd332b3c3cc1dd3cbcdae9cd9bf0c9061907ee39122c6',
+    "repositoryFailureMessage": '1dcf8b618d167d03f9a457b74466a15f37f86d7e109036a8716640b6a51d101c',
+    "createRepositorySuccessor": 'b3e1beb50287d7c0e08faa3cf48a56f0b1b0523505930a3e1234388fcbd96a25',
     "gitAuthoringEnabled": "1c0ea27d91b3f1f53d75ac2a86bff96193784e1ac7c3b2411060d54f71189c00",
     "primaryPersistenceUnavailable": "342b4fa699e42b1d46930147387078f5799ff3380ef58baa3c39c92ae3d51a48",
     "setGraphAuthoringAvailability": "cc45311d49eb56cec124cf2a5932b8e2bc1bac23c179ea6e9f74253eaf3d1d59",
-    "applyAuthoringDocument": "2f2a30653589ff627153830fd8a2b41276d379fe229e71ff5f64e7180a20b62b",
-    "openRepositoryGraph": "ffc3c696d048e466efdbf3d7f6ada247479439ef81b88aaa7c67cacc28572483",
-    "saveRepositoryGraph": "04f9ff81ddd65d5880a221e558b786d1a05f024b1fc2ae1c41fb73784575e4c5",
-    "repositoryHistory": "d9e000b1797bcee8c49aafd346a98614ee4ddcdcb82c4e2e379fb09c6e7ab2d0",
-    "repositoryDiscard": "be75ee53c19a19b4bca346023b085d0d1db797bdedd9dc5822bdf5f6b6371186",
-    "repositoryDelete": "9536467e9e5975d388388ecac8fdcce7df2f03fb69647ba17a582dbb1acd800f",
-    "repositoryRelease": "6769678ca585cfb40e137f6ff24b986bc89e8fac92e2db5b4f053f51a4559bda",
+    "applyAuthoringDocument": "e8f4ad0229b75ac7e451a7e58da8e7c6d90cd156b7d81979f118f5181c77348a",
+    "openRepositoryGraph": 'dfe5d91cf5dd0f5d5a31f876441830b26e9e2e0e7d6744cb72bbb5d452931d75',
+    "saveRepositoryGraph": '4c2ac003000fd7dd07d4d0ef14c8213395fc08501c2ade467108e722f256c3cc',
+    "repositoryHistory": "23a4f3610446b3e1e16e327b73f2401ad0dad4f27f614dbf423242059a914c8d",
+    "repositoryDiscard": "1399bd3fda6a09e40903bd0b166d606c1e64fc7524d559390924f74c6faf7be6",
+    "repositoryDelete": "12486c92d762174b9161c1ec5be9a3c77e54436f945bff7b673b2407507d8893",
+    "repositoryRelease": "de3b913d8a4fc56ac6c5027555849b4afef40e98acb5a08ac8a6cd193a1c7e13",
     "publishedArtifacts": "21ce0b20bfb0f6bb3bab951cc5662dd2d416788bf67684ca0bc749578b1a0637",
-    "connectRuntime": "4ba61ed61c46924c6802d3fa2899c91f8d195d67e6416306738c06bdded5125d",
+    "connectRuntime": '9d8c41966918060e48f83d576318a64a7a7156cca769df6802810e670ea1bf60',
     "createStartupImportPlaceholder": "9b194ed16409f284ecdbe713a9be041d8cc60982f90a84b5d6f016c886e6feef",
 
     "startupImportBinding": "d6eb1a9106def1e00965ade2a2c485b422e51be0fd13641e5a2caee60a454952",
@@ -14916,13 +15153,25 @@ GRAPH_AUTHORING_UI_METHOD_PROOFS = {
     "renderStartupImport": "d68694e197928c9bc52a5b2d9060d24a8d0aac2e0bb3fd8488604333b72e7104",
     "initializeStartupImport": "01a25bf69f2e9bd19ae2f64dbcb8d27897b570c959e238dd60dd9b64d522e756",
 }
+# These broad shell functions are supporting evidence only; their unrelated candidates retain
+# their existing classifications rather than being absorbed by the authoring cohort.
+GRAPH_AUTHORING_UI_SUPPORT_SPAN_PROOFS = {
+    "repositoryPresentationSnapshot": "c4bb9b77bcde66b9ae41a9b601feb7b043e76bb84c44bf83814ae4341a03a735",
+    "setRenderMode": "7959c6e6b5bfc85bffc8f79977e9c30ef3fac63ed5e74920c31a6ba1d07c5150",
+    "arrangeDesign": "6d64169eeb44be8cc48d0cc6dfeefc20c061d1b209d13278402a34155edece5f",
+    "paneIsDirty": "ceb8181d2effb12561ea1b26434ab5feb729eeddafbc4240ac942c65f80d9601",
+    "updateHistoryUi": "11f1b9907d64e960b1d48f54910113ccf9920900d3da6ad739e8f38bacb50578",
+    "completeReplaceActiveDocument": "c3ba35734683c8cd2fb6c22144b2cb577e1c0fd5ffec4625841f2ab1349d7724",
+    "bootApplication": '90cf9352e954968814a5f70304a62c7932554a1da3af2902da325ef6fe7eae03',
+    "syncGraphModeLabel": 'a205d6a872ef979883261fb8c43ff376231456941c05321787ac53ef789faef9',
+}
 GRAPH_AUTHORING_UI_SPAN_PROOFS = {
     (GRAPH_AUTHORING_UI_PATH, "documentModeLabel"):
         "413ae14ef232086fb9a1c0ec233892efc5829de3ebe6e9416a378468fcefbc5d",
     (Path("ravenroot/ravenroot-ui/src/workspace.js"), "createDocumentRecord"):
-        "dce4ad56c2a0f50c9f6c91e45c510bb8f0f9d74267f4f5923d5ea99120e60dda",
+        "967a03ec2a26379e7b6ff859cfdee5ba637d2f4ee37831233705a1009a37449d",
     (Path("ravenroot/ravenroot-ui/src/workspace-persistence.js"), "persistedAuthoring"):
-        "6dbd06006ad07b134568f3e0674a8c2426651892260f418eda13a23bae270eed",
+        "5d5f16d7c42fdc0cb3663ae69b43bc1d8a022a169f5781503ffdeecf34ec1e80",
     (GRAPH_AUTHORING_GRAPH_DOCUMENT_PATH, "createEmptyWorkflowDocument"):
         "97767dbd5de84c28e58797c2e3c29c385ebeabaf9f537947014c350366e3bc03",
     (GRAPH_AUTHORING_GRAPH_DOCUMENT_PATH, "isEmptyWorkflowDocument"):
@@ -14935,6 +15184,7 @@ GRAPH_AUTHORING_UI_SPAN_PROOFS = {
         "0096e4f2b0e93e9273bfd60bb937d45a567708fefa6a9d79379b52d67208d1c2",
 }
 GRAPH_AUTHORING_SETTINGS = (
+    ("graph.release.automation", "releaseAutomation", "RAVENROOT_GRAPH_RELEASE_AUTOMATION", "disabled", "Exact optional GitHub label and durable deployment registration/version/SOURCE binding; partial or unknown fields refuse startup."),
     ("graph.authoring.mode", "mode", "RAVENROOT_GRAPH_AUTHORING_MODE", "LOCAL", "LOCAL or GIT."),
     ("graph.authoring.provider", "provider", "RAVENROOT_GRAPH_AUTHORING_PROVIDER", "GITHUB in Git mode; NONE locally", "GITHUB or GITLAB when Git mode is enabled."),
     ("graph.authoring.repository-owner", "repositoryOwner", "RAVENROOT_GRAPH_AUTHORING_REPOSITORY_OWNER", "required in Git mode", "One GitHub owner segment, at most 100 characters."),
@@ -14950,12 +15200,18 @@ GRAPH_AUTHORING_SETTINGS = (
     ("graph.authoring.github-app-id", "appId", "RAVENROOT_GRAPH_AUTHORING_GITHUB_APP_ID", "empty unless APP mode", "Positive decimal GitHub App identifier in APP mode."),
     ("graph.authoring.github-installation-id", "installationId", "RAVENROOT_GRAPH_AUTHORING_GITHUB_INSTALLATION_ID", "empty unless APP mode", "Positive decimal installation identifier in APP mode."),
     ("graph.authoring.tenant-namespaces", "tenantNamespaces", "RAVENROOT_GRAPH_AUTHORING_TENANT_NAMESPACES", "required in Git mode", "Explicit unique tenant=confined-directory mappings."),
-    ("graph.artifact.base-url", "artifactBase", "RAVENROOT_GRAPH_ARTIFACT_BASE_URL", "required in Git mode", "Absolute HTTPS base ending in slash."),
+    ("graph.artifact.base-url", "artifactBase", "RAVENROOT_GRAPH_ARTIFACT_BASE_URL", "unset disables publication storage", "When configured, absolute HTTPS base ending in slash; invalid configured storage fails closed."),
     ("graph.artifact.catalog-path", "artifactCatalogPath", "RAVENROOT_GRAPH_ARTIFACT_CATALOG_PATH", "catalog.json", "Confined relative catalog path."),
     ("graph.authoring.max-document-bytes", "maxDocumentBytes", "RAVENROOT_GRAPH_AUTHORING_MAX_DOCUMENT_BYTES", "10485760", "1..268435456 bytes; Git mode is capped at 104857600."),
     ("graph.authoring.page-size", "pageSize", "RAVENROOT_GRAPH_AUTHORING_PAGE_SIZE", "50", "1..200 entries."),
     ("graph.authoring.request-timeout-millis", "requestTimeout", "RAVENROOT_GRAPH_AUTHORING_REQUEST_TIMEOUT_MILLIS", "15000", "1..120000 milliseconds."),
     ("graph.authoring.retry-limit", "retryLimit", "RAVENROOT_GRAPH_AUTHORING_RETRY_LIMIT", "1", "0..3 retries."),
+)
+
+
+GRAPH_AUTHORING_WEBHOOK_SETTINGS = (
+    ("graph.authoring.webhook-credential-reference", "credentialReference", "RAVENROOT_GRAPH_AUTHORING_WEBHOOK_CREDENTIAL_REF", "unset disables receiver", "Opaque webhook-only reference; fresh resolution at startup and every authenticated delivery."),
+    ("graph.authoring.webhook-authentication", "authentication", "RAVENROOT_GRAPH_AUTHORING_WEBHOOK_AUTH", "SIGNATURE", "GitHub raw-body HMAC; GitLab Standard Webhooks signature or explicitly selected legacy TOKEN; no automatic fallback."),
 )
 
 
@@ -15018,10 +15274,10 @@ def graph_authoring_cohort_candidate_ids(
         first, last = line_number(source, span[0]), line_number(source, span[1])
         selected.update(identifier for identifier, candidate in discovered.items()
                         if candidate.path == path.as_posix() and first <= candidate.line <= last)
-    route_paths = {"/v1/graph-authoring", "/v1/graph-authoring/{id}",
+    route_paths = {"/v1/graph-authoring-webhooks", "/v1/graph-authoring", "/v1/graph-authoring/{id}",
                    "/v1/graph-authoring/{id}/history", "/v1/graph-authoring/{id}/diff",
                    "/v1/graph-authoring/{id}/restore", "/v1/graph-authoring/{id}/discard",
-                   "/v1/graph-authoring/{id}/release", "/v1/graph-artifacts",
+                   "/v1/graph-authoring/{id}/release", "/v1/graph-authoring/{id}/versions", "/v1/graph-artifacts",
                    "/v1/graph-artifacts/{graphId}/{version}/import",
                    "/v1/graph-artifacts/{graphId}/{version}/deploy"}
     parsed_routes = route_table_candidate_partitions(route_source)
@@ -15061,6 +15317,268 @@ def graph_authoring_cohort_candidate_ids(
                     if candidate.path == GRAPH_AUTHORING_RAW_KUBERNETES_PATH.as_posix()
                     and candidate.expression == "RAVENROOT_GRAPH_AUTHORING_MODE")
     return selected
+
+
+def graph_authoring_managed_open_boundary(sources: dict[Path, str], ui: str) -> bool:
+    """Keep scoped managed opening and restored unsaved work independent of refreshed hashes."""
+    def body(method: str) -> str:
+        span = _javascript_function_span(ui, method)
+        return normalized(ui[slice(*span)]) if span else ""
+
+    def includes(source: str, *guards: str) -> bool:
+        return all(normalized(guard) in source for guard in guards)
+
+    if not includes(body("repositoryScope"), "workspaceAuthority.state !== 'ready'",
+                    "normalizedWorkspaceServiceUrl(workspaceAuthority.client)",
+                    "workspaceAuthority.scope?.tenantId ?? null", "configuration.provider",
+                    "configuration.repositoryDisplay", "configuration.releaseBranch"):
+        return False
+    if not includes(body("repositoryDocumentBindingIsCurrent"), "!scope || !tenantAuthorityAllows(target)",
+                    "target.authoring.providerDocumentId && target.authoring.repositoryScope !== scope"):
+        return False
+    if not includes(body("openRepositorySource"), "tenantAuthorityAllows(target)",
+                    "target.authoring.repositoryScope === scope",
+                    "target.authoring.providerDocumentId === documentId",
+                    "target.authoring.draftDeleted === (source === 'release')"):
+        return False
+    if not includes(body("repositoryDocumentHasLocalWork"), "paneIsDirty(target)",
+                    "target.authoring.saveFlight", "target.authoring.saveError",
+                    "inspectInspectorDraft(inspectorDraft).changed"):
+        return False
+    preserved = body("preserveOpenRepositoryGraph")
+    if not includes(preserved, "activateDocument(target.id)", "workspace.active !== target",
+                    "target.authoring.saveError", "repositoryNotice(") \
+            or any(operation in preserved for operation in (
+                "markSaved(", "applyAuthoringDocument(", "completeReplaceActiveDocument(", "initLoadedGraph(")):
+        return False
+    opened = body("openRepositoryGraph")
+    before = "if (repositoryDocumentHasLocalWork(existing)) return preserveOpenRepositoryGraph(existing);"
+    fetched = "const result = await client.open(documentId, source);"
+    after = "if (repositoryDocumentHasLocalWork(current)"
+    parsed = "const graph = parsePreparedGraph("
+    if any(marker not in opened for marker in (before, fetched, after, parsed)) \
+            or not opened.index(before) < opened.index(fetched) < opened.index(after) < opened.index(parsed):
+        return False
+    if not includes(opened, "current.history !== observedHistory",
+                    "current.history.revision() !== observedRevision", "current.incarnation !== observedIncarnation",
+                    "if (!completeReplaceActiveDocument(target, graph, result.documentId)) return false;",
+                    "openDocument({ name: result.documentId, graph })",
+                    "target.authoring.repositoryScope = scope;"):
+        return False
+    for method in ("saveRepositoryGraph", "createRepositorySuccessor", "repositoryHistory",
+                   "repositoryDiscard", "repositoryDelete", "repositoryRelease"):
+        if "!repositoryDocumentBindingIsCurrent(target)" not in body(method):
+            return False
+    if not includes(body("repositoryOperationBinding"),
+                    "client: graphAuthoringClient", "authority: workspaceAuthority", "scope: repositoryScope()",
+                    "incarnation: target.incarnation", "history: target.history",
+                    "historyRevision: target.history.revision()", "expected: structuredClone(target.authoring.revision)"):
+        return False
+    if not includes(body("requireRepositoryOperationBinding"),
+                    "requireRepositoryBinding(binding.client, binding.authority)",
+                    "binding.scope !== repositoryScope()", "!repositoryDocumentBindingIsCurrent(target, binding.scope)",
+                    "workspace.find(target.id) !== target", "target.incarnation !== binding.incarnation",
+                    "target.history !== binding.history", "target.history.revision() !== binding.historyRevision",
+                    "['draft', 'release', 'publication'].some(key => target.authoring.revision?.[key] !== binding.expected[key])"):
+        return False
+    for method, mutation in (("repositoryHistory", "restore"), ("repositoryDiscard", "discard"),
+                             ("repositoryDelete", "delete"), ("repositoryRelease", "release")):
+        operation = body(method)
+        guard = "requireRepositoryOperationBinding(target, binding);"
+        if not includes(operation, "const binding = repositoryOperationBinding(target);",
+                        "const { client } = binding;") or "graphAuthoringClient." in operation:
+            return False
+        call = ("await client.restore(id, revision, binding.expected);" if mutation == "restore"
+                else "await client.release(id, binding.expected, operation);" if mutation == "release"
+                else f"await client.{mutation}(id, binding.expected);")
+        if call not in operation or not re.search(
+                re.escape(guard) + r"\s+(?:const result = )?" + re.escape(call), operation):
+            return False
+        calls = list(re.finditer(r"await client\.[^;]+;", operation))
+        if not calls or any(not operation[call.end():].lstrip().startswith(guard) for call in calls):
+            return False
+    released = body("repositoryRelease")
+    if not includes(released, "const saved = await client.open(id, 'draft');",
+                    "saved.revision?.[key] !== binding.expected[key]",
+                    "graphMl: decodeGraphMl(saved)",
+                    "let candidate = null;",
+                    "} catch (error) { requireRepositoryOperationBinding(target, binding);"
+                    " if (error.status !== 404 || error.code !== 'NOT_FOUND' || automation?.mode === 'isolated-automerge') throw error;",
+                    "const operation = await releaseOperationIdentity([client.baseUrl, id,"
+                    " candidate || { documentId: id, revision: binding.expected, draftAbsent: true }]);",
+                    "Object.freeze(result);", "result.draftHead, result.releaseHead, automation",
+                    "if (candidate && automation?.mode === 'isolated-automerge')",
+                    "await client.triggerAutomation(automation, requestId,",
+                    "receipt.outcome === 'RECONCILE'", "feedback.reconcile(queue)",
+                    "if (candidate) void observeReleaseProposal({ client, candidate, feedback"):
+        return False
+    if released.count("candidate =") != 2 or released.count("client.open(") != 1 \
+            or re.search(r"feedback\.(?:released|published)\(", released):
+        return False
+    saved = body("saveRepositoryGraph")
+    if not includes(saved,
+                    "const pristineSource = target.authoring.providerDocumentId && !paneIsDirty(target) ? target.graph.sourceXml : null;",
+                    "const prepared = pristineSource ? { xml: pristineSource } : prepareDocumentDownload(target.id);",
+                    "const submittedPresentation = repositoryPresentationSnapshot(target);",
+                    "await client.save(providerDocumentId, prepared.xml, expected, flight)",
+                    "if (target.history === history && history.revision() === submittedRevision && repositoryPresentationSnapshot(target) === submittedPresentation)",
+                    "history.markSaved(); target.visualGroupPresentationDirty = false; target.authoring.localChanges = false;") \
+            or "localChanges = false" in body("applyAuthoringDocument"):
+        return False
+    if not includes(body("repositoryPresentationSnapshot"),
+                    "return JSON.stringify([target.renderMode, target.layoutMode, target.designArrangement, target.visualGroupState]);"):
+        return False
+    for method in ("setRenderMode", "arrangeDesign"):
+        if not includes(body(method),
+                        "if (documentIsEditable(owner) && (owner.authoring.providerDocumentId || owner.authoring.saveFlight))",
+                        "owner.authoring.localChanges = true;", "updateHistoryUi();") \
+                or "owner.visualGroupPresentationDirty =" in body(method):
+            return False
+    persistence = normalized(sources[Path("ravenroot/ravenroot-ui/src/workspace-persistence.js")])
+    close = normalized(sources[Path("ravenroot/ravenroot-ui/src/document-close-plan.js")])
+    workspace = normalized(sources[Path("ravenroot/ravenroot-ui/src/workspace.js")])
+    return includes(persistence, "localChanges: Boolean(localChanges)",
+                    "repositoryScope: nullableString(value.repositoryScope, 'repositoryScope')",
+                    "document_.history.isDirty() || document_.visualGroupPresentationDirty || document_.authoring?.localChanges") \
+        and "document_.authoring?.localChanges" in close \
+        and "Boolean(document_.authoring?.localChanges)" in workspace \
+        and "document_?.authoring?.localChanges" in body("paneIsDirty") \
+        and "activeAuthoring?.localChanges" in body("updateHistoryUi")
+
+
+def graph_authoring_release_boundary(sources: dict[Path, str], ui: str, application: str) -> bool:
+    """Keep optional proposal/trigger authority and exact observation closed beyond file hashes."""
+    def source(name: str) -> str:
+        return normalized(next((value for path, value in sources.items() if path.name == name), ""))
+    def includes(text: str, *fragments: str) -> bool:
+        return all(normalized(fragment) in text for fragment in fragments)
+    policy = source("ReleaseAutomationPolicy.java")
+    progress = source("release-proposal-progress.js")
+    client = source("graph-authoring-client.js")
+    facade = source("AuthorizedRavenrootApplication.java")
+    spans = program_github_method_spans(application, "DefaultRavenrootApplication", "triggerLocalDeploymentSource")
+    trigger = normalized("\n".join(application[start:end] for start, end in spans))
+    return includes(policy, 'Set.of("label", "deploymentId",',
+                    '"registrationIdentity", "graphVersion", "sourceNodeId")',
+                    'if (raw.isBlank()) return disabled();', '!disabled &&',
+                    'map.values().stream().anyMatch(x -> !(x instanceof String))',
+                    'new PayloadLimits(4096, 4, 20, 20, 1024, 64)') \
+        and includes(facade, 'require(context, AuthorizationAction.EXECUTION_START, collection("deployments", context));') \
+        and includes(trigger, '!record.durableRegistration()', '!record.lifecycleId().value().equals(registrationIdentity)',
+                     '!record.deployment().incarnationId().equals(incarnationId)', '!record.graphHash().equals(graphVersion)',
+                     'StoreCapability.DURABLE', 'StoreCapability.DEPLOYMENT_ENTRY_CUSTODY',
+                     'java.util.List.of(security.issuer(), security.principalType().name(), security.subject(), requestId)',
+                     'IngressTarget.node(sourceNodeId)', '"on-demand-v1:" + graphVersion, event') \
+        and not any(call in trigger for call in ('.start(', '.resume(', 'IngressTarget.start()')) \
+        and includes(client, 'registrationIdentity: binding.registrationIdentity',
+                     'deployment.registrationIdentity !== binding.registrationIdentity',
+                     'deployment.graphVersion !== binding.graphVersion',
+                     "return { outcome: 'RECONCILE', requestId };") \
+        and includes(progress, "Object.keys(value).sort()", "crypto.subtle.digest('SHA-256', bytes)",
+                     "feedback.signal, AbortSignal.timeout(timeout)", "attempts = 12, timeout = 60000",
+                     "client.open(candidate.documentId, 'release', { signal })",
+                     'observed.releaseVersion === candidate.releaseVersion', 'decode(observed) === candidate.graphMl',
+                     "signal.addEventListener('abort', done, { once: true })", 'clearTimeout(timer)')
+
+
+def graph_authoring_successor_boundary(sources: dict[Path, str], ui: str, routes: str) -> bool:
+    """Pin successor semantics independently of refreshable exact-file evidence."""
+    def java(name: str, method: str) -> str:
+        source = next(value for path, value in sources.items() if path.stem == name)
+        spans = program_github_method_spans(source, name, method)
+        return normalized("\n".join(source[start:end] for start, end in spans))
+
+    def javascript(method: str) -> str:
+        span = _javascript_function_span(ui, method)
+        return normalized(ui[slice(*span)]) if span else ""
+
+    def includes(source: str, *fragments: str) -> bool:
+        return all(normalized(fragment) in source for fragment in fragments)
+
+    descriptors = route_table_descriptors(routes)
+    if descriptors is None:
+        return False
+    successor = [arguments for arguments in descriptors
+                 if (java_literal_concatenation(arguments[1][0]) or ("",))[0] == "/v1/graph-authoring/{id}/versions"]
+    if len(successor) != 1 or tuple(normalized(successor[0][index][0]) for index in (0, 3, 4, 5, 6, 7, 8)) != (
+            'Set.of("POST")', 'true', 'false', '200', 'GRAPH_AUTHORING_ERRORS', 'NEVER', 'false'):
+        return False
+    http = java("GraphAuthoringHttpApi", "handle")
+    versions = http[http.find('case "versions" -> {'):http.find('case "release" -> {')]
+    if not includes(versions, 'requireMethod(exchange, "POST")',
+                    'require(context, AuthorizationAction.GRAPH_WRITE, documentId)',
+                    'if (!repository.capabilities().contains(GraphAuthoringRepository.Capability.CREATE_NEXT_VERSION))',
+                    'mutation(exchange, documentId, "")', 'repository.createNextVersion(actor,'):
+        return False
+    if not includes(java("GraphAuthoringHttpApi", "expected"),
+                    'requiredHeader(exchange, "X-Ravenroot-Expected-Draft")',
+                    'requiredHeader(exchange, "X-Ravenroot-Expected-Release")',
+                    'requiredHeader(exchange, "X-Ravenroot-Expected-Publication")') \
+            or not includes(java("GraphAuthoringHttpApi", "mutation"),
+                            'expected(exchange)', 'requiredHeader(exchange, "Idempotency-Key")'):
+        return False
+    for provider in ("GithubAuthoringRepository", "GitlabAuthoringRepository"):
+        create = java(provider, "createNextVersion")
+        save = java(provider, "saveSync")
+        accepted = java(provider, "acceptedGraphMl")
+        if not includes(create, 'requireMutation(actor, request, "versions", "")',
+                        'if (releaseToken.length != 2)',
+                        '!token(baseline).equals(request.expected().release())',
+                        'release.releaseVersion() >= GraphReleaseMetadata.MAX_RELEASE_VERSION',
+                        'GraphReleaseMetadata.assign(baseline.bytes(), release.graphId(), release.releaseVersion() + 1)',
+                        'request.expected(), request.idempotencyKey()), "versions", true)'):
+            return False
+        if not includes(save, 'beginIdempotency(actor, request.idempotencyKey(), operation, fingerprint)',
+                        'requireExpected(request.expected(), initial.revision())',
+                        'if ("versions".equals(operation) && initial.draft() != null)',
+                        'draft.releaseVersion() != release.releaseVersion()',
+                        '!MessageDigest.isEqual(initial.draft().bytes(), initial.release().bytes())'):
+            return False
+        if not includes(accepted, 'version = draftMetadata.releaseVersion();',
+                        'version > releaseMetadata.releaseVersion() + 1',
+                        'if (version == releaseMetadata.releaseVersion())',
+                        'state.draft() != null && equivalent(submitted, state.draft().bytes(), graphId, version)',
+                        'new GraphReleaseMetadata.Rewritten(draftMetadata, state.draft().bytes())',
+                        'equivalent(submitted, state.release().bytes(), graphId, version)',
+                        'new GraphReleaseMetadata.Rewritten(releaseMetadata, state.release().bytes())',
+                        'state.draft() != null && !MessageDigest.isEqual(state.draft().bytes(), state.release().bytes())',
+                        'if (version >= GraphReleaseMetadata.MAX_RELEASE_VERSION)',
+                        'version++;', 'GraphReleaseMetadata.assign(submitted, graphId, version)') \
+                or 'state.summary().published()' in accepted:
+            return False
+    if not includes(javascript("createRepositorySuccessor"),
+                    '!authoring?.draftDeleted || !authoring.canWrite',
+                    "operations.includes('CREATE_NEXT_VERSION')", 'if (!globalThis.confirm(',
+                    'authoring.versionRequest ||= crypto.randomUUID()',
+                    'client.createNextVersion(authoring.providerDocumentId, authoring.revision, authoring.versionRequest)',
+                    'requireRepositoryBinding(client, authority)'):
+        return False
+    if not includes(javascript("requireRepositoryBinding"),
+                    'client !== graphAuthoringClient || authority !== workspaceAuthority'):
+        return False
+    if not includes(javascript("connectRuntime"), "outcome.kind === 'ready' && gitAuthoringEnabled()",
+                    'await openRepositoryGraph(requested)'):
+        return False
+    picker = normalized(sources[GRAPH_AUTHORING_PICKER_PATH])
+    return includes(picker, "params.has('file')", "params.getAll('repositoryDocument').length !== 1",
+                    "params.getAll('source').length > 1", "!['draft', 'release'].includes(source)")
+
+
+def graph_authoring_optional_publication_boundary(sources: dict[Path, str]) -> bool:
+    """Only absent publication storage disables reads; configured storage keeps validation."""
+    configuration = normalized(sources[GRAPH_AUTHORING_CONFIGURATION_PATH])
+    catalog = normalized(next(source for path, source in sources.items()
+                              if path.stem == "PublishedGraphArtifactCatalog"))
+    return all(normalized(fragment) in configuration for fragment in (
+        'if (!artifactBase.toString().isEmpty()) { requireHttps(artifactBase, "artifact base");',
+        'if (!artifactBase.getPath().endsWith("/"))',
+        'URI.create(environment.getOrDefault("RAVENROOT_GRAPH_ARTIFACT_BASE_URL", "").strip())',
+        'return mode == Mode.GIT && !artifactBase.toString().isEmpty();',
+    )) and all(normalized(fragment) in catalog for fragment in (
+        'configuration.publicationEnabled() ? new OutboundHttpPolicy(',
+        'if (!configuration.publicationEnabled()) return List.of();',
+        'confined(configuration.artifactBase().resolve(configuration.artifactCatalogPath()))',
+    ))
 
 
 def graph_authoring_authority_from_source(
@@ -15104,6 +15622,23 @@ def graph_authoring_authority_from_source(
         if digest != expected:
             return None
         ui_digests[method] = digest
+    ui_support_digests: dict[str, str] = {}
+    for method, expected in GRAPH_AUTHORING_UI_SUPPORT_SPAN_PROOFS.items():
+        span = _javascript_function_span(ui, method)
+        if span is None:
+            return None
+        digest = hashlib.sha256(normalized(ui[slice(*span)]).encode("utf-8")).hexdigest()
+        if digest != expected:
+            return None
+        ui_support_digests[method] = digest
+    if not graph_authoring_optional_publication_boundary(sources):
+        return None
+    if not graph_authoring_managed_open_boundary(sources, ui):
+        return None
+    if not graph_authoring_release_boundary(sources, ui, application):
+        return None
+    if not graph_authoring_successor_boundary(sources, ui, (root / GRAPH_AUTHORING_ROUTE_PATH).read_text(encoding="utf-8")):
+        return None
     ui_span_digests: dict[str, str] = {}
     for (path, method), expected in GRAPH_AUTHORING_UI_SPAN_PROOFS.items():
         source = ui_span_sources[path]
@@ -15116,6 +15651,70 @@ def graph_authoring_authority_from_source(
         ui_span_digests[f"{path.as_posix()}#{method}"] = digest
     configuration = sources[GRAPH_AUTHORING_CONFIGURATION_PATH]
     semantic_requirements = (
+        (sources[next(path for path in GRAPH_AUTHORING_FILE_PROOFS if path.name == "GraphAuthoringWebhookHttpApi.java")],
+         'private static final int MAX_BYTES = 256 * 1024;'),
+        (sources[next(path for path in GRAPH_AUTHORING_FILE_PROOFS if path.name == "GraphAuthoringWebhookHttpApi.java")],
+         'new Semaphore(16)'),
+        (sources[next(path for path in GRAPH_AUTHORING_FILE_PROOFS if path.name == "GraphAuthoringWebhookHttpApi.java")],
+         'if (!requests.tryAcquire())'),
+        (sources[next(path for path in GRAPH_AUTHORING_FILE_PROOFS if path.name == "GraphAuthoringWebhookHttpApi.java")],
+         'new AuthoringAdmission('),
+        (sources[next(path for path in GRAPH_AUTHORING_FILE_PROOFS if path.name == "GraphAuthoringWebhookHttpApi.java")],
+         'task.cancel(true)'),
+        (sources[next(path for path in GRAPH_AUTHORING_FILE_PROOFS if path.name == "GraphAuthoringWebhookHttpApi.java")],
+         'MessageDigest.isEqual('),
+        (sources[next(path for path in GRAPH_AUTHORING_FILE_PROOFS if path.name == "GraphAuthoringWebhookHttpApi.java")],
+         'if (!valid) throw new Rejected(403);'),
+        (sources[next(path for path in GRAPH_AUTHORING_FILE_PROOFS if path.name == "GraphAuthoringWebhookHttpApi.java")],
+         'time < now - REPLAY_SECONDS'),
+        (sources[next(path for path in GRAPH_AUTHORING_FILE_PROOFS if path.name == "GraphAuthoringWebhookHttpApi.java")],
+         'time > now + REPLAY_SECONDS'),
+        (sources[next(path for path in GRAPH_AUTHORING_FILE_PROOFS if path.name == "GraphAuthoringWebhookHttpApi.java")],
+         'Set<String> tenants = refs.get(ref);'),
+        (sources[next(path for path in GRAPH_AUTHORING_FILE_PROOFS if path.name == "GraphAuthoringWebhookHttpApi.java")],
+         'tenants == null'),
+        (sources[next(path for path in GRAPH_AUTHORING_FILE_PROOFS if path.name == "GraphAuthoringWebhookHttpApi.java")],
+         'GraphAuthoringRepositories.signal(repository, tenant)'),
+        (sources[next(path for path in GRAPH_AUTHORING_FILE_PROOFS if path.name == "GraphAuthoringWebhookHttpApi.java")],
+         'deliveries.size() > 1024'),
+        (sources[next(path for path in GRAPH_AUTHORING_FILE_PROOFS if path.name == "GraphAuthoringWebhookHttpApi.java")],
+         'source.tenantNamespaces().size() > 256'),
+        (sources[next(path for path in GRAPH_AUTHORING_FILE_PROOFS if path.name == "GraphAuthoringWebhookHttpApi.java")],
+         'containsKey("Authorization")'),
+        (sources[next(path for path in GRAPH_AUTHORING_FILE_PROOFS if path.name == "GraphAuthoringWebhookHttpApi.java")],
+         'containsKey("Cookie")'),
+        (sources[next(path for path in GRAPH_AUTHORING_FILE_PROOFS if path.name == "GitlabAuthoringRepository.java")],
+         'fileMetadata(fullPath, commit, Set.of(200))'),
+        (sources[next(path for path in GRAPH_AUTHORING_FILE_PROOFS if path.name == "GitlabAuthoringRepository.java")],
+         '!commit.equals(fileHeader(response, "X-Gitlab-Commit-Id"))'),
+        (sources[next(path for path in GRAPH_AUTHORING_FILE_PROOFS if path.name == "GitlabAuthoringRepository.java")],
+         'values.size() != 1 || values.getFirst().length() > 128'),
+        (sources[next(path for path in GRAPH_AUTHORING_FILE_PROOFS if path.name == "AuthoringAdmission.java")],
+         'if (isCancelled() && state.compareAndSet(0, 2)) admission.release();'),
+        (sources[next(path for path in GRAPH_AUTHORING_FILE_PROOFS if path.name == "ReadObjects.java")],
+         'private static final int ENTRIES = 2048'),
+        (sources[next(path for path in GRAPH_AUTHORING_FILE_PROOFS if path.name == "ReadObjects.java")],
+         'private static final long BYTES = 64 * 1024 * 1024L'),
+        (sources[next(path for path in GRAPH_AUTHORING_FILE_PROOFS if path.name == "ReadObjects.java")],
+         'if (loading.size() >= 64)'),
+        (sources[next(path for path in GRAPH_AUTHORING_FILE_PROOFS if path.name == "ReadObjects.java")],
+         'verifyBlob(identity, value)'),
+        (sources[next(path for path in GRAPH_AUTHORING_FILE_PROOFS if path.name == "AuthoringIndexReader.java")],
+         'outstanding.size() < 16'),
+        (sources[next(path for path in GRAPH_AUTHORING_FILE_PROOFS if path.name == "AuthoringIndexReader.java")],
+         'future.cancel(true)'),
+        (sources[next(path for path in GRAPH_AUTHORING_FILE_PROOFS if path.name == "AuthoringIndexReader.java")],
+         'index.publish(repository, actor.tenantId(), completed, result)'),
+        (sources[next(path for path in GRAPH_AUTHORING_FILE_PROOFS if path.name == "JdbcGraphAuthoringReadIndex.java")],
+         'private static final int GENERATIONS = 16;'),
+        (sources[next(path for path in GRAPH_AUTHORING_FILE_PROOFS if path.name == "JdbcGraphAuthoringReadIndex.java")],
+         'private static final long GENERATION_TTL_MILLIS = 15 * 60_000L'),
+        (sources[next(path for path in GRAPH_AUTHORING_FILE_PROOFS if path.name == "JdbcGraphAuthoringReadIndex.java")],
+         'connection.rollback()'),
+        (sources[next(path for path in GRAPH_AUTHORING_FILE_PROOFS if path.name == "GithubAuthoringRepository.java")],
+         'authorizeAccess();'),
+        (sources[next(path for path in GRAPH_AUTHORING_FILE_PROOFS if path.name == "GitlabAuthoringRepository.java")],
+         'authorizeAccess();'),
         (sources[next(path for path in GRAPH_AUTHORING_FILE_PROOFS if path.name == "GitlabAuthoringRepository.java")],
          'action.put("last_commit_id", original.lastCommit())'),
         (sources[next(path for path in GRAPH_AUTHORING_FILE_PROOFS if path.name == "GitlabAuthoringRepository.java")],
@@ -15157,6 +15756,9 @@ def graph_authoring_authority_from_source(
         (main, "server.configureGraphAuthoring(embeddedGraphAuthoring)"),
         (server, "Git graph authoring requires an immutable graph definition store"),
         (server, "embedded.requireCredentialAvailable()"),
+        (server, "webhookApi = embedded.createWebhook(repository)"),
+        (server, "graphAuthoringWebhooks.handle(exchange)"),
+        (server, "graphAuthoringWebhooks.close()"),
         (server, "close();"),
         (application_api, "default boolean immutableGraphDefinitionsAvailable()"),
         (application, "return graphDefinitionStore != null"),
@@ -15201,7 +15803,7 @@ def graph_authoring_authority_from_source(
     if cohort is None:
         return None
     by_environment = {environment: (setting, field, default, validation)
-                      for setting, field, environment, default, validation in GRAPH_AUTHORING_SETTINGS}
+                      for setting, field, environment, default, validation in (*GRAPH_AUTHORING_SETTINGS, *GRAPH_AUTHORING_WEBHOOK_SETTINGS)}
     contracts: list[dict[str, object]] = []
     assigned: set[str] = set()
     for environment, (setting, field, default, validation) in by_environment.items():
@@ -15212,7 +15814,9 @@ def graph_authoring_authority_from_source(
         assigned.update(ids)
         contracts.append({
             "setting": setting,
-            "owner": f"{GRAPH_AUTHORING_CONFIGURATION_PATH.as_posix()}#GraphAuthoringConfiguration",
+            "owner": ("ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GraphAuthoringWebhookConfiguration.java#GraphAuthoringWebhookConfiguration"
+                      if environment.startswith("RAVENROOT_GRAPH_AUTHORING_WEBHOOK_") else
+                      f"{GRAPH_AUTHORING_CONFIGURATION_PATH.as_posix()}#GraphAuthoringConfiguration"),
             "field": field, "bindings": [environment], "default": default,
             "defaultEvidence": ids, "validation": validation,
             "scope": "One server process and its configured graph repository tenant partition.",
@@ -15223,6 +15827,18 @@ def graph_authoring_authority_from_source(
     residual = cohort - assigned
     tests = sorted(identifier for identifier in residual if discovered[identifier].surface == "test-fixture")
     limits = sorted(identifier for identifier in residual if discovered[identifier].path in {
+        "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/AuthoringAdmission.java",
+        "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/ReadObjects.java",
+        "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/ReadResults.java",
+        "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/AuthoringIndexReader.java",
+        "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/AuthoringRetry.java",
+        "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/ConditionalProviderReads.java",
+        "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/JdbcGraphAuthoringReadIndex.java",
+        "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/VolatileGraphAuthoringReadIndex.java",
+        "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/ReconciledGraphAuthoringRepository.java",
+        "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GraphAuthoringWebhookConfiguration.java",
+        "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/GraphAuthoringWebhookHttpApi.java",
+        "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/authoring/ReleaseAutomationPolicy.java",
         GRAPH_AUTHORING_CONFIGURATION_PATH.as_posix(), HELM_VALUES_PATH, HELM_SCHEMA_PATH,
         "deploy/helm/ravenroot/templates/deployment.yaml",
         GRAPH_AUTHORING_RAW_KUBERNETES_PATH.as_posix(),
@@ -15259,11 +15875,12 @@ def graph_authoring_authority_from_source(
         "javaMethodDigests": {f"{path.as_posix()}#{type_symbol}.{method}": digest
                               for (path, type_symbol, method), digest in GRAPH_AUTHORING_JAVA_METHOD_PROOFS.items()},
         "uiMethodDigests": ui_digests,
+        "uiSupportSpanDigests": ui_support_digests,
         "uiSpanDigests": ui_span_digests,
-        "routePaths": sorted({"/v1/graph-authoring", "/v1/graph-authoring/{id}",
+        "routePaths": sorted({"/v1/graph-authoring-webhooks", "/v1/graph-authoring", "/v1/graph-authoring/{id}",
                               "/v1/graph-authoring/{id}/history", "/v1/graph-authoring/{id}/diff",
                               "/v1/graph-authoring/{id}/restore", "/v1/graph-authoring/{id}/discard",
-                              "/v1/graph-authoring/{id}/release", "/v1/graph-artifacts",
+                              "/v1/graph-authoring/{id}/release", "/v1/graph-authoring/{id}/versions", "/v1/graph-artifacts",
                               "/v1/graph-artifacts/{graphId}/{version}/import",
                               "/v1/graph-artifacts/{graphId}/{version}/deploy"}),
         "helmGraphAuthoringSchemaDigest": canonical_json_digest(graph_schema),
@@ -16147,9 +16764,9 @@ def route_table_authority_errors(root: Path, authorities: object,
         return ["RouteTable.ALL is not the supported direct RouteDescriptor table"]
     partitions, details, source_candidates = parsed
     errors: list[str] = []
-    expected_counts = {"methods": 133, "path": 120, "summary": 461, "successStatuses": 123}
-    if len(details) != 120 or {role: len(ids) for role, ids in partitions.items()} != expected_counts:
-        errors.append("RouteTable authority no longer has the reviewed 120/837 positional shape")
+    expected_counts = {"methods": 144, "path": 131, "summary": 485, "successStatuses": 137}
+    if len(details) != 131 or {role: len(ids) for role, ids in partitions.items()} != expected_counts:
+        errors.append("RouteTable authority no longer has the reviewed 131/897 positional shape")
     recorded = authority["candidateIdsByRole"]
     if not isinstance(recorded, dict) or set(recorded) != set(expected_counts) \
             or any(recorded.get(role) != partitions[role] for role in expected_counts):
@@ -17313,6 +17930,9 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
     errors.extend(helm_authority_errors(
         root, document.get("helmAuthorities"), entries, candidates,
     ))
+    errors.extend(history_policy_authority_errors(
+        root, document.get("businessHistoryAuthorities"), entries, discovered,
+    ))
     errors.extend(persistence_policy_authority_errors(
         root, document.get("persistencePolicyAuthorities"), entries, discovered,
     ))
@@ -17361,6 +17981,10 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
                         if evidence_id not in setting_ids:
                             errors.append(
                                 f"{entry['id']}: defaultEvidence {evidence_id} is not assigned to {setting}")
+            continue
+        if representative.get("historyPolicyAuthority") == HISTORY_POLICY_AUTHORITY_ID:
+            # The mandatory closed authority above checks every exact field/binding/default and
+            # rejects source changes even if a caller also regenerates inventory fingerprints.
             continue
         if representative.get("persistenceAuthority") == PERSISTENCE_POLICY_AUTHORITY_ID:
             continue
@@ -17838,6 +18462,11 @@ def render_report(document: dict[str, object], root: Path = ROOT) -> str:
     return "\n".join(lines)
 
 
+def render_inventory(document: dict[str, object]) -> str:
+    """Readable lossless inventory encoding; historical evidence values stay untouched."""
+    return json.dumps(document, indent=1, ensure_ascii=False) + "\n"
+
+
 def refresh_inventory(root: Path, inventory_path: Path = INVENTORY, report_path: Path = REPORT,
                       *, accept_retired_pending: bool = False,
                       reconciliation_plan: dict[str, object] | None = None) -> tuple[list[str], dict[str, int]]:
@@ -17871,7 +18500,7 @@ def refresh_inventory(root: Path, inventory_path: Path = INVENTORY, report_path:
         inventory_temporary = inventory_path.with_suffix(inventory_path.suffix + ".tmp")
         report_temporary = report_path.with_suffix(report_path.suffix + ".tmp")
         inventory_temporary.write_text(
-            json.dumps(refreshed, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+            render_inventory(refreshed), encoding="utf-8")
         report_temporary.write_text(render_report(refreshed, root), encoding="utf-8")
         inventory_temporary.replace(inventory_path)
         report_temporary.replace(report_path)
@@ -17989,7 +18618,7 @@ def refresh_inventory(root: Path, inventory_path: Path = INVENTORY, report_path:
     rendered = render_report(refreshed, root)
     inventory_temporary = inventory_path.with_suffix(inventory_path.suffix + ".tmp")
     report_temporary = report_path.with_suffix(report_path.suffix + ".tmp")
-    inventory_temporary.write_text(json.dumps(refreshed, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    inventory_temporary.write_text(render_inventory(refreshed), encoding="utf-8")
     report_temporary.write_text(rendered, encoding="utf-8")
     inventory_temporary.replace(inventory_path)
     report_temporary.replace(report_path)
@@ -18014,7 +18643,7 @@ def bootstrap(root: Path, inventory_path: Path, report_path: Path) -> None:
     }
     inventory_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.parent.mkdir(parents=True, exist_ok=True)
-    inventory_path.write_text(json.dumps(document, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    inventory_path.write_text(render_inventory(document), encoding="utf-8")
     report_path.write_text(render_report(document, root), encoding="utf-8")
 
 

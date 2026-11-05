@@ -51,7 +51,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * over; {@link #holdSettlementsFrom} exists so a test can assert the settlement <em>did</em> land
  * there, which is what keeps the separation from becoming a hole.</p>
  */
-final class ThreadRecordingExecutionStore implements ExecutionStore {
+final class ThreadRecordingExecutionStore implements ForwardingHistoryExecutionStore {
 
     private final ExecutionStore delegate;
     private final Set<StoreCapability> withheld;
@@ -59,6 +59,8 @@ final class ThreadRecordingExecutionStore implements ExecutionStore {
     private final List<String> holdSettlementThreads = new CopyOnWriteArrayList<>();
     private final java.util.concurrent.atomic.AtomicBoolean failNextSettlement =
             new java.util.concurrent.atomic.AtomicBoolean();
+
+    @Override public ExecutionStore delegate() { return delegate; }
 
     ThreadRecordingExecutionStore(ExecutionStore delegate) {
         this(delegate, Set.of());

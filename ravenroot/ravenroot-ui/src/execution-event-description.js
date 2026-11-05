@@ -93,6 +93,7 @@ const DESCRIPTION_KEY_BY_TYPE = Object.freeze({
   // looking to find out what went wrong. Success is asserted only in `describeWithReason` below,
   // which knows the outcome.
   NODE_COMPLETED: 'executionEvent.nodeCompleted',
+  SOURCE_BOUNDARY: 'executionEvent.sourceBoundary',
   // Found by the structural check in this module's test, not by review: this arm had been missing
   // since the type was introduced, so every routed edge rendered as generic activity. Same defect
   // class as the cancellation entry below -- a positive allow-list degrades silently when the

@@ -438,14 +438,21 @@ public final class SqliteDeploymentRegistry implements DeploymentRegistry {
 
     @Override
     public CompletionStage<Optional<GraphVersion>> version(String tenantId, DeploymentId deploymentId, long version) {
+        return version(tenantId, deploymentId, version, Integer.MAX_VALUE);
+    }
+
+    @Override
+    public CompletionStage<Optional<GraphVersion>> version(String tenantId, DeploymentId deploymentId, long version, int maximumBytes) {
+        if (maximumBytes < 1) throw new IllegalArgumentException("maximumBytes must be positive");
         return async(() -> inReadTransaction(() -> {
             String sql = "SELECT format_version, canonical_bytes, digest, author, created_at_epoch_second, "
                     + "created_at_nano FROM deployment_version WHERE tenant_id = ? AND deployment_id = ? "
-                    + "AND version = ?";
+                    + "AND version = ? AND length(canonical_bytes) <= ?";
             try (PreparedStatement statement = connection.prepareStatement(sql)) {
                 statement.setString(1, tenantId);
                 statement.setString(2, deploymentId.value());
                 statement.setLong(3, version);
+                statement.setInt(4, maximumBytes);
                 try (ResultSet rows = statement.executeQuery()) {
                     if (!rows.next()) {
                         return Optional.empty();

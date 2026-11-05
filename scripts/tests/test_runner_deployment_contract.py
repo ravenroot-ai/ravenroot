@@ -172,5 +172,27 @@ class RunnerDeploymentContract(unittest.TestCase):
         self.assertNotIn("/var/run/docker.sock", json.dumps(services["ravenroot"]))
 
 
+    @unittest.skipUnless(shutil.which("helm"), "Helm is required")
+    def test_quantity_policy_erases_only_resource_schema_selectors_and_keeps_exact_budgets(self):
+        rendered = subprocess.run(["helm", "template", "native", str(ROOT / "deploy/helm/ravenroot"), "-f",
+                                   str(ROOT / "docs/examples/governed-runner/kubernetes-values.yaml")],
+                                  check=True, capture_output=True, text=True).stdout
+        selectors = [f"quantity(dyn(object.spec{container}.resources).limits['{resource}'])"
+                     for container in ("", ".containers[0]") for resource in ("cpu", "memory")]
+        guards = ["r.requests == r.limits", "r.limits.size() == 2", "'cpu' in r.limits", "'memory' in r.limits",
+                  "int(e.value) >= 20", "int(e.value) <= 2147483647", "string(4 * int(e.value) / 5)",
+                  "failurePolicy: Fail", "validationActions: [Deny, Audit]"]
+        def verify(source):
+            for marker in selectors + guards:
+                self.assertIn(marker, source)
+            self.assertNotIn("quantity(object.spec", source)
+            self.assertEqual(3, source.count(".compareTo("))
+            self.assertEqual(3, source.count(")) == 0"))
+        verify(rendered)
+        for marker in selectors + guards:
+            with self.subTest(removed=marker), self.assertRaises(AssertionError):
+                verify(rendered.replace(marker, ""))
+
+
 if __name__ == "__main__":
     unittest.main()

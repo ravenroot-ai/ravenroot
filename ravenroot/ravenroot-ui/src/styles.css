@@ -273,6 +273,7 @@
       font-size: 12px; cursor: pointer; transition: all .15s;
       white-space: nowrap; user-select: none;
     }
+    .btn[hidden] { display: none; }
     .btn:hover { background: var(--bg-h); border-color: var(--acc); }
     .btn.active { background: var(--accent-soft); border-color: var(--acc); color: var(--acc); }
     .btn.primary { background: var(--acc); border-color: var(--acc); color: var(--surface-canvas); font-weight: 600; }
@@ -321,6 +322,11 @@
     .runtime-controls {
       min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 10px; flex: 0 0 auto;
     }
+    .program-readiness-controls {
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+      flex: 1 1 100%; padding: 6px 0; font-size: 12px; color: var(--tx-2);
+    }
+    .program-readiness-controls[hidden] { display: none; }
     #btn-program-approve {
       flex: 0 0 auto; min-width: min(11rem, 100%); max-width: 11rem;
       white-space: normal; overflow-wrap: anywhere;
@@ -1794,7 +1800,7 @@
       border: 1px solid var(--bd); border-radius: 5px; color: var(--tx-2); font-size: 11px;
     }
     .graph-interaction-tools {
-      position: absolute; z-index: 5; top: 12px; left: 12px;
+      position: absolute; z-index: 5; top: calc(var(--workspace-doc-header-h) + 8px); left: 12px;
       display: flex; align-items: center; gap: 4px; padding: 4px;
       border: 1px solid var(--bd); border-radius: 7px;
       background: color-mix(in srgb, var(--bg-1) 94%, transparent);
@@ -2733,3 +2739,59 @@
 @media (max-width: 720px), (pointer: coarse) {
   .palette-actions button, .palette-create button, .node-template button { min-height: 44px; }
 }
+
+.repository-picker { box-sizing: border-box; width: min(1040px, 94vw); height: min(700px, 86vh); min-width: min(480px, 94vw); min-height: 320px; max-width: 96vw; max-height: 94vh; resize: both; overflow: hidden; color: var(--tx-1); background: var(--bg-1); margin: auto; padding: 24px; border: 1px solid var(--bd); border-radius: 16px; box-shadow: 0 24px 80px #0007; }
+.repository-picker[open] { display: flex; flex-direction: column; gap: 18px; }
+.repository-picker::backdrop { background: #080d18aa; backdrop-filter: blur(4px); }
+.repository-picker h2 { margin: 0; font-size: 22px; letter-spacing: -.4px; }
+.repository-picker-toolbar { display: flex; gap: 12px; flex-wrap: wrap; }
+.repository-picker input, .repository-picker select, .repository-picker button { color: var(--tx-1); background: var(--bg-2); border: 1px solid var(--bd); border-radius: 8px; padding: 10px 14px; font: inherit; }
+.repository-picker input { flex: 1; min-width: 180px; }
+.repository-picker p { margin: 0; color: var(--tx-2); font-size: 13px; line-height: 1.5; }
+.repository-picker button:hover { background: var(--bg-h); }
+.repository-picker :focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.repository-picker-list { flex: 1; min-height: 100px; overflow: auto; border: 1px solid var(--bd); border-radius: 10px; scrollbar-gutter: stable; }
+.repository-picker table { width: 100%; border-collapse: separate; border-spacing: 0; text-align: left; font-size: 13px; }
+.repository-picker th { position: sticky; top: 0; z-index: 1; background: var(--bg-2); color: var(--tx-2); font-size: 12px; font-weight: 600; padding: 13px 16px; border-bottom: 1px solid var(--bd); white-space: nowrap; }
+.repository-picker td { padding: 14px 16px; border-bottom: 1px solid var(--bd); vertical-align: middle; }
+.repository-picker tbody tr:last-child td { border-bottom: 0; }
+.repository-picker tbody tr:hover { background: var(--bg-h); }
+.repository-picker td:first-child { min-width: 220px; }
+.repository-picker-list button { text-align: left; padding: 3px 0; border: 0; background: transparent; font-weight: 600; overflow-wrap: anywhere; }
+.repository-picker small { display: block; color: var(--tx-2); margin-top: 4px; overflow-wrap: anywhere; }
+.repository-picker footer { display: flex; justify-content: space-between; gap: 12px; }
+.repository-picker footer button:last-child { margin-left: auto; }
+.repository-badge { display: inline-block; padding: 5px 9px; border-radius: 6px; font-size: 12px; line-height: 1.4; white-space: nowrap; background: #8794a21a; color: var(--tx-1); }
+.repository-badge.draft { color: #acd2ff; background: #5296e522; }
+.repository-badge.published { color: #99dfbb; background: #3baf7822; }
+.repository-badge.pending { color: #ecd091; background: #cf9b2820; white-space: normal; }
+
+#repository-notice { padding: 12px 20px; background: #522b20; color: #fff; border: 2px solid #efb17d; }
+#repository-next-version { margin-left: 12px; }
+
+.doc-run-binding { max-width: 18rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .7rem; color: var(--text-muted); }
+#node-correlation-preview { min-width: 0; }
+#node-correlation-preview button { min-height: 44px; }
+#node-correlation-preview textarea { width: 100%; box-sizing: border-box; }
+#node-correlation-preview pre { max-height: 16rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.doc-run-binding { display: flex; margin-left: auto; min-width: 0; max-width: 50%; }
+.doc-run-id { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.doc-run-state { flex-shrink: 0; }
+.doc-pane-header:has(.doc-run-binding) .doc-pane-maximize { margin-left: 0; }
+@media (max-width: 720px) {
+  .repository-picker { padding: 16px; }
+  .repository-picker th, .repository-picker td { padding: 10px 7px; }
+  .repository-picker th { white-space: normal; }
+  .repository-picker td:first-child { min-width: 130px; }
+  .repository-picker table { font-size: 12px; }
+  .repository-badge { white-space: normal; padding: 4px 6px; }
+}
+
+.repository-operation-dialog { width: min(520px, 90vw); margin: auto; padding: 24px; border: 1px solid var(--bd); border-radius: 14px; color: var(--tx-1); background: var(--bg-1); box-shadow: 0 24px 80px #0008; }
+.repository-operation-dialog::backdrop { background: #080d1899; backdrop-filter: blur(3px); }
+.repository-operation-dialog h2 { margin: 0 0 16px; }
+.repository-operation-dialog p { line-height: 1.6; overflow-wrap: anywhere; }
+.repository-operation-dialog a { display: block; margin: 16px 0; color: var(--focus-ring); }
+.repository-operation-dialog a[hidden] { display: none; }
+.repository-operation-dialog button { display: block; margin: 20px 0 0 auto; padding: 9px 18px; border: 1px solid var(--bd); border-radius: 7px; background: var(--bg-2); color: var(--tx-1); }

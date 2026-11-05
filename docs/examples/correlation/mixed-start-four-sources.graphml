@@ -1,0 +1,255 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+  <key id="kind" for="node" attr.name="kind" attr.type="string" />
+  <key id="behavior" for="node" attr.name="behavior" attr.type="string" />
+  <key id="url" for="node" attr.name="url" attr.type="string" />
+  <key id="method" for="node" attr.name="method" attr.type="string" />
+  <key id="durationMs" for="node" attr.name="durationMs" attr.type="int" />
+  <key id="brokerProfile" for="node" attr.name="brokerProfile" attr.type="string" />
+  <key id="queue" for="node" attr.name="queue" attr.type="string" />
+  <key id="mailProfile" for="node" attr.name="mailProfile" attr.type="string" />
+  <key id="recovery.repeatable" for="node" attr.name="recovery.repeatable" attr.type="string" />
+  <key id="layoutX" for="node" attr.name="layoutX" attr.type="double" />
+  <key id="layoutY" for="node" attr.name="layoutY" attr.type="double" />
+  <key id="layoutWidth" for="node" attr.name="layoutWidth" attr.type="double" />
+  <key id="layoutHeight" for="node" attr.name="layoutHeight" attr.type="double" />
+  <key id="label" for="node" attr.name="label" attr.type="string" />
+  <key id="outcome" for="edge" attr.name="outcome" attr.type="string" />
+  <key id="joinPolicy" for="node" attr.name="joinPolicy" attr.type="string" />
+  <graph id="mixed-start-four-sources" edgedefault="directed">
+    <node id="start">
+      <data key="kind">START</data>
+      <data key="layoutX">0</data>
+      <data key="layoutY">0</data>
+      <data key="layoutWidth">140</data>
+      <data key="layoutHeight">70</data>
+      <data key="label">start</data>
+    </node>
+    <node id="prepare">
+      <data key="kind">BEHAVIOR</data>
+      <data key="layoutX">220</data>
+      <data key="layoutY">0</data>
+      <data key="layoutWidth">140</data>
+      <data key="layoutHeight">70</data>
+      <data key="label">prepare</data>
+      <data key="behavior">http-request</data>
+      <data key="url">http://localhost:19090/prepare</data>
+      <data key="method">GET</data>
+    </node>
+    <node id="loop-http">
+      <data key="kind">BEHAVIOR</data>
+      <data key="layoutX">440</data>
+      <data key="layoutY">0</data>
+      <data key="layoutWidth">140</data>
+      <data key="layoutHeight">70</data>
+      <data key="label">loop-http</data>
+      <data key="behavior">http-request</data>
+      <data key="url">http://localhost:19090/loop</data>
+      <data key="method">GET</data>
+      <data key="joinPolicy">each</data>
+    </node>
+    <node id="wait">
+      <data key="kind">BEHAVIOR</data>
+      <data key="layoutX">660</data>
+      <data key="layoutY">0</data>
+      <data key="layoutWidth">140</data>
+      <data key="layoutHeight">70</data>
+      <data key="label">wait</data>
+      <data key="behavior">delay</data>
+      <data key="durationMs">20</data>
+    </node>
+    <node id="sibling-mail">
+      <data key="kind">BEHAVIOR</data>
+      <data key="layoutX">220</data>
+      <data key="layoutY">150</data>
+      <data key="layoutWidth">140</data>
+      <data key="layoutHeight">70</data>
+      <data key="label">sibling-mail</data>
+      <data key="behavior">mail.send</data>
+      <data key="mailProfile">mixed-mail</data>
+    </node>
+    <node id="source-mail">
+      <data key="kind">BEHAVIOR</data>
+      <data key="layoutX">440</data>
+      <data key="layoutY">300</data>
+      <data key="layoutWidth">140</data>
+      <data key="layoutHeight">70</data>
+      <data key="label">source-mail</data>
+      <data key="behavior">mail.send</data>
+      <data key="mailProfile">mixed-mail</data>
+    </node>
+    <node id="amqp-1">
+      <data key="kind">BEHAVIOR</data>
+      <data key="layoutX">0</data>
+      <data key="layoutY">300</data>
+      <data key="layoutWidth">140</data>
+      <data key="layoutHeight">70</data>
+      <data key="label">amqp-1</data>
+      <data key="behavior">amqp.consume</data>
+      <data key="brokerProfile">mixed-1</data>
+      <data key="queue">mixed.1</data>
+    </node>
+    <node id="worker-1">
+      <data key="kind">BEHAVIOR</data>
+      <data key="layoutX">220</data>
+      <data key="layoutY">300</data>
+      <data key="layoutWidth">140</data>
+      <data key="layoutHeight">70</data>
+      <data key="label">worker-1</data>
+      <data key="behavior">http-request</data>
+      <data key="url">http://localhost:19090/source-1</data>
+      <data key="method">GET</data>
+    </node>
+    <node id="amqp-2">
+      <data key="kind">BEHAVIOR</data>
+      <data key="layoutX">0</data>
+      <data key="layoutY">450</data>
+      <data key="layoutWidth">140</data>
+      <data key="layoutHeight">70</data>
+      <data key="label">amqp-2</data>
+      <data key="behavior">amqp.consume</data>
+      <data key="brokerProfile">mixed-2</data>
+      <data key="queue">mixed.2</data>
+    </node>
+    <node id="worker-2">
+      <data key="kind">BEHAVIOR</data>
+      <data key="layoutX">220</data>
+      <data key="layoutY">450</data>
+      <data key="layoutWidth">140</data>
+      <data key="layoutHeight">70</data>
+      <data key="label">worker-2</data>
+      <data key="behavior">http-request</data>
+      <data key="url">http://localhost:19090/source-2</data>
+      <data key="method">GET</data>
+    </node>
+    <node id="amqp-3">
+      <data key="kind">BEHAVIOR</data>
+      <data key="layoutX">0</data>
+      <data key="layoutY">600</data>
+      <data key="layoutWidth">140</data>
+      <data key="layoutHeight">70</data>
+      <data key="label">amqp-3</data>
+      <data key="behavior">amqp.consume</data>
+      <data key="brokerProfile">mixed-3</data>
+      <data key="queue">mixed.3</data>
+    </node>
+    <node id="worker-3">
+      <data key="kind">BEHAVIOR</data>
+      <data key="layoutX">220</data>
+      <data key="layoutY">600</data>
+      <data key="layoutWidth">140</data>
+      <data key="layoutHeight">70</data>
+      <data key="label">worker-3</data>
+      <data key="behavior">http-request</data>
+      <data key="url">http://localhost:19090/source-3</data>
+      <data key="method">GET</data>
+    </node>
+    <node id="amqp-4">
+      <data key="kind">BEHAVIOR</data>
+      <data key="layoutX">0</data>
+      <data key="layoutY">750</data>
+      <data key="layoutWidth">140</data>
+      <data key="layoutHeight">70</data>
+      <data key="label">amqp-4</data>
+      <data key="behavior">amqp.consume</data>
+      <data key="brokerProfile">mixed-4</data>
+      <data key="queue">mixed.4</data>
+    </node>
+    <node id="worker-4">
+      <data key="kind">BEHAVIOR</data>
+      <data key="layoutX">220</data>
+      <data key="layoutY">750</data>
+      <data key="layoutWidth">140</data>
+      <data key="layoutHeight">70</data>
+      <data key="label">worker-4</data>
+      <data key="behavior">http-request</data>
+      <data key="url">http://localhost:19090/source-4</data>
+      <data key="method">GET</data>
+    </node>
+    <node id="end">
+      <data key="kind">END</data>
+      <data key="layoutX">660</data>
+      <data key="layoutY">750</data>
+      <data key="layoutWidth">140</data>
+      <data key="layoutHeight">70</data>
+      <data key="label">end</data>
+    </node>
+    <node id="error">
+      <data key="kind">ERROR</data>
+      <data key="layoutX">880</data>
+      <data key="layoutY">750</data>
+      <data key="layoutWidth">140</data>
+      <data key="layoutHeight">70</data>
+      <data key="label">error</data>
+    </node>
+    <edge id="route-0" source="start" target="prepare">
+      <data key="outcome">continue</data>
+    </edge>
+    <edge id="route-1" source="parse-prepared-mail" target="amqp-1">
+      <data key="outcome">continue</data>
+    </edge>
+    <edge id="route-2" source="parse-prepared-mail" target="sibling-mail">
+      <data key="outcome">continue</data>
+    </edge>
+    <edge id="route-3" source="parse-prepared-mail" target="loop-http">
+      <data key="outcome">continue</data>
+    </edge>
+    <edge id="route-4" source="loop-http" target="wait">
+      <data key="outcome">continue</data>
+    </edge>
+    <edge id="route-5" source="wait" target="loop-http">
+      <data key="outcome">continue</data>
+    </edge>
+    <edge id="route-6" source="worker-1" target="parse-source-mail">
+      <data key="outcome">continue</data>
+    </edge>
+    <edge id="route-7" source="amqp-1" target="worker-1">
+      <data key="outcome">continue</data>
+    </edge>
+    <edge id="route-8" source="worker-1" target="amqp-2">
+      <data key="outcome">continue</data>
+    </edge>
+    <edge id="route-9" source="amqp-2" target="worker-2">
+      <data key="outcome">continue</data>
+    </edge>
+    <edge id="route-10" source="worker-2" target="amqp-3">
+      <data key="outcome">continue</data>
+    </edge>
+    <edge id="route-11" source="amqp-3" target="worker-3">
+      <data key="outcome">continue</data>
+    </edge>
+    <edge id="route-12" source="worker-3" target="amqp-4">
+      <data key="outcome">continue</data>
+    </edge>
+    <edge id="route-13" source="amqp-4" target="worker-4">
+      <data key="outcome">continue</data>
+    </edge>
+    <edge id="route-14" source="worker-4" target="end">
+      <data key="outcome">continue</data>
+    </edge>
+    <node id="parse-prepared-mail">
+      <data key="kind">BEHAVIOR</data>
+      <data key="behavior">json-parse</data>
+      <data key="label">parse-prepared-mail</data>
+      <data key="layoutX">220</data>
+      <data key="layoutY">85</data>
+      <data key="layoutWidth">140</data>
+      <data key="layoutHeight">70</data>
+    </node>
+    <node id="parse-source-mail">
+      <data key="kind">BEHAVIOR</data>
+      <data key="behavior">json-parse</data>
+      <data key="label">parse-source-mail</data>
+      <data key="layoutX">440</data>
+      <data key="layoutY">385</data>
+      <data key="layoutWidth">140</data>
+      <data key="layoutHeight">70</data>
+    </node>
+    <edge id="route-100" source="prepare" target="parse-prepared-mail">
+      <data key="outcome">continue</data>
+    </edge>
+    <edge id="route-101" source="parse-source-mail" target="source-mail">
+      <data key="outcome">continue</data>
+    </edge>
+  </graph>
+</graphml>

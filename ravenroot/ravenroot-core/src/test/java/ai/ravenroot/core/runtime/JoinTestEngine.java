@@ -46,6 +46,7 @@ final class JoinTestEngine implements ExecutionEngine {
 
     private final Map<NodeRef, RavenNode> nodes = new ConcurrentHashMap<>();
     private final Set<String> completedBeforeSendReturns = ConcurrentHashMap.newKeySet();
+    private final Map<String, HeldSend> heldSends = new ConcurrentHashMap<>();
     private final ExecutorService pool;
     private final ManualScheduler scheduler = new ManualScheduler();
     private volatile EngineState state = EngineState.RUNNING;
@@ -73,6 +74,22 @@ final class JoinTestEngine implements ExecutionEngine {
         completedBeforeSendReturns.add(nodeId);
     }
 
+    /** Holds an exact node's send before actor lookup, so stop-versus-send order is controlled. */
+    HeldSend holdBeforeSend(String nodeId) {
+        var held = new HeldSend();
+        heldSends.put(nodeId, held);
+        return held;
+    }
+
+    static final class HeldSend {
+        final CountDownLatch entered = new CountDownLatch(1);
+        private final CompletableFuture<Void> released = new CompletableFuture<>();
+
+        void release() {
+            released.complete(null);
+        }
+    }
+
     @Override
     public String id() {
         return "join-test";
@@ -98,6 +115,15 @@ final class JoinTestEngine implements ExecutionEngine {
 
     @Override
     public CompletionStage<NodeResult> send(NodeRef target, NodeMessage message) {
+        HeldSend held = heldSends.get(message.nodeId());
+        if (held != null) {
+            held.entered.countDown();
+            return held.released.thenCompose(ignored -> sendNow(target, message));
+        }
+        return sendNow(target, message);
+    }
+
+    private CompletionStage<NodeResult> sendNow(NodeRef target, NodeMessage message) {
         RavenNode node = nodes.get(target);
         if (node == null) {
             return CompletableFuture.failedFuture(new IllegalArgumentException("unknown node " + target.value()));

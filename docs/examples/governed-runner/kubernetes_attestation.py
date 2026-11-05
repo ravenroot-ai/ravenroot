@@ -4,6 +4,7 @@ This runs before Agent admission. It never accepts a shell program, path, cluste
 graph-selected option. Every temporary file and child is owned by this invocation and cleaned up.
 The manager retains the bounded evidence and refuses unproven storage and process limits.
 """
+from contextlib import contextmanager
 import ctypes
 import errno
 import json
@@ -15,6 +16,61 @@ import subprocess
 import sys
 import tempfile
 import time
+
+
+# A failure marker is unverified diagnostic context, never positive enforcement proof. Only
+# these closed literals cross the process boundary; exception text and dynamic values do not.
+class DiagnosticFailure(Exception):
+    def __init__(self, phase, reason):
+        self.phase, self.reason = phase, reason
+
+
+@contextmanager
+def diagnostic_phase(phase):
+    try:
+        yield
+    except Exception as failure:
+        reasons = {
+            "positive CPU throttling evidence is missing": "CPU_THROTTLING_MISSING",
+            "Workspace initialization identity changed": "SEED_IDENTITY_CHANGED",
+            "Workspace seed initialization is uncertain; refusing a fresh clone": "SEED_UNCERTAIN",
+        }
+        reason = (reasons.get(failure.args[0]) if type(failure) is RuntimeError
+                  and len(failure.args) == 1 and isinstance(failure.args[0], str) else None)
+        if reason is None:
+            reason = ("PROCESS_TIMEOUT" if isinstance(failure, subprocess.TimeoutExpired) else
+                      "PROCESS_EXIT" if isinstance(failure, subprocess.CalledProcessError) else
+                      "OS_ERROR" if isinstance(failure, OSError) else
+                      "INVALID_VALUE" if isinstance(failure, (ValueError, KeyError)) else
+                      "REFUSED" if isinstance(failure, RuntimeError) else "UNKNOWN")
+        raise DiagnosticFailure(phase, reason) from None
+
+
+def entrypoint(arguments):
+    try:
+        if arguments == ["--memory-boundary"]:
+            with diagnostic_phase("MEMORY_BOUNDARY"):
+                memory_boundary()
+        elif arguments == ["--network-control"]:
+            with diagnostic_phase("CONTROL"):
+                network_isolated(False)
+                print('{"networkReachable":true}', flush=True)
+        elif not arguments:
+            run()
+        else:
+            with diagnostic_phase("ARGUMENTS"):
+                raise ValueError("unknown attestation operation")
+        return 0
+    except Exception as failure:
+        phase, reason = ((failure.phase, failure.reason) if isinstance(failure, DiagnosticFailure)
+                         else ("UNKNOWN", "UNKNOWN"))
+        if not isinstance(phase, str) or not isinstance(reason, str) or phase not in {"UNKNOWN", "NETWORK", "IDENTITY", "PRIVILEGES", "CREDENTIAL", "ROOT", "LANDLOCK",
+                         "CEILINGS", "STORAGE", "PROCESS", "CGROUP", "WORKSPACE", "CONTROL", "MEMORY_BOUNDARY", "ARGUMENTS"} \
+                or reason not in {"UNKNOWN", "REFUSED", "OS_ERROR", "INVALID_VALUE", "PROCESS_EXIT", "PROCESS_TIMEOUT",
+                                  "CPU_THROTTLING_MISSING", "SEED_UNCERTAIN", "SEED_IDENTITY_CHANGED"}:
+            phase, reason = "UNKNOWN", "UNKNOWN"
+        print("RR_ATTESTATION_FAILURE_V1:" + phase + ":" + reason, file=sys.stderr, flush=True)
+        return 1
 
 
 def quota(root, limit):
@@ -139,47 +195,54 @@ def cgroups():
 
 
 def run():
-    network_isolated()
-    if os.getuid() != 65532 or os.getgid() != 65532:
-        raise RuntimeError("approved non-root identity required")
-    status = pathlib.Path("/proc/self/status").read_text()
-    fields = dict(line.split(":", 1) for line in status.splitlines() if ":" in line)
-    if int(fields["CapEff"].strip(), 16) != 0 or fields["NoNewPrivs"].strip() != "1":
-        raise RuntimeError("capability or privilege confinement is missing")
-    if pathlib.Path("/var/run/secrets/kubernetes.io/serviceaccount/token").exists():
-        raise RuntimeError("Agent received a Kubernetes credential")
-    if not os.statvfs("/").f_flag & os.ST_RDONLY:
-        raise RuntimeError("Agent root filesystem must be read-only")
-    libc = ctypes.CDLL(None, use_errno=True)
-    abi = libc.syscall(444, 0, 0, 1)
-    if abi < 3:
-        raise RuntimeError("Landlock ABI 3 is required")
-    limit = int(os.environ["RAVENROOT_WORKSPACE_LIMIT_BYTES"])
-    process_limit = int(os.environ["RAVENROOT_PROCESS_LIMIT"])
-    if not 1_048_576 <= limit <= 1_099_511_627_776 or not 4 <= process_limit <= 4096:
-        raise ValueError("invalid operator enforcement ceiling")
-    proof = quota("/workspace", limit)
-    proof.update(processes(process_limit))
-    proof.update(cgroups())
-    initialize_workspace()
+    with diagnostic_phase("NETWORK"):
+        network_isolated()
+    with diagnostic_phase("IDENTITY"):
+        if os.getuid() != 65532 or os.getgid() != 65532:
+            raise RuntimeError("approved non-root identity required")
+    with diagnostic_phase("PRIVILEGES"):
+        status = pathlib.Path("/proc/self/status").read_text()
+        fields = dict(line.split(":", 1) for line in status.splitlines() if ":" in line)
+        if int(fields["CapEff"].strip(), 16) != 0 or fields["NoNewPrivs"].strip() != "1":
+            raise RuntimeError("capability or privilege confinement is missing")
+    with diagnostic_phase("CREDENTIAL"):
+        if pathlib.Path("/var/run/secrets/kubernetes.io/serviceaccount/token").exists():
+            raise RuntimeError("Agent received a Kubernetes credential")
+    with diagnostic_phase("ROOT"):
+        if not os.statvfs("/").f_flag & os.ST_RDONLY:
+            raise RuntimeError("Agent root filesystem must be read-only")
+    with diagnostic_phase("LANDLOCK"):
+        libc = ctypes.CDLL(None, use_errno=True)
+        abi = libc.syscall(444, 0, 0, 1)
+        if abi < 3:
+            raise RuntimeError("Landlock ABI 3 is required")
+    with diagnostic_phase("CEILINGS"):
+        limit = int(os.environ["RAVENROOT_WORKSPACE_LIMIT_BYTES"])
+        process_limit = int(os.environ["RAVENROOT_PROCESS_LIMIT"])
+        if not 1_048_576 <= limit <= 1_099_511_627_776 or not 4 <= process_limit <= 4096:
+            raise ValueError("invalid operator enforcement ceiling")
+    with diagnostic_phase("STORAGE"):
+        proof = quota("/workspace", limit)
+    with diagnostic_phase("PROCESS"):
+        proof.update(processes(process_limit))
+    with diagnostic_phase("CGROUP"):
+        proof.update(cgroups())
+    with diagnostic_phase("WORKSPACE"):
+        initialize_workspace()
     proof.update(protocolVersion=1, nonRoot=True, capabilitiesDropped=True, noNewPrivileges=True,
                  readOnlyRoot=True, landlockAbi=abi, serviceAccountAbsent=True, networkBlocked=True)
     print(json.dumps(proof, separators=(",", ":")), flush=True)
 
 
+def memory_boundary():
+    # Destructive, fixed CI/operator probe on a sacrificial owned Pod, never normal preflight.
+    # cgroup v2 memory.oom.group may kill every process; the manager must prove UID absence.
+    limit = int(pathlib.Path('/sys/fs/cgroup/memory.max').read_text())
+    if limit > int(os.environ['RAVENROOT_MEMORY_LIMIT_BYTES']):
+        raise RuntimeError('memory ceiling is unproven')
+    allocation = bytearray(limit * 2)
+    raise RuntimeError('memory boundary was not enforced')
+
+
 if __name__ == "__main__":
-    if sys.argv[1:] == ["--memory-boundary"]:
-        # Destructive, fixed CI/operator probe on a sacrificial owned Pod, never normal preflight.
-        # cgroup v2 memory.oom.group may kill every process; the manager must prove UID absence.
-        limit = int(pathlib.Path('/sys/fs/cgroup/memory.max').read_text())
-        if limit > int(os.environ['RAVENROOT_MEMORY_LIMIT_BYTES']):
-            raise RuntimeError('memory ceiling is unproven')
-        allocation = bytearray(limit * 2)
-        raise RuntimeError('memory boundary was not enforced')
-    elif sys.argv[1:] == ["--network-control"]:
-        network_isolated(False)
-        print('{"networkReachable":true}', flush=True)
-    elif not sys.argv[1:]:
-        run()
-    else:
-        raise ValueError("unknown attestation operation")
+    sys.exit(entrypoint(sys.argv[1:]))

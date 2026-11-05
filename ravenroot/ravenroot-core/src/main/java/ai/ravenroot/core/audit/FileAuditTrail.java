@@ -131,7 +131,9 @@ public final class FileAuditTrail implements AuditTrail {
      * The tenant's chain head, read from memory when known and seeded from the log exactly once.
      *
      * <p>Must be called under the tenant's lock. Seeding parses the whole log, which is the cost the
-     * cache exists to pay once instead of on every append; a corrupt log makes that seeding fail with a
+     * cache exists to pay once instead of on every append. Seeding streams the log and retains only
+     * its last record; paginated reads retain only the requested page but still parse every record.
+     * A corrupt log makes that seeding fail with a
      * typed {@link AuditTrailFailure.Corrupted} rather than a raw parse error, because appending onto a
      * chain whose end cannot be established risks reusing a sequence an unreadable record already
      * holds.</p>
@@ -141,13 +143,10 @@ public final class FileAuditTrail implements AuditTrail {
         if (known != null) {
             return known;
         }
-        List<AuditRecord> chain = readLogStrictly(tenantId);
-        if (chain.isEmpty()) {
-            return null;
-        }
-        AuditRecord head = chain.get(chain.size() - 1);
-        headCache.put(tenantId, head);
-        return head;
+        AuditRecord[] last = new AuditRecord[1];
+        scanLogStrictly(tenantId, record -> last[0] = record);
+        if (last[0] != null) headCache.put(tenantId, last[0]);
+        return last[0];
     }
 
     @Override
@@ -161,13 +160,10 @@ public final class FileAuditTrail implements AuditTrail {
         ReentrantLock tenantLock = lockFor(tenantId);
         tenantLock.lock();
         try {
-            List<AuditRecord> chain = readLogStrictly(tenantId);
             var result = new ArrayList<AuditRecord>();
-            for (AuditRecord record : chain) {
-                if (record.sequence() > afterSequence && result.size() < limit) {
-                    result.add(record);
-                }
-            }
+            scanLogStrictly(tenantId, record -> {
+                if (record.sequence() > afterSequence && result.size() < limit) result.add(record);
+            });
             return List.copyOf(result);
         } catch (IOException e) {
             throw new AuditTrailException(new AuditTrailFailure.Unavailable(
@@ -319,6 +315,39 @@ public final class FileAuditTrail implements AuditTrail {
      * the skipped record still occupies a sequence number, so the next append would reuse it and write
      * a collision into the chain while ostensibly recovering from damage.</p>
      */
+    /** Streams every record even after a requested page is full, retaining corruption refusal. */
+    private void scanLogStrictly(String tenantId, java.util.function.Consumer<AuditRecord> consume)
+            throws IOException {
+        Path path = logPath(tenantId);
+        if (!Files.exists(path)) return;
+        long position = 0, malformedCount = 0, firstPosition = 0;
+        String firstDetail = null;
+        try (var reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (line.isBlank()) continue;
+                position++;
+                AuditRecord record;
+                try {
+                    record = deserialize(line);
+                } catch (RuntimeException unreadable) {
+                    malformedCount++;
+                    if (firstDetail == null) {
+                        firstPosition = position;
+                        firstDetail = unreadable.getClass().getSimpleName() + ": " + unreadable.getMessage();
+                    }
+                    continue;
+                }
+                consume.accept(record);
+            }
+        }
+        if (malformedCount > 0) {
+            throw new AuditTrailException(new AuditTrailFailure.Corrupted(tenantId,
+                    malformedCount + " unreadable record(s), the first at position " + firstPosition
+                            + ": " + firstDetail));
+        }
+    }
+
     private List<AuditRecord> readLogStrictly(String tenantId) throws IOException {
         var malformed = new ArrayList<ChainAnomaly.MalformedRecord>();
         List<AuditRecord> records = readLogTolerantly(tenantId, malformed);

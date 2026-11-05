@@ -25,6 +25,8 @@ public interface GraphAuthoringRepository extends AutoCloseable {
         CREATE,
         /** Persists a changed draft. */
         SAVE,
+        /** Explicitly creates the next draft from an immutable reviewed release. */
+        CREATE_NEXT_VERSION,
         /** Enumerates file-scoped source revisions. */
         HISTORY,
         /** Compares two immutable source revisions. */
@@ -331,12 +333,26 @@ public interface GraphAuthoringRepository extends AutoCloseable {
 
     /**
      * Validates and persists a draft through an expected-parent provider update.
+     * Changed content based on a reviewed release creates its next draft version atomically;
+     * unchanged saves and edits to an unreleased draft retain the assigned version.
      *
      * @param actor authenticated repository actor
      * @param request proposed bytes, expected state, and bounded idempotency key
      * @return stage yielding server-canonical GraphML and the advanced source state
      */
     CompletionStage<Document> save(Actor actor, SaveRequest request);
+
+    /**
+     * Creates a successor of the reviewed release using the complete observed revision.
+     *
+     * @param actor authenticated repository actor
+     * @param request expected state and retry identity; sourceRevision must be empty
+     * @return the editable successor with unchanged document and graph identity
+     */
+    default CompletionStage<Document> createNextVersion(Actor actor, MutationRequest request) {
+        return java.util.concurrent.CompletableFuture.failedFuture(
+                new GraphAuthoringException(GraphAuthoringException.Failure.UNSUPPORTED_PROVIDER));
+    }
 
     /**
      * Lists immutable file revisions for a tenant-owned document.

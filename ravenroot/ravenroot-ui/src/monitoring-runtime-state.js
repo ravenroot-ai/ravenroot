@@ -14,6 +14,7 @@ const MAX_DEPLOYMENT_EVENT_STREAMS = 256;
 // deliberately absent: they open an arrival rather than settling one.
 const SETTLED_NODE_STATES = Object.freeze({
   NODE_COMPLETED: 'completed',
+  SOURCE_BOUNDARY: 'source-boundary',
   NODE_FAILED: 'failed',
   NODE_DEFAULTED: 'fallback',
   NODE_BYPASSED: 'bypassed',
@@ -22,7 +23,7 @@ const OPENING_NODE_EVENTS = Object.freeze(new Set(['NODE_STARTED', 'NODE_RETRY_S
 // How specific each settled outcome is. A standing outcome survives a less specific one until the
 // node is entered again; see `observeNodeActivity` for why recency is the wrong rule here.
 const OUTCOME_PRECEDENCE = Object.freeze({
-  completed: 1, bypassed: 2, fallback: 3, failed: 4,
+  completed: 1, 'source-boundary': 2, bypassed: 2, fallback: 3, failed: 4,
 });
 
 function finiteTime(value, fallback) {

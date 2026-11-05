@@ -41,7 +41,10 @@ import java.util.function.Consumer;
  *       client is not told how the server is deployed.</li>
  * </ul>
  *
- * <p>{@code publicReason} is carried by both and is not a divergence.</p>
+ * <p>{@code publicReason} and the five typed business-context fields are carried by both and are
+ * not divergences. Business context is a bounded, explicit scalar allowlist: application id,
+ * contribution id/kind, round and non-secret public reference. Its availability is explicit;
+ * arbitrary payload, attributes, credentials and nested context objects are never added.</p>
  *
  * <p><b>{@code deploymentId} used to be on this list and no longer is.</b> The argument for keeping
  * it here was that an author's browser is not told how the server is deployed — sound for the
@@ -124,7 +127,21 @@ public final class StructuredExecutionLogger implements Consumer<ExecutionEvent>
                 // lines from noise into a diagnosis.
                 + ",\"publicReason\":" + (event.publicReason() == null ? "null"
                         : "\"" + escape(event.publicReason()) + "\"")
+                + correlation(event.applicationCorrelation())
                 + "}";
+    }
+
+    private static String correlation(ai.ravenroot.api.correlation.ApplicationCorrelationContext context) {
+        return ",\"applicationCorrelationId\":" + nullable(context == null ? null : context.applicationCorrelationId())
+                + ",\"contributionId\":" + nullable(context == null ? null : context.contributionId().orElse(null))
+                + ",\"contributionKind\":" + nullable(context == null ? null : context.contributionKind().orElse(null))
+                + ",\"roundId\":" + nullable(context == null ? null : context.roundId())
+                + ",\"publicReference\":" + nullable(context == null ? null : context.publicReference().orElse(null))
+                + ",\"applicationCorrelationAvailability\":\"" + (context == null ? "NOT_RECORDED" : "AVAILABLE") + "\"";
+    }
+
+    private static String nullable(String value) {
+        return value == null ? "null" : "\"" + escape(value) + "\"";
     }
 
     /** The one shared implementation; see {@link JsonStrings}'s own Javadoc for why. */

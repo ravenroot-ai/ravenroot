@@ -39,6 +39,64 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ManagedExecutionStoreTest {
     @Test
+    void allTypedInitialHistoryCustodyAndJoinMethodsReachTheDelegateIncludingOverloads() throws Exception {
+        var names = java.util.Set.of("acceptDeploymentEntry",
+                "acceptInitialStart",
+                "businessHistories",
+                "businessHistory",
+                "businessHistoryPolicy",
+                "closeBusinessHistory",
+                "compareAndSetCorrelatedJoin",
+                "correlatedJoin",
+                "correlatedJoinMembers",
+                "correlatedJoins",
+                "correlatedTraversal",
+                "correlatedTraversals",
+                "deploymentEntry",
+                "executionEdgeSummaries",
+                "executionInvocationNodeIds",
+                "executionNodeSummaries",
+                "executionSelectionExists",
+                "executionTraversal",
+                "executionTraversals",
+                "executionVisitAttempts",
+                "executionVisitParents",
+                "executionVisits",
+                "initialStart",
+                "pendingDeploymentEntries",
+                "recordCorrelatedTraversal",
+                "settleCorrelatedTraversal",
+                "uncorrelatedDeploymentTraversals");
+        var expected = new java.util.concurrent.atomic.AtomicReference<java.lang.reflect.Method>();
+        var expectedArguments = new java.util.concurrent.atomic.AtomicReference<Object[]>();
+        var calls = new AtomicInteger();
+        var result = new CompletableFuture<Object>();
+        ExecutionStore delegate = executionStore((method, arguments) -> {
+            assertEquals(expected.get(), method, "the exact typed overload must reach the adapter");
+            org.junit.jupiter.api.Assertions.assertArrayEquals(expectedArguments.get(), arguments);
+            calls.incrementAndGet();
+            return method.getName().equals("businessHistoryPolicy")
+                    ? ai.ravenroot.api.correlation.BusinessHistoryPolicy.DEFAULTS : result;
+        });
+        ExecutionStore managed = ManagedExecutionStore.protect(delegate, manifestStore(Map.of()));
+        var methods = java.util.Arrays.stream(ExecutionStore.class.getMethods())
+                .filter(method -> names.contains(method.getName())).toList();
+        assertEquals(30, methods.size(), "review any new typed history surface explicitly");
+        for (var method : methods) {
+            Object[] arguments = java.util.Arrays.stream(method.getParameterTypes())
+                    .map(type -> type == int.class ? (Object) 7 : type == long.class ? 11L : null)
+                    .toArray();
+            expected.set(method);
+            expectedArguments.set(arguments);
+            Object actual = method.invoke(managed, arguments);
+            org.junit.jupiter.api.Assertions.assertSame(method.getName().equals("businessHistoryPolicy")
+                    ? ai.ravenroot.api.correlation.BusinessHistoryPolicy.DEFAULTS : result, actual,
+                    "the managed wrapper must preserve the adapter result without invoking defaults");
+        }
+        assertEquals(30, calls.get());
+    }
+
+    @Test
     void selectedProcessJournalReadDelegatesWithoutManagedMutationAuthority() {
         ExecutionKey key = key(7);
         var called = new AtomicBoolean();

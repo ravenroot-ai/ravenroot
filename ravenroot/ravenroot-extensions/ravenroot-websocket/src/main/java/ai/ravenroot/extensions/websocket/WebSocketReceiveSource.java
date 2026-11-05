@@ -306,7 +306,7 @@ final class WebSocketReceiveSource implements InboundSource {
                                             + settings.profile().destination().getAuthority(),
                                     "subprotocols", settings.profile().subprotocols()));
                     IngressDisposition disposition = current.ingress().offer(current.identity(),
-                            IngressTarget.start(), payload);
+                            IngressTarget.node(context.nodeId()), payload);
                     if (disposition != IngressDisposition.ACCEPTED) revokeForBackpressure(generation);
                 } catch (RuntimeException failure) {
                     revokeForBackpressure(generation);

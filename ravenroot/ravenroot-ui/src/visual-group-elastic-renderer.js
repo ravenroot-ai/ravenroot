@@ -118,7 +118,7 @@ export function createElasticVisualGroupRenderer({ zoomGroup, nodes, links, simu
     paths.attr('data-original-edge-id', edge => edge.originalEdgeIds[0]);
     paths.attr('stroke-dasharray', edge => edge.lineStyle === 'dashed' ? (edge.dashPattern || '6 4') : null)
       .attr('stroke-width', edge => (edge.baseWidth || 1.8) * (edge.parallel ? 1.6 : 1));
-    paths.attr('stroke-width', edge => edgeFlowWidth(edge.flow?.recent || 0)
+    paths.attr('stroke-width', edge => (edge.flow?.count > 0 && !edge.flow?.recent ? 3 : edgeFlowWidth(edge.flow?.recent || 0))
       * (edge.parallel ? 1.6 : 1)).classed('d3-edge--active', edge => (edge.flow?.recent || 0) > 0)
       .attr('stroke-dasharray', edge => (edge.flow?.recent || 0) > 0
         ? '7 5' : edge.lineStyle === 'dashed' ? (edge.dashPattern || '6 4') : null);

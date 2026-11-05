@@ -147,6 +147,50 @@ same composition root.
 A refusal exposes a closed code such as `GRAPH_LIMIT_FAN_OUT_EXCEEDED` or
 `GRAPH_LIMIT_TRAVERSAL_STEPS_EXCEEDED`, never graph content or payload values.
 
+## Business history and correlated join limits
+
+These settings apply to both SQLite and PostgreSQL execution stores. System properties take
+precedence over environment variables; blank properties delegate to the environment. The server
+validates the typed `BusinessHistoryPolicy` during composition, before listeners or initial START.
+Application correlation mappings cannot raise these operator-owned limits.
+
+| System property | Environment variable | Default | Meaning |
+|---|---|---|---|
+| `ravenroot.history.max-histories-per-scope` | `RAVENROOT_HISTORY_MAX_HISTORIES_PER_SCOPE` | `100000` | Retained business identities per tenant, logical deployment and exact graph version. |
+| `ravenroot.history.max-open-joins` | `RAVENROOT_HISTORY_MAX_OPEN_JOINS` | `64` | Open join generations per business history. |
+| `ravenroot.history.max-retained-joins` | `RAVENROOT_HISTORY_MAX_RETAINED_JOINS` | `1024` | All retained join generations, including small terminal tombstones. |
+| `ravenroot.history.max-contributions` | `RAVENROOT_HISTORY_MAX_CONTRIBUTIONS` | `1024` | Distinct contributions per join. |
+| `ravenroot.history.max-join-payload-bytes` | `RAVENROOT_HISTORY_MAX_JOIN_PAYLOAD_BYTES` | `16777216` | Dedicated retained contribution payload bytes per join. |
+| `ravenroot.history.max-pending-entries` | `RAVENROOT_HISTORY_MAX_PENDING_ENTRIES` | `1024` | Pending source or explicit derivation inputs per scope; hard ceiling 100000. |
+| `ravenroot.history.max-pending-entry-bytes` | `RAVENROOT_HISTORY_MAX_PENDING_ENTRY_BYTES` | `16777216` | Total retained entry input, identity and reserved checkpoint bytes per scope; hard ceiling 67108864 bytes. |
+| `ravenroot.history.max-page-size` | `RAVENROOT_HISTORY_MAX_PAGE_SIZE` | `100` | Largest requested metadata page; hard ceiling 1000. |
+| `ravenroot.history.retention-seconds` | `RAVENROOT_HISTORY_RETENTION_SECONDS` | `2592000` | Business metadata retention deadline; compact tombstones preserve closure. |
+| `ravenroot.history.join-deadline-seconds` | `RAVENROOT_HISTORY_JOIN_DEADLINE_SECONDS` | `86400` | Deadline for incomplete joins; cannot exceed history retention. |
+| `ravenroot.history.max-id-characters` | `RAVENROOT_HISTORY_MAX_ID_CHARACTERS` | `256` | Maximum application, contribution and round identifier length. |
+| `ravenroot.history.max-selector-characters` | `RAVENROOT_HISTORY_MAX_SELECTOR_CHARACTERS` | `1024` | Maximum authored JSON Pointer length. |
+| `ravenroot.history.max-selector-segments` | `RAVENROOT_HISTORY_MAX_SELECTOR_SEGMENTS` | `32` | Maximum pointer depth. |
+| `ravenroot.history.max-manifest-items` | `RAVENROOT_HISTORY_MAX_MANIFEST_ITEMS` | `1024` | Maximum distinct announced manifest members. |
+| `ravenroot.history.max-cas-attempts` | `RAVENROOT_HISTORY_MAX_CAS_ATTEMPTS` | `128` | Maximum join revision-conflict attempts per bounded arrival. |
+| `ravenroot.history.read-timeout-ms` | `RAVENROOT_HISTORY_READ_TIMEOUT_MS` | `10000` | Total wait budget for one SDK history operation; hard ceiling 60000 ms. |
+| `ravenroot.history.response-max-bytes` | `RAVENROOT_HISTORY_RESPONSE_MAX_BYTES` | `4194304` | Encoded history response ceiling; hard ceiling 16777216 bytes. |
+| `ravenroot.history.response-max-values` | `RAVENROOT_HISTORY_RESPONSE_MAX_VALUES` | `100000` | Response tree ceiling; hard ceiling 1000000 values; must accommodate the configured maximum metadata page. |
+
+Every numeric setting is a positive integer. The typed policy rejects inconsistent retention,
+join and response budgets, excessive pages, and values above its safety ceilings. SDK composition
+can supply the same `BusinessHistoryPolicy` through `SqliteStoreConfig.withBusinessHistories` or
+`PostgresStoreConfig.withBusinessHistories`, including a bounded `PayloadLimits` response policy.
+The default response policy permits 4 MiB, depth 64, 2000 entries per collection, 100000 total
+values, 262144 characters per text and 256 per key. Workflow input payload budgets remain separate. Correlation selectors read within the configured graph
+input payload budget. Pending-entry quotas include bounded identity and causal checkpoint overhead;
+a full quota refuses the next admission before it can return a committed receipt.
+A response exceeding its configured projection budget is refused; it is never silently truncated.
+
+The server publishes the effective history policy to authenticated SDK readers through
+`DeploymentHistoryReader.policy()`. Requests above `max-page-size` are invalid. Applications that
+raise it to 1000 can retrieve all 1000 metadata rows in one bounded response when the response
+policy has sufficient capacity. Activity content remains separately governed by its capture policy;
+raising metadata limits does not enable capture or undo redaction.
+
 ## Human Task operational policy
 
 Human Task limits are one immutable server policy shared by graph authoring, catalog projection,

@@ -10,6 +10,28 @@ import java.time.Clock;
 import static org.junit.jupiter.api.Assertions.*;
 
 class GraphAuthoringConfigurationTest {
+    @Test void optionalAutomationIsDisabledByDefaultAndRejectsPartialNullOrUnsupportedBindings() {
+        assertFalse(GraphAuthoringConfiguration.fromEnvironment(gitEnvironment()).releaseAutomation().enabled());
+        String valid = "{\"label\":\"graph:auto\",\"deploymentId\":\"automation\",\"registrationIdentity\":\"11111111-1111-1111-1111-111111111111\",\"graphVersion\":\"" + "a".repeat(64) + "\",\"sourceNodeId\":\"source\"}";
+        var env = gitEnvironment(); env.put("RAVENROOT_GRAPH_RELEASE_AUTOMATION", valid);
+        assertTrue(GraphAuthoringConfiguration.fromEnvironment(env).releaseAutomation().enabled());
+        for (String invalid : java.util.List.of("null", "{}", "{\"label\":\"graph:auto\"}",
+                valid.replace("graph:auto", ""), valid.replace("\"label\"", "\"unknown\""),
+                valid.replace("\"automation\"", "null"))) {
+            env.put("RAVENROOT_GRAPH_RELEASE_AUTOMATION", invalid);
+            assertThrows(IllegalArgumentException.class, () -> GraphAuthoringConfiguration.fromEnvironment(env));
+        }
+        assertThrows(IllegalArgumentException.class, () -> new ReleaseAutomationPolicy("", "automation", "", "", ""));
+        assertThrows(IllegalArgumentException.class, () -> new ReleaseAutomationPolicy(null, "", "", "", ""));
+        assertThrows(IllegalArgumentException.class, () -> GraphAuthoringConfiguration.fromEnvironment(Map.of("RAVENROOT_GRAPH_RELEASE_AUTOMATION", valid)));
+        var gitlab = gitEnvironment();
+        gitlab.put("RAVENROOT_GRAPH_AUTHORING_PROVIDER", "gitlab");
+        gitlab.put("RAVENROOT_GRAPH_AUTHORING_GITLAB_PROJECT", "42");
+        gitlab.put("RAVENROOT_GRAPH_AUTHORING_CREDENTIAL_MODE", "PAT");
+        gitlab.put("RAVENROOT_GRAPH_RELEASE_AUTOMATION", valid);
+        assertThrows(IllegalArgumentException.class, () -> GraphAuthoringConfiguration.fromEnvironment(gitlab));
+    }
+
     @Test void localIsTheDefaultAndCarriesNoRemoteAuthority() {
         var configuration = GraphAuthoringConfiguration.fromEnvironment(Map.of());
         assertEquals(GraphAuthoringConfiguration.Mode.LOCAL, configuration.mode());
@@ -53,7 +75,8 @@ class GraphAuthoringConfigurationTest {
         assertTrue(configuration.capabilitiesJson().contains("\"provider\":\"gitlab\""));
         try (var repository = GraphAuthoringRepositories.create(configuration, ignored -> java.util.Optional.empty(),
                 (tenant, graph, version, source, bytes) -> "absent", ignored -> { })) {
-            assertInstanceOf(GitlabAuthoringRepository.class, repository);
+            var managed = assertInstanceOf(ReconciledGraphAuthoringRepository.class, repository);
+            assertInstanceOf(GitlabAuthoringRepository.class, managed.delegate);
         }
     }
 
@@ -69,6 +92,25 @@ class GraphAuthoringConfigurationTest {
         environment.put("RAVENROOT_GRAPH_AUTHORING_RELEASE_BRANCH", "main");
         environment.put("RAVENROOT_GRAPH_AUTHORING_TENANT_NAMESPACES", "a=customers,b=customers/other");
         assertThrows(IllegalArgumentException.class, () -> GraphAuthoringConfiguration.fromEnvironment(environment));
+    }
+
+    @Test void gitDraftsDoNotRequirePublicationStorage() {
+        var environment = gitEnvironment();
+        environment.remove("RAVENROOT_GRAPH_ARTIFACT_BASE_URL");
+        var configuration = GraphAuthoringConfiguration.fromEnvironment(environment);
+        assertEquals(GraphAuthoringConfiguration.Mode.GIT, configuration.mode());
+        assertFalse(configuration.publicationEnabled());
+        var catalog = new PublishedGraphArtifactCatalog(configuration);
+        assertTrue(catalog.list("tenant-a").isEmpty());
+        assertEquals("absent", catalog.token("tenant-a", "orders", 1, "a".repeat(40), new byte[0]));
+        var missing = assertThrows(ai.ravenroot.api.authoring.GraphAuthoringException.class,
+                () -> catalog.resolve("tenant-a", "orders", 1));
+        assertEquals(ai.ravenroot.api.authoring.GraphAuthoringException.Failure.NOT_FOUND, missing.failure());
+        for (String invalid : java.util.List.of("http://example.test/", "https://example.test/no-slash")) {
+            environment.put("RAVENROOT_GRAPH_ARTIFACT_BASE_URL", invalid);
+            assertThrows(IllegalArgumentException.class,
+                    () -> GraphAuthoringConfiguration.fromEnvironment(environment));
+        }
     }
 
     private static Map<String, String> gitEnvironment() {

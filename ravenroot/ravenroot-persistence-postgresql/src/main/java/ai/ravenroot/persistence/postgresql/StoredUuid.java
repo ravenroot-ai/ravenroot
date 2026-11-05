@@ -14,11 +14,13 @@ import java.util.UUID;
  * Decoder for identifiers crossing the PostgreSQL persistence boundary.
  *
  * <h2>Native {@code uuid}, and what that does and does not remove</h2>
- * <p>Identifiers are stored in PostgreSQL's own {@code uuid} type rather than as text. The column
+ * <p>Normalized execution aggregate identifiers use PostgreSQL's own {@code uuid} type. The column
  * therefore cannot hold a malformed or non-canonical value at all — the database rejects it on the
  * way in, wherever it came from — so the whole class of "stored text is not a UUID" corruption the
  * text-based adapter has to decode defensively simply does not arise, and it is half the width of the
- * index besides.</p>
+ * index besides. The additive business-history and retained-entry tables use canonical UUID text
+ * for their cross-adapter scalar metadata; those columns use the same strict, sanitized text decoder
+ * as durable envelopes. Native aggregate columns keep their typed JDBC reads.</p>
  *
  * <p>What native typing does <em>not</em> remove is referential corruption: a well-formed identifier
  * naming a row that is not there, or naming a different aggregate than the one being read. Foreign
@@ -58,6 +60,19 @@ final class StoredUuid {
 
     static UUID optional(ResultSet rows, String table, String column) throws SQLException {
         return rows.getObject(column, UUID.class);
+    }
+
+    static UUID required(String stored, String table, String column, String tenantId) {
+        return required(stored, table, column, diagnosticKey(tenantId));
+    }
+
+    /** Cursor text is caller input, so invalid identifiers are a request error, never stored corruption. */
+    static UUID cursor(String value) {
+        try {
+            return required(value, "history_cursor", "identity", diagnosticKey("cursor"));
+        } catch (ExecutionStoreException malformed) {
+            throw new IllegalArgumentException("invalid history cursor identity");
+        }
     }
 
     static UUID required(String stored, String table, String column, ExecutionKey key) {

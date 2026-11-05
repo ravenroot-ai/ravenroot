@@ -203,7 +203,7 @@ final class OpenApiRequestReplySource implements ManagedIngressSource {
         }
         RequestReplyAdmission admission;
         try {
-            admission = activeContext.requestReply().requestProjected(settings.profile().target(), exchange -> {
+            admission = activeContext.requestReply().requestProjected(ai.ravenroot.api.deployment.IngressTarget.node(activeContext.nodeId()), exchange -> {
                 if (!registered.openProof(exchange, activeContext)) {
                     throw OpenApiValues.invalid();
                 }

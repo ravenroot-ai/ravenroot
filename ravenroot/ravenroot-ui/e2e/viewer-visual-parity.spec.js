@@ -52,6 +52,12 @@ async function stubViewerService(page) {
     if (url.pathname.endsWith('/view')) return route.fulfill({
       status: 200, contentType: 'application/json', body: JSON.stringify(envelope),
     });
+    if (url.pathname === '/v1/deployments/visual-parity') return route.fulfill({ json: {
+      deploymentId: 'visual-parity', state: 'READY', tenantId: 'local', sourceCount: 0,
+      graphVersion: 'graph-v1', runtimeIncarnationId: 'inc-visual', scope: 'LOCAL_PROCESS',
+      diagnostic: null, continuity: 'PROCESS_LOCAL', deploymentRevision: null,
+      desiredState: null, observedState: null, recoveryFailure: null,
+    } });
     if (url.pathname.endsWith('/events')) return route.fulfill({
       status: 200, contentType: 'text/event-stream', body:
         'event: source-gap\ndata: {"reason":"REPLAY_WINDOW_EXCEEDED"}\n\n',
@@ -189,6 +195,11 @@ const nativeCardSnapshot = (page, renderer) => page.evaluate(selectedRenderer =>
   };
 }, renderer);
 
+async function openNativeElasticFixture(page) {
+  // Exercise the actual read-only deployment document, including its live renderer binding.
+  await page.locator('#btn-monitoring').click();
+}
+
 const nativeElasticSnapshot = page => page.evaluate(source => {
   const owner = window.ravenroot.activeDocument();
   const renderer = owner.renderer;
@@ -324,7 +335,7 @@ for (const theme of ['dark', 'light']) {
       // uses the native default Design presentation instead of forcing this legacy standard style.
       if (renderer === 'cyto') await page.evaluate(() => window.ravenroot.setVisualStyle('standard'));
       if (renderer === 'n8n') await page.evaluate(() => window.ravenroot.setVisualStyle('n8n'));
-      if (renderer === 'elastic') await page.locator('#btn-monitoring').click();
+      if (renderer === 'elastic') await openNativeElasticFixture(page);
       if (renderer === 'elastic') {
         await expect(page.locator('.doc-pane--active .doc-elastic-host.active')).toBeVisible();
       }
@@ -360,7 +371,7 @@ for (const theme of ['dark', 'light']) {
       await page.evaluate(selected => window.ravenroot.setApplicationTheme(selected), theme);
       for (const [mode, renderer] of [['design', 'cyto'], ['monitoring', 'elastic']]) {
         if (renderer === 'elastic') {
-          await page.locator('#btn-monitoring').click();
+          await openNativeElasticFixture(page);
           await expect(page.locator('.doc-pane--active .doc-elastic-host.active')).toBeVisible();
         }
         const native = renderer === 'elastic'

@@ -1,0 +1,23 @@
+[
+  {
+    "ingestionId": "ingest-sales-v1",
+    "filename": "sales.csv",
+    "version": "v1",
+    "round": "round-1",
+    "stage": "bronze"
+  },
+  {
+    "ingestionId": "ingest-sales-v2",
+    "filename": "sales.csv",
+    "version": "v2",
+    "round": "round-1",
+    "stage": "bronze"
+  },
+  {
+    "ingestionId": "ingest-orders-v1",
+    "filename": "orders.csv",
+    "version": "v1",
+    "round": "round-1",
+    "stage": "bronze"
+  }
+]

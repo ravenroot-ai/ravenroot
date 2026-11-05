@@ -33,6 +33,8 @@ CORE_FACTORY_IDS = {
     "HttpRequestNodeBehaviorFactory": "http-request",
     "ProgramNodeBehaviorFactory": "program",
     "BoundaryGuardNodeBehaviorFactory": "boundary-guard",
+    "CorrelationCloseNodeBehaviorFactory": "correlation-close",
+    "CorrelationDeriveNodeBehaviorFactory": "correlation-derive",
 }
 
 

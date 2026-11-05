@@ -3,7 +3,7 @@ import { uiText } from './ui-text.js';
 
 /** Native keyboard targets over the read-only Design glyphs; runtime belongs to real nodes only. */
 export function createEmbedDesignInspection({ canvas, cy, tooltip, snapshot, runtime, projection, toggle,
-  t = uiText }) {
+  onInspect = () => {}, t = uiText }) {
   const layer = canvas.ownerDocument.createElement('div');
   layer.className = 'embed-design-inspection';
   canvas.append(layer);
@@ -18,7 +18,8 @@ export function createEmbedDesignInspection({ canvas, cy, tooltip, snapshot, run
     if (!node || element.empty() || !element.visible()) { hide(); return; }
     const state = runtime()?.nodeStates.get(hovered);
     tooltip.textContent = runtimeNodeTooltipText({ ...node, ...state,
-      runtimeObserved: Boolean(state), instances: state?.activeInstances });
+      runtimeObserved: Boolean(state), instances: state?.activeInstances,
+      historyNotLoaded: Boolean(runtime()?.nodeHistoryAvailability && !state && !runtime()?.nodeCoverageComplete) }, t);
     tooltip.style.display = 'block';
     const point = element.renderedPosition();
     const bounds = canvas.getBoundingClientRect();
@@ -58,7 +59,7 @@ export function createEmbedDesignInspection({ canvas, cy, tooltip, snapshot, run
               const next = projection()?.groups.find(group => group.id === entry.group.id);
               buttons.get(next?.collapsed ? next.summaryId : next?.headerId)?.focus();
             }
-          } else { cy.$(':selected').unselect(); cy.getElementById(entry.id).select(); }
+          } else { cy.$(':selected').unselect(); cy.getElementById(entry.id).select(); onInspect(entry.id); }
         });
         if (!entry.group) {
           const show = () => { hovered = entry.id; refreshTooltip(); };
@@ -69,8 +70,9 @@ export function createEmbedDesignInspection({ canvas, cy, tooltip, snapshot, run
       }
       button.setAttribute('aria-label', entry.label);
       const bounds = cy.getElementById(entry.id).renderedBoundingBox({ includeLabels: false });
-      Object.assign(button.style, { left: `${bounds.x1}px`, top: `${bounds.y1}px`,
-        width: `${bounds.w}px`, height: `${bounds.h}px` });
+      const width = Math.max(44, bounds.w), height = Math.max(44, bounds.h);
+      Object.assign(button.style, { left: `${bounds.x1 - (width - bounds.w) / 2}px`, top: `${bounds.y1 - (height - bounds.h) / 2}px`,
+        width: `${width}px`, height: `${height}px` });
     }
     refreshTooltip();
   }

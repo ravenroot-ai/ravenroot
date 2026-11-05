@@ -31,7 +31,8 @@ import java.util.Objects;
 public record SqliteStoreConfig(SynchronousMode synchronousMode, Duration busyTimeout,
                                 Duration maxLeaseTtl, int maxPayloadBytes, Duration maxClockSkew,
                                 Duration journalRetention, int maxInventoryPageSize,
-                                Duration terminalRetention, Duration executionResultRetention) {
+                                Duration terminalRetention, Duration executionResultRetention,
+                                ai.ravenroot.api.correlation.BusinessHistoryPolicy businessHistories) {
 
     /**
      * How far SQLite flushes on commit.
@@ -87,7 +88,21 @@ public record SqliteStoreConfig(SynchronousMode synchronousMode, Duration busyTi
         return DEFAULTS;
     }
 
+    /** Source-compatible configuration before explicit business-history budgets. */
+    public SqliteStoreConfig(SynchronousMode synchronousMode, Duration busyTimeout, Duration maxLeaseTtl,
+            int maxPayloadBytes, Duration maxClockSkew, Duration journalRetention, int maxInventoryPageSize,
+            Duration terminalRetention, Duration executionResultRetention) {
+        this(synchronousMode, busyTimeout, maxLeaseTtl, maxPayloadBytes, maxClockSkew, journalRetention,
+                maxInventoryPageSize, terminalRetention, executionResultRetention,
+                ai.ravenroot.api.correlation.BusinessHistoryPolicy.DEFAULTS);
+    }
+
+    /** Supplies operator-owned business-history, pagination and response projection budgets. */
+    public SqliteStoreConfig withBusinessHistories(ai.ravenroot.api.correlation.BusinessHistoryPolicy policy) {
+        return new SqliteStoreConfig(synchronousMode, busyTimeout, maxLeaseTtl, maxPayloadBytes, maxClockSkew, journalRetention, maxInventoryPageSize, terminalRetention, executionResultRetention, policy);
+    }
     public SqliteStoreConfig {
+        Objects.requireNonNull(businessHistories, "businessHistories");
         Objects.requireNonNull(synchronousMode, "synchronousMode");
         Objects.requireNonNull(busyTimeout, "busyTimeout");
         Objects.requireNonNull(maxLeaseTtl, "maxLeaseTtl");
@@ -151,12 +166,12 @@ public record SqliteStoreConfig(SynchronousMode synchronousMode, Duration busyTi
 
     public SqliteStoreConfig withSynchronousMode(SynchronousMode mode) {
         return new SqliteStoreConfig(mode, busyTimeout, maxLeaseTtl, maxPayloadBytes, maxClockSkew,
-                journalRetention, maxInventoryPageSize, terminalRetention, executionResultRetention);
+                journalRetention, maxInventoryPageSize, terminalRetention, executionResultRetention, businessHistories);
     }
 
     public SqliteStoreConfig withBusyTimeout(Duration timeout) {
         return new SqliteStoreConfig(synchronousMode, timeout, maxLeaseTtl, maxPayloadBytes, maxClockSkew,
-                journalRetention, maxInventoryPageSize, terminalRetention, executionResultRetention);
+                journalRetention, maxInventoryPageSize, terminalRetention, executionResultRetention, businessHistories);
     }
 
     /**
@@ -179,7 +194,7 @@ public record SqliteStoreConfig(SynchronousMode synchronousMode, Duration busyTi
      */
     public SqliteStoreConfig withTerminalRetention(Duration retention) {
         return new SqliteStoreConfig(synchronousMode, busyTimeout, maxLeaseTtl, maxPayloadBytes,
-                maxClockSkew, journalRetention, maxInventoryPageSize, retention, executionResultRetention);
+                maxClockSkew, journalRetention, maxInventoryPageSize, retention, executionResultRetention, businessHistories);
     }
 
     /**
@@ -190,7 +205,7 @@ public record SqliteStoreConfig(SynchronousMode synchronousMode, Duration busyTi
      */
     public SqliteStoreConfig withMaxInventoryPageSize(int maximum) {
         return new SqliteStoreConfig(synchronousMode, busyTimeout, maxLeaseTtl, maxPayloadBytes,
-                maxClockSkew, journalRetention, maximum, terminalRetention, executionResultRetention);
+                maxClockSkew, journalRetention, maximum, terminalRetention, executionResultRetention, businessHistories);
     }
 
     /**
@@ -203,7 +218,7 @@ public record SqliteStoreConfig(SynchronousMode synchronousMode, Duration busyTi
      */
     public SqliteStoreConfig withJournalRetention(Duration retention) {
         return new SqliteStoreConfig(synchronousMode, busyTimeout, maxLeaseTtl, maxPayloadBytes,
-                maxClockSkew, retention, maxInventoryPageSize, terminalRetention, executionResultRetention);
+                maxClockSkew, retention, maxInventoryPageSize, terminalRetention, executionResultRetention, businessHistories);
     }
 
     /**
@@ -229,6 +244,6 @@ public record SqliteStoreConfig(SynchronousMode synchronousMode, Duration busyTi
      */
     public SqliteStoreConfig withExecutionResultRetention(Duration retention) {
         return new SqliteStoreConfig(synchronousMode, busyTimeout, maxLeaseTtl, maxPayloadBytes,
-                maxClockSkew, journalRetention, maxInventoryPageSize, terminalRetention, retention);
+                maxClockSkew, journalRetention, maxInventoryPageSize, terminalRetention, retention, businessHistories);
     }
 }

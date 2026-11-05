@@ -44,6 +44,7 @@ public final class RavenrootCli {
                 case "status" -> status();
                 case "runtime" -> runtime();
                 case "node-types" -> nodeTypes();
+                case "correlation-preview" -> correlationPreview(args);
                 case "inspect" -> inspect(args);
                 // The only command here that does not reach the backend, and
                 // deliberately: validating a local file against the GraphML profile needs no
@@ -138,6 +139,17 @@ public final class RavenrootCli {
             output.println("resume-traversal-id=" + result.resumeTraversalId());
         }
         return 0;
+    }
+
+    private int correlationPreview(String[] args) throws IOException {
+        if (args.length != 2) return invalid("Usage: ravenroot correlation-preview <request.json>");
+        int maximum = ai.ravenroot.api.payload.PayloadLimits.DEFAULTS.maxEncodedBytes();
+        byte[] document;
+        try (var input = Files.newInputStream(Path.of(args[1]))) { document = input.readNBytes(maximum + 1); }
+        if (document.length > maximum) throw new IllegalArgumentException("correlation preview request exceeds payload limit");
+        String response = backend.previewCorrelation(document);
+        output.println(sanitizeForConsole(response));
+        return response.contains("\"valid\":true") ? 0 : 1;
     }
 
     private int derived(String[] args, boolean preview) throws IOException {
@@ -539,6 +551,43 @@ public final class RavenrootCli {
      * same reason -- one CLI verb, several related actions, rather than seven top-level commands.
      */
     private int deployments(String[] args) throws IOException {
+        if (args.length >= 3 && ("history".equals(args[1]) || "run-initial".equals(args[1]) || "observe-initial".equals(args[1]))) {
+            var options = new java.util.LinkedHashMap<String, String>();
+            for (int i = 3; i < args.length; i += 2) {
+                if (i + 1 >= args.length || !args[i].startsWith("--") || options.putIfAbsent(args[i].substring(2), args[i + 1]) != null)
+                    return invalidDeploymentUsage();
+            }
+            var source = new ai.ravenroot.api.history.DeploymentHistorySource(args[2],
+                    options.remove("incarnation"), options.remove("graph-version"));
+            String response;
+            if ("history".equals(args[1])) {
+                var names = java.util.Map.of("application-correlation-id", "applicationCorrelationId", "public-reference", "publicReference",
+                        "process-instance-id", "processInstanceId", "traversal-id", "traversalId", "invocation-id", "invocationId", "attempt-id", "attemptId", "node-id", "nodeId", "round-id", "roundId", "member-state", "memberState");
+                var query = new java.util.LinkedHashMap<String, String>();
+                options.forEach((name, value) -> { if (query.putIfAbsent(names.getOrDefault(name, name), value) != null)
+                    throw new IllegalArgumentException("duplicate history field"); });
+                response = backend.deploymentHistory(source, query);
+            } else if ("observe-initial".equals(args[1])) {
+                String requestId = options.remove("request-id");
+                if (requestId == null || !options.isEmpty()) return invalidDeploymentUsage();
+                response = backend.observeInitialStart(source, requestId);
+            } else {
+                String requestId = options.remove("request-id"), inputFile = options.remove("input-file");
+                if (requestId == null || !options.isEmpty()) return invalidDeploymentUsage();
+                byte[] input = "{}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                if (inputFile != null) {
+                    int maximum = ai.ravenroot.api.payload.PayloadLimits.DEFAULTS.maxEncodedBytes();
+                    try (var stream = Files.newInputStream(Path.of(inputFile))) { input = stream.readNBytes(maximum + 1); }
+                    if (input.length > maximum) throw new IllegalArgumentException("initial input exceeds payload limit");
+                }
+                response = backend.initialStart(source, requestId, input);
+            }
+            output.println(sanitizeForConsole(response));
+            return response.contains("\"outcome\":\"REFUSED\"") || response.contains("\"outcome\":\"RECONCILE\"") ? 1 : 0;
+        }
+        if (args.length == 7 && "restore".equals(args[1]) && "--registration-identity".equals(args[3]) && "--graph-version".equals(args[5])) {
+            return printDeployment(backend.restoreDeployment(args[2], args[4], args[6]));
+        }
         if (args.length == 2 && "list".equals(args[1])) {
             return listDeployments();
         }
@@ -572,6 +621,10 @@ public final class RavenrootCli {
         return invalid("Usage: ravenroot deployments <list"
                 + "|register <deployment-id> <graph.graphml>"
                 + "|inspect <deployment-id>|start <deployment-id>"
+                + "|history <deployment-id> --incarnation <id> --graph-version <version> [--view <view>] [--limit <count>] [--cursor <cursor>]"
+                + "|restore <deployment-id> --registration-identity <id> --graph-version <version>"
+                + "|observe-initial <deployment-id> --incarnation <id> --graph-version <version> --request-id <id>"
+                + "|run-initial <deployment-id> --incarnation <id> --graph-version <version> --request-id <id> [--input-file <json>]"
                 + "|stop <deployment-id> [--reason <text>]"
                 + "|restart <deployment-id>"
                 + "|undeploy <deployment-id> [--disposition <DRAIN_FIRST|CANCEL_IN_FLIGHT|REFUSE_IF_BUSY>"
@@ -606,6 +659,7 @@ public final class RavenrootCli {
                 + "\tstate=" + deployment.state()
                 + "\tsource-count=" + deployment.sourceCount()
                 + "\tscope=" + deployment.scope()
+                + (deployment.registrationIdentity() == null ? "" : "\tregistration-identity=" + sanitizeForConsole(deployment.registrationIdentity()))
                 + (deployment.deploymentGeneration() == null ? ""
                         : "\tgeneration=" + deployment.deploymentGeneration())
                 + (deployment.commandOutcome() == null ? ""
@@ -704,6 +758,10 @@ public final class RavenrootCli {
         output.println("       ravenroot deployments <list"
                 + "|register <deployment-id> <graph.graphml>"
                 + "|inspect <deployment-id>|start <deployment-id>"
+                + "|history <deployment-id> --incarnation <id> --graph-version <version> [--view <view>] [--limit <count>] [--cursor <cursor>]"
+                + "|restore <deployment-id> --registration-identity <id> --graph-version <version>"
+                + "|observe-initial <deployment-id> --incarnation <id> --graph-version <version> --request-id <id>"
+                + "|run-initial <deployment-id> --incarnation <id> --graph-version <version> --request-id <id> [--input-file <json>]"
                 + "|stop <deployment-id> [--reason <text>]"
                 + "|restart <deployment-id>"
                 + "|undeploy <deployment-id> [--disposition <DRAIN_FIRST|CANCEL_IN_FLIGHT|REFUSE_IF_BUSY>"
@@ -721,6 +779,7 @@ public final class RavenrootCli {
         // Listed separately because it is answered locally whether or not --server is
         // given -- the document is on this machine and so is the profile that reads it.
         output.println("       ravenroot validate <graph.graphml>");
+        output.println("       ravenroot correlation-preview <request.json>");
         output.println("       ravenroot events decode   (decode a captured SSE body from stdin)");
         // Listed separately for the opposite reason to 'validate': this REQUIRES
         // --server, because stored credentials live in a running server's own store, not in anything

@@ -119,7 +119,7 @@ class DefaultGraphDeploymentDurableIngressTest {
     void constructionFailsFastWhenTheStoreDoesNotDeclareDurable() {
         try (var engine = new JoinTestEngine(); var store = new InMemoryExecutionStore()) {
             var failure = assertThrows(IllegalArgumentException.class, () -> new DefaultGraphDeployment(
-                    DeploymentId.of("no-durable"), engine, BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults()),
+                    DeploymentId.of("no-durable"), engine, ManualSourceFixture.register(BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults())),
                     new ExecutionMonitor(), ExecutionIdentitySource.randomUuids(), graphBytes(),
                     DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY, store,
                     DefaultGraphDeployment.DEFAULT_INBOX_RETENTION));
@@ -141,12 +141,12 @@ class DefaultGraphDeploymentDurableIngressTest {
                 }
             })) {
                 var deployment = new DefaultGraphDeployment(DeploymentId.of("volatile"), engine,
-                        BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults()), monitor,
+                        ManualSourceFixture.register(BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults())), monitor,
                         ExecutionIdentitySource.randomUuids(), graphBytes(),
                         DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY);
                 deployment.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
 
-                var receipt = deployment.ingress().offerDurably(IDENTITY, IngressTarget.start(), "payload",
+                var receipt = deployment.ingress().offerDurably(IDENTITY, IngressTarget.node("start"), "payload",
                         "poller-1", "key-1");
 
                 assertInstanceOf(IngressReceipt.VolatileCustody.class, receipt);
@@ -181,7 +181,7 @@ class DefaultGraphDeploymentDurableIngressTest {
             var deployment = deployment(deploymentId, engine, store, completions.monitor());
             deployment.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
 
-            var receipt = deployment.ingress().offerDurably(IDENTITY, IngressTarget.start(), "payload",
+            var receipt = deployment.ingress().offerDurably(IDENTITY, IngressTarget.node("start"), "payload",
                     "poller-1", "key-origin");
             assertInstanceOf(IngressReceipt.DurablyCommitted.class, receipt);
             assertTrue(completions.latch().await(10, TimeUnit.SECONDS));
@@ -212,7 +212,7 @@ class DefaultGraphDeploymentDurableIngressTest {
             var deployment = deployment(engine, store, completions.monitor());
             deployment.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
 
-            var receipt = deployment.ingress().offerDurably(IDENTITY, IngressTarget.start(), "payload",
+            var receipt = deployment.ingress().offerDurably(IDENTITY, IngressTarget.node("start"), "payload",
                     "poller-1", "key-A");
 
             assertInstanceOf(IngressReceipt.DurablyCommitted.class, receipt);
@@ -229,7 +229,7 @@ class DefaultGraphDeploymentDurableIngressTest {
         var deploymentId = DeploymentId.of("recover-" + UUID.randomUUID());
         String sourceId = "poller-1";
         String key = "key-crash-window";
-        String destination = deploymentId.value() + "/" + sourceId;
+        String destination = deploymentId.value() + "/source/c3RhcnQ/" + sourceId;
         UUID eventId = UUID.nameUUIDFromBytes((IDENTITY.tenantId() + '\0' + destination + '\0' + key)
                 .getBytes(StandardCharsets.UTF_8));
         try (var engine = new JoinTestEngine(); var store = new SqliteExecutionStore(file, systemClock())) {
@@ -239,7 +239,7 @@ class DefaultGraphDeploymentDurableIngressTest {
             var deployment = deployment(deploymentId, engine, store, completions.monitor());
             deployment.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
 
-            IngressReceipt repaired = deployment.ingress().offerDurably(IDENTITY, IngressTarget.start(),
+            IngressReceipt repaired = deployment.ingress().offerDurably(IDENTITY, IngressTarget.node("start"),
                     "payload", sourceId, key);
 
             assertInstanceOf(IngressReceipt.Duplicate.class, repaired,
@@ -271,36 +271,57 @@ class DefaultGraphDeploymentDurableIngressTest {
                         try { return method.invoke(store, args); }
                         catch (java.lang.reflect.InvocationTargetException wrapped) { throw wrapped.getCause(); }
                     });
-            var first = deployment(deploymentId, engine, interrupted, countCompletions().monitor());
+            var initialScan = new CountDownLatch(1);
+            var first = deployment(deploymentId, engine, gateRecoveryScan(interrupted, initialScan,
+                    CompletableFuture.completedFuture(null)), countCompletions().monitor());
             first.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
+            // The manual scheduler will not run another sweep. Finish the actual empty startup
+            // query before creating the fault, so orderly cleanup cannot cancel recovered work.
+            assertTrue(initialScan.await(10, TimeUnit.SECONDS));
             assertThrows(RuntimeException.class, () -> first.ingress().offerDurably(IDENTITY,
-                    IngressTarget.start(), "payload", sourceId, key));
+                    IngressTarget.node("start"), "payload", sourceId, key));
+            var beforeStop = assertUnstartedCustody(store);
+            assertEquals(ai.ravenroot.api.application.ProcessInstanceStatus.ACCEPTED, beforeStop.state().status());
             first.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            assertEquals(beforeStop, store.load(beforeStop.key()).toCompletableFuture().get(10, TimeUnit.SECONDS),
+                    "fixture cleanup must not settle the work whose crash recovery is being tested");
         }
         try (var engine = new JoinTestEngine(); var store = new SqliteExecutionStore(file, systemClock())) {
-            byte[] changedGraph = GRAPH.replace("id=\"wiring\"", "id=\"replacement\"")
+            byte[] changedGraph = ManualSourceFixture.graph(GRAPH).replace("id=\"wiring\"", "id=\"replacement\"")
                     .getBytes(StandardCharsets.UTF_8);
             var changed = new DefaultGraphDeployment(deploymentId, engine,
-                    BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults()), new ExecutionMonitor(),
+                    ManualSourceFixture.register(BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults())), new ExecutionMonitor(),
                     ExecutionIdentitySource.randomUuids(), changedGraph,
                     DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY, store,
                     DefaultGraphDeployment.DEFAULT_INBOX_RETENTION);
             changed.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
-            assertInstanceOf(IngressReceipt.Ambiguous.class, changed.ingress().offerDurably(
-                    IDENTITY, IngressTarget.start(), "payload", sourceId, key),
-                    "a replacement graph cannot acknowledge an unstarted execution pinned to older content");
+            assertFalse(assertInstanceOf(IngressReceipt.Refused.class, changed.ingress().offerDurably(
+                    IDENTITY, IngressTarget.node("start"), "payload", sourceId, key),
+                    "a replacement graph must definitively refuse input custody pinned to older content").acknowledgeable());
             changed.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
 
             var completions = countCompletions();
-            var restarted = deployment(deploymentId, engine, store, completions.monitor());
-            restarted.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
-            var receipt = restarted.ingress().offerDurably(IDENTITY, IngressTarget.start(),
-                    "payload", sourceId, key);
-            assertInstanceOf(IngressReceipt.Duplicate.class, receipt);
-            assertTrue(completions.latch().await(10, TimeUnit.SECONDS),
-                    "the saved but unstarted execution must dispatch after redelivery");
-            assertEquals(1, completions.count().get());
-            restarted.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            var original = assertUnstartedCustody(store);
+            var scanRead = new CountDownLatch(1);
+            var releaseScan = new CompletableFuture<Void>();
+            var restarted = deployment(deploymentId, engine, gateRecoveryScan(store, scanRead, releaseScan), completions.monitor());
+            try {
+                restarted.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
+                assertTrue(scanRead.await(10, TimeUnit.SECONDS));
+                var receipt = restarted.ingress().offerDurably(IDENTITY, IngressTarget.node("start"),
+                        "payload", sourceId, key);
+                assertInstanceOf(IngressReceipt.Duplicate.class, receipt);
+                assertTrue(completions.latch().await(10, TimeUnit.SECONDS),
+                        "the saved but unstarted execution must dispatch after redelivery");
+                assertEquals(1, completions.count().get());
+                var settled = store.load(original.key()).toCompletableFuture().get(10, TimeUnit.SECONDS);
+                assertEquals(original.graphVersionPin(), settled.graphVersionPin());
+                assertEquals(original.state().traversals().keySet(), settled.state().traversals().keySet());
+                assertEquals(ai.ravenroot.api.application.ProcessInstanceStatus.COMPLETED, settled.state().status());
+            } finally {
+                releaseScan.complete(null);
+                restarted.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            }
         }
     }
 
@@ -321,21 +342,42 @@ class DefaultGraphDeploymentDurableIngressTest {
                         try { return method.invoke(store, args); }
                         catch (java.lang.reflect.InvocationTargetException wrapped) { throw wrapped.getCause(); }
                     });
-            var first = deployment(deploymentId, engine, interrupted, countCompletions().monitor());
+            var initialScan = new CountDownLatch(1);
+            var first = deployment(deploymentId, engine, gateRecoveryScan(interrupted, initialScan,
+                    CompletableFuture.completedFuture(null)), countCompletions().monitor());
             first.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
+            // The manual scheduler will not run another sweep. Finish the actual empty startup
+            // query before creating the fault, so orderly cleanup cannot cancel recovered work.
+            assertTrue(initialScan.await(10, TimeUnit.SECONDS));
             assertThrows(RuntimeException.class, () -> first.ingress().offerDurably(IDENTITY,
-                    IngressTarget.start(), "payload", sourceId, key));
+                    IngressTarget.node("start"), "payload", sourceId, key));
+            var beforeStop = assertUnstartedCustody(store);
+            assertEquals(ai.ravenroot.api.application.ProcessInstanceStatus.RUNNING, beforeStop.state().status());
             first.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            assertEquals(beforeStop, store.load(beforeStop.key()).toCompletableFuture().get(10, TimeUnit.SECONDS),
+                    "fixture cleanup must not settle the work whose crash recovery is being tested");
         }
         try (var engine = new JoinTestEngine(); var store = new SqliteExecutionStore(file, systemClock())) {
             var completions = countCompletions();
-            var restarted = deployment(deploymentId, engine, store, completions.monitor());
-            restarted.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
-            assertInstanceOf(IngressReceipt.Duplicate.class, restarted.ingress().offerDurably(
-                    IDENTITY, IngressTarget.start(), "payload", sourceId, key));
-            assertTrue(completions.latch().await(10, TimeUnit.SECONDS));
-            assertEquals(1, completions.count().get());
-            restarted.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            var original = assertUnstartedCustody(store);
+            var scanRead = new CountDownLatch(1);
+            var releaseScan = new CompletableFuture<Void>();
+            var restarted = deployment(deploymentId, engine, gateRecoveryScan(store, scanRead, releaseScan), completions.monitor());
+            try {
+                restarted.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
+                assertTrue(scanRead.await(10, TimeUnit.SECONDS));
+                assertInstanceOf(IngressReceipt.Duplicate.class, restarted.ingress().offerDurably(
+                        IDENTITY, IngressTarget.node("start"), "payload", sourceId, key));
+                assertTrue(completions.latch().await(10, TimeUnit.SECONDS));
+                assertEquals(1, completions.count().get());
+                var settled = store.load(original.key()).toCompletableFuture().get(10, TimeUnit.SECONDS);
+                assertEquals(original.graphVersionPin(), settled.graphVersionPin());
+                assertEquals(original.state().traversals().keySet(), settled.state().traversals().keySet());
+                assertEquals(ai.ravenroot.api.application.ProcessInstanceStatus.COMPLETED, settled.state().status());
+            } finally {
+                releaseScan.complete(null);
+                restarted.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            }
         }
     }
 
@@ -361,7 +403,7 @@ class DefaultGraphDeploymentDurableIngressTest {
                 var first = deployment(deploymentId, firstEngine, firstStore, firstCompletions.monitor());
                 first.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
 
-                var firstReceipt = first.ingress().offerDurably(IDENTITY, IngressTarget.start(), "payload",
+                var firstReceipt = first.ingress().offerDurably(IDENTITY, IngressTarget.node("start"), "payload",
                         "poller-1", "key-restart");
                 assertInstanceOf(IngressReceipt.DurablyCommitted.class, firstReceipt);
                 assertTrue(firstCompletions.latch().await(10, TimeUnit.SECONDS));
@@ -374,7 +416,7 @@ class DefaultGraphDeploymentDurableIngressTest {
             var second = deployment(deploymentId, secondEngine, secondStore, secondCompletions.monitor());
             second.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
 
-            var secondReceipt = second.ingress().offerDurably(IDENTITY, IngressTarget.start(), "payload",
+            var secondReceipt = second.ingress().offerDurably(IDENTITY, IngressTarget.node("start"), "payload",
                     "poller-1", "key-restart");
 
             assertInstanceOf(IngressReceipt.Duplicate.class, secondReceipt);
@@ -395,7 +437,7 @@ class DefaultGraphDeploymentDurableIngressTest {
         try (var engine = new JoinTestEngine(); var store = new SqliteExecutionStore(file, systemClock())) {
             var deployment = deployment(engine, store, new ExecutionMonitor());
             // Never started: COLD refuses exactly as offer() does, before any store call is attempted.
-            var receipt = deployment.ingress().offerDurably(IDENTITY, IngressTarget.start(), "payload",
+            var receipt = deployment.ingress().offerDurably(IDENTITY, IngressTarget.node("start"), "payload",
                     "poller-1", "key-refused");
 
             assertInstanceOf(IngressReceipt.Refused.class, receipt);
@@ -435,7 +477,7 @@ class DefaultGraphDeploymentDurableIngressTest {
     void checkpointWithoutAStoreIsUnsupportedRatherThanFabricated() throws Exception {
         try (var engine = new JoinTestEngine()) {
             var deployment = new DefaultGraphDeployment(DeploymentId.of("no-store-checkpoint"), engine,
-                    BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults()), new ExecutionMonitor(),
+                    ManualSourceFixture.register(BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults())), new ExecutionMonitor(),
                     ExecutionIdentitySource.randomUuids(), graphBytes(),
                     DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY);
             deployment.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
@@ -466,12 +508,12 @@ class DefaultGraphDeploymentDurableIngressTest {
             var store = new FailingInboxStore(realStore, shouldFail::get);
             var completions = countCompletions();
             var deployment = new DefaultGraphDeployment(DeploymentId.of("ambiguous-" + java.util.UUID.randomUUID()),
-                    engine, BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults()), completions.monitor(),
+                    engine, ManualSourceFixture.register(BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults())), completions.monitor(),
                     ExecutionIdentitySource.randomUuids(), graphBytes(), 1, store,
                     DefaultGraphDeployment.DEFAULT_INBOX_RETENTION);
             deployment.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
 
-            var first = deployment.ingress().offerDurably(IDENTITY, IngressTarget.start(), "payload",
+            var first = deployment.ingress().offerDurably(IDENTITY, IngressTarget.node("start"), "payload",
                     "poller-1", "key-ambiguous-1");
             assertInstanceOf(IngressReceipt.Ambiguous.class, first);
             assertFalse(first.acknowledgeable(), "an ambiguous outcome must never license an external ack");
@@ -479,7 +521,7 @@ class DefaultGraphDeploymentDurableIngressTest {
             // Permit released: on a capacity-1 buffer, a second call against the still-failing store
             // must reach the store again (and also come back Ambiguous) rather than being refused as
             // buffer-full -- which is only possible if the first call gave back what it acquired.
-            var second = deployment.ingress().offerDurably(IDENTITY, IngressTarget.start(), "payload",
+            var second = deployment.ingress().offerDurably(IDENTITY, IngressTarget.node("start"), "payload",
                     "poller-1", "key-ambiguous-2");
             assertInstanceOf(IngressReceipt.Ambiguous.class, second,
                     "a buffer-full receipt here would mean the first Ambiguous leaked its permit");
@@ -492,7 +534,7 @@ class DefaultGraphDeploymentDurableIngressTest {
             // re-offering the SAME key that was ambiguous commits fresh rather than reading as a
             // duplicate of a write that never happened.
             shouldFail.set(false);
-            var reconciled = deployment.ingress().offerDurably(IDENTITY, IngressTarget.start(), "payload",
+            var reconciled = deployment.ingress().offerDurably(IDENTITY, IngressTarget.node("start"), "payload",
                     "poller-1", "key-ambiguous-1");
             assertInstanceOf(IngressReceipt.DurablyCommitted.class, reconciled,
                     "reconciliation: the ambiguous attempt never actually recorded, so a retry commits fresh");
@@ -515,24 +557,24 @@ class DefaultGraphDeploymentDurableIngressTest {
     void bufferFullOnTheDurablePathIsRefusedWithoutTouchingTheStore() throws Exception {
         Path file = databaseDirectory.resolve("buffer-full.db");
         var gate = new CompletableFuture<NodeResult>();
-        var registry = BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults())
+        var registry = ManualSourceFixture.register(BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults()))
                 .register("blocker", message -> gate);
         try (var engine = new JoinTestEngine(); var store = new SqliteExecutionStore(file, systemClock())) {
             var deployment = new DefaultGraphDeployment(
                     DeploymentId.of("buffer-full-" + java.util.UUID.randomUUID()), engine, registry,
                     new ExecutionMonitor(), ExecutionIdentitySource.randomUuids(),
-                    BLOCKING_GRAPH.getBytes(StandardCharsets.UTF_8), 1, store,
+                    ManualSourceFixture.graph(BLOCKING_GRAPH).getBytes(StandardCharsets.UTF_8), 1, store,
                     DefaultGraphDeployment.DEFAULT_INBOX_RETENTION);
             deployment.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
 
-            var holding = deployment.ingress().offerDurably(IDENTITY, IngressTarget.start(), "payload",
+            var holding = deployment.ingress().offerDurably(IDENTITY, IngressTarget.node("start"), "payload",
                     "poller-1", "key-holding");
             assertInstanceOf(IngressReceipt.DurablyCommitted.class, holding,
                     "the first offer must commit and hold the deployment's only permit in the blocker node");
 
             long recordedBefore = store.inboxRecordCount(IDENTITY.tenantId()).toCompletableFuture().get(10, TimeUnit.SECONDS);
 
-            var refused = deployment.ingress().offerDurably(IDENTITY, IngressTarget.start(), "payload",
+            var refused = deployment.ingress().offerDurably(IDENTITY, IngressTarget.node("start"), "payload",
                     "poller-1", "key-refused-buffer-full");
 
             assertInstanceOf(IngressReceipt.Refused.class, refused);
@@ -571,13 +613,13 @@ class DefaultGraphDeploymentDurableIngressTest {
         try (var engine = new JoinTestEngine(); var realStore = new SqliteExecutionStore(file, systemClock())) {
             var store = new EventIdCapturingStore(realStore, capturedEventIds::add);
             var deployment = new DefaultGraphDeployment(DeploymentId.of("event-id-fixed"), engine,
-                    BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults()), new ExecutionMonitor(),
+                    ManualSourceFixture.register(BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults())), new ExecutionMonitor(),
                     ExecutionIdentitySource.randomUuids(), graphBytes(),
                     DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY, store,
                     DefaultGraphDeployment.DEFAULT_INBOX_RETENTION);
             deployment.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
 
-            var receipt = deployment.ingress().offerDurably(IDENTITY, IngressTarget.start(), "payload",
+            var receipt = deployment.ingress().offerDurably(IDENTITY, IngressTarget.node("start"), "payload",
                     "poller-1", "key-nul-fix");
             assertInstanceOf(IngressReceipt.DurablyCommitted.class, receipt);
 
@@ -586,9 +628,9 @@ class DefaultGraphDeploymentDurableIngressTest {
 
         assertEquals(1, capturedEventIds.size(), "exactly one event was offered");
         // Captured from the source form with raw NUL separators for this exact
-        // tenantId="durable-ingress-tenant", destination="event-id-fixed/poller-1",
+        // tenantId="durable-ingress-tenant", destination="event-id-fixed/source/c3RhcnQ/poller-1",
         // idempotentKey="key-nul-fix" -- see the method Javadoc for what pinning this literal proves.
-        UUID expectedEventId = UUID.fromString("d5cc7fa2-ed63-3e5f-9e5c-b9822b1ba87c");
+        UUID expectedEventId = UUID.fromString("c67c20d6-2ec0-3c2b-8dd0-5828465ec91b");
         assertEquals(expectedEventId, capturedEventIds.get(0),
                 "replacing the raw NUL separator bytes with '\\0' escapes must not change the "
                         + "derived eventId -- they are the same character, so this UUID must be identical "
@@ -596,6 +638,42 @@ class DefaultGraphDeploymentDurableIngressTest {
     }
 
     // -------------------------------------------------------------------------------------- fixtures
+
+    /** Holds the actual startup query result, without filtering it or replacing store behavior. */
+    private static ExecutionStore gateRecoveryScan(ExecutionStore store, CountDownLatch read,
+                                                    CompletableFuture<Void> release) {
+        return (ExecutionStore) java.lang.reflect.Proxy.newProxyInstance(ExecutionStore.class.getClassLoader(),
+                new Class<?>[]{ExecutionStore.class}, (proxy, method, args) -> {
+                    Object result;
+                    try { result = method.invoke(store, args); }
+                    catch (java.lang.reflect.InvocationTargetException wrapped) { throw wrapped.getCause(); }
+                    if (method.getName().equals("pendingDeploymentEntries")) {
+                        return ((java.util.concurrent.CompletionStage<?>) result).thenCompose(page -> {
+                            read.countDown();
+                            return release.thenApply(ignored -> page);
+                        });
+                    }
+                    return result;
+                });
+    }
+
+    private static ai.ravenroot.api.persistence.StoredProcessInstance assertUnstartedCustody(ExecutionStore store) throws Exception {
+        var processes = store.listProcessInstances(IDENTITY.tenantId(),
+                ai.ravenroot.api.persistence.ProcessInventoryQuery.everything(10)).toCompletableFuture().get(10, TimeUnit.SECONDS);
+        assertEquals(1, processes.items().size());
+        var key = processes.items().getFirst().key();
+        var stored = store.load(key).toCompletableFuture().get(10, TimeUnit.SECONDS);
+        assertFalse(stored.state().status().terminal());
+        assertEquals(1, stored.state().traversals().size());
+        var traversal = stored.state().traversals().values().iterator().next();
+        assertEquals("start", traversal.ingressNodeId());
+        assertTrue(traversal.invocations().isEmpty());
+        var custody = store.deploymentEntry(key).toCompletableFuture().get(10, TimeUnit.SECONDS).orElseThrow();
+        assertEquals(traversal.traversalId(), custody.traversalId());
+        assertEquals(IDENTITY, custody.identity());
+        assertTrue(store.leases(IDENTITY.tenantId()).toCompletableFuture().get(10, TimeUnit.SECONDS).isEmpty());
+        return stored;
+    }
 
     private static DefaultGraphDeployment deployment(ai.ravenroot.api.execution.ExecutionEngine engine,
             ExecutionStore store, ExecutionMonitor monitor) {
@@ -605,7 +683,7 @@ class DefaultGraphDeploymentDurableIngressTest {
     private static DefaultGraphDeployment deployment(DeploymentId deploymentId,
             ai.ravenroot.api.execution.ExecutionEngine engine, ExecutionStore store, ExecutionMonitor monitor) {
         return new DefaultGraphDeployment(deploymentId, engine,
-                BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults()), monitor,
+                ManualSourceFixture.register(BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults())), monitor,
                 ExecutionIdentitySource.randomUuids(), graphBytes(),
                 DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY, store,
                 DefaultGraphDeployment.DEFAULT_INBOX_RETENTION);
@@ -632,7 +710,7 @@ class DefaultGraphDeploymentDurableIngressTest {
     }
 
     private static byte[] graphBytes() {
-        return GRAPH.getBytes(StandardCharsets.UTF_8);
+        return ManualSourceFixture.graph(GRAPH).getBytes(StandardCharsets.UTF_8);
     }
 
     /**
@@ -643,7 +721,7 @@ class DefaultGraphDeploymentDurableIngressTest {
      * {@code ambiguousReceiptReleasesItsPermitDispatchesNothingAndIsReconcilableByReoffering} correct: a
      * retry after the failure is a fresh commit, not a duplicate of a write that never happened.
      */
-    private static final class FailingInboxStore implements ExecutionStore {
+    private static final class FailingInboxStore implements ForwardingHistoryExecutionStore {
         // Durable inventory: pure delegation, so this double differs from the store it
         // wraps only in the one operation it exists to perturb.
 
@@ -690,6 +768,8 @@ class DefaultGraphDeploymentDurableIngressTest {
 
         private final ExecutionStore delegate;
         private final java.util.function.BooleanSupplier shouldFail;
+
+        @Override public ExecutionStore delegate() { return delegate; }
 
         FailingInboxStore(ExecutionStore delegate, java.util.function.BooleanSupplier shouldFail) {
             this.delegate = delegate;
@@ -848,7 +928,7 @@ class DefaultGraphDeploymentDurableIngressTest {
      * never otherwise exposes past its own private scope, and the value
      * {@code ingressEventIdDerivationIsUnchangedByTheNulByteFix} exists to pin.
      */
-    private static final class EventIdCapturingStore implements ExecutionStore {
+    private static final class EventIdCapturingStore implements ForwardingHistoryExecutionStore {
         // Durable inventory: pure delegation, so this double differs from the store it
         // wraps only in the one operation it exists to perturb.
 
@@ -895,6 +975,8 @@ class DefaultGraphDeploymentDurableIngressTest {
 
         private final ExecutionStore delegate;
         private final java.util.function.Consumer<UUID> onEventId;
+
+        @Override public ExecutionStore delegate() { return delegate; }
 
         EventIdCapturingStore(ExecutionStore delegate, java.util.function.Consumer<UUID> onEventId) {
             this.delegate = delegate;

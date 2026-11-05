@@ -122,6 +122,7 @@ class DeploymentLifecyclePersistenceBrowserTest {
                 server.start();
                 var live = control.register(OPERATOR, "live-after-restart", GRAPH);
                 liveIdentity = live.durable().deploymentId().value();
+                assertEquals(liveIdentity, application.localDeployment("local", "live-after-restart").orElseThrow().registrationIdentity().orElseThrow());
                 control.register(OPERATOR, "removed-after-restart", GRAPH);
                 assertEquals(2, registry.purgeExpiredCommandRecords("local").toCompletableFuture().join(),
                         "the safety proof must actually remove both CREATE ledger rows");
@@ -155,6 +156,7 @@ class DeploymentLifecyclePersistenceBrowserTest {
             try (var control = new DurableLocalDeploymentControl(application, registry, coordinator, clock)) {
                 var recovered = control.register(OPERATOR, "live-after-restart", GRAPH);
                 assertEquals(liveIdentity, recovered.durable().deploymentId().value());
+                assertEquals(liveIdentity, application.localDeployment("local", "live-after-restart").orElseThrow().registrationIdentity().orElseThrow());
                 assertEquals(1, recovered.durable().generation());
                 assertEquals(DeploymentRegistry.DesiredKind.RUNNING, recovered.durable().desired().kind());
 
@@ -188,7 +190,8 @@ class DeploymentLifecyclePersistenceBrowserTest {
             throw new IllegalStateException("the installed Playwright binary is required for the real harness");
         }
         var builder = new ProcessBuilder(executable.toString(), "test",
-                "--config=playwright.deployment-persistence.config.js")
+                "--config=playwright.deployment-persistence.config.js",
+                "e2e/deployment-persistence-real/durable-deployment-lifecycle.spec.js")
                 .directory(ui.toFile()).redirectErrorStream(true)
                 .redirectOutput(output.resolve("playwright-driver.log").toFile());
         builder.environment().put("RAVENROOT_DEPLOYMENT_PERSISTENCE_ORIGIN", origin);

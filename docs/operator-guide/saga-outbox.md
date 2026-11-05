@@ -7,7 +7,30 @@ database, RabbitMQ, or an HTTP service.
 
 ## Authoring contract
 
-Saga fields appear in the normal node catalog and inspector and round-trip through GraphML. Every
+Sagas are optional and disabled by default. Adding, editing or saving an ordinary node does not
+add saga properties. Open **Saga scopes** in the graph toolbar to see existing scope membership,
+choose a scope name, and configure one eligible participant. The inspector's explicit participation
+checkbox enables that node's saga fields. Naming a scope never enrolls the other nodes in the graph.
+Scopes are represented by their participants' shared `saga.scope` values; an empty scope draft is not
+persisted. Rename or remove membership by editing the individual participants. Turning participation
+off removes the catalog saga declaration from that node.
+
+Ordinary transformations and diagnostic **Log** nodes can coexist before, between or after saga
+participants. Log has no supported saga participant contract and cannot opt in, even as `pure`.
+Generic side-effect capabilities (for example messaging, storage, mail and collaboration actions)
+do not grant saga authority. Only a trusted `saga-pure` behavior without `side-effect`, or the exact
+supported effectful behavior and adapter capability described below, exposes participation controls.
+
+For existing documents, the only automatic repair is the confirmed historical Log inspector
+signature: exactly `saga.role=forward`, `saga.irreversible=false` and
+`saga.businessCompletionRequired=false`, with no other saga properties on that Log node. These three
+injected defaults are removed together. The repair accepts Boolean false and the exact string
+`false`; it does not guess from partial, nondefault, custom-node or unknown declarations. Explicit
+scope, step, participant, adapter, compensation and future saga properties remain intact. Incomplete
+or unknown saga declarations are rejected with a node, property and safe admission reason.
+Existing valid explicit saga documents retain their per-node wire contract.
+
+Saga fields round-trip through GraphML. Every
 forward behavior node in a scope declares `saga.scope`, `saga.step`, and `saga.participant`.
 `saga.dependsOn` is a comma-separated list of logical predecessor steps. A compensatable step names
 the node id in `saga.compensation`; that node declares the same scope and
@@ -48,7 +71,11 @@ different payload is rejected.
 transaction as the execution revision. SQLite and PostgreSQL persist both tables through numbered
 migrations; the in-memory adapter implements the same reference contract for tests but does not
 claim process survival. Application admission requires both `DURABLE` and `DURABLE_SAGAS`; a volatile
-configuration is rejected before dispatch.
+configuration is rejected before dispatch with `SAGA_DURABILITY_REQUIRED`. Unsupported participant
+contracts produce `SAGA_PARTICIPANT_UNSUPPORTED`; incomplete or inconsistent declarations produce
+`SAGA_CONTRACT_INVALID` with the actionable property (for example `saga.adapter`,
+`saga.outcomeLookupUrl`, `saga.compensation` or `saga.dependsOn`). Public findings never echo authored
+URLs, SQL, payloads or other property values.
 
 A JDBC participant still owns its local guarantee. Its approved single statement must atomically
 write the business effect and its operation-bound receipt row, for example by making the business

@@ -184,10 +184,22 @@ final class RabbitMqAmqpConsumerProtocol implements AmqpConsumerProtocol {
                 long next = (long) total + key.getBytes(java.nio.charset.StandardCharsets.UTF_8).length + valueSize;
                 if (next > policy.maxHeaderBytes()) throw new InvalidMetadata("headers-too-large");
                 total = (int) next;
-                copy.put(key, value instanceof LongString text ? text.getBytes()
+                copy.put(key, value instanceof LongString text ? textOrBinary(text.getBytes())
                         : value instanceof byte[] bytes ? bytes.clone() : value);
             }
             return java.util.Collections.unmodifiableMap(copy);
+        }
+
+        // AMQP longstr values written by the official client from Java String are UTF-8 text.
+        // Preserve the binary AMQP byte-array domain and malformed longstr bytes separately.
+        private static Object textOrBinary(byte[] bytes) {
+            try {
+                String text = java.nio.charset.StandardCharsets.UTF_8.newDecoder()
+                        .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                        .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+                        .decode(java.nio.ByteBuffer.wrap(bytes)).toString();
+                return text.codePoints().anyMatch(Character::isISOControl) ? bytes.clone() : text;
+            } catch (java.nio.charset.CharacterCodingException binary) { return bytes.clone(); }
         }
 
         private static long size(Object value) {

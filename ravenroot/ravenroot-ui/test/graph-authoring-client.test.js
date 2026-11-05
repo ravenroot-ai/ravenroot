@@ -30,6 +30,19 @@ describe('graph authoring client', () => {
     expect(options.headers.get('Authorization')).toBe('Bearer session');
   });
 
+  it('creates successors with the same authenticated full-revision request conventions', async () => {
+    const fetchImpl = vi.fn(async () => new Response('{}', { status: 200 }));
+    const client = new GraphAuthoringClient('', { tokenProvider: () => 'actor', fetchImpl });
+    await client.createNextVersion('orders.graphml', { draft: 'd', release: 'r', publication: 'p' }, 'request-identity');
+    const [url, options] = fetchImpl.mock.calls[0];
+    expect(url).toBe('/v1/graph-authoring/orders.graphml/versions');
+    expect(options.method).toBe('POST');
+    expect(options.body).toBeUndefined();
+    expect(options.headers.get('Idempotency-Key')).toBe('request-identity');
+    expect(options.headers.get('X-Ravenroot-Expected-Publication')).toBe('p');
+    expect(options.headers.get('Authorization')).toBe('Bearer actor');
+  });
+
   it('uses the shared mutable runtime token provider contract', async () => {
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ items: [] }),
       { status: 200, headers: { 'Content-Type': 'application/json' } }));

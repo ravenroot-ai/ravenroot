@@ -10,7 +10,7 @@ public record GraphNode(String id, NodeKind kind, String behavior, Map<String, O
             throw new IllegalArgumentException("A graph node must have a non-blank id");
         }
         Objects.requireNonNull(kind, "kind");
-        properties = properties == null ? Map.of() : Map.copyOf(properties);
+        properties = properties == null ? Map.of() : LegacySagaDefaults.normalize(behavior, properties);
         if (kind == NodeKind.BEHAVIOR && (behavior == null || behavior.isBlank())) {
             throw new IllegalArgumentException("A behavior node must declare a behavior name");
         }

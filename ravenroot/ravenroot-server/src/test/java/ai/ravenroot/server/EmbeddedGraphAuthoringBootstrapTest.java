@@ -1,22 +1,31 @@
 package ai.ravenroot.server;
 
-import ai.ravenroot.api.authoring.GraphAuthoringRepository;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
 import ai.ravenroot.api.application.ExecutionIdentitySource;
+import ai.ravenroot.api.authoring.GraphAuthoringRepository;
 import ai.ravenroot.api.security.SecretValue;
 import ai.ravenroot.core.persistence.InMemoryGraphDefinitionStore;
-import ai.ravenroot.core.programming.InMemoryArtifactRegistry;
 import ai.ravenroot.core.programming.DisabledProgramRuntime;
+import ai.ravenroot.core.programming.InMemoryArtifactRegistry;
 import ai.ravenroot.core.runtime.BehaviorRegistry;
 import ai.ravenroot.core.runtime.DefaultRavenrootApplication;
 import ai.ravenroot.core.runtime.ExecutionMonitor;
 import ai.ravenroot.core.runtime.UnknownBehaviorPolicy;
 import ai.ravenroot.pekko.PekkoExecutionEngine;
-import ai.ravenroot.server.authoring.GraphAuthoringConfiguration;
 import ai.ravenroot.server.authoring.EmptyPublishedGraphArtifactCatalogFixture;
+import ai.ravenroot.server.authoring.GraphAuthoringConfiguration;
+import ai.ravenroot.server.persistence.ExecutionStoreConfiguration;
 import ai.ravenroot.server.security.DisabledLoopbackAuthenticator;
 import ai.ravenroot.server.support.ForwardingRavenrootApplication;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.testcontainers.containers.PostgreSQLContainer;
 
 import java.io.IOException;
 import java.net.InetAddress;
@@ -41,29 +50,131 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-
 class EmbeddedGraphAuthoringBootstrapTest {
-    private static final String GRAPH = """
-            <?xml version="1.0" encoding="UTF-8"?>
-            <graphml xmlns="http://graphml.graphdrawing.org/xmlns">
-              <key id="kind" for="node" attr.name="kind" attr.type="string"/>
-              <key id="outcome" for="edge" attr.name="outcome" attr.type="string"/>
-              <graph id="embedded-authoring" edgedefault="directed">
-                <node id="error"><data key="kind">ERROR</data></node>
-                <node id="start"><data key="kind">START</data></node>
-                <node id="end"><data key="kind">END</data></node>
-                <edge id="e1" source="start" target="end"><data key="outcome">continue</data></edge>
-              </graph>
-            </graphml>
-            """;
+    private static final String GRAPH =
+            """
+<?xml version="1.0" encoding="UTF-8"?>
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+  <key id="kind" for="node" attr.name="kind" attr.type="string"/>
+  <key id="outcome" for="edge" attr.name="outcome" attr.type="string"/>
+  <graph id="embedded-authoring" edgedefault="directed">
+    <node id="error"><data key="kind">ERROR</data></node>
+    <node id="start"><data key="kind">START</data></node>
+    <node id="end"><data key="kind">END</data></node>
+    <edge id="e1" source="start" target="end"><data key="outcome">continue</data></edge>
+  </graph>
+</graphml>
+""";
 
     @TempDir
     Path temporaryDirectory;
+
+    @Test
+    @org.junit.jupiter.api.Timeout(120)
+    @org.junit.jupiter.api.parallel.ResourceLock(
+            org.junit.jupiter.api.parallel.Resources.SYSTEM_PROPERTIES)
+    void embeddedPersistenceSnapshotExcludesUnrelatedSecretsAndOwnsItsSelectedPool()
+            throws Exception {
+        var properties = new java.util.HashMap<String, String>();
+        for (String key :
+                List.of(
+                        ExecutionStoreConfiguration.SELECTOR_PROPERTY,
+                        ExecutionStoreConfiguration.POOL_SIZE_PROPERTY,
+                        ExecutionStoreConfiguration.POOL_TIMEOUT_PROPERTY))
+            properties.put(key, System.getProperty(key));
+        try (var postgres = new PostgreSQLContainer<>("postgres:17-alpine")) {
+            postgres.start();
+            String application = "authoring-composition-fixture";
+            var environment = new java.util.HashMap<>(configurationEnvironment());
+            environment.put(ExecutionStoreConfiguration.SELECTOR_VARIABLE, "sqlite");
+            environment.put(
+                    ExecutionStoreConfiguration.URL_VARIABLE,
+                    postgres.getJdbcUrl()
+                            + (postgres.getJdbcUrl().contains("?") ? "&" : "?")
+                            + "ApplicationName="
+                            + application);
+            environment.put(ExecutionStoreConfiguration.USER_VARIABLE, postgres.getUsername());
+            environment.put(ExecutionStoreConfiguration.PASSWORD_VARIABLE, postgres.getPassword());
+            environment.put(ExecutionStoreConfiguration.POOL_SIZE_VARIABLE, "4");
+            environment.put(ExecutionStoreConfiguration.POOL_TIMEOUT_VARIABLE, "5000");
+            String unrelated = "unrelated-inline-credential-fixture";
+            environment.put("RAVENROOT_CREDENTIAL_756E72656C61746564", unrelated);
+            System.setProperty(ExecutionStoreConfiguration.SELECTOR_PROPERTY, "postgresql");
+            System.setProperty(ExecutionStoreConfiguration.POOL_SIZE_PROPERTY, "2");
+            System.setProperty(ExecutionStoreConfiguration.POOL_TIMEOUT_PROPERTY, "3000");
+            var configured =
+                    EmbeddedGraphAuthoringConfiguration.fromEnvironment(
+                            environment, ignored -> Optional.empty());
+            var factoryField =
+                    EmbeddedGraphAuthoringConfiguration.class.getDeclaredField("repositories");
+            factoryField.setAccessible(true);
+            Object factory = factoryField.get(configured);
+            boolean foundPersistence = false;
+            for (var captured : factory.getClass().getDeclaredFields()) {
+                if (java.lang.reflect.Modifier.isStatic(captured.getModifiers())) continue;
+                captured.setAccessible(true);
+                Object value = captured.get(factory);
+                assertFalse(value instanceof Map, "source environment must not be retained");
+                assertFalse(
+                        unrelated.equals(value),
+                        "unrelated credential must stay behind its resolver");
+                if (value instanceof ExecutionStoreConfiguration persistence) {
+                    var shared =
+                            assertInstanceOf(ExecutionStoreConfiguration.Shared.class, persistence);
+                    assertEquals(2, shared.connection().poolSize());
+                    assertEquals(
+                            java.time.Duration.ofSeconds(3), shared.connection().poolTimeout());
+                    foundPersistence = true;
+                }
+            }
+            assertTrue(foundPersistence, "capture the resolved persistence configuration");
+            try (var admin =
+                    java.sql.DriverManager.getConnection(
+                            postgres.getJdbcUrl(),
+                            postgres.getUsername(),
+                            postgres.getPassword())) {
+                assertEquals(0, poolSessions(admin, application));
+                var repository =
+                        configured.createRepository(
+                                ai.ravenroot.server.authoring.PublicationEvidence.absent(),
+                                ignored -> {});
+                try (repository) {
+                    int sessions = poolSessions(admin, application);
+                    assertTrue(
+                            sessions >= 1 && sessions <= 2,
+                            "selected bounded pool is owned by composition");
+                }
+                repository.close();
+                long deadline =
+                        System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+                while (poolSessions(admin, application) != 0 && System.nanoTime() < deadline)
+                    Thread.sleep(10);
+                assertEquals(
+                        0,
+                        poolSessions(admin, application),
+                        "archive close releases every owned PostgreSQL connection");
+            }
+        } finally {
+            properties.forEach(
+                    (key, value) -> {
+                        if (value == null) System.clearProperty(key);
+                        else System.setProperty(key, value);
+                    });
+        }
+    }
+
+    private static int poolSessions(java.sql.Connection admin, String application)
+            throws java.sql.SQLException {
+        try (var statement =
+                admin.prepareStatement(
+                        "SELECT count(*) FROM pg_stat_activity WHERE application_name=?")) {
+            statement.setString(1, application);
+            try (var rows = statement.executeQuery()) {
+                assertTrue(rows.next());
+                return rows.getInt(1);
+            }
+        }
+    }
 
     @Test
     void publicEmbeddedBootstrapServesGitAuthoringAndArtifactRoutesFromALocalGitRepository() throws Exception {
@@ -107,6 +218,63 @@ class EmbeddedGraphAuthoringBootstrapTest {
             assertEquals(200, artifactRoute.statusCode(), artifactRoute.body());
             assertTrue(artifactRoute.body().contains("\"items\":[]"), artifactRoute.body());
         }
+    }
+
+    @Test
+    void publicDecorationRetainsAdmissionAndClosesOwnedDelegateOnce() throws Exception {
+        var directory = temporaryDirectory.resolve("decorated-repository");
+        initGit(directory);
+        var closed = new java.util.concurrent.atomic.AtomicInteger();
+        var configured =
+                EmbeddedGraphAuthoringConfiguration.forTest(
+                                configuration(),
+                                ignored ->
+                                        Optional.of(new SecretValue("fixture-token".toCharArray())),
+                                (configuration, credentials, publications, admission) ->
+                                        new LocalGitRepository(directory, configuration, admission),
+                                EmptyPublishedGraphArtifactCatalogFixture::create)
+                        .decorateRepository(
+                                delegate ->
+                                        new ai.ravenroot.server.authoring
+                                                .ForwardingGraphAuthoringRepository(delegate) {
+                                            @Override
+                                            public void close() {
+                                                closed.incrementAndGet();
+                                                super.close();
+                                            }
+                                        });
+        try (var engine = new PekkoExecutionEngine("embedded-decoration-" + UUID.randomUUID());
+                var server =
+                        new RavenrootServer(
+                                        application(engine, true),
+                                        new InetSocketAddress(InetAddress.getLoopbackAddress(), 0),
+                                        null,
+                                        new DisabledLoopbackAuthenticator())
+                                .configureGraphAuthoring(configured)) {
+            server.start();
+            var invalid =
+                    HttpClient.newHttpClient()
+                            .send(
+                                    HttpRequest.newBuilder(
+                                                    URI.create(
+                                                            "http://localhost:"
+                                                                    + server.port()
+                                                                    + "/v1/graph-authoring/invalid.graphml"))
+                                            .header("Idempotency-Key", "invalid-graph-key-0001")
+                                            .header("X-Ravenroot-Expected-Draft", "absent")
+                                            .header("X-Ravenroot-Expected-Release", "absent")
+                                            .header("X-Ravenroot-Expected-Publication", "absent")
+                                            .PUT(
+                                                    HttpRequest.BodyPublishers.ofString(
+                                                            GRAPH.replace(
+                                                                    "source=\"start\"",
+                                                                    "source=\"missing\"")))
+                                            .build(),
+                                    HttpResponse.BodyHandlers.ofString());
+            assertTrue(invalid.statusCode() >= 400, invalid.body());
+            assertFalse(Files.exists(directory.resolve("graphs/customers/local/invalid.graphml")));
+        }
+        assertEquals(1, closed.get());
     }
 
     @Test

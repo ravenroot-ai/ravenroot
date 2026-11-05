@@ -1,5 +1,6 @@
 // Generated from the annotated progressive-enhancement shell. Keys are stable DOM contracts.
 export const STATIC_ENGLISH_MESSAGES = Object.freeze({
+  "shell.saga-scopes.text": "Saga scopes",
   "shell.dropzone.instruction": "Drop .graphml or .json (graphify) file here",
   "shell.derived-authorize-effects.text": "I am authorized to repeat selected downstream external effects.",
   "shell.bottom.nodes": "nodes",
@@ -22,6 +23,8 @@ export const STATIC_ENGLISH_MESSAGES = Object.freeze({
   "shell.btn-group-1.aria-label": "Graph view",
   "shell.btn-design.title": "Restore the saved Design view",
   "shell.btn-design.text": "Design",
+  "shell.btn-history.text": "History",
+  "shell.btn-history.title": "Open deployment history and traversal graphs",
   "shell.btn-monitoring.title": "Restore the saved Monitoring view",
   "shell.btn-monitoring.text": "Monitoring",
   "shell.btn-render.title": "Recompute the active graph view",

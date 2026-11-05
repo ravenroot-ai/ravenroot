@@ -73,6 +73,38 @@ class AmqpStartupFailureDeploymentTest {
                 "STARTUP_FAILED", false);
     }
 
+    @Test
+    void rejectedInputKeepsDeploymentReadyBeforeAndAfterTheNextValidDelivery() throws Exception {
+        var owner = new AmqpConsumerTestSupport.FakeOwner(2);
+        NodeBehavior behavior = new AmqpConsumeNodeBehavior(
+                ignored -> Optional.of(new SecretValue("credential".toCharArray())),
+                (tenant, name) -> Optional.of(AmqpTestSupport.profile(tenant, name, 4, 100, 1_000, 2)),
+                (tenant, name) -> Optional.of(AmqpConsumerTestSupport.policy()),
+                new AmqpConsumerTestSupport.FakeProtocol(owner),
+                task -> Thread.ofVirtual().start(task), Clock.systemUTC());
+        BehaviorRegistry registry = NodePackages.register(new BehaviorRegistry(), nodePackage(behavior));
+        try (var store = new SqliteExecutionStore(directory.resolve("listener-health.db"), Clock.systemUTC());
+             var engine = new DirectEngine()) {
+            var deployment = deployment(engine, registry, store);
+            try {
+                deployment.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
+                owner.deliver(AmqpConsumerTestSupport.delivery(71, null, false));
+                owner.reject(72, "headers-too-large");
+                AmqpConsumerTestSupport.await(owner.nacked);
+                assertEquals(List.of("71:false", "72:false"), owner.nacks);
+                assertEquals(ai.ravenroot.api.deployment.DeploymentState.READY, deployment.status().state());
+                assertTrue(deployment.status().cause().isEmpty());
+
+                owner.deliver(AmqpConsumerTestSupport.delivery(73, "valid-after-rejections", false));
+                AmqpConsumerTestSupport.await(owner.acked);
+                assertEquals(List.of(73L), owner.acks);
+                assertEquals(ai.ravenroot.api.deployment.DeploymentState.READY, deployment.status().state());
+            } finally {
+                deployment.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            }
+        }
+    }
+
     private void assertFailure(RuntimeException sentinel, AmqpConsumerProtocol protocol,
                                String expectedReason, boolean classified) throws Exception {
         assertFailure((Throwable) sentinel, protocol, expectedReason, classified);

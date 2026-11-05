@@ -54,6 +54,7 @@ their architecture status and wording are ready for publication.
 | 2026-09-16 | 0042 | Accepted | [Explicit Workspaces and independently scalable runner coordinators](0042-explicit-workspaces-and-runner-coordinators.md) |
 | 2026-09-18 | 0043 | Accepted | [Kubernetes-native governed runner](0043-kubernetes-native-governed-runner.md) |
 | 2026-09-26 | 0044 | Accepted contract | [Encapsulated finite automata](0044-encapsulated-finite-automata.md) |
+| 2026-10-23 | 0045 | Accepted | [Deployment entry and durable business history](0045-deployment-entry-and-business-history.md) |
 
 ## Status vocabulary
 

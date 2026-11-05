@@ -33,6 +33,7 @@ const RUNTIME_SOURCES: Readonly<Record<string, string>> = {
   "slack.config": "ravenroot-extensions/ravenroot-slack/src/main/java/ai/ravenroot/extensions/slack/SlackConfiguration.java",
   "teams.config": "ravenroot-extensions/ravenroot-teams/src/main/java/ai/ravenroot/extensions/teams/TeamsConfiguration.java",
   "core.http": "ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
+  "core.history": "ravenroot-server/src/main/java/ai/ravenroot/server/persistence/BusinessHistoryConfiguration.java",
   "core.program": "ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
   "core.human-task": "ravenroot-server/src/main/java/ai/ravenroot/server/humantaskinteraction/HumanTaskInteractionConfiguration.java",
   "core.publication-policies": "ravenroot-server/src/main/java/ai/ravenroot/server/PublicationPolicyConfiguration.java",

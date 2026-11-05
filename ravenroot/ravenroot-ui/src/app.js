@@ -1,3 +1,14 @@
+import { createDeploymentObservationBarrier } from './deployment-observation.js';
+import { repositoryOperationDialog } from './repository-operation-dialog.js';
+import { releaseOperationIdentity, observeReleaseProposal } from './release-proposal-progress.js';
+import { readSavedDeploymentView } from './saved-deployment-view.js';
+import { requireHistorySource } from './deployment-history-model.js';
+import { deploymentGraphSignature } from './deployment-graph-match.js';
+import { createDeploymentHistoryMonitor } from './embed-viewer-entry.js';
+import { mountCorrelationPreview } from './correlation-authoring.js';
+import { runOriginDeployment, persistedDeploymentRun, boundDeploymentNeedsCloseDecision, stopOriginDeployment, deploymentRunIsPending, observeOriginDeployment } from './deployment-run.js';
+import { sagaParticipant, sagaScopes, readSagaCatalogProperties } from './saga-authoring.js';
+import { chooseRepositoryDocument, managedRepositoryLaunch } from './repository-picker.js';
 import { uiMessage, uiComputed, isUiMessage, renderUiMessage, uiErrorMessage, uiMessageOf } from './ui-message.js';
 import { productError } from './product-error.js';
 import cytoscape from 'cytoscape';
@@ -283,6 +294,7 @@ import {
   documentIsEditable,
   detachExecution,
   documentForRuntimeEvent,
+  deploymentRunOwnsEvent,
   forkDocumentRecord,
   hasUnsavedWork,
   retireSourceSessionProcessBindings,
@@ -659,17 +671,6 @@ function createStylesheet(palette = rendererPalette) {
     shape: 'roundrectangle', 'background-color': surface['human-task'],
     'border-color': node['human-task'], 'border-width': 2.5,
   }},
-  { selector: 'node[humanTaskPending > 0]', style: {
-    'underlay-color': palette.focus, 'underlay-opacity': 0.22, 'underlay-padding': 9,
-    'border-style': 'double', 'border-width': 4,
-  }},
-  { selector: 'node[humanTaskEscalated > 0]', style: {
-    'underlay-color': node.error, 'underlay-opacity': 0.32, 'underlay-padding': 11,
-    'border-style': 'double', 'border-width': 5,
-  }},
-  { selector: 'node.human-task-pulse[humanTaskPending > 0]', style: {
-    'underlay-opacity': 0.45, 'underlay-padding': 15,
-  }},
   // The node the author switched off. Last of the node-type rules on purpose — it has to beat
   // every `node[nodeType=…]` border above it, because "this does not run" outranks "this is an agent"
   // for a reader scanning the drawing, and the surface colour is left alone so the node's identity is
@@ -750,6 +751,13 @@ function createStylesheet(palette = rendererPalette) {
     'line-color': edge.callback, 'target-arrow-color': edge.callback,
     width: 2, color: edge.callback,
   }},
+  { selector: 'edge[runtimeCount > 0]', style: {
+    'line-color': edge.completed, 'target-arrow-color': edge.completed, width: 3,
+  }},
+  { selector: 'edge[?runtimeActive]', style: {
+    'line-color': palette.selection, 'target-arrow-color': palette.selection,
+    'underlay-color': palette.selection, 'underlay-opacity': .16, 'underlay-padding': 4,
+  }},
   // Preserve the edge's own width, colour and dash semantics and project selection around them.
   // The padded underlay is deliberately not colour-only: its extra silhouette remains legible on
   // dense graphs, at different zoom levels and for `continueP`, whose normal line is already wide.
@@ -800,6 +808,18 @@ function createStylesheet(palette = rendererPalette) {
   // Hover/search/trace dimming must not make the selected edge disappear. Its native semantic
   // styling still wins; only the visibility of the selection affordance is restored.
   { selector: 'edge:selected.dim', style: { opacity: 1 }},
+  // Pending human decisions stay visible while selected or under the graph cursor.
+  { selector: 'node[humanTaskPending > 0]', style: {
+    'underlay-color': palette.focus, 'underlay-opacity': 0.22, 'underlay-padding': 9,
+    'border-style': 'double', 'border-width': 4,
+  }},
+  { selector: 'node[humanTaskEscalated > 0]', style: {
+    'underlay-color': node.error, 'underlay-opacity': 0.32, 'underlay-padding': 11,
+    'border-style': 'double', 'border-width': 5,
+  }},
+  { selector: 'node.human-task-pulse[humanTaskPending > 0]', style: {
+    'underlay-opacity': 0.45, 'underlay-padding': 15,
+  }},
   ];
 }
 
@@ -833,6 +853,8 @@ let workspaceAuthority = Object.freeze({ state: 'unverified', client: null, scop
 const SESSION_ONLY_RUNTIME_EVENT_SCOPE = Object.freeze({ tenantId: null });
 
 function beginWorkspaceAuthority(client, state = 'pending') {
+  workspace.documents.forEach(retireDocumentHistory);
+  workspace.documents.forEach(retireOriginDeploymentView);
   startupImportController?.runtimePending();
   workspaceAuthority = Object.freeze({ state, client, scope: null,
     generation: workspaceAuthority.generation + 1 });
@@ -1021,12 +1043,16 @@ async function switchWorkspacePersistence(configuration, client) {
           name: stored.name, displayName: stored.displayName, graph: stored.graph,
           documentId: stored.documentId, tenantId: stored.tenantId, mode: stored.mode,
           provenance: stored.provenance, presentation: stored.presentation,
-          authoring: stored.authoring,
+          authoring: stored.authoring, deploymentRun: stored.deploymentRun,
         });
       }
       if (restored.activeDocumentId && workspace.activeId !== restored.activeDocumentId) {
         activateDocument(restored.activeDocumentId);
       }
+      clearActivity();
+      addActivityMessage(uiMessage('workspace.notice.editor.6'), uiMessage('workspace.notice.workspaceRestored', {
+        count: restored.documents.length, name: graphDisplayName || '',
+      }));
       if (restored.recoveredStaleSelection) workspacePersistenceReason += uiText("workspace.app.the.stale.selection.was.repaired");
     } else {
       openDocument({ tenantId: nextScope.tenantId });
@@ -1073,6 +1099,7 @@ let graphName    = 'untitled.graphml';
 let graphDisplayName = graphName;
 let runtimeClient = null;
 let graphAuthoringClient = null;
+let pendingManagedLaunch = null;
 let activeAuthoring = null;
 let graphAuthoringUnavailable = false;
 let runtimeDisconnect = null;
@@ -1127,6 +1154,7 @@ let humanTaskController = null;
 let humanTaskControllerOwner = null;
 let humanTaskDecisionDialog = null;
 let humanTaskPulseTimer = null;
+let humanTaskPulseOwner = null;
 let humanTaskRecoveryGeneration = 0;
 const HUMAN_TASK_SELECTION_KEY = 'ravenroot.human-task.selection.v1';
 
@@ -1189,14 +1217,18 @@ function currentHumanTaskCapability() {
 function stopHumanTaskPulse() {
   if (humanTaskPulseTimer != null) clearInterval(humanTaskPulseTimer);
   humanTaskPulseTimer = null;
+  humanTaskPulseOwner = null;
   cy?.nodes('.human-task-pulse').removeClass('human-task-pulse');
   elasticRendererFor(workspace.active)?.nodeSelection?.classed('human-task-pulse', false);
 }
 
 function syncHumanTaskPulse(owner) {
-  stopHumanTaskPulse();
   if (owner !== workspace.active || !owner?.cy?.nodes('[humanTaskPending > 0]').length
-      || globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+      || globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return stopHumanTaskPulse();
+  // Attention polling must not reset the off phase before it becomes visible.
+  if (humanTaskPulseTimer != null && humanTaskPulseOwner === owner) return;
+  stopHumanTaskPulse();
+  humanTaskPulseOwner = owner;
   const counts = owner.humanTasks?.projection?.nodeCounts || new Map();
   let on = true;
   owner.cy.nodes('[humanTaskPending > 0]').addClass('human-task-pulse');
@@ -1208,7 +1240,7 @@ function syncHumanTaskPulse(owner) {
     on = !on;
     owner.cy.nodes('[humanTaskPending > 0]').toggleClass('human-task-pulse', on);
     elasticRendererFor(owner)?.nodeSelection
-      ?.filter(item => (counts.get(item.id)?.pending || 0) > 0)
+      ?.filter(item => (owner.humanTasks?.projection?.nodeCounts?.get(item.id)?.pending || 0) > 0)
       .classed('human-task-pulse', on);
   }, 900);
 }
@@ -1220,6 +1252,7 @@ function applyHumanTaskProjection(owner) {
     const attention = counts.get(node.id()) || { pending: 0, escalated: 0 };
     node.data('humanTaskPending', attention.pending);
     node.data('humanTaskEscalated', attention.escalated);
+    applyRuntimeVisual(node, owner);
     node.data('label', `${NODE_ICONS[node.data('nodeType')] || '• '}${runtimeNodeLabel(node)}`);
     if (isN8nFamilyLayout(owner.visualStyle)) {
       node.style({ label: runtimeNodeLabel(node), 'text-wrap': attention.pending ? 'wrap' : 'none',
@@ -1296,6 +1329,7 @@ function receiveHumanTaskProjection(state) {
   owner.humanTasks.attentionSignature = signature;
   owner.humanTasks.pageSignature = pageSignature;
   owner.humanTasks.projection = state;
+  refreshHistoryAttention(owner);
   if (changed) applyHumanTaskProjection(owner);
   if (pageChanged) renderSelectedHumanTasks(owner);
   if (changed && owner === workspace.active && state.kind === 'ready') {
@@ -2887,7 +2921,7 @@ function paneDisplayName(document_) {
 }
 
 function paneIsDirty(document_) {
-  return Boolean(documentIsEditable(document_) && document_.visualGroupPresentationDirty) || (workspace.activeId === document_.id
+  return Boolean(document_?.authoring?.localChanges) || Boolean(documentIsEditable(document_) && document_.visualGroupPresentationDirty) || (workspace.activeId === document_.id
     ? Boolean(editHistory.state().dirty)
     : Boolean(document_.history?.isDirty()));
 }
@@ -2930,7 +2964,20 @@ function syncGraphModeLabel() {
   if (active?.authoring?.providerDocumentId) {
     const revision = active.authoring.revision || {};
     mode.title = uiText("workspace.app.draft.revision.release.revision.publication.revision", { absent: revision.draft || uiText('common.absent'), absent2: revision.release || uiText('common.absent'), absent3: revision.publication || uiText('common.absent') });
+    if (!active.authoring.draftDeleted) mode.title += ` · ${uiText('repository.version.draftExplanation')}`;
   } else mode.removeAttribute('title');
+  let versionAction = document.getElementById('repository-next-version');
+  if (!versionAction) {
+    versionAction = document.createElement('button'); versionAction.id = 'repository-next-version';
+    versionAction.type = 'button'; versionAction.addEventListener('click', createRepositorySuccessor);
+    mode.after(versionAction);
+  }
+  const authoring = active?.authoring;
+  versionAction.hidden = !(authoring?.draftDeleted && authoring.released && authoring.canWrite
+    && (authoring.successor || authoring.versionEligible)
+    && authoring.releaseVersion < 9_007_199_254_740_991
+    && runtimeConfiguration?.configuration?.graphAuthoring?.operations.includes('CREATE_NEXT_VERSION'));
+  versionAction.textContent = uiText(authoring?.successor ? 'repository.version.open' : 'repository.version.create');
 }
 
 let maximizedDocumentId = null;
@@ -2993,7 +3040,7 @@ function setGraphDocumentMaximized(document_, maximized) {
 }
 
 window.document.addEventListener('keydown', event => {
-  if (event.key !== 'Escape' || maximizedDocumentId === null) return;
+  if (event.key !== 'Escape' || maximizedDocumentId === null || event.target.closest?.('.doc-history-dialog')) return;
   const document_ = workspace.find(maximizedDocumentId);
   if (!document_) return;
   event.preventDefault();
@@ -3111,6 +3158,29 @@ function syncPaneHeaders() {
       lifecycle: deployment.state.lifecycle.toLowerCase(),
       continuity: deployment.state.continuity.toLowerCase(),
     }) : '';
+
+    let runBinding = header.querySelector('.doc-run-binding');
+    if (document_.deploymentRun) {
+      if (!runBinding) { runBinding = document.createElement('span'); runBinding.className = 'doc-run-binding'; runBinding.setAttribute('role', 'status'); runBinding.setAttribute('aria-live', 'polite'); header.insertBefore(runBinding, header.querySelector('.doc-pane-maximize')); }
+      runBinding.textContent = document_.deploymentRun.deploymentId
+        + (document_.deploymentRunStatus ? ` — ${uiText('workspace.run.runtimeState', { state: uiText(({ REGISTERED: 'workspace.run.state.REGISTERED', STARTING: 'workspace.run.state.STARTING', READY: 'workspace.run.state.READY', DEGRADED: 'workspace.run.state.DEGRADED', STOPPING: 'workspace.run.state.STOPPING', STOPPED: 'workspace.run.state.STOPPED', FAILED: 'workspace.run.state.FAILED', UNKNOWN: 'workspace.run.state.UNKNOWN' })[document_.deploymentRunStatus]) })}` : '');
+      if (document_.deploymentRunStatus === 'READY' && document_.deploymentRunSourceCount > 0) {
+        runBinding.textContent = `${document_.deploymentRun.deploymentId} — ${uiText('workspace.run.listening', { count: document_.deploymentRunSourceCount })}`;
+      }
+      runBinding.textContent += document_.deploymentRunStopPending ? ` — ${uiText('workspace.run.stopRequested')}` : '';
+      runBinding.textContent += document_.deploymentRunOperation === 'ACTIVATING' && !document_.deploymentRunStopPending ? ` — ${uiText('workspace.run.activating')}` : '';
+      runBinding.title = `${runBinding.textContent} · ${shortId(document_.deploymentRun.graphVersion)}\n${uiText('workspace.run.draftSeparate')}`;
+      const identity = document.createElement('span'); identity.className = 'doc-run-id';
+      identity.textContent = document_.deploymentRun.deploymentId;
+      const status = document.createElement('span'); status.className = 'doc-run-state';
+      status.textContent = runBinding.textContent.slice(identity.textContent.length);
+      runBinding.replaceChildren(identity, status);
+      pane.dataset.deploymentId = document_.deploymentRun.deploymentId;
+      pane.dataset.deploymentVersion = document_.deploymentRun.graphVersion || '';
+      pane.dataset.deploymentRunPhase = document_.deploymentRun.phase;
+    } else {
+      runBinding?.remove(); delete pane.dataset.deploymentId; delete pane.dataset.deploymentVersion; delete pane.dataset.deploymentRunPhase;
+    }
 
     const label = header.querySelector('.doc-pane-name');
     label.textContent = name;
@@ -3657,12 +3727,13 @@ function initLoadedGraph(graph, currentStyle) {
 }
 
 function openDocument({ name = defaultDocumentName(), displayName, graph = null, documentId, tenantId,
-  mode = DOCUMENT_MODES.DRAFT, provenance = null, presentation = null, authoring = null } = {}) {
+  mode = DOCUMENT_MODES.DRAFT, provenance = null, presentation = null, authoring = null, deploymentRun = null } = {}) {
   const graphPresentation = graph && !presentation ? documentPresentationState({ graph }) : null;
   const document_ = addDocumentRecord(name, displayName || allocateDocumentDisplayName(name), {
     documentId, tenantId, mode, provenance,
     presentation: presentation || graphPresentation,
   });
+  document_.deploymentRun = persistedDeploymentRun(deploymentRun);
   if (authoring) Object.assign(document_.authoring, structuredClone(authoring));
   if (graph) {
     graphName = name;
@@ -3679,15 +3750,60 @@ function openDocument({ name = defaultDocumentName(), displayName, graph = null,
   }
   syncActiveDocumentChrome();
   scheduleProgramGraphReadiness(document_);
+  observeDocumentDeployment(document_);
   if (presentation?.renderMode === 'monitoring') reconcileActiveRenderModeRenderer();
   scheduleWorkspacePersistence();
   return document_.id;
 }
 
-async function openDeploymentDocument(deploymentId, client = runtimeClient) {
+function paintDocumentDeploymentView(owner, state) {
+  const cleared = !state.nodeStates.size
+    || owner.cy.nodes().some(node => node.data('runtimeObserved') && !state.nodeStates.has(node.id()));
+  applyDeploymentViewStateToRenderer(owner.cy, state);
+  owner.execution.monitoringFlow = state.runtime;
+  if (cleared) applyVisualStyle(owner.visualStyle, owner.cy, owner, { preserveEdgeGeometry: true });
+  owner.cy.nodes().forEach(node => {
+    const view = state.nodeStates.get(node.id());
+    node.data('instances', view?.instances || 0);
+    node.data('arrivals', view?.arrivals || 0);
+    if (view) applyRuntimeVisual(node, owner);
+    updateD3RuntimeNode(owner, node.id(), view?.instances || 0, view?.state || 'idle', view?.arrivals || 0,
+      { runtimeObserved: Boolean(view) });
+  });
+  owner.cy.edges().forEach(edge => updateRuntimeEdge(owner, edge.id()));
+  if (owner === workspace.active) drawingModelController?.scheduleRefresh(owner.id);
+}
+
+function openDeploymentSourceDocument(source, action) {
+  // i18n-audit-exempt: authored-content - The filename identifies the immutable deployment version.
+  const filename = `${source.deploymentId}-${source.graphVersion.slice(0, 12)}.graphml`;
+  if (action === 'download') {
+    dispatchDocumentDownload({ xml: source.graphMlBytes || source.graphMl, filename });
+    return;
+  }
+  const graph = parsePreparedGraph(source.graphMl, filename, { maxBytes: currentGraphDocumentByteLimit() });
+  const id = openDocument({ name: filename, graph,
+    mode: action === 'draft' ? DOCUMENT_MODES.DRAFT : DOCUMENT_MODES.DEPLOYED,
+    provenance: { originMode: DOCUMENT_MODES.DEPLOYED, sourceGraphVersion: source.graphVersion },
+  });
+  const owner = workspace.find(id);
+  if (action === 'open') owner.deploymentSource = source;
+  else if (action === 'draft') setModifyMode(true);
+  addActivityMessage(uiMessage('workspace.notice.deployment'), uiMessage('workspace.deployment.source.opened', {
+    version: shortId(source.graphVersion), deploymentId: source.deploymentId }), 'completed');
+  scheduleWorkspacePersistence();
+  return id;
+}
+
+async function openDeploymentDocument(deploymentId, client = runtimeClient, rebuild = false) {
   if (!client) throw productError("workspace.error.app.connect.to.a.ravenroot.service.before.opening.a.deployment", new Error('Connect to a Ravenroot service before opening a deployment.'));
-  const envelope = await client.deploymentView(deploymentId);
+  const [envelope, status] = await Promise.all([client.deploymentView(deploymentId, { rebuild }), client.deployment(deploymentId)]);
+  if (status.graphVersion !== envelope.source.graphVersion || status.runtimeIncarnationId !== envelope.source.incarnationId)
+    throw productError('history.sourceChanged', new Error('Deployment changed during view opening'));
   const graph = deploymentProjectionDocument(envelope);
+  graph.viewerBinding = Object.freeze({ ...graph.viewerBinding, registrationIdentity: status.registrationIdentity });
+  if (['REBUILT', 'DEGRADED'].includes(envelope.renderingStatus))
+    addActivityMessage(uiMessage('workspace.notice.deployment'), uiMessage('workspace.deployment.renderingDegraded'));
   const id = openDocument({
     // i18n-audit-exempt: authored-content - Document filenames are persisted stable identities.
     name: `${deploymentId}.deployment`,
@@ -3707,10 +3823,24 @@ async function openDeploymentDocument(deploymentId, client = runtimeClient) {
   });
   const owner = workspace.find(id);
   if (!owner) throw productError("workspace.error.app.the.deployment.canvas.could.not.be.created", new Error('The deployment canvas could not be created.'));
-  const state = createDeploymentViewState({ ...graph.viewerBinding, lifecycle: envelope.lifecycle });
+  attachDeploymentDocument(owner, envelope, client);
+  setModifyMode(false);
+  syncActiveDocumentChrome();
+  scheduleWorkspacePersistence();
+  return id;
+}
+
+function attachDeploymentDocument(owner, envelope, client) {
+  owner.deploymentView?.disconnect?.();
+  const deploymentId = envelope.source.deploymentId;
+  const state = createDeploymentViewState({ ...owner.graph.viewerBinding, lifecycle: envelope.lifecycle });
+  const authority = workspaceAuthority, incarnation = owner.incarnation;
+  const current = () => workspace.find(owner.id) === owner && owner.incarnation === incarnation
+    && runtimeClient === client && workspaceAuthority === authority && tenantAuthorityAllows(owner, client);
   const repaint = frame => {
+    if (!current()) return;
     const result = applyDeploymentViewFrame(state, frame);
-    if (owner.cy) applyDeploymentViewStateToRenderer(owner.cy, state);
+    if (owner.cy) paintDocumentDeploymentView(owner, state);
     syncPaneHeaders();
     if (workspace.active === owner) {
       addActivityMessage(uiMessage("workspace.notice.deployment"), result.reason === 'execution' ? uiMessage("workspace.notice.observed.on", { type: frame.event.type, deploymentId: deploymentId }) : uiMessage("workspace.notice.deployment.2", { deploymentId: deploymentId, detail2: state.continuity.toLowerCase() }),
@@ -3718,6 +3848,7 @@ async function openDeploymentDocument(deploymentId, client = runtimeClient) {
     }
   };
   const disconnect = client.connectDeploymentView(envelope, repaint, (connectionState, message, renderMessage) => {
+    if (!current()) return;
     if (connectionState === 'revoked') {
       resetDeploymentViewRuntime(state, 'DETACHED', 'AUTHORITY_CHANGED');
     } else if (connectionState === 'error') {
@@ -3726,17 +3857,41 @@ async function openDeploymentDocument(deploymentId, client = runtimeClient) {
       state.continuity = connectionState === 'connected' ? 'LIVE'
         : connectionState === 'reconnecting' ? 'RECONNECTING' : connectionState.toUpperCase();
     }
-    if (owner.cy) applyDeploymentViewStateToRenderer(owner.cy, state);
+    if (owner.cy) paintDocumentDeploymentView(owner, state);
     syncPaneHeaders();
     if (workspace.active === owner) addActivityMessage(uiMessage("workspace.notice.deployment.3"), renderMessage ? uiComputed(renderMessage) : message,
       ['error', 'revoked'].includes(connectionState) ? 'failed' : 'completed');
   });
   owner.deploymentView = { envelope, state, disconnect };
-  applyDeploymentViewStateToRenderer(owner.cy, state);
+  paintDocumentDeploymentView(owner, state);
   syncPaneHeaders();
-  setModifyMode(false);
-  syncActiveDocumentChrome();
-  return id;
+}
+
+async function reconnectSavedDeploymentView(owner, client = runtimeClient) {
+  if (owner.graph?.format !== 'deployment' || owner.deploymentRun || !tenantAuthorityAllows(owner, client)) return;
+  const binding = owner.graph.viewerBinding;
+  if (!binding?.registrationIdentity) return;
+  const authority = workspaceAuthority, incarnation = owner.incarnation;
+  const current = () => workspace.find(owner.id) === owner && owner.incarnation === incarnation
+    && runtimeClient === client && workspaceAuthority === authority && tenantAuthorityAllows(owner, client);
+  owner.deploymentView?.disconnect?.();
+  owner.graph.lifecycle = 'UNKNOWN';
+  try {
+    const envelope = await readSavedDeploymentView(client, binding);
+    if (!current()) return;
+    owner.graph.viewerBinding = Object.freeze({ ...envelope.source, registrationIdentity: binding.registrationIdentity });
+    owner.graph.lifecycle = envelope.lifecycle;
+    attachDeploymentDocument(owner, envelope, client);
+    scheduleWorkspacePersistence();
+  } catch (error) {
+    if (!current()) return;
+    const state = createDeploymentViewState(binding);
+    resetDeploymentViewRuntime(state, 'UNAVAILABLE', 'OBSERVATION_ENDED');
+    owner.deploymentView = { state, disconnect: () => {} };
+    paintDocumentDeploymentView(owner, state); syncPaneHeaders();
+    addActivityMessage(uiMessage('workspace.notice.deployment'), uiMessage('workspace.deployment.restoreFailed', {
+      deploymentId: binding.deploymentId, reason: uiErrorMessage(error) }), 'failed');
+  }
 }
 
 function forkActiveDocument() {
@@ -3801,11 +3956,13 @@ function completeReplaceActiveDocument(target, graph, name) {
   destroyDocumentRenderer(target, 'replaced');
   detachExecution(target);
   target.incarnation = createDocumentIncarnation();
+  target.deploymentRun = null;
   target.visualGroupState = {};
   target.canvasState = null;
   target.viewStates = { design: null, monitoring: null };
   target.monitoringForces = normalizedMonitoringForces();
   target.visualGroupPresentationDirty = false;
+  target.authoring.localChanges = false;
   activeDocumentIncarnation = target.incarnation;
   graphName = name;
   graphDisplayName = allocateDocumentDisplayName(name);
@@ -3873,6 +4030,7 @@ function replaceActiveDocumentFromText(
 }
 
 function activateDocument(id) {
+  if (workspace.activeId !== id) retireDocumentHistory(workspace.active);
   finishVisualGroups(workspace.active);
   if (!workspace.find(id) || workspace.activeId === id) return workspace.activeId;
   if (maximizedDocumentId && maximizedDocumentId !== id) {
@@ -3913,6 +4071,7 @@ function teardownDocument(target) {
   target.sourceSession.pollController = null;
   retireSourceSessionProcessBindings(target);
   target.deploymentView?.disconnect?.();
+  retireOriginDeploymentView(target);
   target.deploymentView = null;
   // Renderer ownership is per document: close retires this target's callbacks and host without
   // touching any visible sibling, whether or not the target owns the shared chrome.
@@ -4766,6 +4925,7 @@ function registerCytoscapeRenderer(owner, target = owner?.cy) {
 }
 
 function destroyDocumentRenderer(owner, reason = 'destroyed') {
+  if (['closed', 'replaced', 'destroyed'].includes(reason)) { retireDocumentHistory(owner); retireOriginDeploymentView(owner); }
   owner?.visualGroupsRenderer?.destroy();
   if (owner) owner.visualGroupsRenderer = null;
   if (edgeGestureSession?.owner === owner) cancelEdgeGesture({ clearMessage: true });
@@ -6053,6 +6213,9 @@ function setRenderMode(name, { skipDraftGuard = false } = {}) {
   if (!skipDraftGuard && semanticMode !== renderMode) {
     return runAfterInspectorDraft(() => setRenderMode(name, { skipDraftGuard: true }));
   }
+  if (documentIsEditable(owner) && (owner.authoring.providerDocumentId || owner.authoring.saveFlight)) {
+    owner.authoring.localChanges = true;
+  }
   invalidateDocumentLayouts(owner);
   captureDocumentModeView(owner, renderMode);
   if (dragSnapshot?.owner === owner) cancelNodeMoveGesture();
@@ -6062,6 +6225,7 @@ function setRenderMode(name, { skipDraftGuard = false } = {}) {
   const incoming = ensureModeViewStates(owner)[semanticMode];
   owner.visualGroupState = structuredClone(incoming?.visualGroupState || owner.visualGroupState || {});
   if (semanticMode === 'design') {
+    retireDocumentHistory(owner);
     stopElasticRendering(owner, 'mode-restored');
     target.nodes().unlock();
     layoutMode = incoming?.layoutMode && incoming.layoutMode !== 'elastic'
@@ -6083,6 +6247,7 @@ function setRenderMode(name, { skipDraftGuard = false } = {}) {
   syncPaneLayout();
   syncLayoutChrome(owner);
   updateModifyAvailability();
+  updateHistoryUi();
   scheduleWorkspacePersistence();
   return true;
 }
@@ -6093,6 +6258,10 @@ function arrangeDesign(name, { skipDraftGuard = false } = {}) {
   if (!arrangement || renderMode !== 'design' || !owner || !cy) return false;
   if (!skipDraftGuard) {
     return runAfterInspectorDraft(() => arrangeDesign(name, { skipDraftGuard: true }));
+  }
+  if (documentIsEditable(owner) && (owner.authoring.providerDocumentId || owner.authoring.saveFlight)) {
+    owner.authoring.localChanges = true;
+    updateHistoryUi();
   }
   if (designArrangement === name) {
     designArrangement = null;
@@ -6145,6 +6314,109 @@ function renderActiveMode({ skipDraftGuard = false } = {}) {
 // Normalizing the fields without reconciling that handle makes the radio truthful about state but
 // false about what is actually painted. This runs only after the target pane is visible, and only
 // when the semantic mode and renderer kind disagree; ordinary document switches do no work.
+function retireDocumentHistory(owner) {
+  owner?.historyMonitor?.destroy();
+  owner?.historyContainer?.remove(); owner?.historyDialog?.close(); owner?.historyDialog?.remove();
+  if (owner) { owner.historyMonitor = null; owner.historyContainer = null; owner.historyDialog = null; owner.historyBinding = null; }
+  owner?.pane?.classList.remove('doc-pane--history');
+}
+
+function refreshHistoryAttention(owner) {
+  const summary = owner.historyDialog?.querySelector('.doc-history-attention');
+  const button = owner.historyDialog?.querySelector('.doc-history-review-tasks');
+  if (!summary || !button) return;
+  owner.historyMonitor?.setDeploymentStatus?.(owner.deploymentRunStatus || owner.graph?.viewerProjection?.lifecycle, owner.deploymentRunSourceCount);
+  const state = owner.humanTasks?.projection;
+  const total = state?.kind === 'ready' ? [...state.nodeCounts.values()].reduce((sum, row) => sum + row.pending, 0) : null;
+  const escalated = state?.kind === 'ready' ? [...state.nodeCounts.values()].reduce((sum, row) => sum + row.escalated, 0) : 0;
+  summary.textContent = total === null ? uiText('workspace.run.taskAttentionUnavailable') : uiText('workspace.run.taskAttention', { count: total, escalated });
+  button.hidden = !total;
+}
+
+function documentHistoryDraftNotice(owner) {
+  if (owner.mode !== DOCUMENT_MODES.DRAFT) return uiText('history.deployedOnly');
+  if (!owner.deploymentRun?.graphMl) return uiText('workspace.run.draftSeparate');
+  try {
+    return uiText(documentMatchesDeployment(owner) ? 'history.draftMatches' : 'history.draftChanged');
+  } catch { return uiText('workspace.run.draftSeparate'); }
+}
+
+function reconcileDocumentHistory(owner, { open = false } = {}) {
+  if (owner !== workspace.active) return false;
+  if (!open && !owner.historyDialog?.open) return false;
+  const bound = owner?.deploymentRunObservedSource || owner?.deploymentRun || owner?.graph?.viewerBinding;
+  if (!bound?.deploymentId || !bound.graphVersion || !bound.incarnationId) {
+    retireDocumentHistory(owner); return false;
+  }
+  const client = runtimeClient, authority = workspaceAuthority, incarnation = owner.incarnation;
+  if (!client || !tenantAuthorityAllows(owner, client)) { retireDocumentHistory(owner); return true; }
+  const identity = `${bound.deploymentId}:${bound.incarnationId}:${bound.graphVersion}`;
+  if (owner.historyBinding !== identity) {
+    retireDocumentHistory(owner);
+    const dialog = window.document.createElement('dialog'); dialog.className = 'doc-history-dialog';
+    dialog.setAttribute('aria-label', uiText('history.title'));
+    const bar = window.document.createElement('nav'); bar.className = 'doc-history-bar';
+    const back = window.document.createElement('button'); back.type = 'button'; back.textContent = uiText('history.return');
+    const returnToGraph = () => retireDocumentHistory(owner);
+    back.addEventListener('click', returnToGraph);
+    const notice = window.document.createElement('p'); notice.className = 'doc-history-draft'; notice.setAttribute('role', 'status');
+    const attention = window.document.createElement('p'); attention.className = 'doc-history-attention'; attention.setAttribute('role', 'status');
+    const reviewTasks = window.document.createElement('button'); reviewTasks.type = 'button'; reviewTasks.className = 'doc-history-review-tasks'; reviewTasks.textContent = uiText('workspace.run.reviewTasks');
+    reviewTasks.addEventListener('click', () => {
+      if (workspace.active !== owner || !tenantAuthorityAllows(owner)) return;
+      const nodeId = [...(owner.humanTasks?.projection?.nodeCounts || new Map())].find(([, count]) => count.pending > 0)?.[0];
+      returnToGraph();
+      const node = nodeId && owner.cy.getElementById(nodeId);
+      if (node?.length) { owner.cy.nodes().unselect(); node.select(); node.emit('tap'); }
+    });
+    const information = window.document.createElement('details'); information.className = 'doc-history-information';
+    const informationTitle = window.document.createElement('summary'); informationTitle.textContent = uiText('history.details');
+    information.append(informationTitle, notice);
+    const taskBar = window.document.createElement('div'); taskBar.className = 'doc-history-tasks'; taskBar.append(attention, reviewTasks);
+    bar.append(back, information, taskBar);
+    dialog.addEventListener('cancel', event => { event.preventDefault(); returnToGraph(); });
+    const container = window.document.createElement('section'); container.className = 'doc-history';
+    dialog.append(bar, container); window.document.body.append(dialog);
+    owner.historyDialog = dialog; owner.historyContainer = container; owner.historyBinding = identity;
+    const current = () => workspace.find(owner.id) === owner && owner.incarnation === incarnation
+      && owner.historyBinding === identity && runtimeClient === client && workspaceAuthority === authority && tenantAuthorityAllows(owner, client);
+    void client.deploymentView(bound.deploymentId).then(projection => {
+      if (!current()) return;
+      const source = projection.source;
+      requireHistorySource(bound, source);
+      owner.historyMonitor = createDeploymentHistoryMonitor({ container, projection, isCurrent: current,
+        read: (query, options) => client.deploymentHistory(source, query, options), theme: applicationTheme, t: uiText, title: owner.mode === DOCUMENT_MODES.DRAFT ? owner.displayName || owner.name : null });
+      refreshHistoryAttention(owner);
+    }).catch(error => {
+      if (!current()) return;
+      const message = window.document.createElement('p'); message.textContent = uiText('history.viewFailed', { deploymentId: bound.deploymentId, reason: uiErrorReason(error) });
+      const retry = window.document.createElement('button'); retry.type = 'button'; retry.textContent = uiText('history.retryView');
+      retry.addEventListener('click', () => { if (current()) { retireDocumentHistory(owner); reconcileDocumentHistory(owner, { open: true }); } });
+      container.replaceChildren(message, retry);
+      if (error?.code === 'HISTORY_SOURCE_CHANGED') {
+        const reconnect = window.document.createElement('button'); reconnect.type = 'button';
+        reconnect.textContent = uiText('history.openCurrent');
+        reconnect.addEventListener('click', async () => {
+          if (!current()) return;
+          reconnect.disabled = true;
+          try {
+            const id = await openDeploymentDocument(bound.deploymentId, client);
+            retireDocumentHistory(owner);
+            const opened = workspace.find(id);
+            if (opened === workspace.active) reconcileDocumentHistory(opened, { open: true });
+          } catch (failure) {
+            if (current()) message.textContent = uiText('history.viewFailed', { deploymentId: bound.deploymentId, reason: uiErrorReason(failure) });
+          } finally { reconnect.disabled = false; }
+        });
+        retry.hidden = true; container.append(reconnect);
+      }
+    });
+  }
+  refreshHistoryAttention(owner);
+  owner.historyDialog.querySelector('.doc-history-draft').textContent = documentHistoryDraftNotice(owner);
+  owner.historyContainer.hidden = false; if (!owner.historyDialog.open) owner.historyDialog.showModal(); owner.pane.classList.add('doc-pane--history'); return true;
+}
+
 function reconcileActiveRenderModeRenderer() {
   const owner = workspace.active;
   if (!owner?.cy) return;
@@ -6688,7 +6960,7 @@ function readNodeEditorPatch(form, model) {
   const custom = readPropertyEditor(form);
   const additionalGroups = readAdditionalPropertyGroupEditor(
     form, catalogDescriptor(behavior));
-  const catalog = readCatalogPropertyEditor(form);
+  const catalog = readSagaCatalogProperties(form, () => readCatalogPropertyEditor(form));
   const kind = String(values.get('kind'));
   // Conditional catalog fields retain their draft and serialized value by default. AMQP destination
   // modes are narrower: their runtime schemas reject inactive destination fields, so remove only
@@ -7147,12 +7419,24 @@ function runAfterInspectorDraft(action, {
   return deferredResult;
 }
 
+function startCorrelationDescriptor(kind) {
+  const shared = catalogDescriptor('correlation-derive');
+  return kind === 'START' && shared ? { ...shared, displayName: uiText('correlation.entry.title'),
+    properties: shared.properties.filter(property => property.name.startsWith('correlation.')) } : null;
+}
+
+function nodeEditorCatalogDescriptor(descriptor, kind) {
+  return kind === 'START' ? null : descriptor;
+}
+
 function renderNodeForm(model, creating) {
   contextualHelp.dismiss();
   const descriptor = catalogDescriptor(model.behavior);
-  const catalogEditorDescriptor = programCatalogEditorDescriptor(descriptor);
+  const catalogEditorDescriptor = programCatalogEditorDescriptor(nodeEditorCatalogDescriptor(descriptor, model.kind));
+  const startMapping = startCorrelationDescriptor(model.kind);
   const catalogFieldOwner = { documentId: workspace.activeId, nodeId: model.id };
   const catalogNames = new Set((descriptor?.properties || []).map(property => property.name));
+  for (const property of startMapping?.properties || []) catalogNames.add(property.name);
   // `runtime.nature` (or whatever `descriptor.natureProperty` names) is platform-owned, never a
   // behavior property (see NodeRuntimeNatureProperty's javadoc) — it has its own dedicated control
   // below and must never also surface as a free-form "additional property" row, which would give the
@@ -7204,10 +7488,13 @@ function renderNodeForm(model, creating) {
       <div id="node-nature-section">${natureFieldHtml(descriptor, model)}</div>
       <div id="node-max-concurrency-section">${maxConcurrencyFieldHtml(descriptor, model)}</div>
       <div id="node-join-section">${joinFieldHtml(graphData, model)}</div>
+      <div id="node-correlation-section">${catalogPropertyFieldsHtml(startMapping, model.properties || {}, catalogFieldOwner)}</div>
       <div id="catalog-properties">${catalogPropertyFieldsHtml(
-        catalogEditorDescriptor, model.properties || {}, catalogFieldOwner)}</div>
+        sagaOrdinaryDescriptor(catalogEditorDescriptor), model.properties || {}, catalogFieldOwner)}</div>
+      <div id="node-saga-section">${sagaFieldsHtml(catalogEditorDescriptor, model, catalogFieldOwner)}</div>
       <div id="program-workspace">${programWorkspaceContentHtml(descriptor, model)}</div>
       <div id="additional-property-groups">${additionalPropertyGroupsHtml(additionalGroups.groups)}</div>
+      <section id="node-correlation-preview"></section>
       ${propertyEditorHtml('node-properties', extras)}
       <div class="editor-actions">
         ${creating ? '' : `<button class="btn danger" type="button" id="delete-node">${escapeHtml(uiText("workspace.app.delete.node"))}</button>`}
@@ -7215,10 +7502,22 @@ function renderNodeForm(model, creating) {
       </div>
     </form>`;
   const form = document.getElementById('node-editor');
+  let correlationPreview = { reconcile() {} };
   form._localeRender = () => renderNodeForm(model, creating);
+  const renderCorrelationCatalogControls = (selected, values) => {
+    const kind = form.elements.kind.value;
+    const effective = programCatalogEditorDescriptor(nodeEditorCatalogDescriptor(selected, kind));
+    document.getElementById('catalog-properties').innerHTML = catalogPropertyFieldsHtml(
+      sagaOrdinaryDescriptor(effective), values, catalogFieldOwner);
+    document.getElementById('node-saga-section').innerHTML = sagaFieldsHtml(effective, { properties: values }, catalogFieldOwner);
+    bindSagaFields(form);
+    document.getElementById('node-correlation-section').innerHTML = catalogPropertyFieldsHtml(startCorrelationDescriptor(kind), values, catalogFieldOwner);
+    correlationPreview.reconcile();
+  };
   form.elements.catalogBehavior.addEventListener('change', event => {
     const selected = catalogDescriptor(event.target.value);
     if (!selected) return;
+    const sharedMapping = Object.fromEntries(Object.entries(readCurrentCatalogPropertyValues(form)).filter(([name]) => name.startsWith('correlation.')));
     form.elements.kind.value = 'BEHAVIOR';
     form.elements.behavior.value = selected.behavior;
     if (Array.from(form.elements.nodeType.options).some(option => option.value === selected.visualType)) {
@@ -7238,8 +7537,7 @@ function renderNodeForm(model, creating) {
     // condition that decides whether the bypass control may exist at all. Rebuilt for the same reason
     // the nature control is, and against the CURRENT form state rather than the loaded model.
     renderBypassSection(form, model);
-    document.getElementById('catalog-properties').innerHTML = catalogPropertyFieldsHtml(
-      programCatalogEditorDescriptor(selected), {}, catalogFieldOwner);
+    renderCorrelationCatalogControls(selected, sharedMapping);
     document.getElementById('program-workspace').innerHTML = programWorkspaceContentHtml(selected, model);
     document.getElementById('additional-property-groups').innerHTML = additionalPropertyGroupsHtml(
       splitAdditionalPropertyGroups(selected, model.properties || {}, model.propertyTypes || {}).groups);
@@ -7248,11 +7546,16 @@ function renderNodeForm(model, creating) {
   // `NodeBypassValidator` refuses the key on every non-BEHAVIOR node, `false` included, so
   // changing Kind changes whether the control may be offered. Re-rendered rather than left stale: a
   // checkbox surviving a switch to END would let a save write a graph the runtime refuses to load.
-  form.elements.kind.addEventListener('change', () => renderBypassSection(form, model));
+  form.elements.kind.addEventListener('change', () => {
+    renderBypassSection(form, model);
+    const values = readCurrentCatalogPropertyValues(form);
+    renderCorrelationCatalogControls(catalogDescriptor(form.elements.behavior.value), values);
+  });
   bindBypassField();
   bindNatureField();
   bindMaxConcurrencyField();
   bindJoinField();
+  bindSagaFields(form);
   // Any catalog property can be the sibling a condition names, so this listens on the
   // container rather than on specific properties the descriptor happens to declare as
   // condition-drivers today — nothing here is specific to "mode" or to any one behavior. Delegated
@@ -7260,7 +7563,7 @@ function renderNodeForm(model, creating) {
   // handler, which would otherwise have to re-bind itself on every change.
   document.getElementById('catalog-properties')?.addEventListener('change', event => {
     if (!catalogEditorDescriptor || !event.target.closest('[data-catalog-property]')) return;
-    refreshConditionalCatalogProperties(catalogEditorDescriptor, catalogFieldOwner);
+    refreshConditionalCatalogProperties(sagaOrdinaryDescriptor(catalogEditorDescriptor), catalogFieldOwner);
   });
   document.getElementById('catalog-properties')?.addEventListener('input', event => {
     const field = event.target.closest('[data-catalog-property]');
@@ -7323,6 +7626,17 @@ function renderNodeForm(model, creating) {
   });
   bindProgramWorkspace(form, model);
   bindInspectorDraft(form, model, 'node', creating);
+  const previewOwner = workspace.active, previewIncarnation = previewOwner.incarnation;
+  correlationPreview = mountCorrelationPreview({ container: document.getElementById('node-correlation-preview'), form,
+    properties: () => readCatalogPropertyEditor(form).properties,
+    isCurrent: () => workspace.active === previewOwner && previewOwner.incarnation === previewIncarnation && form.isConnected,
+    preview: async (properties, sample, options) => {
+      const client = runtimeClient, authority = workspaceAuthority;
+      if (!client || !tenantAuthorityAllows(previewOwner, client)) throw new Error('No current authoring service');
+      const result = await client.previewCorrelation(properties, sample, options);
+      if (client !== runtimeClient || authority !== workspaceAuthority) throw new DOMException('Retired authoring authority', 'AbortError');
+      return result;
+    } });
 }
 
 function catalogDescriptor(behavior) {
@@ -7412,7 +7726,8 @@ function catalogPropertyFieldsHtml(descriptor, values, owner) {
   // the referenced sibling, never a stale or differently-defaulted one. Computed once, up front,
   // because a condition can name any other property in this same list, not only ones earlier in it.
   const resolvedValues = Object.fromEntries(
-    descriptor.properties.map(property => [property.name, values[property.name] ?? property.defaultValue ?? '']));
+    descriptor.properties.map(property => [property.name, values[property.name]
+      ?? (property.name.startsWith('saga.') ? '' : property.defaultValue) ?? '']));
   // Publisher inherits a Producer queue only as an in-session draft. The queue stays mounted and
   // retained, but cannot suppress the Publisher exchange/routing controls while its own row is
   // hidden. Other descriptors keep the established rule that conditions see retained hidden values.
@@ -7692,7 +8007,7 @@ function catalogPropertyFieldsHtml(descriptor, values, owner) {
       const recognized = !present || stringValue === '' || stringValue === 'true' || stringValue === 'false';
       const unrecognizedOption = recognized ? ''
         : `<option value="${escapeAttribute(value)}" selected>${escapeHtml(uiText("workspace.template.app.current.value.not.recognized"))} ${escapeHtml(value)}</option>`;
-      control = `<select data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="BOOLEAN"${accessibility}>${unrecognizedOption}<option value="false" ${recognized && stringValue !== 'true' ? 'selected' : ''}>${escapeHtml(uiText("workspace.template.app.false"))}</option><option value="true" ${stringValue === 'true' ? 'selected' : ''}>${escapeHtml(uiText("workspace.template.app.true"))}</option></select>`;
+      control = `<select data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="BOOLEAN"${accessibility}>${property.name.startsWith('saga.') ? `<option value="" ${stringValue === '' ? 'selected' : ''}>${escapeHtml(uiText("workspace.template.app.not.declared"))}</option>` : ''}${unrecognizedOption}<option value="false" ${recognized && stringValue !== 'true' && (!property.name.startsWith('saga.') || stringValue !== '') ? 'selected' : ''}>${escapeHtml(uiText("workspace.template.app.false"))}</option><option value="true" ${stringValue === 'true' ? 'selected' : ''}>${escapeHtml(uiText("workspace.template.app.true"))}</option></select>`;
     } else {
       const inputType = property.type === 'INTEGER' || property.type === 'DECIMAL' ? 'number' : 'text';
       const step = property.type === 'DECIMAL' ? ' step="any"' : '';
@@ -8488,8 +8803,15 @@ function renderWorkflowValidationAdvisory(ownerGraph, owner = workspace.active) 
 function ensureProgramReadinessChrome() {
   let button = document.getElementById('btn-program-approve');
   if (button) return;
-  const controls = document.querySelector('.runtime-controls');
-  if (!controls) return;
+  const bar = document.getElementById('workflowbar');
+  if (!bar) return;
+  const controls = document.createElement('div');
+  controls.className = 'program-readiness-controls';
+  controls.id = 'program-readiness-controls';
+  controls.setAttribute('role', 'group');
+  controls.setAttribute('aria-label', uiText('workspace.app.program.readiness.2'));
+  controls.hidden = true;
+  bar.append(controls);
   button = document.createElement('button');
   button.className = 'btn';
   button.id = 'btn-program-approve';
@@ -8504,7 +8826,7 @@ function ensureProgramReadinessChrome() {
   summary.setAttribute('role', 'status');
   summary.setAttribute('aria-live', 'polite');
   summary.hidden = true;
-  controls.append(button, summary);
+  controls.append(summary, button);
 }
 
 function syncProgramReadinessChrome(owner = workspace.active) {
@@ -8513,6 +8835,7 @@ function syncProgramReadinessChrome(owner = workspace.active) {
   const summary = document.getElementById('program-readiness-summary');
   if (!button || !summary) return;
   const nodes = programNodes(programGraph(owner));
+  document.getElementById('program-readiness-controls').hidden = !owner || !nodes.length;
   if (!owner || !nodes.length) {
     button.hidden = true;
     summary.hidden = true;
@@ -10246,7 +10569,7 @@ mmCanvas.addEventListener('blur', () => scheduleMinimap());
 // WORKFLOW EDITING & RUNTIME
 // ═══════════════════════════════════════════════════════════════
 
-function newWorkflow() {
+function newWorkflow({ announce = true } = {}) {
   if (!workspace.active) return openDocument();
   if (!confirmDiscardChanges()) return;
   setModifyMode(false);
@@ -10265,7 +10588,7 @@ function newWorkflow() {
   clearActivity();
   // The message must describe the START -> Do something -> {End, Error} shape that
   // createWorkflowDocument() actually builds.
-  addActivityMessage(uiMessage("workspace.notice.editor.6"), uiMessage("workspace.notice.minimal.start.do.something.end.error.workflow.created"), 'completed');
+  if (announce) addActivityMessage(uiMessage("workspace.notice.editor.6"), uiMessage("workspace.notice.minimal.start.do.something.end.error.workflow.created"), 'completed');
 }
 
 function createStartupImportPlaceholder() {
@@ -10363,10 +10686,10 @@ function showAddCatalogNodeForm(behavior, { skipDraftGuard = false } = {}) {
   model.behavior = descriptor.behavior;
   model.nodeType = resolveDescriptorNodeType(descriptor);
   model.properties = Object.fromEntries((descriptor.properties || [])
-    .filter(catalogPropertyHasDeclaredDefault)
+    .filter(property => !property.name.startsWith('saga.') && catalogPropertyHasDeclaredDefault(property))
     .map(property => [property.name, property.defaultValue]));
   model.propertyTypes = Object.fromEntries((descriptor.properties || [])
-    .filter(catalogPropertyHasDeclaredDefault)
+    .filter(property => !property.name.startsWith('saga.') && catalogPropertyHasDeclaredDefault(property))
     .map(property => [property.name, catalogTypeToGraphMl(property.type)]));
   document.getElementById('info-title').textContent = uiText("workspace.app.add", { displayName: descriptor.displayName });
   renderNodeForm(model, true);
@@ -10445,6 +10768,8 @@ function markDocumentDownloaded(prepared, { announce = true } = {}) {
 }
 
 function downloadDocument(id) {
+  const source = workspace.find(id)?.deploymentSource;
+  if (source) { openDeploymentSourceDocument(source, 'download'); return true; }
   const prepared = prepareDocumentDownload(id);
   if (!prepared) return false;
   dispatchDocumentDownload(prepared);
@@ -10564,9 +10889,15 @@ function confirmDiscardChanges() {
 }
 
 function updateHistoryUi() {
+  const owner = workspace.active;
+  if (owner?.deploymentRun?.graphMl && !owner.execution.executionId && owner.cy?.nodes().some(node => node.data('runtimeObserved'))
+      && !documentMatchesDeployment(owner)) {
+    resetRuntimeState(owner, owner.cy, owner.graph, owner.layoutMode, owner.visualStyle);
+  }
   const state = editHistory.state();
   const presentationDirty = visualGroupPresentationIsDirty(workspace.active);
-  const dirty = state.dirty || (documentIsEditable(workspace.active) && presentationDirty);
+  const dirty = state.dirty || Boolean(activeAuthoring?.localChanges)
+    || (documentIsEditable(workspace.active) && presentationDirty);
   const indicator = document.getElementById('dirty-state');
   if (indicator) {
     indicator.classList.toggle('dirty', dirty);
@@ -11993,6 +12324,8 @@ async function connectRuntime(atBoot = false) {
         runnerWindow?.setClient(connectedClient);
         void configureHumanTasks();
         workspace.documents.forEach(scheduleProgramGraphReadiness);
+        workspace.documents.forEach(observeDocumentDeployment);
+        workspace.documents.forEach(owner => { void reconnectSavedDeploymentView(owner, connectedClient); });
         void loadPersonalPalettes(connectedClient);
       } else if (scope?.failed) {
         failWorkspaceAuthority(connectedClient, authorityGeneration, workspacePersistenceReason);
@@ -12088,6 +12421,12 @@ async function connectRuntime(atBoot = false) {
         || uiText("workspace.import.notReady"); } };
   }
   startupImportController?.updateRuntime(outcome);
+  if (pendingManagedLaunch) {
+    if (outcome.kind === 'ready' && gitAuthoringEnabled()) {
+      const requested = pendingManagedLaunch; pendingManagedLaunch = null;
+      await openRepositoryGraph(requested);
+    } else repositoryNotice(uiText('repository.launch.unavailable'));
+  }
   return outcome;
 }
 
@@ -12204,6 +12543,11 @@ function stopCurrentSourceSession() {
   if (!workspace.active || !graphData) return showInspectorMessage(uiText("workspace.notice.create.or.load.a.workflow.first"));
   if (!tenantAuthorityAllows(workspace.active)) {
     return showInspectorMessage(uiText("workspace.notice.wait.for.this.document.workspace.authority.to.be.verified"));
+  }
+  if (boundDeploymentNeedsCloseDecision(workspace.active)) {
+    const owner = workspace.active;
+    void stopDocumentRuntime(owner).finally(() => { syncPaneHeaders(); refreshCommands(); });
+    syncPaneHeaders(); refreshCommands(); return true;
   }
   if (!sourceSessionIsActive(activeSourceSession)) {
     return showInspectorMessage(uiText("workspace.notice.no.process.local.source.session.is.active.for.this"));
@@ -12666,6 +13010,9 @@ async function focusRuntimeFinding(owner, finding) {
 }
 
 const REFUSAL_REMEDIATION = Object.freeze({
+  SAGA_CONTRACT_INVALID: 'workspace.saga.invalid',
+  SAGA_PARTICIPANT_UNSUPPORTED: 'workspace.saga.unsupported',
+  SAGA_DURABILITY_REQUIRED: 'workspace.saga.durability',
   INVALID_STRUCTURE: 'workspace.refusal.invalidStructure',
   REQUIRED_PROPERTY_MISSING: 'workspace.refusal.requiredProperty',
   PROPERTY_TYPE_INVALID: 'workspace.refusal.propertyType',
@@ -12694,15 +13041,230 @@ async function presentRuntimeRefusal(owner, finding, title = uiMessage('workspac
   await focusRuntimeFinding(owner, finding);
 }
 
-async function playGraph(mode = 'test') {
+const deploymentGraphMatches = new WeakMap();
+function documentMatchesDeployment(owner) {
+  const revision = owner.history.revision(), graphMl = owner.deploymentRun.graphMl;
+  const artifacts = programNodes(owner.graph).map(node => programReadiness(owner).phases.get(node.id)?.artifactId).join(':');
+  const cached = deploymentGraphMatches.get(owner);
+  if (cached?.graph === owner.graph && cached.revision === revision && cached.graphMl === graphMl && cached.artifacts === artifacts) return cached.matches;
+  try {
+    const pinned = cached?.graphMl === graphMl ? cached.pinned : deploymentGraphSignature(graphMl);
+    const matches = deploymentGraphSignature(serializeGraphML(graphForAuthorizedExecution(owner, canonicalGraphSnapshot(owner.graph)))) === pinned;
+    deploymentGraphMatches.set(owner, { graph: owner.graph, revision, graphMl, artifacts, pinned, matches });
+    return matches;
+  } catch { return false; }
+}
+
+function retireOriginDeploymentView(owner) {
+  owner?.originDeploymentView?.disconnect?.();
+  if (owner) owner.originDeploymentView = null;
+}
+
+function connectOriginDeploymentView(owner, client, envelope, { signal } = {}) {
+  const source = envelope.source, binding = owner.deploymentRun, authority = workspaceAuthority, incarnation = owner.incarnation;
+  if (!binding || source.deploymentId !== binding.deploymentId || source.graphVersion !== binding.graphVersion
+      || !tenantAuthorityAllows(owner, client)) return Promise.reject(productError('workspace.run.observationFailed', new Error('OBSERVATION_SOURCE_CHANGED')));
+  const old = owner.originDeploymentView;
+  if (old?.client === client && old.binding === binding && old.source.incarnationId === source.incarnationId
+      && (old.barrier?.pending || old.barrier?.canAdmit())) {
+    if (old.barrier.pending && signal) {
+      const cancel = () => old.barrier.retire();
+      if (signal.aborted) cancel();
+      else {
+        signal.addEventListener('abort', cancel, { once: true });
+        const release = () => signal.removeEventListener('abort', cancel);
+        old.ready.then(release, release);
+      }
+    }
+    return old.ready;
+  }
+  retireOriginDeploymentView(owner);
+  const state = createDeploymentViewState({ ...source, lifecycle: envelope.lifecycle });
+  const observation = { client, binding, source, state, ready: null, live: false, disconnect: null, barrier: null };
+  owner.originDeploymentView = observation;
+  const canvas = owner.cy, tenantId = owner.tenantId;
+  const ownsSource = () => workspace.find(owner.id) === owner && owner.incarnation === incarnation
+    && owner.originDeploymentView === observation && owner.deploymentRun === binding && owner.tenantId === tenantId
+    && source.deploymentId === state.binding.deploymentId && source.graphVersion === state.binding.graphVersion
+    && source.incarnationId === state.binding.incarnationId;
+  const current = () => ownsSource() && runtimeClient === client && workspaceAuthority === authority
+    && tenantAuthorityAllows(owner, client) && observation.barrier?.active !== false;
+  const ownsRenderer = () => ownsSource() && owner.cy === canvas && canvas && !canvas.destroyed();
+  const mayPaint = () => !(owner.execution.executionId && !owner.execution.finished.has(owner.execution.executionId))
+    && documentMatchesDeployment(owner);
+  // Ending observation may revoke stream authority. Clearing its own paint needs only captured
+  // presentation ownership; this predicate must never authorize an event or initial admission.
+  const publishReset = () => {
+    if (!state.nodeStates.size && !state.edgeStates.size && ownsRenderer() && mayPaint()) {
+      // A background Monitoring renderer is paused, but still owns its old flow decoration.
+      // Its reset is in-place and never reheats the simulation or accepts new runtime data.
+      elasticRendererFor(owner)?.resetRuntime?.({ idleStroke: runtimeColor('idle') });
+      paintDocumentDeploymentView(owner, state);
+    }
+  };
+  const barrier = createDeploymentObservationBarrier({ source, isCurrent: current, signal,
+    cancel: () => {
+      observation.live = false; observation.stopStream?.();
+      if (['LIVE', 'CONNECTING'].includes(state.continuity))
+        resetDeploymentViewRuntime(state, 'UNAVAILABLE', 'OBSERVATION_ENDED');
+      publishReset();
+    } });
+  observation.barrier = barrier; observation.ready = barrier.ready;
+  let paintQueued = false;
+  const paint = () => {
+    if (paintQueued) return;
+    paintQueued = true;
+    const renderer = owner.renderer;
+    scheduleFrame(() => {
+      paintQueued = false;
+      if (current() && ownsRenderer() && owner.renderer === renderer && mayPaint()) paintDocumentDeploymentView(owner, state);
+    });
+  };
+  observation.stopStream = client.connectDeploymentObservation(source, frame => {
+    if (!current()) return;
+    const result = applyDeploymentViewFrame(state, frame);
+    barrier.frame(frame, result);
+    if (!barrier.active || !result.accepted) return;
+    observation.live = !result.terminal && state.continuity === 'LIVE';
+    if (frame.type === 'execution') {
+      const event = { ...frame.event, graphVersion: frame.graphVersion,
+        deploymentId: binding.registrationIdentity || binding.deploymentId };
+      owner.execution.events.push(runtimeEventProjection(event));
+      if (owner.execution.events.length > RUNTIME_EVENT_TAIL) owner.execution.events.shift();
+      owner.historyMonitor?.notify?.(event);
+      if (owner === workspace.active) { appendActivityEvent(event); refreshAssistantContext(); }
+    }
+    paint();
+  }, connection => {
+    if (!current()) return;
+    barrier.connection(connection);
+    if (connection !== 'connected') observation.live = false;
+    if (['error', 'revoked'].includes(connection)) {
+      observation.live = false;
+      resetDeploymentViewRuntime(state, connection === 'revoked' ? 'DETACHED' : 'UNAVAILABLE'); publishReset();
+    }
+  }, { diagnostics: true });
+  observation.disconnect = () => { barrier.retire(); observation.stopStream(); };
+  return observation.ready;
+}
+
+const deploymentObservations = new WeakMap();
+function observeDocumentDeployment(owner) {
+  const client = runtimeClient, authority = workspaceAuthority, binding = owner?.deploymentRun;
+  if (!binding || !client || !tenantAuthorityAllows(owner, client)) return;
+  const previous = deploymentObservations.get(owner);
+  if (previous?.client === client && previous.binding === binding) return;
+  clearTimeout(previous?.timer);
+  const observation = { client, binding, timer: null };
+  deploymentObservations.set(owner, observation);
+  const current = () => workspace.find(owner.id) === owner && owner.deploymentRun === binding
+    && runtimeClient === client && workspaceAuthority === authority && tenantAuthorityAllows(owner, client)
+    && deploymentObservations.get(owner) === observation;
+  const read = async () => {
+    if (!current()) return;
+    if (!deploymentRunIsPending(owner) && !owner.deploymentRunStopPending) {
+      try {
+        await observeOriginDeployment(owner, { client, isCurrent: () => current()
+          && !deploymentRunIsPending(owner) && !owner.deploymentRunStopPending });
+        if (current() && !deploymentRunIsPending(owner) && !owner.deploymentRunStopPending) {
+          const source = owner.deploymentRunObservedSource;
+          if (source && ['READY', 'DEGRADED'].includes(owner.deploymentRunStatus)
+              && owner.originDeploymentView?.source.incarnationId !== source.incarnationId) {
+            const view = await client.deploymentView(binding.deploymentId);
+            if (current()) await connectOriginDeploymentView(owner, client, view);
+          } else if (owner.deploymentRunStatus === 'STOPPED') retireOriginDeploymentView(owner);
+        }
+      }
+      catch { if (current() && !deploymentRunIsPending(owner) && !owner.deploymentRunStopPending) owner.deploymentRunStatus = 'UNKNOWN'; }
+    }
+    if (!current()) return;
+    syncPaneHeaders(); refreshCommands();
+    observation.timer = setTimeout(read, 5000);
+  };
+  void read();
+}
+
+async function runCapturedDocumentDeployment(owner, client, { graphMl, payload, displayName, attachment }) {
+  const authority = workspaceAuthority, scope = activeWorkspaceScope, persistenceGeneration = workspacePersistenceGeneration;
+  const incarnation = owner.incarnation;
+  const current = () => workspace.find(owner.id) === owner && owner.incarnation === incarnation
+    && workspaceAuthority === authority && tenantAuthorityAllows(owner, client)
+    && scope === activeWorkspaceScope && persistenceGeneration === workspacePersistenceGeneration;
+  const persist = async () => {
+    if (!current() || !scope || !workspacePersistenceWritable || workspacePersistenceSuspended
+        || owner.tenantId !== scope.tenantId) throw productError('workspace.run.persistenceRequired', new Error('RUN_STORAGE_UNAVAILABLE'));
+    scheduleWorkspacePersistence(); const requiredRevision = workspacePersistenceRevision;
+    await flushWorkspacePersistence();
+    if (!current() || !workspacePersistenceWritable || workspacePersistedRevision < requiredRevision)
+      throw productError('workspace.run.persistenceRequired', new Error('RUN_STORAGE_NOT_COMMITTED'));
+  };
+  if (owner === workspace.active) addActivityMessage(uiMessage('workspace.run.reconciling'), uiMessage('workspace.run.draftSeparate'));
+  let result;
+  try { result = await runOriginDeployment(owner, { client, serviceUrl: scope?.serviceUrl || normalizedWorkspaceServiceUrl(client),
+    tenantId: owner.tenantId, graphMl, inputJson: JSON.stringify(payload), attachment,
+    persist, isCurrent: current, onObservation: (observation, options) => connectOriginDeploymentView(owner, client, observation, options),
+    onPhase: () => { syncPaneHeaders(); refreshCommands(); } }); }
+  catch (error) {
+    void observeOriginDeployment(owner, { client, isCurrent: current }).catch(() => {}).finally(() => {
+      if (current()) { syncPaneHeaders(); refreshCommands(); }
+    });
+    throw error;
+  }
+  if (!current()) return false;
+  if (result.stoppedBeforeInitial) { syncPaneHeaders(); refreshCommands(); return true; }
+  if (owner.deploymentRunMonitoringError) addActivityMessage(uiMessage('workspace.notice.deployment'),
+    uiMessage('workspace.deployment.monitoringUnavailable'), 'failed');
+  owner.humanTasks.deploymentId = result.intent.deploymentId;
+  owner.humanTasks.registrationIdentity = result.intent.registrationIdentity;
+  owner.humanTasks.graphVersion = result.intent.graphVersion;
+  owner.provenance.deploymentId = result.intent.deploymentId; owner.provenance.sourceGraphVersion = result.intent.graphVersion;
+  // Hosted initial START belongs to the deployment journal, not the one-shot result registry.
+  // Its permanent identity must never become an unresolved Test execution after a restart.
+  if (owner.execution.executionId === result.intent.traversalId) setDocumentExecution(owner, null, null);
+  observeDocumentDeployment(owner);
+  void configureHumanTasks(owner); reconcileDocumentHistory(owner); owner.historyMonitor?.refresh?.();
+  syncPaneHeaders(); scheduleWorkspacePersistence();
+  if (owner === workspace.active) { refreshCommands(); addActivityMessage(uiMessage('workspace.run.ready'), uiMessage('workspace.run.attached', {
+    deploymentId: result.intent.deploymentId, version: shortId(result.intent.graphVersion) }), 'completed'); }
+  return true;
+}
+
+async function runAsNewDeployment({ owner = workspace.active, confirmed = false } = {}) {
+  if (owner !== workspace.active || !owner?.deploymentRun || !documentIsEditable(owner) || !tenantAuthorityAllows(owner)
+      || deploymentRunIsPending(owner) || owner.deploymentRunStopPending) return false;
+  captureActiveDocument();
+  // Keep the original document and its immutable association available for inspection.
+  // A separate draft is the explicit boundary for a new registration and initial START.
+  const graph = canonicalGraphSnapshot(owner.graph);
+  graph.nodeMap = Object.fromEntries(graph.nodes.map(node => [node.id, node]));
+  openDocument({ name: owner.name, graph, tenantId: owner.tenantId,
+    presentation: { ...visualGroupPresentation(owner), renderMode: owner.renderMode,
+      layoutMode: owner.layoutMode, visualStyle: owner.visualStyle,
+      designArrangement: owner.designArrangement, fontSize: owner.fontSize } });
+  return playGraph('run', { confirmed });
+}
+
+async function playGraph(mode = 'test', { confirmed = false } = {}) {
   const owner = workspace.active;
   const ownerGraph = graphData;
   if (!owner || !ownerGraph) return showInspectorMessage(uiText("workspace.notice.create.or.load.a.workflow.first.3"));
   if (!tenantAuthorityAllows(owner)) {
     return showInspectorMessage(uiText("workspace.notice.wait.for.this.document.workspace.authority.to.be.verified.3"));
   }
+  const originIncarnation = owner.incarnation;
+  if (workspace.active === owner && documentIsEditable(owner)) syncGraphPositions();
+  const submissionGraph = canonicalGraphSnapshot(ownerGraph);
+  const programSignature = programNodes(ownerGraph).length ? programBuildPlan(owner).signature : null;
+  let graphMl = ownerGraph.format === 'deployment' ? '' : serializeGraphML(graphForAuthorizedExecution(owner, submissionGraph));
+  const payload = document.getElementById('execution-payload').value;
+  const displayName = owner.displayName;
+  const ownerCy = owner.cy || cy;
+  const ownerLayoutMode = owner.layoutMode;
+  const ownerVisualStyle = owner.visualStyle;
+  const attachment = !owner.deploymentRun && owner.provenance?.deploymentId && owner.provenance?.sourceGraphVersion
+    ? { deploymentId: owner.provenance.deploymentId, graphVersion: owner.provenance.sourceGraphVersion } : null;
   owner.execution.intentGeneration += 1;
-  if (programNodes(ownerGraph).length) {
+  if (programNodes(ownerGraph).length && !(mode === 'run' && (owner.deploymentRun || attachment))) {
     const ready = await ensureProgramGraphReady(owner, { automatic: true });
     if (!ready) {
       const phases = programReadiness(owner).phases;
@@ -12716,6 +13278,9 @@ async function playGraph(mode = 'test') {
         'failed');
       return;
     }
+    if (workspace.find(owner.id) !== owner || owner.incarnation !== originIncarnation
+        || programBuildPlan(owner).signature !== programSignature) return;
+    graphMl = serializeGraphML(graphForAuthorizedExecution(owner, submissionGraph));
   }
   const flight = acquireExecutionCommand(owner.execution);
   if (!flight) {
@@ -12724,15 +13289,9 @@ async function playGraph(mode = 'test') {
     return;
   }
 
-  // Everything a later POST can consume is captured before the first await. The graph is serialized
-  // now, not read from whichever document may become active while a delayed terminal GET is pending.
-  syncGraphPositions();
-  const graphMl = serializeGraphML(graphForAuthorizedExecution(owner, ownerGraph));
-  const payload = document.getElementById('execution-payload').value;
-  const displayName = graphDisplayName;
-  const ownerCy = cy;
-  const ownerLayoutMode = layoutMode;
-  const ownerVisualStyle = visualStyle;
+  // The origin graph and input were captured before readiness. Only governed artifact references
+  // from the same unchanged program plan were overlaid after readiness.
+
   renderWorkflowValidationAdvisory(ownerGraph, owner);
   if (mode === 'run' && (!nodeCatalogLoaded || nodeCatalogFailure)) {
     releaseExecutionCommand(flight);
@@ -12744,8 +13303,8 @@ async function playGraph(mode = 'test') {
   if (!runtimeClient) connectRuntime();
   const executionClient = runtimeClient;
   try {
-    const inspection = await executionClient.inspectGraph(graphMl,
-      sourceCount > 0 ? 'SOURCE_SESSION' : 'EXECUTION');
+    const inspection = graphMl && !(mode === 'run' && (owner.deploymentRun || attachment))
+      ? await executionClient.inspectGraph(graphMl, mode === 'run' ? 'LOCAL_DEPLOYMENT' : 'EXECUTION') : { valid: true };
     if (!inspection.valid && inspection.findings[0]) {
       releaseExecutionCommand(flight);
       await presentRuntimeRefusal(owner, inspection.findings[0], uiMessage('workspace.refusal.graphAdmission'));
@@ -12762,15 +13321,8 @@ async function playGraph(mode = 'test') {
       return;
     }
   }
-  // Run has two meanings. A graph with an
-  // effective SOURCE starts a local listener session (unchanged below). Every other graph gets
-  // a real one-shot execution with effects (mode=run). The deployments panel lets that graph also be
-  // "registered and controlled as a local deployment" without
-  // hijacking this button. This is the Deployments-window contract.
-  const confirmation = sourceCount > 0
-    ? uiText("workspace.execution.localSession.confirm", { name: displayName, count: sourceCount })
-    : uiText("workspace.execution.run.confirm", { name: displayName });
-  if (mode === 'run' && !globalThis.confirm(confirmation)) {
+  const confirmation = uiText('workspace.run.confirmDeployment', { name: displayName });
+  if (mode === 'run' && !confirmed && !globalThis.confirm(confirmation)) {
     releaseExecutionCommand(flight);
     return;
   }
@@ -12778,37 +13330,32 @@ async function playGraph(mode = 'test') {
     releaseExecutionCommand(flight);
     return;
   }
-  const ownerStillActive = workspace.activeId === owner.id && workspace.find(owner.id) === owner
-    && tenantAuthorityAllows(owner, executionClient);
+  const ownerStillActive = (mode === 'run' || workspace.activeId === owner.id) && workspace.find(owner.id) === owner
+    && owner.incarnation === originIncarnation && tenantAuthorityAllows(owner, executionClient);
   if (!ownerStillActive || !executionCommandIsCurrent(flight)) {
     releaseExecutionCommand(flight);
     return;
   }
 
-  // Only a graph with an effective SOURCE
-  // starts a listener session here; a source-less Run falls through to the one-shot submission below,
-  // as required by the confirmation-text contract above.
-  if (sourceCount > 0) {
+  if (mode === 'run') {
+    let recoverMissingDeployment = false;
     try {
-      // The canvas is cleared for a listener session exactly as it is for a run. Before this, a
-      // source start left the previous run's colours in place -- and once a session can actually
-      // paint, stale paint is no longer harmless decoration but a claim about traffic that is not
-      // this session's.
-      resetRuntimeState(owner, ownerCy, ownerGraph, ownerLayoutMode, ownerVisualStyle);
-      await startSourceSession(owner, executionClient, graphMl, sourceCount);
+      await runCapturedDocumentDeployment(owner, executionClient, { graphMl, payload, displayName, attachment });
     } catch (error) {
-      // startSourceSession normally converts request failures to an honest, fenced lifecycle state.
-      // Keep this guard for unexpected programming failures without mutating an unrelated binding.
-      if (workspace.find(owner.id) === owner && sourceSessionIsActive(owner.sourceSession)) {
-        const token = captureSourceSessionToken(owner.sourceSession);
-        updateSourceSession(owner, {
-          state: 'UNKNOWN', sourceCount: owner.sourceSession.sourceCount, diagnostic: '',
-        }, token, { observationUnavailable: true });
+      if (workspace.find(owner.id) === owner && owner === workspace.active) {
+        if (error?.uiMessageKey === 'workspace.run.restoreUnavailable' && documentIsEditable(owner)
+            && tenantAuthorityAllows(owner, executionClient)) {
+          const binding = owner.deploymentRun;
+          recoverMissingDeployment = globalThis.confirm(uiText('workspace.run.recoverUnavailable', {
+            name: owner.displayName, deploymentId: binding.deploymentId,
+          })) && workspace.active === owner && owner.incarnation === originIncarnation
+            && owner.deploymentRun === binding && tenantAuthorityAllows(owner, executionClient);
+          if (!recoverMissingDeployment) addActivityMessage(uiMessage('workspace.run.failed'), uiErrorMessage(error), 'failed');
+        } else if (error?.finding) await presentRuntimeRefusal(owner, error.finding, uiMessage('workspace.app.execution.refused'));
+        else addActivityMessage(uiMessage('workspace.run.failed'), uiErrorMessage(error), 'failed');
       }
-    } finally {
-      releaseExecutionCommand(flight);
-      refreshCommands();
-    }
+    } finally { releaseExecutionCommand(flight); syncPaneHeaders(); refreshCommands(); }
+    if (recoverMissingDeployment) return runAsNewDeployment({ owner, confirmed: true });
     return;
   }
 
@@ -12864,6 +13411,8 @@ function handleRuntimeEvent(event, client = runtimeClient) {
   if (!streamScope) return;
   const target = documentForRuntimeEvent(workspace, event, streamScope);
   if (!target || !tenantAuthorityAllows(target, client)) return;
+  if (target.originDeploymentView?.live && (deploymentRunOwnsEvent(target, event)
+      || !event.deploymentId && target.sourceSession.processOwners.get(event.processInstanceId)?.deploymentBindingToken)) return;
   const isTerminal = event.type === 'EXECUTION_COMPLETED' || event.type === 'EXECUTION_FAILED'
     || event.type === 'EXECUTION_CANCELLED';
   const isActive = target === workspace.active;
@@ -12894,7 +13443,8 @@ function handleRuntimeEvent(event, client = runtimeClient) {
   if (event.type === 'EXECUTION_PAUSED') setExecutionPaused(target, true);
   if (event.type === 'EXECUTION_RESUMED') setExecutionPaused(target, false);
 
-  if (isTerminal) {
+  if (isTerminal && (target.execution.executionId === event.executionId
+      || target.execution.executionId === PENDING_EXECUTION)) {
     setExecutionPaused(target, false);
     const recoveredFromUnknown = target.execution.reconciliationState === 'unknown';
     settleReconciledExecution(target, event.executionId, target.execution.reconciliationClient,
@@ -12914,6 +13464,13 @@ function handleRuntimeEvent(event, client = runtimeClient) {
     }
   }
 
+  const deploymentEvent = deploymentRunOwnsEvent(target, event)
+    || !event.deploymentId && Boolean(target.sourceSession.processOwners.get(event.processInstanceId)?.deploymentBindingToken);
+  if (deploymentEvent) target.historyMonitor?.notify?.(event);
+  // Never paint a pinned deployment onto a different edited draft. The deployed view remains
+  // available independently of the authoring document.
+  if (deploymentEvent && target.deploymentRun?.graphMl && !documentMatchesDeployment(target)) return;
+
   // Past this point the event paints nodes, and it paints them on the document that owns the run —
   // which is not necessarily the one on screen.
   const targetCy = isActive ? cy : target.cy;
@@ -12923,7 +13480,7 @@ function handleRuntimeEvent(event, client = runtimeClient) {
     const knownEdgeIds = new Set((targetGraph?.edges || []).map(edge => edge.id));
     const observation = observeEdgeTraversal(target.execution.monitoringFlow, event, { knownEdgeIds });
     if (observation.changed) {
-      updateD3RuntimeEdge(target, observation.edgeId);
+      updateRuntimeEdge(target, observation.edgeId);
       if (isActive) {
         drawingModelController?.scheduleRefresh(target.id);
         const generation = target.execution.generation;
@@ -13086,6 +13643,9 @@ function resetRuntimeState(owner, targetCy, targetGraph, targetLayoutMode, targe
     if (owner === workspace.active) drawingModelController?.scheduleRefresh(owner.id);
     return;
   }
+  targetCy.edges().forEach(edge => {
+    edge.data({ runtimeActive: false, runtimeRecent: 0, runtimeCount: 0 });
+  });
   targetCy.nodes().forEach(node => {
     node.removeStyle('border-color border-width underlay-color underlay-opacity underlay-padding label');
     node.data('instances', 0);
@@ -13169,14 +13729,18 @@ function applyRuntimeVisual(node, owner = workspace.active) {
   const active = Number(node.data('instances')) || 0;
   node.data('label', `${NODE_ICONS[node.data('nodeType')] || '• '}${runtimeNodeLabel(node)}`);
   if (isN8nFamilyLayout()) node.style('label', runtimeNodeLabel(node));
+  const pending = Number(node.data('humanTaskPending')) > 0;
+  if (pending) node.removeStyle('underlay-color underlay-opacity underlay-padding');
   if (state === 'idle') return;
   const color = runtimeColor(state);
   node.style({
     'border-color': color,
     'border-width': state === 'active' ? 6 : 4,
-    'underlay-color': color,
-    'underlay-opacity': state === 'active' ? 0.28 : 0.12,
-    'underlay-padding': state === 'active' ? 12 + Math.min(active, 8) * 2 : 7,
+    ...(pending ? {} : {
+      'underlay-color': color,
+      'underlay-opacity': state === 'active' ? 0.28 : 0.12,
+      'underlay-padding': state === 'active' ? 12 + Math.min(active, 8) * 2 : 7,
+    }),
   });
   if (owner === workspace.active) drawingModelController?.scheduleRefresh(owner.id);
 }
@@ -13189,7 +13753,7 @@ function updateD3RuntimeNode(owner, nodeId, activeInstances, state, inFlightArri
   datum.instances = activeInstances;
   datum.arrivals = inFlightArrivals;
   datum.runtimeState = state;
-  datum.runtimeObserved = true;
+  datum.runtimeObserved = event.runtimeObserved !== false;
   datum.lastEventType = event.type || null;
   datum.lastOccurredAt = event.occurredAt || null;
   datum.processingDuration = event.processingDuration ?? null;
@@ -13219,41 +13783,45 @@ function updateD3RuntimeNode(owner, nodeId, activeInstances, state, inFlightArri
   renderer.updateNode?.(nodeId, datum);
 }
 
-function updateD3RuntimeEdge(owner, edgeId) {
+// The Design canvas owns runtime paint even when no elastic renderer is mounted.
+const runtimeEdgeTimers = new WeakMap();
+function updateRuntimeEdge(owner, edgeId) {
+  if (!owner?.cy || workspace.find(owner.id) !== owner) return;
+  const flow = edgeFlowSnapshot(owner.execution.monitoringFlow, edgeId);
+  const projection = groupProjection(owner);
+  const projected = projection?.edges.find(edge => edge.originalEdgeIds.includes(edgeId));
+  const visible = owner.cy.getElementById(projected?.id || edgeId);
+  visible.data('runtimeActive', flow.recent > 0);
+  visible.data('runtimeRecent', flow.recent);
+  visible.data('runtimeCount', flow.count);
   const renderer = elasticRendererFor(owner);
-  if (!renderer?.updateEdgeFlow || !rendererSessions.isLive(renderer.token)) return;
-  const paint = () => {
-    if (!rendererSessions.isLive(renderer.token)) return;
-    const flow = edgeFlowSnapshot(owner.execution.monitoringFlow, edgeId);
-    const remainingPulseMs = flow.expiresAt == null ? 0 : Math.max(0, flow.expiresAt - Date.now());
+  if (renderer?.updateEdgeFlow && rendererSessions.isLive(renderer.token)) {
     renderer.updateEdgeFlow(edgeId, flow, {
       reducedMotion: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true,
-      decayMs: remainingPulseMs || FLOW_PULSE_MS,
-      onDecay: flow.recent > 0 ? paint : null,
     });
-    const projection = groupProjection(owner);
-    const graphEdge = owner.graph?.edges?.find(edge => edge.id === edgeId);
-    const sourceGroup = graphEdge ? projection?.groupByNodeId.get(graphEdge.source) : null;
-    const targetGroup = graphEdge ? projection?.groupByNodeId.get(graphEdge.target) : null;
-    if (sourceGroup) paintVisibleGroupRuntime(owner, sourceGroup);
-    if (targetGroup && targetGroup !== sourceGroup) paintVisibleGroupRuntime(owner, targetGroup);
-    const projected = projection?.edges.find(edge => edge.originalEdgeIds.includes(edgeId));
-    if (projected && !elasticRendererFor(owner)?.elasticMount) {
-      const visible = owner.cy?.getElementById(projected.id);
-      visible?.data('runtimeActive', flow.recent > 0);
-      visible?.data('runtimeRecent', flow.recent);
-      visible?.data('runtimeCount', flow.count);
-    }
-    scheduleMinimap(owner);
-    if (owner === workspace.active) drawingModelController?.scheduleRefresh(owner.id);
-  };
-  paint();
+  }
+  let timers = runtimeEdgeTimers.get(owner);
+  if (!timers) { timers = new Map(); runtimeEdgeTimers.set(owner, timers); }
+  clearTimeout(timers.get(edgeId)); timers.delete(edgeId);
+  if (flow.recent > 0) {
+    timers.set(edgeId, setTimeout(() => {
+      timers.delete(edgeId);
+      updateRuntimeEdge(owner, edgeId);
+    }, Math.max(1, (flow.expiresAt || Date.now() + FLOW_PULSE_MS) - Date.now() + 1)));
+  }
+  const graphEdge = owner.graph?.edges?.find(edge => edge.id === edgeId);
+  const sourceGroup = graphEdge ? projection?.groupByNodeId.get(graphEdge.source) : null;
+  const targetGroup = graphEdge ? projection?.groupByNodeId.get(graphEdge.target) : null;
+  if (sourceGroup) paintVisibleGroupRuntime(owner, sourceGroup);
+  if (targetGroup && targetGroup !== sourceGroup) paintVisibleGroupRuntime(owner, targetGroup);
+  scheduleMinimap(owner);
+  if (owner === workspace.active) drawingModelController?.scheduleRefresh(owner.id);
 }
 
 function rehydrateD3RuntimeEdges(owner) {
   const renderer = elasticRendererFor(owner);
   if (!renderer?.links || !rendererSessions.isLive(renderer.token)) return;
-  renderer.links.forEach(link => updateD3RuntimeEdge(owner, link.id));
+  renderer.links.forEach(link => updateRuntimeEdge(owner, link.id));
 }
 
 // Process, traversal and invocation are not synonyms — a process is the long-lived instance,
@@ -13372,7 +13940,11 @@ function appendActivityEvent(event) {
   const hasNode = Boolean(event.nodeId);
   const instances = Number(event.activeInstances) || 0;
   const inFlight = Number(event.inFlightArrivals) || 0;
-  const detail = uiComputed(() => publicExecutionDescription(description, type, publicReason)
+  const activeOwner = workspace.active;
+  const initialCompleted = type === 'EXECUTION_COMPLETED'
+    && event.executionId === activeOwner?.deploymentRun?.traversalId;
+  const detail = uiComputed(() => (initialCompleted
+    ? uiText('workspace.run.initialCompleted') : publicExecutionDescription(description, type, publicReason))
     + (hasNode ? uiText('activity.event.counts', {
       instances, inFlight,
     }) : '')
@@ -14491,6 +15063,7 @@ const capturedDeleteShortcutEvents = new WeakSet();
 function executeGlobalShortcut(event, expectedCommandId = '') {
   const id = commandRegistry.matchShortcut(event, commandContext(), 'global');
   if (!id || (expectedCommandId && id !== expectedCommandId)) return false;
+  if (event.target.closest?.('.deployment-history') && /^(edit\.|insert\.|node\.|edge\.|layout\.)/.test(id)) return false;
   event.preventDefault();
   executeCommand(id, { event, control: event.target });
   return true;
@@ -15433,7 +16006,9 @@ function renderCloseAllList(documents, kind) {
     const item = document.createElement('li');
     if (kind === 'sessions') {
       const count = document_.sourceSession.sourceCount;
-      item.textContent = uiText(count === 1 ? 'closeAll.sessions.item.one' : 'closeAll.sessions.item.many', {
+      item.textContent = document_.deploymentRun
+        ? uiText('workspace.run.closeItem', { name: document_.displayName, deploymentId: document_.deploymentRun.deploymentId })
+        : uiText(count === 1 ? 'closeAll.sessions.item.one' : 'closeAll.sessions.item.many', {
         name: document_.displayName,
         count,
       });
@@ -15580,8 +16155,7 @@ async function commitCloseAllDocuments() {
       stage = 'stop';
       for (const owner of classified.activeSessions) {
         if (!resolveDocumentCloseSnapshot(workspace, pending.snapshot).includes(owner)) continue;
-        const stopped = sourceSessionIsActive(owner.sourceSession)
-          ? await stopActiveSourceSession(owner) : true;
+        const stopped = await stopDocumentRuntime(owner);
         if (pendingCloseAllDocuments !== pending || pending.cancelled) return false;
         if (!stopped) {
           throw productError("workspace.error.app.source.session.did.not.stop", new Error('Source session did not stop.'));
@@ -15644,26 +16218,11 @@ function handleCloseAllDocumentsAction(action) {
   return true;
 }
 
-/**
- * Closing is never Stop, and that difference has to reach the operator as a real
- * choice, not merely a code comment on {@link closeDocument}. A document with an active local
- * listener session started by Run gets an explicit dialog naming the distinction before the close
- * proceeds; a document with no active session closes immediately.
- * Reached both directly (no unsaved changes) and after the unsaved-changes dialog resolves
- * (save/discard), so the two axes -- persistence of edits, lifecycle of a server-side session -- are
- * asked about independently rather than folded into one dialog that could not state either clearly.
- *
- * This is strictly about `owner.sourceSession`, which exists only for a graph with an
- * effective SOURCE (Run's other branch is a one-shot execution with no ongoing session to ask about).
- * A deployment registered through the separate Deployments panel (see `deployment-panel.js`) has no
- * document tying it to this dialog at all -- it is tenant-scoped, not document-scoped, so closing any
- * document neither stops nor undeploys it. That is also why this dialog offers no Undeploy action:
- * undeploy exists only on that panel, next to the deployment it removes, never behind a document close.
- */
+/** Closing detaches observation. Only the explicit Stop choice controls a captured server binding. */
 function proceedToCloseDocument(id, origin) {
   const target = workspace.find(id);
   if (!target) return false;
-  if (!sourceSessionIsActive(target.sourceSession)) return completeCloseDocument(id);
+  if (!sourceSessionIsActive(target.sourceSession) && !boundDeploymentNeedsCloseDecision(target)) return completeCloseDocument(id);
   return openActiveDeploymentCloseDialog({ documentId: id, origin });
 }
 
@@ -15686,6 +16245,17 @@ function setGraphAuthoringAvailability(available) {
 }
 
 function applyAuthoringDocument(target, result, providerDocumentId = result.documentId) {
+  if (target.name !== providerDocumentId) {
+    target.name = providerDocumentId;
+    target.displayName = allocateDocumentDisplayName(providerDocumentId);
+    if (target === workspace.active) {
+      graphName = target.name;
+      graphDisplayName = target.displayName;
+      window.document.getElementById('graph-title').textContent = graphDisplayName;
+      window.document.title = uiText("workspace.app.value1.ravenroot.ui", { graphDisplayName });
+    }
+    syncDocumentSwitcher();
+  }
   target.authoring.providerDocumentId = providerDocumentId;
   target.authoring.revision = structuredClone(result.revision);
   target.authoring.graphId = result.graphId;
@@ -15704,139 +16274,352 @@ function applyAuthoringDocument(target, result, providerDocumentId = result.docu
   }
 }
 
+function requireRepositoryBinding(client, authority) {
+  if (client !== graphAuthoringClient || authority !== workspaceAuthority)
+    throw new Error(uiText('repository.error.connectionChanged'));
+}
+
+function repositoryNotice(message) {
+  let surface = document.getElementById('repository-notice');
+  if (!surface) {
+    surface = document.createElement('div'); surface.id = 'repository-notice';
+    surface.setAttribute('role', 'alert');
+    document.getElementById('main').before(surface);
+  }
+  surface.textContent = message; surface.hidden = !message;
+}
+
+function repositoryFailureMessage(error, imported = false) {
+  if (error?.status === 409 || error?.code === 'CONFLICT')
+    return uiText(imported ? 'repository.error.importConflict' : 'repository.error.conflict');
+  if ([401, 403].includes(error?.status)) return uiText('repository.error.authorization');
+  return uiText('repository.error.failed', { reason: uiErrorReason(error) });
+}
+
+// Scope is browser-safe configuration identity, never a credential or a filename-derived authority.
+function repositoryScope() {
+  if (workspaceAuthority.state !== 'ready') return null;
+  const configuration = runtimeConfiguration.configuration.graphAuthoring;
+  return JSON.stringify([normalizedWorkspaceServiceUrl(workspaceAuthority.client),
+    workspaceAuthority.scope?.tenantId ?? null, configuration.provider,
+    configuration.repositoryDisplay, configuration.releaseBranch]);
+}
+
+function repositoryDocumentBindingIsCurrent(target, scope = repositoryScope()) {
+  if (!scope || !tenantAuthorityAllows(target)
+      || (target.authoring.providerDocumentId && target.authoring.repositoryScope !== scope)) {
+    repositoryNotice(uiText('repository.error.sourceBinding'));
+    return false;
+  }
+  return true;
+}
+
+function openRepositorySource(documentId, source, scope) {
+  return workspace.documents.find(target => tenantAuthorityAllows(target)
+    && target.authoring.repositoryScope === scope
+    && target.authoring.providerDocumentId === documentId
+    && target.authoring.draftDeleted === (source === 'release')) || null;
+}
+
+function repositoryDocumentHasLocalWork(target) {
+  return Boolean(target && (paneIsDirty(target) || target.authoring.saveFlight || target.authoring.saveError
+    || (inspectorDraft?.documentId === target.id && inspectorDraft.form.isConnected
+      && inspectInspectorDraft(inspectorDraft).changed)));
+}
+
+function preserveOpenRepositoryGraph(target) {
+  activateDocument(target.id);
+  if (workspace.active !== target) return false;
+  repositoryNotice(uiText('repository.open.preserved') + (target.authoring.saveError
+    ? ` ${uiText('repository.open.saveFailed', { reason: target.authoring.saveError })}` : ''));
+  updateHistoryUi();
+  return true;
+}
+
+async function createRepositorySuccessor() {
+  const target = workspace.active;
+  const authoring = target?.authoring;
+  const client = graphAuthoringClient, authority = workspaceAuthority;
+  if (!gitAuthoringEnabled() || !authoring?.draftDeleted || !authoring.canWrite
+      || !runtimeConfiguration?.configuration?.graphAuthoring?.operations.includes('CREATE_NEXT_VERSION')) return false;
+  if (!repositoryDocumentBindingIsCurrent(target)) return false;
+  if (authoring.successor) return openRepositoryGraph({ documentId: authoring.providerDocumentId, source: 'draft' });
+  if (!globalThis.confirm(uiText('repository.version.confirm', {
+    current: authoring.releaseVersion, next: authoring.releaseVersion + 1,
+  }))) return false;
+  // Keep the identity on the source record so an uncertain retry reuses the same request.
+  authoring.versionRequest ||= crypto.randomUUID();
+  try {
+    await client.createNextVersion(authoring.providerDocumentId, authoring.revision, authoring.versionRequest);
+    requireRepositoryBinding(client, authority);
+    return openRepositoryGraph({ documentId: authoring.providerDocumentId, source: 'draft' });
+  } catch (error) { repositoryNotice(repositoryFailureMessage(error)); return false; }
+}
+
 async function openRepositoryGraph(requested = null) {
   if (!gitAuthoringEnabled()) return false;
+  const client = graphAuthoringClient, authority = workspaceAuthority;
   try {
     let documentId = requested?.documentId;
     let source = requested?.source;
     if (!documentId || !['draft', 'release'].includes(source)) {
-      const page = await graphAuthoringClient.list();
-      setGraphAuthoringAvailability(true);
-      if (!page.items.length) return showInspectorMessage(uiText("workspace.notice.this.repository.has.no.graphs.in.your.workspace")) || false;
-      const choices = page.items.flatMap(item => [
-        ...(!item.draftDeleted ? [{ key: `${item.documentId} [draft]`, documentId: item.documentId,
-          source: 'draft', label: uiText("workspace.repository.draft.choice", { documentId: item.documentId, version: item.releaseVersion })
-            + (item.released ? uiText("workspace.repository.released.choice.suffix", { version: item.releasedVersion,
-              publication: item.published ? uiText("workspace.repository.published.suffix") : uiText("workspace.app.publication.pending.or.failed") }) : '') }] : []),
-        ...(item.released ? [{ key: `${item.documentId} [released]`, documentId: item.documentId,
-          source: 'release', label: uiText("workspace.repository.released.choice", { documentId: item.documentId, version: item.releasedVersion })
-            + (item.published ? uiText("workspace.repository.published.suffix") : uiText("workspace.app.publication.pending.or.failed")) }] : []),
-      ]);
-      const selected = globalThis.prompt(uiText("workspace.app.open.a.repository.graph", { value: choices.map(item => item.label).join('\n') }),
-        choices[0].key)?.trim();
-      const choice = choices.find(item => item.key === selected);
+      const choice = await chooseRepositoryDocument(client);
       if (!choice) return false;
+      requireRepositoryBinding(client, authority);
       ({ documentId, source } = choice);
     }
-    const result = await graphAuthoringClient.open(documentId, source);
+    const scope = repositoryScope();
+    if (!scope) return false;
+    captureActiveDocument();
+    const existing = openRepositorySource(documentId, source, scope);
+    if (repositoryDocumentHasLocalWork(existing)) return preserveOpenRepositoryGraph(existing);
+    const observedHistory = existing?.history;
+    const observedRevision = observedHistory?.revision();
+    const observedIncarnation = existing?.incarnation;
+    const result = await client.open(documentId, source);
+    requireRepositoryBinding(client, authority);
+    captureActiveDocument();
+    // Another open or a local edit may have completed while the remote read was pending.
+    const current = openRepositorySource(documentId, source, scope);
+    if (repositoryDocumentHasLocalWork(current) || (current && current === existing
+        && (current.history !== observedHistory || current.history.revision() !== observedRevision
+          || current.incarnation !== observedIncarnation))) return preserveOpenRepositoryGraph(current);
     const graph = parsePreparedGraph(decodeGraphMl(result), result.documentId,
       { maxBytes: currentGraphDocumentByteLimit() });
-    const id = openDocument({ name: result.documentId, graph,
-      documentId: `repository:${result.documentId}:${source}` });
-    const target = workspace.find(id);
+    let target = current;
+    if (target) {
+      activateDocument(target.id);
+      if (workspace.active !== target) return false;
+      if (!completeReplaceActiveDocument(target, graph, result.documentId)) return false;
+    } else {
+      target = workspace.find(openDocument({ name: result.documentId, graph }));
+    }
+    target.authoring.repositoryScope = scope;
+    target.authoring.localChanges = false;
     applyAuthoringDocument(target, result, result.documentId);
+    target.authoring.canWrite = result.canWrite === true;
+    target.authoring.successor = false;
+    target.authoring.versionEligible = source === 'release' && result.revision.draft === 'absent';
+    if (source === 'release' && result.revision.draft !== 'absent') {
+      try {
+        const draft = await client.open(documentId, 'draft');
+        requireRepositoryBinding(client, authority);
+        target.authoring.successor = draft.graphId === result.graphId
+          && draft.releaseVersion === result.releaseVersion + 1;
+        target.authoring.versionEligible = draft.graphId === result.graphId
+          && draft.releaseVersion === result.releaseVersion && draft.graphMl === result.graphMl;
+        if (!target.authoring.successor && !target.authoring.versionEligible)
+          repositoryNotice(uiText('repository.version.reconcile'));
+      } catch (error) { repositoryNotice(repositoryFailureMessage(error)); }
+    }
+    syncGraphModeLabel();
+    if (source !== 'release' || target.authoring.successor || target.authoring.versionEligible) repositoryNotice('');
     target.history.markSaved();
     updateHistoryUi();
     addActivityMessage(uiMessage("workspace.notice.editor.20"), uiMessage("workspace.notice.opened.from", { documentId: result.documentId, repositoryDisplay: runtimeConfiguration.configuration.graphAuthoring.repositoryDisplay }), 'completed');
     return true;
   } catch (error) {
     setGraphAuthoringAvailability(false);
-    showInspectorMessage(uiErrorReason(error) || uiText("workspace.notice.the.repository.graph.could.not.be.opened")); return false;
+    repositoryNotice(repositoryFailureMessage(error)); return false;
   }
+}
+
+function repositoryPresentationSnapshot(target) {
+  return JSON.stringify([target.renderMode, target.layoutMode, target.designArrangement,
+    target.visualGroupState]);
 }
 
 async function saveRepositoryGraph() {
   const target = workspace.active;
-  if (!gitAuthoringEnabled() || !target || target.authoring.saveFlight) return false;
+  const client = graphAuthoringClient, authority = workspaceAuthority;
+  if (!gitAuthoringEnabled() || !target || !documentIsEditable(target) || target.authoring.saveFlight) return false;
+  if (!repositoryDocumentBindingIsCurrent(target)) return false;
+  const scope = repositoryScope();
   const providerDocumentId = target.authoring.providerDocumentId
     || globalThis.prompt(uiText("workspace.app.repository.filename"), target.name.endsWith('.graphml') ? target.name : `${target.name}.graphml`)?.trim();
   if (!providerDocumentId) return false;
-  const prepared = prepareDocumentDownload(target.id);
+  // Opening a managed graph may arrange its renderer and choose default view modes. A clean
+  // repository save still submits the exact accepted source, with the normal revision checks;
+  // only authored or explicit presentation edits go through download serialization.
+  const pristineSource = target.authoring.providerDocumentId && !paneIsDirty(target)
+    ? target.graph.sourceXml : null;
+  const prepared = pristineSource ? { xml: pristineSource } : prepareDocumentDownload(target.id);
   if (!prepared) return false;
   const history = target.history;
   const submittedRevision = history.revision();
+  const submittedPresentation = repositoryPresentationSnapshot(target);
   const expected = target.authoring.revision || { draft: 'absent', release: 'absent', publication: 'absent' };
   const flight = crypto.randomUUID();
   target.authoring.saveError = null;
   target.authoring.saveFlight = flight;
   updateHistoryUi();
   try {
-    const result = await graphAuthoringClient.save(providerDocumentId, prepared.xml, expected, flight);
+    const result = await client.save(providerDocumentId, prepared.xml, expected, flight);
+    requireRepositoryBinding(client, authority);
     if (target.authoring.saveFlight !== flight) return false;
     applyAcceptedGraphMl(target.graph, result, xml => parsePreparedGraph(xml, providerDocumentId,
       { maxBytes: currentGraphDocumentByteLimit() }));
     applyAuthoringDocument(target, result, providerDocumentId);
+    target.authoring.repositoryScope = scope;
     // Edits made while the request was in flight remain dirty. Only the exact submitted history
     // position becomes the save point.
-    if (target.history === history && history.revision() === submittedRevision) {
+    if (target.history === history && history.revision() === submittedRevision
+        && repositoryPresentationSnapshot(target) === submittedPresentation) {
       history.markSaved(); target.visualGroupPresentationDirty = false;
+      target.authoring.localChanges = false;
     }
+    repositoryNotice('');
     addActivityMessage(uiMessage("workspace.notice.editor.21"), uiMessage("workspace.notice.saved.as.authored.version", { providerDocumentId: providerDocumentId, releaseVersion: result.releaseVersion }), 'completed');
     updateHistoryUi(); return true;
   } catch (error) {
     target.authoring.saveError = uiErrorReason(error) || uiText("workspace.app.the.repository.save.failed");
     setGraphAuthoringAvailability(false);
-    showInspectorMessage(uiErrorReason(error) || uiText("workspace.notice.the.repository.save.failed.refresh.and.retry")); return false;
+    repositoryNotice(repositoryFailureMessage(error, !target.authoring.providerDocumentId)); return false;
   } finally {
     if (target.authoring.saveFlight === flight) target.authoring.saveFlight = null;
     updateHistoryUi();
   }
 }
 
+function repositoryOperationBinding(target) {
+  return { client: graphAuthoringClient, authority: workspaceAuthority, scope: repositoryScope(),
+    incarnation: target.incarnation, history: target.history, historyRevision: target.history.revision(),
+    expected: structuredClone(target.authoring.revision) };
+}
+
+function requireRepositoryOperationBinding(target, binding) {
+  requireRepositoryBinding(binding.client, binding.authority);
+  if (binding.scope !== repositoryScope() || !repositoryDocumentBindingIsCurrent(target, binding.scope)
+      || workspace.find(target.id) !== target || target.incarnation !== binding.incarnation
+      || target.history !== binding.history || target.history.revision() !== binding.historyRevision
+      || ['draft', 'release', 'publication'].some(key => target.authoring.revision?.[key] !== binding.expected[key]))
+    throw new Error(uiText('repository.error.operationChanged'));
+}
+
 async function repositoryHistory() {
   const target = workspace.active; const id = target?.authoring.providerDocumentId;
-  if (!gitAuthoringEnabled() || !id) return false;
+  if (!gitAuthoringEnabled() || !id || !repositoryDocumentBindingIsCurrent(target)) return false;
+  const binding = repositoryOperationBinding(target);
+  const { client } = binding;
   try {
-    const page = await graphAuthoringClient.history(id);
+    const page = await client.history(id);
+    requireRepositoryOperationBinding(target, binding);
     const lines = page.items.map(item => `${item.revision.slice(0, 12)} · ${item.summary} · ${item.author}`);
     const revision = globalThis.prompt(uiText("workspace.app.history.for.enter.a.full.revision.to.restore.or", { id: id, value: lines.join('\n') }), '')?.trim();
     if (!revision) return true;
     if (!globalThis.confirm(uiText("workspace.app.restore.this.revision.as.a.new.draft"))) return false;
-    const result = await graphAuthoringClient.restore(id, revision, target.authoring.revision);
+    requireRepositoryOperationBinding(target, binding);
+    const result = await client.restore(id, revision, binding.expected);
+    requireRepositoryOperationBinding(target, binding);
     const graph = parsePreparedGraph(decodeGraphMl(result), id, { maxBytes: currentGraphDocumentByteLimit() });
-    completeReplaceActiveDocument(target, graph, id); applyAuthoringDocument(target, result, id);
+    if (!completeReplaceActiveDocument(target, graph, id)) return false;
+    applyAuthoringDocument(target, result, id);
     target.history.markSaved(); updateHistoryUi(); return true;
-  } catch (error) { showInspectorMessage(uiErrorReason(error) || uiText("workspace.notice.repository.history.is.unavailable")); return false; }
+  } catch (error) { repositoryNotice(uiErrorReason(error) || uiText("workspace.notice.repository.history.is.unavailable")); return false; }
 }
 
 async function repositoryDiscard() {
   const target = workspace.active; const id = target?.authoring.providerDocumentId;
-  if (!gitAuthoringEnabled() || !id || !globalThis.confirm(uiText("workspace.app.discard.draft.changes.and.restore.the.reviewed"))) return false;
+  if (!gitAuthoringEnabled() || !id || !repositoryDocumentBindingIsCurrent(target)
+      || !globalThis.confirm(uiText("workspace.app.discard.draft.changes.and.restore.the.reviewed"))) return false;
+  const binding = repositoryOperationBinding(target);
+  const { client } = binding;
   try {
-    const result = await graphAuthoringClient.discard(id, target.authoring.revision);
+    requireRepositoryOperationBinding(target, binding);
+    const result = await client.discard(id, binding.expected);
+    requireRepositoryOperationBinding(target, binding);
     const graph = parsePreparedGraph(decodeGraphMl(result), id, { maxBytes: currentGraphDocumentByteLimit() });
-    completeReplaceActiveDocument(target, graph, id); applyAuthoringDocument(target, result, id);
+    if (!completeReplaceActiveDocument(target, graph, id)) return false;
+    applyAuthoringDocument(target, result, id);
     target.history.markSaved(); updateHistoryUi(); return true;
-  } catch (error) { showInspectorMessage(uiErrorReason(error) || uiText("workspace.notice.draft.changes.could.not.be.discarded")); return false; }
+  } catch (error) { repositoryNotice(uiErrorReason(error) || uiText("workspace.notice.draft.changes.could.not.be.discarded")); return false; }
 }
 
 async function repositoryDelete() {
   const target = workspace.active; const id = target?.authoring.providerDocumentId;
-  if (!gitAuthoringEnabled() || !id || !globalThis.confirm(uiText("workspace.app.delete.the.draft.git.history.is.retained", { id: id }))) return false;
-  try { await graphAuthoringClient.delete(id, target.authoring.revision);
+  if (!gitAuthoringEnabled() || !id || !repositoryDocumentBindingIsCurrent(target)
+      || !globalThis.confirm(uiText("workspace.app.delete.the.draft.git.history.is.retained", { id: id }))) return false;
+  const binding = repositoryOperationBinding(target);
+  const { client } = binding;
+  try {
+    requireRepositoryOperationBinding(target, binding);
+    await client.delete(id, binding.expected);
+    requireRepositoryOperationBinding(target, binding);
     if (target.authoring.released) {
-      const result = await graphAuthoringClient.open(id, 'release');
+      const result = await client.open(id, 'release');
+      requireRepositoryOperationBinding(target, binding);
       const graph = parsePreparedGraph(decodeGraphMl(result), id, { maxBytes: currentGraphDocumentByteLimit() });
-      completeReplaceActiveDocument(target, graph, id); applyAuthoringDocument(target, result, id);
+      if (!completeReplaceActiveDocument(target, graph, id)) return false;
+      applyAuthoringDocument(target, result, id);
       target.history.markSaved();
     } else target.authoring.providerDocumentId = null;
     addActivityMessage(uiMessage("workspace.notice.editor.22"), uiMessage("workspace.notice.deleted.the.draft.git.history.remains.available", { id: id }), 'completed');
     updateHistoryUi(); refreshCommands(); return true;
-  } catch (error) { showInspectorMessage(uiErrorReason(error) || uiText("workspace.notice.the.draft.could.not.be.deleted")); return false; }
+  } catch (error) { repositoryNotice(uiErrorReason(error) || uiText("workspace.notice.the.draft.could.not.be.deleted")); return false; }
 }
 
 async function repositoryRelease() {
   const target = workspace.active; const id = target?.authoring.providerDocumentId;
-  if (!gitAuthoringEnabled() || !id) return false;
+  if (!gitAuthoringEnabled() || !id || !repositoryDocumentBindingIsCurrent(target)
+      || target.authoring.releaseFlight || target.authoring.saveFlight) return false;
+  target.authoring.releaseFlight = true; refreshCommands();
+  repositoryNotice('');
+  const feedback = repositoryOperationDialog();
+  const binding = repositoryOperationBinding(target);
+  const { client } = binding;
   const reviewKey = repositoryReviewMessageKey(graphAuthoringCapability.provider);
-  try { const result = await graphAuthoringClient.release(id, target.authoring.revision);
+  try {
+    requireRepositoryOperationBinding(target, binding);
+    const automation = runtimeConfiguration?.configuration?.graphAuthoring?.releaseAutomation;
+    let candidate = null;
+    try {
+      const saved = await client.open(id, 'draft');
+      requireRepositoryOperationBinding(target, binding);
+      if (['draft', 'release', 'publication'].some(key => saved.revision?.[key] !== binding.expected[key]))
+        throw new Error(uiText('repository.error.operationChanged'));
+      candidate = Object.freeze({ documentId: id, graphId: saved.graphId,
+        releaseVersion: saved.releaseVersion, revision: structuredClone(binding.expected), graphMl: decodeGraphMl(saved) });
+    } catch (error) {
+      requireRepositoryOperationBinding(target, binding);
+      if (error.status !== 404 || error.code !== 'NOT_FOUND' || automation?.mode === 'isolated-automerge') throw error;
+      // Ordinary review also supports draft deletion. Retained release bytes cannot prove that proposal completed.
+    }
+    const operation = await releaseOperationIdentity([client.baseUrl, id,
+      candidate || { documentId: id, revision: binding.expected, draftAbsent: true }]);
+    requireRepositoryOperationBinding(target, binding);
+    const result = await client.release(id, binding.expected, operation);
+    requireRepositoryOperationBinding(target, binding);
+    Object.freeze(result);
+    feedback.success(result);
+    if (candidate && automation?.mode === 'isolated-automerge') {
+      const requestId = await releaseOperationIdentity([operation, result.url, result.draftHead, result.releaseHead, automation]);
+      const queue = async () => {
+        try {
+          requireRepositoryOperationBinding(target, binding);
+          const receipt = await client.triggerAutomation(automation, requestId, {
+            requestType: 'release-request', documentId: id, graphId: candidate.graphId,
+            releaseVersion: candidate.releaseVersion, proposalUrl: result.url, draftHead: result.draftHead,
+            releaseHead: result.releaseHead,
+          });
+          requireRepositoryOperationBinding(target, binding);
+          if (!feedback.isOpen()) return;
+          if (receipt.outcome === 'RECONCILE') feedback.reconcile(queue);
+          else if (receipt.outcome === 'REFUSED') feedback.refused();
+          else feedback.automationQueued();
+        } catch (error) { if (feedback.isOpen()) feedback.automationFailed(uiErrorReason(error)); }
+      };
+      await queue();
+    }
+    if (candidate) void observeReleaseProposal({ client, candidate, feedback, decode: decodeGraphMl,
+      assertCurrent: () => requireRepositoryOperationBinding(target, binding) });
     const reviewType = uiMessage(reviewKey);
     addActivityMessage(uiMessage("workspace.notice.editor.23"), uiMessage("workspace.notice.graph.review", {
       detail1: uiMessage(result.reused ? "workspace.app.existing" : "workspace.app.new"),
       reviewType,
       url: result.url,
     }), 'completed'); return true;
-  } catch (error) { showInspectorMessage(uiErrorReason(error) || uiText("workspace.notice.a.release.review.could.not.be.proposed")); return false; }
+  } catch (error) { feedback.failure(repositoryFailureMessage(error)); return false; }
+  finally { target.authoring.releaseFlight = false; refreshCommands(); }
 }
 
 async function publishedArtifacts() {
@@ -15862,12 +16645,36 @@ async function publishedArtifacts() {
   } catch (error) { showInspectorMessage(uiErrorReason(error) || uiText("workspace.notice.the.published.version.could.not.be.deployed")); return false; }
 }
 
+async function stopDocumentRuntime(owner) {
+  if (boundDeploymentNeedsCloseDecision(owner)) {
+    const client = runtimeClient, authority = workspaceAuthority;
+    try {
+      const stopped = await stopOriginDeployment(owner, { client,
+        isCurrent: () => workspaceAuthority === authority
+          && tenantAuthorityAllows(owner, client)
+          && normalizedWorkspaceServiceUrl(client) === owner.deploymentRun?.serviceUrl,
+        reason: status => globalThis.prompt(uiText('workspace.deployment.panel.why.should', {
+          label: status.deploymentId, action: uiText('workspace.deployment.action.stop') })),
+      });
+      if (!stopped) return false;
+    } catch (error) {
+      owner.deploymentRunStatus = 'UNKNOWN';
+      void observeOriginDeployment(owner, { client, isCurrent: () => workspaceAuthority === authority && tenantAuthorityAllows(owner, client) })
+        .catch(() => {}).finally(() => { syncPaneHeaders(); refreshCommands(); });
+      if (owner === workspace.active) addActivityMessage(uiMessage('workspace.run.stopFailed'), uiErrorMessage(error), 'failed');
+      return false;
+    }
+  }
+  return sourceSessionIsActive(owner.sourceSession) ? stopActiveSourceSession(owner) : true;
+}
+
 function openActiveDeploymentCloseDialog({ documentId, origin }) {
   const target = workspace.find(documentId);
   if (!target) return false;
-  pendingActiveDeploymentClose = { documentId, origin };
+  pendingActiveDeploymentClose = { documentId, origin, target, incarnation: target.incarnation, binding: target.deploymentRun };
   const count = target.sourceSession.sourceCount;
   document.getElementById('active-deployment-description').textContent =
+    target.deploymentRun ? uiText('workspace.run.closeDescription', { name: target.displayName, deploymentId: target.deploymentRun.deploymentId }) :
     uiText("workspace.app.closing.value1.only.stops.watching.it.from", { displayName: target.displayName })
     + uiText("workspace.app.session.value1.inbound.source.node.value2.scope", { count })
     + uiText("workspace.app.running.in.this.server.process.until.you");
@@ -15888,14 +16695,16 @@ function closeActiveDeploymentDialog(outcome) {
     return;
   }
   const target = workspace.find(pending.documentId);
-  if (!target) return;
+  if (!target || target !== pending.target || target.incarnation !== pending.incarnation
+      || target.deploymentRun !== pending.binding) return;
   if (outcome === 'stop-and-close') {
     // Stop is claimed here, on the still-open document, and only then does the close proceed --
     // matching `stopActiveSourceSession`'s own token discipline: closing first would abort the poll
     // controller closeDocument itself owns, but the stop request it kicks off here is unaffected by
     // that abort (see `sourceSessionCleanupIsCurrent`, which does not depend on the pollController).
-    void stopActiveSourceSession(target).then(stopped => {
-      if (stopped) completeCloseDocument(pending.documentId);
+    void stopDocumentRuntime(target).then(stopped => {
+      if (stopped && workspace.find(target.id) === target && target.incarnation === pending.incarnation
+          && target.deploymentRun === pending.binding) completeCloseDocument(pending.documentId);
       else if (pending.origin?.isConnected) pending.origin.focus();
     });
     return;
@@ -15965,10 +16774,12 @@ const commandActions = {
   setWorkspaceLayout: mode => setWorkspaceLayoutMode(mode),
   resetWorkspaceLayout: () => resetWorkspaceLayout(),
   setRenderMode: name => setRenderMode(name),
+  openHistory: () => reconcileDocumentHistory(workspace.active, { open: true }),
   render: () => renderActiveMode(),
   arrange: name => arrangeDesign(name),
   play: () => playGraph(),
   run: () => playGraph('run'),
+  runNewDeployment: runAsNewDeployment,
   pause: () => executionLifecycleCommand('pause'),
   resume: () => executionLifecycleCommand('resume'),
   cancel: () => executionLifecycleCommand('cancel'),
@@ -15986,11 +16797,17 @@ const commandActions = {
 let commandRegistry = createCommandRegistry(createAppCommands(commandActions, { t: uiText }));
 
 function commandContext() {
+  const owner = workspace.active;
   const history = editHistory.state();
   const transientRunning = Boolean(activeExecutionId) && activeExecutionId !== PENDING_EXECUTION
     && !finishedExecutions.has(activeExecutionId);
   const sourceSessionActive = sourceSessionIsActive(activeSourceSession);
-  const running = transientRunning || sourceSessionActive;
+  const boundDeploymentActive = deploymentRunIsPending(owner) || Boolean(owner?.deploymentRun
+    && (['STARTING', 'READY', 'DEGRADED', 'STOPPING'].includes(owner.deploymentRunStatus)
+      || owner.deploymentRunStatus === 'UNKNOWN'
+        && ['REGISTERED', 'STARTING', 'READY', 'DEGRADED', 'STOPPING'].includes(owner.deploymentRunLastObservedState)));
+  const running = transientRunning || sourceSessionActive || deploymentRunIsPending(workspace.active)
+    || owner?.deploymentRunStopPending || owner?.deploymentRunStatus === 'UNKNOWN';
   const selectedNodes = cy?.nodes(':selected');
   const groupMetadata = readVisualGroups(graphData);
   const selectedReal = selectedRealNodeIds();
@@ -16002,14 +16819,22 @@ function commandContext() {
     canGroupSelection: selectedReal.length >= 2 && ['none', 'valid'].includes(groupMetadata.status)
       && !selectedReal.some(id => groupedIds.has(id)),
     invalidGroupMetadata: ['invalid', 'future'].includes(groupMetadata.status),
+    hasOriginDeployment: Boolean(owner?.deploymentRun),
+    deploymentUnknown: owner?.deploymentRunStatus === 'UNKNOWN',
+    hasDeploymentHistory: Boolean((owner?.deploymentRun || owner?.graph?.viewerBinding)?.graphVersion),
     hasDocument: Boolean(workspace.active && graphData),
     authoringCapability: primaryPersistenceTarget(graphAuthoringCapability),
     gitAuthoring: graphAuthoringCapability.state === AUTHORING_CAPABILITY_STATE.GIT,
     repositoryDocument: Boolean(activeAuthoring?.providerDocumentId),
     repositoryReleasedSource: Boolean(activeAuthoring?.providerDocumentId && activeAuthoring?.draftDeleted),
+    repositoryReleaseEligible: !runtimeConfiguration?.configuration?.graphAuthoring?.releaseAutomation
+      || !activeAuthoring?.released || activeAuthoring.releaseVersion > activeAuthoring.releasedVersion,
     repositoryDraftAvailable: Boolean(activeAuthoring?.providerDocumentId && activeAuthoring?.draftDeleted
-      && activeAuthoring?.revision?.draft !== 'absent'),
-    authoringSaveFlight: Boolean(activeAuthoring?.saveFlight),
+      && activeAuthoring?.successor),
+    authoringSaveFlight: Boolean(activeAuthoring?.saveFlight || activeAuthoring?.releaseFlight),
+    repositorySuccessorVersion: activeAuthoring?.released && !activeAuthoring?.draftDeleted
+      && activeAuthoring?.releaseVersion === activeAuthoring?.releasedVersion && paneIsDirty(owner)
+      ? activeAuthoring.releaseVersion + 1 : null,
     hasOpenDocuments: workspace.size > 0,
     // Preserve every existing public format's command behavior. Only the new safe deployment
     // projection is excluded: it is an attachment, not a serializable or executable authoring graph.
@@ -16046,9 +16871,9 @@ function commandContext() {
     running,
     transientRunning,
     executionPaused: activeExecutionPaused,
-    executionCommandInFlight: activeExecutionCommandInFlight,
-    sourceSessionActive,
-    sourceSessionStopInFlight: Boolean(activeSourceSession?.stopPromise),
+    executionCommandInFlight: Boolean(owner?.execution.commandFlight),
+    sourceSessionActive: sourceSessionActive || boundDeploymentActive,
+    sourceSessionStopInFlight: Boolean(activeSourceSession?.stopPromise || owner?.deploymentRunStopPending),
     executionUnknown: activeExecutionReconciliation === 'unknown',
     hasToken: hasRuntimeToken,
     leftCollapsed: Boolean(panelLayout.zones.left.collapsed),
@@ -16063,7 +16888,9 @@ function executeCommand(id, invocation = {}) {
 
 function commandDisplayLabel(command, context) {
   if (context.gitAuthoring && command.id === 'file.open') return uiText('commands.file.open.repositoryLabel');
-  if (context.gitAuthoring && command.id === 'file.save') return uiText('commands.file.save.repositoryLabel');
+  if (context.gitAuthoring && command.id === 'file.save') return context.repositorySuccessorVersion
+    ? uiText('commands.file.save.successorLabel', { version: context.repositorySuccessorVersion })
+    : uiText('commands.file.save.repositoryLabel');
   if (context.repositoryReleasedSource && command.id === 'file.fork') return uiText('commands.file.fork.repositoryLabel');
   return command.label;
 }
@@ -16564,6 +17391,7 @@ document.addEventListener('input', event => {
 // The panes sit INSIDE this element, so a pane that holds focus still delivers those keys here:
 // the contract is untouched by the pane layer rather than reimplemented beside it.
 document.getElementById('cy-wrap').addEventListener('keydown', event => {
+  if (event.target.closest?.('.deployment-history')) return;
   if (layoutBusy
       && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter', 'e', 'E', 'r', 'R'].includes(event.key)) {
     event.preventDefault();
@@ -16756,13 +17584,15 @@ deploymentsWindow = createDeploymentsWindow({
       authorityGeneration: workspaceAuthority.generation,
       graphMl: serializeGraphML(graphData), graph: canonicalGraphSnapshot(graphData), name: graphName };
   },
-  onOpenDeployment: (deploymentId, client) => openDeploymentDocument(deploymentId, client),
+  onOpenDeployment: (deploymentId, client, rebuild) => openDeploymentDocument(deploymentId, client, rebuild),
+  onDeploymentSource: openDeploymentSourceDocument,
   onRegistered: (deployment, source) => {
     const owner = workspace.find(source.documentId);
     if (!owner || owner.incarnation !== source.incarnation || !deployment.graphVersion
         || source.authorityGeneration !== workspaceAuthority.generation
         || !tenantAuthorityAllows(owner)) return;
     owner.humanTasks.deploymentId = deployment.deploymentId;
+    owner.humanTasks.registrationIdentity = deployment.registrationIdentity || null;
     owner.humanTasks.graphVersion = deployment.graphVersion;
     source.graph.nodeMap = Object.fromEntries(source.graph.nodes.map(node => [node.id, node]));
     const deployedId = openDocument({
@@ -16780,6 +17610,7 @@ deploymentsWindow = createDeploymentsWindow({
     });
     const deployed = workspace.find(deployedId);
     deployed.humanTasks.deploymentId = deployment.deploymentId;
+    deployed.humanTasks.registrationIdentity = deployment.registrationIdentity || null;
     deployed.humanTasks.graphVersion = deployment.graphVersion;
     void configureHumanTasks(deployed);
     scheduleWorkspacePersistence();
@@ -16788,6 +17619,7 @@ deploymentsWindow = createDeploymentsWindow({
     const owner = workspace.active;
     if (!owner || !tenantAuthorityAllows(owner)) return;
     owner.humanTasks.deploymentId = deployment.deploymentId;
+    owner.humanTasks.registrationIdentity = deployment.registrationIdentity || null;
     owner.humanTasks.graphVersion = deployment.graphVersion;
     void configureHumanTasks(owner);
   },
@@ -17051,6 +17883,7 @@ uiLocalization.subscribe(() => {
   renderNodeCatalog();
   renderPersonalPalettes();
   refreshLocalizedProgramPanels();
+  document.getElementById('program-readiness-controls')?.setAttribute('aria-label', uiText('workspace.app.program.readiness.2'));
   const programApproveButton = document.getElementById('btn-program-approve');
   if (programApproveButton) programApproveButton.textContent = uiText('workspace.app.approve.program.batch');
   renderSelectedHumanTasks();
@@ -17067,7 +17900,13 @@ uiLocalization.subscribe(() => {
       ? uiErrorReason(invalidStartupImportError) : uiText("workspace.app.the.graph.url.is.invalid");
   }
   drawingModelController?.refreshLocale?.();
-  workspace.documents.forEach(owner => owner.visualGroupsRenderer?.refreshLocale?.());
+  workspace.documents.forEach(owner => { owner.visualGroupsRenderer?.refreshLocale?.(); owner.historyMonitor?.refreshLocale?.();
+    if (owner.historyDialog) { owner.historyDialog.setAttribute('aria-label', uiText('history.title'));
+      owner.historyDialog.querySelector('.doc-history-bar button').textContent = uiText('history.return');
+      owner.historyDialog.querySelector('.doc-history-information summary').textContent = uiText('history.details');
+      owner.historyDialog.querySelector('.doc-history-draft').textContent = documentHistoryDraftNotice(owner);
+      owner.historyDialog.querySelector('.doc-history-review-tasks').textContent = uiText('workspace.run.reviewTasks'); refreshHistoryAttention(owner); }
+  });
   refreshCommands();
   renderShortcutHelp();
   refreshActivityLocale();
@@ -17150,7 +17989,11 @@ function bootApplication() {
   const selectedService = rememberedConnection.startup(defaultService, legacyService);
   serviceInput.value = selectedService === connectionService(defaultService, location.origin)
     && !rememberedConnection.hasSavedService ? defaultService : selectedService;
-  const fileParam = params.get('file');
+  let managedLaunch = null;
+  let launchError = null;
+  try { managedLaunch = managedRepositoryLaunch(location.search); }
+  catch (error) { launchError = error; }
+  const fileParam = launchError || managedLaunch ? null : params.get('file');
   // The workspace always holds at least one document; the editor has simply never had a way to open
   // a second one. Creating it here means `initCy` always has a document to draw into.
   addDocumentRecord();
@@ -17159,7 +18002,7 @@ function bootApplication() {
   // presentation, repository identity or runtime activity added while waiting makes the import open
   // as a separate document instead.
   if (fileParam) createStartupImportPlaceholder();
-  else newWorkflow();
+  else newWorkflow({ announce: false });
   // Import from ?file= after validated configuration and workspace restoration. Supports .graphml,
   // .xml and Graphify .json without acquiring repository authoring identity.
   // Examples:
@@ -17167,7 +18010,9 @@ function bootApplication() {
   // ?file=/graphs/project/graph.json
   // ?file=examples/graph.json
   if (fileParam) initializeStartupImport(fileParam);
-  void connectRuntime(true);
+  pendingManagedLaunch = managedLaunch;
+  if (launchError) repositoryNotice(launchError.message);
+  void connectRuntime(true).catch(error => repositoryNotice(repositoryFailureMessage(error)));
   // Composed once at boot so the chips are truthful from the first paint rather than blank
   // until something happens. The connection attempt above is already in flight.
   refreshAssistantContext();
@@ -17178,3 +18023,72 @@ function bootApplication() {
 // slow or missing optional catalog can settle after the window load event, so initialize directly
 // when that event has already passed instead of leaving the workspace empty.
 scheduleApplicationBoot({ document, window, boot: bootApplication });
+
+
+document.getElementById('btn-saga-scopes')?.addEventListener('click', () => {
+  runAfterInspectorDraft(() => showSagaScopes());
+});
+
+function sagaOrdinaryDescriptor(descriptor) {
+  return descriptor && { ...descriptor, properties: (descriptor.properties || [])
+    .filter(property => !property.name.startsWith('saga.')) };
+}
+
+function sagaFieldsHtml(descriptor, model, owner) {
+  if (!sagaParticipant(descriptor)) return '';
+  const values = model.properties || {};
+  const enabled = Object.keys(values).some(name => name.startsWith('saga.'));
+  const sagaDescriptor = { ...descriptor, properties: (descriptor.properties || [])
+    .filter(property => property.name.startsWith('saga.')).map(property => ({ ...property, defaultValue: '' })) };
+  return `<section class="saga-authoring"><div class="editor-section-title">${escapeHtml(uiText('workspace.saga.title'))}</div>
+    <label><input type="checkbox" data-saga-enabled ${enabled ? 'checked' : ''}>${escapeHtml(uiText('workspace.saga.optIn'))}</label>
+    <p>${escapeHtml(uiText('workspace.saga.help'))}</p>
+    <div data-saga-fields ${enabled ? '' : 'hidden'}>${catalogPropertyFieldsHtml(sagaDescriptor, values, owner)}</div></section>`;
+}
+
+function bindSagaFields(form) {
+  const enabled = form.querySelector('[data-saga-enabled]');
+  const fields = form.querySelector('[data-saga-fields]');
+  if (!enabled || !fields) return;
+  const update = () => {
+    fields.hidden = !enabled.checked;
+    fields.querySelectorAll('[data-catalog-property]').forEach(field => { field.disabled = !enabled.checked; });
+  };
+  enabled.addEventListener('change', update);
+  update();
+}
+
+function showSagaScopes() {
+  if (!graphData || graphData.format !== 'graphml') return false;
+  retireInspectorDraft();
+  revealInspector();
+  document.getElementById('info-title').textContent = uiText('workspace.saga.scopes');
+  const scopes = sagaScopes(graphData);
+  const eligible = graphData.nodes.filter(node => node.kind === 'BEHAVIOR' && sagaParticipant(catalogDescriptor(node.behavior)));
+  document.getElementById('info-body').innerHTML = `<p>${escapeHtml(uiText('workspace.saga.scopeHelp'))}</p>
+    <ul>${[...scopes].map(([scope, nodes]) => `<li>${escapeHtml(scope)}: ${nodes.map(node => escapeHtml(node.name || node.id)).join(', ')}</li>`).join('')}</ul>
+    <form id="saga-scope-editor" class="editor-form">
+      <label>${escapeHtml(uiText('workspace.saga.scopeName'))}<input name="scope" required list="saga-scope-names"></label>
+      <datalist id="saga-scope-names">${[...scopes.keys()].map(scope => `<option value="${escapeAttribute(scope)}"></option>`).join('')}</datalist>
+      <label>${escapeHtml(uiText('workspace.saga.selectNode'))}<select name="node" required><option value=""></option>${eligible.map(node => `<option value="${escapeAttribute(node.id)}">${escapeHtml(node.name || node.id)}</option>`).join('')}</select></label>
+      <button class="btn" type="submit" ${modifyEnabled ? '' : 'disabled'}>${escapeHtml(uiText('workspace.saga.configure'))}</button>
+      <p>${escapeHtml(uiText('workspace.saga.emptyScope'))}</p>
+    </form>`;
+  document.getElementById('saga-scope-editor').addEventListener('submit', event => {
+    event.preventDefault();
+    if (!modifyEnabled || !canModifyGraph(graphData, layoutMode)) return;
+    const values = new FormData(event.currentTarget);
+    const node = graphData.nodeMap[String(values.get('node'))];
+    if (!node || !sagaParticipant(catalogDescriptor(node.behavior))) return;
+    renderNodeForm(node, false);
+    const form = document.getElementById('node-editor');
+    const enabled = form.querySelector('[data-saga-enabled]');
+    enabled.checked = true;
+    const scope = form.querySelector('[data-catalog-property="saga.scope"]');
+    scope.value = String(values.get('scope')).trim();
+    enabled.dispatchEvent(new Event('change', { bubbles: true }));
+    scope.dispatchEvent(new Event('input', { bubbles: true }));
+    form.querySelector('[data-catalog-property="saga.step"]')?.focus();
+  });
+  return true;
+}

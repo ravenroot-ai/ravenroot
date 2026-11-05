@@ -17,7 +17,8 @@
     <node id="end"><data key="kind">END</data></node>
     <node id="error"><data key="kind">ERROR</data></node>
     <edge id="start-action" source="start" target="action"><data key="outcome">continue</data></edge>
-    <edge id="action-end-0" source="action" target="end"><data key="outcome">responded</data></edge>
+    <edge id="action-end-0" source="action" target="end"><data key="outcome">continue</data></edge>
+    <edge id="action-end-1" source="action" target="end"><data key="outcome">responded</data></edge>
     <edge id="action-error" source="action" target="error"/>
   </graph>
 </graphml>

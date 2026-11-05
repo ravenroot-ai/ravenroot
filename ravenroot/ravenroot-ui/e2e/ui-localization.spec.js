@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 
 import { ENGLISH_MESSAGES } from '../src/ui-text.js';
+import { MAX_UI_CATALOG_BYTES } from '../src/ui-localization.js';
 import { UI_ORIGIN } from './ports.mjs';
 
 const mapMessages = transform => Object.fromEntries(Object.entries(ENGLISH_MESSAGES).map(([key, message]) => [
@@ -39,7 +40,7 @@ Object.assign(italian.messages, {
 // Keep long RTL labels while omitting redundant English prose from long messages.
 const arabic = { schema: 'ravenroot.ui-catalog/v1', locale: 'ar', direction: 'rtl',
   messages: mapMessages(value => '⟦نص واجهة طويل للاختبار⟧'
-    + (value.length > 80 ? (value.match(/\{[A-Za-z][A-Za-z0-9_]*\}/gu) || []).join(' ') : value)),
+    + (value.length > 32 ? (value.match(/\{[A-Za-z][A-Za-z0-9_]*\}/gu) || []).join(' ') : value)),
 };
 const german = pseudo('de', 'ltr', '⟦DE⟧');
 Object.assign(german.messages, {
@@ -60,8 +61,11 @@ const configuration = {
 };
 
 async function configure(page, body = configuration) {
+  const serialized = JSON.stringify(body);
+  expect(Buffer.byteLength(serialized, 'utf8'), 'synthetic catalogs fit the production configuration ceiling')
+    .toBeLessThanOrEqual(MAX_UI_CATALOG_BYTES);
   await page.route('**/ui-locales.json', route => route.fulfill({
-    contentType: 'application/json', body: JSON.stringify(body),
+    contentType: 'application/json', body: serialized,
   }));
 }
 
@@ -78,7 +82,18 @@ async function createDirtyDraft(page) {
   await page.locator('#node-editor input[name="name"]').fill('Saved before locale switch');
   await page.locator('#node-editor button[type="submit"]').click();
   await expect(page.locator('#dirty-state')).toHaveText('unsaved changes');
-  await page.evaluate(() => { window.cy.nodes().last().select(); });
+  // Approval controls are visible only for an actual approval-required program. Retain the
+  // dirty authoring selection and open form while exercising that localized presentation.
+  await page.evaluate(() => {
+    const selected = window.cy.nodes().last().id();
+    window.ravenroot._showReadOnlyProgramReadinessForTest({ id: 'locale-program', name: 'Authored program' }, {
+      phase: 'APPROVAL_REQUIRED', revision: 5, artifactId: 'locale-artifact', ready: false,
+    });
+    const model = window.ravenroot.activeDocument().graph.nodeMap['locale-program'];
+    model.properties.language = 'javascript'; model.properties.source = 'return input;';
+    window.cy.nodes().unselect(); window.cy.getElementById(selected).select();
+  });
+  await expect(page.locator('#btn-program-approve')).toBeVisible();
   await expect(page.locator('#node-editor')).toBeVisible();
   await page.locator('#node-editor input[name="name"]').fill('Unsubmitted localized draft');
   return page.evaluate(() => ({
@@ -227,6 +242,16 @@ test('contains a long localized palette at the desktop minimum panel width', asy
 
 test('switches a complete catalog live while preserving a dirty selected document and open form', async ({ page }, testInfo) => {
   await configure(page);
+  await page.route('**/v1/configuration', route => route.fulfill({ json: {
+    schemaVersion: 1, graphDocumentMaxBytes: 10 * 1024 * 1024,
+  } }));
+  await page.route('**/v1/program-artifacts/build', route => route.fulfill({ json: {
+    buildId: 'locale-build', revision: 5, terminal: false,
+    programs: route.request().postDataJSON().programs.map(program => ({
+      nodeId: program.nodeId, artifactId: 'locale-artifact', phase: 'APPROVAL_REQUIRED',
+      revision: 5, terminal: false, ready: false,
+    })),
+  } }));
   await page.goto('/');
   const before = await createDirtyDraft(page);
   expect(before.selected.length).toBeGreaterThan(0);
@@ -246,6 +271,7 @@ test('switches a complete catalog live while preserving a dirty selected documen
   await expect(page.locator('#minimap-label')).toHaveText(`⟦IT⟧Overview — ${before.displayName}⟦IT⟧`);
   await expect(page.locator('#minimap-canvas')).toHaveAttribute('aria-label', /⟦IT⟧Design⟦IT⟧/u);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await expect(page.locator('#btn-program-approve')).toBeVisible();
   expect(await page.locator('#btn-program-approve').evaluate(button => {
     const bounds = button.getBoundingClientRect();
     return bounds.left >= 0 && bounds.right <= innerWidth && bounds.width >= 160;

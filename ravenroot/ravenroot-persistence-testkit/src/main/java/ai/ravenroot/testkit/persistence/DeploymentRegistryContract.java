@@ -91,6 +91,18 @@ public abstract class DeploymentRegistryContract {
     }
 
     @Test
+    final void boundedVersionReadRefusesOversizeBeforeContentProjection() {
+        MutableClock clock = new MutableClock(START);
+        try (var registry = createRegistry(clock)) {
+            var created = create(registry, clock, "tenant", "bounded-version", "canonical-bytes");
+            assertTrue(registry.version("tenant", created.deploymentId(), 1, 4).toCompletableFuture().join().isEmpty());
+            assertArrayEquals("canonical-bytes".getBytes(StandardCharsets.UTF_8), registry.version("tenant", created.deploymentId(), 1, 15)
+                    .toCompletableFuture().join().orElseThrow().canonicalSnapshot());
+            assertTrue(registry.version("foreign", created.deploymentId(), 1, 15).toCompletableFuture().join().isEmpty());
+        }
+    }
+
+    @Test
     final void serverMintsStableTenantBoundIdentityAndKeepsExactImmutableBytes() {
         MutableClock clock = new MutableClock(START);
         try (DeploymentRegistry registry = createRegistry(clock)) {

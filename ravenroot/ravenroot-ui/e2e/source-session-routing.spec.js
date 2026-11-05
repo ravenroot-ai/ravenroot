@@ -1,4 +1,6 @@
+import { keepMockDeploymentStreamsOpen } from './deployment-run-fixture.mjs';
 import { keepAuthenticationInMemory } from './memory-only-auth.mjs';
+import { createHash } from 'node:crypto';
 import { expect, test } from '@playwright/test';
 
 const SOURCE_CATALOG = JSON.stringify([{
@@ -69,6 +71,8 @@ function durableHumanTaskReentryStream(deploymentId) {
     { processInstanceId: firstProcess, executionId: resumedTraversal, traversalId: resumedTraversal,
       deploymentId: null, workloadId: 'source-workload-1', type: 'NODE_COMPLETED', nodeId: 'publish' },
     { processInstanceId: firstProcess, executionId: resumedTraversal, traversalId: resumedTraversal,
+      deploymentId: null, workloadId: 'source-workload-1', type: 'NODE_COMPLETED', nodeId: 'end', output: 'resumed-end' },
+    { processInstanceId: firstProcess, executionId: resumedTraversal, traversalId: resumedTraversal,
       deploymentId: null, workloadId: 'source-workload-1', type: 'EXECUTION_COMPLETED', nodeId: null },
     { processInstanceId: secondProcess, executionId: secondTraversal, traversalId: secondTraversal,
       deploymentId, workloadId: 'source-workload-2', type: 'NODE_COMPLETED', nodeId: 'source',
@@ -83,84 +87,102 @@ function durableHumanTaskReentryStream(deploymentId) {
   })}\n\n`).join('');
 }
 
-async function stubRuntime(page, { sourceResponder, sourceTraffic, workspaceTenant = null,
-  configurationResponder, eventResponder } = {}) {
-  const sourceCalls = [];
-  const executionCalls = [];
-  const configurationCalls = [];
-  const eventCalls = [];
-  // The editor connects its stream at boot, before any session exists, so the frames cannot be
-  // composed up front: their deployment id is the one the browser invents when Run is pressed. The
-  // stream therefore waits for the start request and is composed from it, which is also the order
-  // the real server publishes in.
-  let announceSession = () => {};
+async function stubRuntime(page, { sourceResponder, sourceTraffic, workspaceTenant = 'tenant-authenticated',
+  configurationResponder, eventResponder, legacyAfterAdmission = false } = {}) {
+  await keepMockDeploymentStreamsOpen(page);
+  const sourceCalls = [], executionCalls = [], configurationCalls = [], eventCalls = [], deploymentCalls = [];
+  let nativeUnavailable = false, admitted;
+  const admissionIssued = new Promise(resolve => { admitted = resolve; });
+  let status = null, graphVersion = null, tenant = workspaceTenant;
+  let announceSession;
   const startedSession = new Promise(resolve => { announceSession = resolve; });
-  if (workspaceTenant || configurationResponder) {
-    await page.route('**/v1/configuration', async route => {
-      configurationCalls.push({ headers: route.request().headers() });
-      if (configurationResponder) {
-        await configurationResponder({ route, configurationCalls });
-        return;
-      }
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ schemaVersion: 1, graphDocumentMaxBytes: 10 * 1024 * 1024,
-          workspace: { tenantId: workspaceTenant } }),
-      });
-    });
-  }
-  await page.route('**/v1/node-types', route => route.fulfill({
-    status: 200, contentType: 'application/json', body: SOURCE_CATALOG,
-  }));
+  const wire = body => body?.replaceAll('"graphVersion":"v1"', `"graphVersion":"${graphVersion}"`);
+  await page.route('**/v1/configuration', async route => {
+    configurationCalls.push({ headers: route.request().headers() });
+    if (configurationResponder) {
+      await configurationResponder({ configurationCalls, route: { fulfill: options => {
+        tenant = JSON.parse(options.body).workspace.tenantId; return route.fulfill(options);
+      } } }); return;
+    }
+    await route.fulfill({ json: { schemaVersion: 1, graphDocumentMaxBytes: 10485760, workspace: { tenantId: tenant } } });
+  });
+  await page.route('**/v1/node-types', route => route.fulfill({ json: JSON.parse(SOURCE_CATALOG) }));
   await page.route('**/v1/events**', async route => {
     eventCalls.push({ headers: route.request().headers() });
-    if (eventResponder) {
-      await eventResponder({ route, eventCalls, startedSession });
-      return;
-    }
-    if (!sourceTraffic) {
-      await route.fulfill({ status: 204, body: '' });
-      return;
-    }
-    const deploymentId = await startedSession;
-    await route.fulfill({
-      status: 200,
-      contentType: 'text/event-stream',
-      body: sourceTraffic.body
-        ? sourceTraffic.body(deploymentId)
-        : sourceEventStream(deploymentId, sourceTraffic.nodeIds, sourceTraffic.admissions),
-    });
+    if (legacyAfterAdmission) await admissionIssued;
+    const routed = { fulfill: options => route.fulfill({ ...options, body: wire(options.body) }) };
+    if (eventResponder) { await eventResponder({ route: routed, eventCalls, startedSession }); return; }
+    if (!sourceTraffic) { await route.fulfill({ status: 204, body: '' }); return; }
+    const id = await startedSession;
+    await routed.fulfill({ status: 200, contentType: 'text/event-stream', body: sourceTraffic.body
+      ? sourceTraffic.body(id) : sourceEventStream(id, sourceTraffic.nodeIds, sourceTraffic.admissions) });
   });
-  await page.route('**/v1/source-sessions**', async route => {
-    const request = route.request();
-    sourceCalls.push({ method: request.method(), url: request.url(), body: request.postData() || '' });
-    const sessionId = new URL(request.url()).searchParams.get('id')
-      || decodeURIComponent(new URL(request.url()).pathname.split('/').at(-1));
-    if (request.method() === 'POST') announceSession(sessionId);
+  await page.route('**/v1/executions**', route => {
+    const request = route.request(); executionCalls.push({ method: request.method(), url: request.url(), body: request.postData() || '' });
+    return route.fulfill({ json: { executionId: '20000000-0000-0000-0000-000000000002',
+      processInstanceId: '10000000-0000-0000-0000-000000000001', graphVersion,
+      status: 'COMPLETED', payload: null } });
+  });
+  await page.route('**/v1/deployments**', async route => {
+    const request = route.request(), url = new URL(request.url()), parts = url.pathname.split('/').filter(Boolean);
+    const id = url.searchParams.get('id') || parts[2], action = parts[3];
+    deploymentCalls.push({ id, action, method: request.method(), body: request.postData() });
+    if (request.method() === 'POST' && !action) {
+      graphVersion = createHash('sha256').update(request.postData()).digest('hex');
+      status = { deploymentId: id, tenantId: tenant, graphVersion, runtimeIncarnationId: 'runtime-original',
+        state: 'REGISTERED', sourceCount: request.postData().includes('external.consume') ? 1 : 0,
+        scope: 'LOCAL_PROCESS', diagnostic: null, continuity: 'PROCESS_LOCAL', deploymentRevision: null,
+        desiredState: null, observedState: null, recoveryFailure: null };
+      await route.fulfill({ json: status }); return;
+    }
+    if (!status || status.deploymentId !== id) { await route.fulfill({ status: 404, body: '' }); return; }
+    if (action === 'events') {
+      if (nativeUnavailable) { await route.fulfill({ status: 503, body: '' }); return; }
+      await route.fulfill({ contentType: 'text/event-stream', body: `event: lifecycle\ndata: ${JSON.stringify({ type: 'lifecycle', deploymentId: id, graphVersion, incarnationId: status.runtimeIncarnationId, lifecycle: status.state, cursor: 'c'.repeat(43) })}\n\n` }); return;
+    }
+    if (action === 'view') {
+      await route.fulfill({ json: { viewerSourceVersion: '1', source: { kind: 'deployment', deploymentId: id,
+        graphVersion, incarnationId: status.runtimeIncarnationId }, lifecycle: status.state,
+        projection: { viewerContractVersion: '1.0', nodes: [], edges: [] } } }); return;
+    }
+    if (action === 'initial-start') {
+      if (legacyAfterAdmission) {
+        nativeUnavailable = true;
+        await page.evaluate(() => window.__interruptMockDeploymentObservation());
+        admitted();
+      }
+      const body = request.postDataJSON();
+      await route.fulfill({ status: 202, json: { outcome: 'ACCEPTED', requestId: body.requestId,
+        processInstanceId: '10000000-0000-0000-0000-000000000001', traversalId: '20000000-0000-0000-0000-000000000002' } }); return;
+    }
+    const logicalMethod = action === 'stop' ? 'DELETE' : action === 'start' ? 'POST' : 'GET';
+    sourceCalls.push({ method: logicalMethod, url: request.url(), body: request.postData() || '', headers: request.headers(), action });
+    if (logicalMethod === 'POST') announceSession(id);
+    if (logicalMethod !== 'GET') {
+      expect(request.headers()['x-ravenroot-deployment-incarnation']).toBe('runtime-original');
+      expect(request.headers()['x-ravenroot-graph-version']).toBe(graphVersion);
+    }
+    if (status.state === 'FAILED' && logicalMethod === 'GET') { await route.fulfill({ json: status }); return; }
     if (sourceResponder) {
-      await sourceResponder({ route, request, sessionId, sourceCalls });
-      return;
+      const translatedRoute = {
+        abort: reason => route.abort(reason),
+        fulfill: async options => {
+          if (options.status === 404) { await route.fulfill(options); return; }
+          if (options.status >= 400) {
+            status.state = 'FAILED'; await route.fulfill({ json: status }); return;
+          }
+          const supplied = JSON.parse(options.body);
+          status.state = ({ LISTENING: 'READY', STARTING: 'STARTING', STOPPING: 'STOPPING', STOPPED: 'STOPPED', FAILED: 'FAILED' })[supplied.state];
+          await route.fulfill({ json: status });
+        },
+      };
+      await sourceResponder({ route: translatedRoute, request: { method: () => logicalMethod }, sessionId: id, sourceCalls }); return;
     }
-    const state = request.method() === 'POST' ? 'STARTING'
-      : request.method() === 'DELETE' ? 'STOPPED' : 'LISTENING';
-    await route.fulfill({
-      status: request.method() === 'POST' ? 202 : 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ sessionId, deploymentId: sessionId, state, sourceCount: 1,
-        scope: 'LOCAL_PROCESS', diagnostic: null }),
-    });
+    if (action === 'start') status.state = 'READY';
+    if (action === 'stop') status.state = 'STOPPED';
+    await route.fulfill({ json: status });
   });
-  await page.route('**/v1/executions**', async route => {
-    executionCalls.push({
-      method: route.request().method(), url: route.request().url(), body: route.request().postData() || '',
-    });
-    await route.fulfill({
-      status: 202, contentType: 'application/json',
-      body: JSON.stringify({ executionId: 'one-shot', graphVersion: 'v1', executionPolicy: 'STANDARD' }),
-    });
-  });
-  return { sourceCalls, executionCalls, configurationCalls, eventCalls };
+  return { sourceCalls, executionCalls, configurationCalls, eventCalls, deploymentCalls };
 }
 
 async function openGraph(page, xml, name) {
@@ -170,7 +192,23 @@ async function openGraph(page, xml, name) {
   await expect(page.locator('#btn-run')).toBeEnabled();
 }
 
-test('Run routes an effective SOURCE to an accessible local session and Test stays passthrough', async ({ page }) => {
+// Listener READY precedes initial START admission. Use this only when a test needs the
+// accepted deployment admission identities, not for lifecycle tests.
+async function expectInitialAdmissionBound(page, documentId) {
+  await expect.poll(() => page.evaluate(id => {
+    const owner = window.ravenroot.workspace.find(id), run = owner?.deploymentRun;
+    return { processInstanceId: run?.processInstanceId, traversalId: run?.traversalId,
+      projectedProcessInstanceId: owner?.execution.processInstanceId,
+      projectedTraversalId: owner?.execution.executionId,
+      pinMatches: owner?.execution.graphVersion === run?.graphVersion };
+  }, documentId)).toEqual({
+    processInstanceId: '10000000-0000-0000-0000-000000000001',
+    traversalId: '20000000-0000-0000-0000-000000000002',
+    projectedProcessInstanceId: null, projectedTraversalId: null, pinMatches: false,
+  });
+}
+
+test('Run binds an effective SOURCE deployment with one initial START and Test stays passthrough', async ({ page }) => {
   const calls = await stubRuntime(page);
   await page.goto('/');
   await openGraph(page, sourceGraph('external.consume'), 'source.graphml');
@@ -181,20 +219,20 @@ test('Run routes an effective SOURCE to an accessible local session and Test sta
     await dialog.accept();
   }));
   await page.locator('#btn-run').click();
-  await expect(confirmation).resolves.toMatch(/No initial payload or traversal/);
-  await expect(page.locator('#source-session-status')).toContainText('Listening · one local source');
-  await expect(page.locator('#source-session-status')).toHaveAttribute('role', 'status');
+  await expect(confirmation).resolves.toMatch(/deployment|START/i);
+  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Listening');
+  await expect(page.locator('.doc-pane--active .doc-run-binding')).toHaveAttribute('role', 'status');
   await expect(page.locator('#btn-stop')).toBeEnabled();
   await expect(page.locator('#btn-pause')).toBeDisabled();
   await expect(page.locator('#btn-cancel')).toBeHidden();
 
   expect(calls.sourceCalls.filter(call => call.method === 'POST')).toHaveLength(1);
-  expect(calls.sourceCalls[0].body).toContain('<graphml');
-  expect(calls.sourceCalls[0].body).not.toContain('must-not-be-an-initial-event');
+  expect(calls.sourceCalls.find(call => call.action === 'start').url).toContain('/start');
+  expect(calls.sourceCalls.find(call => call.action === 'start').body).not.toContain('must-not-be-an-initial-event');
   expect(calls.executionCalls.filter(call => call.method === 'POST')).toHaveLength(0);
 
   await page.locator('#btn-stop').click();
-  await expect(page.locator('#source-session-status')).toContainText('Stopped · one local source');
+  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Stopped');
   expect(calls.sourceCalls.some(call => call.method === 'DELETE')).toBe(true);
 
   await page.locator('#btn-play').click();
@@ -212,7 +250,7 @@ test('source Human Task re-entry and a second AMQP message stay in one listening
 
   page.once('dialog', dialog => dialog.accept());
   await page.locator('#btn-run').click();
-  await expect(page.locator('#source-session-status')).toContainText('Listening');
+  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Listening');
   await expect(page.locator('#activity-log')).toContainText('resolved-message-1');
   await expect(page.locator('#activity-log')).toContainText('amqp-message-2');
 
@@ -220,7 +258,7 @@ test('source Human Task re-entry and a second AMQP message stay in one listening
     const document_ = window.ravenroot.activeDocument();
     return {
       tenantId: document_.tenantId,
-      state: document_.sourceSession.state,
+      state: document_.deploymentRunStatus,
       processOwners: [...document_.sourceSession.processOwners.keys()],
       events: document_.execution.events.map(event => ({
         type: event.type, executionId: event.executionId,
@@ -229,7 +267,7 @@ test('source Human Task re-entry and a second AMQP message stay in one listening
     };
   });
   expect(timeline.tenantId).toBe('tenant-authenticated');
-  expect(timeline.state).toBe('LISTENING');
+  expect(timeline.state).toBe('READY');
   expect(timeline.processOwners).toEqual(expect.arrayContaining([
     '10000000-0000-4000-8000-000000000001',
     '10000000-0000-4000-8000-000000000002',
@@ -262,6 +300,7 @@ test('re-authentication holds a source frame until workspace authority can deliv
   });
   let deploymentId;
   const calls = await stubRuntime(page, {
+    legacyAfterAdmission: true,
     configurationResponder: async ({ route, configurationCalls }) => {
       if (configurationCalls.length === 2) {
         announceReauthentication();
@@ -306,7 +345,7 @@ test('re-authentication holds a source frame until workspace authority can deliv
   await openGraph(page, sourceGraph('external.consume'), 'source-authority-race.graphml');
   page.once('dialog', dialog => dialog.accept());
   await page.locator('#btn-run').click();
-  await expect(page.locator('#source-session-status')).toContainText('Listening');
+  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Listening');
   releaseInitialTraffic();
   await expect.poll(() => page.evaluate(
     () => window.ravenroot.activeDocument().execution.events.length)).toBe(2);
@@ -342,7 +381,7 @@ test('re-authentication holds a source frame until workspace authority can deliv
   ]));
 });
 
-test('Run preserves the one-shot route when the graph has no effective SOURCE', async ({ page }) => {
+test('Run binds a deployment and initial START even without an effective SOURCE', async ({ page }) => {
   const calls = await stubRuntime(page);
   await page.goto('/');
   await openGraph(page, sourceGraph(''), 'ordinary.graphml');
@@ -350,45 +389,125 @@ test('Run preserves the one-shot route when the graph has no effective SOURCE', 
   page.once('dialog', dialog => dialog.accept());
   await page.locator('#btn-run').click();
 
-  await expect.poll(() => calls.executionCalls.filter(call => call.method === 'POST').length).toBe(1);
-  expect(calls.executionCalls.find(call => call.method === 'POST').url).toContain('mode=run');
-  expect(calls.sourceCalls).toHaveLength(0);
+  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Ready');
+  expect(calls.executionCalls.filter(call => call.method === 'POST')).toHaveLength(0);
+  expect(calls.sourceCalls.filter(call => call.action === 'start')).toHaveLength(1);
 });
 
 test('a delayed failed start updates its owning background document and is recoverable', async ({ page }) => {
   let releaseStart;
   const startGate = new Promise(resolve => { releaseStart = resolve; });
-  await stubRuntime(page, {
-    sourceResponder: async ({ route, request }) => {
+  let starts = 0;
+  const calls = await stubRuntime(page, {
+    sourceResponder: async ({ route, request, sessionId }) => {
       if (request.method() === 'POST') {
-        await startGate;
-        await route.fulfill({
-          status: 500, contentType: 'application/problem+json',
-          body: JSON.stringify({ title: 'Source startup failed', status: 500 }),
-        });
+        starts += 1;
+        if (starts === 1) {
+          await startGate;
+          await route.fulfill({
+            status: 500, contentType: 'application/problem+json',
+            body: JSON.stringify({ title: 'Source startup failed', status: 500 }),
+          });
+        } else {
+          await route.fulfill({ status: 202, body: JSON.stringify({ sessionId,
+            state: 'LISTENING', sourceCount: 1, scope: 'LOCAL_PROCESS' }) });
+        }
         return;
       }
-      await route.fulfill({ status: 404, body: '' });
+      await route.fulfill(starts >= 2 ? { status: 200, body: JSON.stringify({ sessionId,
+        state: 'LISTENING', sourceCount: 1, scope: 'LOCAL_PROCESS' }) } : { status: 404, body: '' });
     },
+  });
+  await page.addInitScript(() => {
+    const failedWrites = new WeakSet();
+    const put = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (value, ...args) {
+      if (this.name === 'tenant-workspaces' && value?.documents?.some(
+        document_ => document_.name === 'delayed.graphml' && document_.deploymentRun?.phase === 'FAILED')) {
+        failedWrites.add(this.transaction);
+      }
+      return put.call(this, value, ...args);
+    };
+    const complete = Object.getOwnPropertyDescriptor(IDBTransaction.prototype, 'oncomplete');
+    Object.defineProperty(IDBTransaction.prototype, 'oncomplete', {
+      ...complete,
+      set(callback) {
+        complete.set.call(this, function (event) {
+          if (failedWrites.has(this) && !window.__failedRunWriteHeld) {
+            // The real write has committed. Hold only its completion notification so activation
+            // occurs before the real command unwinds, without manufacturing a runtime state.
+            window.__failedRunWriteHeld = true;
+            window.__releaseFailedRunWrite = () => callback.call(this, event);
+          } else callback.call(this, event);
+        });
+      },
+    });
   });
   await page.goto('/');
   await openGraph(page, sourceGraph('external.consume'), 'delayed.graphml');
-  const ownerId = await page.evaluate(() => window.ravenroot.documents().find(
-    document_ => document_.name === 'delayed.graphml').id);
+  await page.locator('#execution-payload').fill('original retry input');
+  const ownerId = await page.evaluate(() => window.ravenroot.activeDocument().id);
 
   page.once('dialog', dialog => dialog.accept());
   await page.locator('#btn-run').click();
-  await expect.poll(() => page.evaluate(() => window.ravenroot.documents().find(
-    document_ => document_.name === 'delayed.graphml').sourceSession.state)).toBe('STARTING');
+  await expect.poll(() => page.evaluate(id => window.ravenroot.workspace.find(
+    id).deploymentRunOperation, ownerId)).toBe('ACTIVATING');
   await page.evaluate(() => window.ravenroot.openDocument({ name: 'other.graphml' }));
+  const sibling = await page.evaluate(() => {
+    const owner = window.ravenroot.activeDocument();
+    return { id: owner.id, incarnation: owner.incarnation, graph: JSON.stringify(owner.graph),
+      executionId: owner.execution.executionId, binding: owner.deploymentRun ?? null };
+  });
   releaseStart();
 
-  await expect.poll(() => page.evaluate(id => window.ravenroot.documents().find(
-    document_ => document_.id === id).sourceSession.state, ownerId)).toBe('FAILED');
+  await expect.poll(() => page.evaluate(() => window.__failedRunWriteHeld)).toBe(true);
+  const failedIntent = await page.evaluate(id => {
+    const owner = window.ravenroot.workspace.find(id);
+    return { intent: { ...owner.deploymentRun }, status: owner.deploymentRunStatus,
+      pending: Boolean(owner.execution.commandFlight) };
+  }, ownerId);
+  expect(failedIntent.status).toBe('FAILED');
+  expect(failedIntent.intent.phase).toBe('FAILED');
+  expect(failedIntent.pending).toBe(true);
+  expect(await page.evaluate(() => window.ravenroot.workspace.activeId)).toBe(sibling.id);
   await page.evaluate(id => window.ravenroot.activateDocument(id), ownerId);
-  await expect(page.locator('#source-session-status')).toContainText('Failed');
+  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Failed');
+  await expect(page.locator('#btn-run')).toBeDisabled();
+  await page.evaluate(() => window.__releaseFailedRunWrite());
+  await expect.poll(() => page.evaluate(id => {
+    const owner = window.ravenroot.workspace.find(id);
+    return { pending: Boolean(owner.execution.commandFlight), operation: owner.deploymentRunOperation };
+  }, ownerId)).toEqual({ pending: false, operation: null });
   await expect(page.locator('#btn-run')).toBeEnabled();
   await expect(page.locator('#btn-play')).toBeEnabled();
+
+  await page.locator('#execution-payload').fill('edited after failed delivery');
+  page.once('dialog', dialog => dialog.accept());
+  await page.locator('#btn-run').click();
+  await expect.poll(() => page.evaluate(id => {
+    const owner = window.ravenroot.workspace.find(id);
+    return { phase: owner.deploymentRun.phase, pending: Boolean(owner.execution.commandFlight),
+      process: owner.deploymentRun.processInstanceId, traversal: owner.deploymentRun.traversalId };
+  }, ownerId)).toEqual({ phase: 'READY', pending: false,
+    process: '10000000-0000-0000-0000-000000000001', traversal: '20000000-0000-0000-0000-000000000002' });
+  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Listening');
+  const recovered = await page.evaluate(id => ({ ...window.ravenroot.workspace.find(id).deploymentRun }), ownerId);
+  for (const field of ['deploymentId', 'activationRequestId', 'initialStartRequestId', 'graphVersion',
+    'incarnationId', 'inputJson', 'graphMl']) expect(recovered[field]).toBe(failedIntent.intent[field]);
+  expect(calls.deploymentCalls.filter(call => call.method === 'POST' && !call.action)).toHaveLength(1);
+  expect(calls.sourceCalls.filter(call => call.action === 'start')).toHaveLength(2);
+  expect(calls.deploymentCalls.filter(call => call.action === 'events')).toHaveLength(1);
+  const initial = calls.deploymentCalls.filter(call => call.action === 'initial-start');
+  expect(initial).toHaveLength(1);
+  expect(initial[0].id).toBe(failedIntent.intent.deploymentId);
+  expect(JSON.parse(initial[0].body)).toMatchObject({ requestId: failedIntent.intent.initialStartRequestId,
+    graphVersion: failedIntent.intent.graphVersion, incarnationId: failedIntent.intent.incarnationId,
+    input: JSON.parse(failedIntent.intent.inputJson) });
+  expect(await page.evaluate(id => {
+    const owner = window.ravenroot.workspace.find(id);
+    return { id: owner.id, incarnation: owner.incarnation, graph: JSON.stringify(owner.graph),
+      executionId: owner.execution.executionId, binding: owner.deploymentRun ?? null };
+  }, sibling.id)).toEqual(sibling);
 });
 
 test('Stop requested while start is pending waits for registration and leaves no listener', async ({ page }) => {
@@ -416,7 +535,7 @@ test('Stop requested while start is pending waits for registration and leaves no
         });
         return;
       }
-      await route.fulfill({ status: 404, body: '' });
+      await route.fulfill({ status: listenerPresent ? 200 : 404, body: JSON.stringify({ state: listenerPresent ? 'LISTENING' : 'STOPPED' }) });
     },
   });
   await page.goto('/');
@@ -431,7 +550,7 @@ test('Stop requested while start is pending waits for registration and leaves no
   expect(deleteCalls).toBe(0);
 
   releaseStart();
-  await expect(page.locator('#source-session-status')).toContainText('Stopped');
+  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Stopped');
   expect(deleteCalls).toBe(1);
   expect(listenerPresent).toBe(false);
   await expect(page.locator('#btn-run')).toBeEnabled();
@@ -464,7 +583,7 @@ test('closing the owner cannot cancel a Stop already queued behind its pending s
         });
         return;
       }
-      await route.fulfill({ status: 404, body: '' });
+      await route.fulfill({ status: listenerPresent ? 200 : 404, body: JSON.stringify({ state: listenerPresent ? 'LISTENING' : 'STOPPED' }) });
     },
   });
   await page.goto('/');
@@ -475,7 +594,7 @@ test('closing the owner cannot cancel a Stop already queued behind its pending s
   await page.locator('#btn-run').click();
   await expect.poll(() => calls.sourceCalls.filter(call => call.method === 'POST').length).toBe(1);
   await page.locator('#btn-stop').click();
-  await expect(page.locator('#source-session-status')).toContainText('Stopping');
+  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Stop requested');
   await page.evaluate(id => window.ravenroot.closeDocument(id), ownerId);
   await expect.poll(() => page.evaluate(id => window.ravenroot.workspace.find(id), ownerId)).toBeNull();
   expect(deletedSessionIds).toHaveLength(0);
@@ -488,7 +607,7 @@ test('closing the owner cannot cancel a Stop already queued behind its pending s
   expect(deletedSessionIds).toHaveLength(1);
 });
 
-test('an authoritative observation 404 recovers STARTING to stopped', async ({ page }) => {
+test('an absent observation leaves STARTING unavailable until explicit recovery', async ({ page }) => {
   await stubRuntime(page, {
     sourceResponder: async ({ route, request, sessionId }) => {
       if (request.method() === 'POST') {
@@ -506,9 +625,9 @@ test('an authoritative observation 404 recovers STARTING to stopped', async ({ p
 
   page.once('dialog', dialog => dialog.accept());
   await page.locator('#btn-run').click();
-  await expect(page.locator('#source-session-status')).toContainText('Stopped');
+  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('State unavailable');
   await expect(page.locator('#btn-run')).toBeEnabled();
-  await expect(page.locator('#btn-play')).toBeEnabled();
+  await expect(page.locator('#btn-play')).toBeDisabled();
 });
 
 test('an authoritative stop 404 recovers STOPPING to stopped', async ({ page }) => {
@@ -530,14 +649,14 @@ test('an authoritative stop 404 recovers STOPPING to stopped', async ({ page }) 
 
   page.once('dialog', dialog => dialog.accept());
   await page.locator('#btn-run').click();
-  await expect(page.locator('#source-session-status')).toContainText('Listening');
+  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Listening');
   await page.locator('#btn-stop').click();
-  await expect(page.locator('#source-session-status')).toContainText('Stopped');
+  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Stopped');
   await expect(page.locator('#btn-run')).toBeEnabled();
   await expect(page.locator('#btn-play')).toBeEnabled();
 });
 
-test('an ambiguous stop restores the last honest state and keeps observing without allowing Run', async ({ page }) => {
+test('an ambiguous stop keeps observing and permits only bound Run recovery', async ({ page }) => {
   let releaseObservation;
   const observationGate = new Promise(resolve => { releaseObservation = resolve; });
   let stopAttempted = false;
@@ -561,15 +680,15 @@ test('an ambiguous stop restores the last honest state and keeps observing witho
 
   page.once('dialog', dialog => dialog.accept());
   await page.locator('#btn-run').click();
-  await expect(page.locator('#source-session-status')).toContainText('Listening');
+  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Listening');
   await page.locator('#btn-stop').click();
-  await expect(page.locator('#source-session-status')).toContainText('status unavailable, retrying');
+  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('State unavailable');
   await expect(page.locator('#btn-stop')).toBeEnabled();
-  await expect(page.locator('#btn-run')).toBeDisabled();
+  await expect(page.locator('#btn-run')).toBeEnabled();
   await expect(page.locator('#btn-play')).toBeDisabled();
 
   releaseObservation();
-  await expect(page.locator('#source-session-status')).toHaveText('Listening · one local source');
+  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Listening');
 });
 
 test('an ambiguous start becomes UNKNOWN until observation proves the listener state', async ({ page }) => {
@@ -593,14 +712,14 @@ test('an ambiguous start becomes UNKNOWN until observation proves the listener s
 
   page.once('dialog', dialog => dialog.accept());
   await page.locator('#btn-run').click();
-  await expect(page.locator('#source-session-status')).toContainText('Unknown');
-  await expect(page.locator('#source-session-status')).toContainText('status unavailable, retrying');
+  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('State unavailable');
+  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('State unavailable');
   await expect(page.locator('#btn-stop')).toBeEnabled();
-  await expect(page.locator('#btn-run')).toBeDisabled();
+  await expect(page.locator('#btn-run')).toBeEnabled();
   await expect(page.locator('#btn-play')).toBeDisabled();
 
   releaseObservation();
-  await expect(page.locator('#source-session-status')).toHaveText('Listening · one local source');
+  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Listening');
 });
 
 /**
@@ -611,19 +730,23 @@ test('an ambiguous start becomes UNKNOWN until observation proves the listener s
  * LISTENING and the canvas stayed blank for as long as the source ran. The document now matches on
  * the deployment its session reports, which is the one identity it can hold in advance.
  */
-test('a listening source paints its nodes from traversals the document was never told about', async ({ page }) => {
-  await stubRuntime(page, { sourceTraffic: { nodeIds: ['source', 'end'], admissions: 6 } });
+test('a listening deployment paints all actual traversals on its unchanged originating graph', async ({ page }) => {
+  await stubRuntime(page, { sourceTraffic: { nodeIds: ['source', 'end'], admissions: 6 }, legacyAfterAdmission: true });
   await page.goto('/');
   await openGraph(page, sourceGraph('external.consume'), 'listening.graphml');
 
+  const initialResponse = page.waitForResponse(response => response.request().method() === 'POST'
+    && new URL(response.url()).pathname.endsWith('/initial-start'));
   page.once('dialog', dialog => dialog.accept());
   await page.locator('#btn-run').click();
-  await expect(page.locator('#source-session-status')).toContainText('Listening · one local source');
+  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Listening');
+  expect((await initialResponse).status()).toBe(202);
+  await expectInitialAdmissionBound(page, await page.evaluate(() => window.ravenroot.activeDocument().id));
 
   const painted = () => page.evaluate(() => {
     const document_ = window.ravenroot.activeDocument();
     return {
-      deploymentId: document_.sourceSession.deploymentId,
+      deploymentId: document_.deploymentRun.deploymentId,
       boundExecutionId: document_.execution.executionId,
       source: document_.cy.getElementById('source').data('runtimeState') || 'idle',
       end: document_.cy.getElementById('end').data('runtimeState') || 'idle',
@@ -638,9 +761,9 @@ test('a listening source paints its nodes from traversals the document was never
   await expect.poll(async () => (await painted()).traversals).toBeGreaterThanOrEqual(6);
   const report = await painted();
   expect(report.deploymentId, 'the document holds the deployment, not an execution').toBeTruthy();
-  expect(report.boundExecutionId, 'a listener session binds no single execution id').toBeNull();
-  expect(report.source).toBe('completed');
-  expect(report.end).toBe('completed');
+  expect(report.boundExecutionId, 'the initial traversal stays in the deployment binding, outside one-shot reconciliation').toBeNull();
+  expect(report.source, 'matching source events paint the unchanged deployed graph').toBe('completed');
+  expect(report.end, 'each matching node receives its runtime highlight').toBe('completed');
 });
 
 /**
@@ -663,7 +786,7 @@ test('another deployment traffic is still dropped rather than painted on whichev
 
     page.once('dialog', dialog => dialog.accept());
     await page.locator('#btn-run').click();
-    await expect(page.locator('#source-session-status')).toContainText('Listening · one local source');
+    await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Listening');
 
     await page.waitForTimeout(1_500);
     expect(await page.evaluate(() => window.ravenroot.activeDocument().cy
@@ -672,3 +795,95 @@ test('another deployment traffic is still dropped rather than painted on whichev
 
 // Exercise the established feature with deliberately memory-only browser authentication.
 test.beforeEach(async ({ page }) => keepAuthenticationInMemory(page));
+
+test('known continuation stays with its originating bound document through focus and draft changes', async ({ page }) => {
+  let releaseInitialBody;
+  const initialBody = new Promise(resolve => { releaseInitialBody = resolve; });
+  await page.exposeFunction('__holdInitialStartBody', () => initialBody);
+  await page.addInitScript(() => {
+    const fetch = globalThis.fetch.bind(globalThis);
+    globalThis.__initialStartBodyWaiting = false;
+    globalThis.fetch = async (input, options) => {
+      const response = await fetch(input, options);
+      if (options?.method === 'POST' && /\/v1\/deployments\/[^/]+\/initial-start$/.test(new URL(String(input), location.href).pathname)) {
+        const text = response.text.bind(response);
+        response.text = async () => {
+          globalThis.__initialStartBodyWaiting = true;
+          await globalThis.__holdInitialStartBody();
+          return text();
+        };
+      }
+      return response;
+    };
+  });
+  const initialRequests = [];
+  page.on('request', request => {
+    if (request.method() === 'POST' && new URL(request.url()).pathname.endsWith('/initial-start')) initialRequests.push(request);
+  });
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  await stubRuntime(page, { legacyAfterAdmission: true, eventResponder: async ({ route, startedSession }) => {
+    const id = await startedSession; await gate;
+    await route.fulfill({ status: 200, contentType: 'text/event-stream', body: durableHumanTaskReentryStream(id) });
+  } });
+  await page.goto('/');
+  await openGraph(page, sourceGraph('external.consume'), 'original-source.graphml');
+  const originId = await page.evaluate(() => window.ravenroot.activeDocument().id);
+  const initialResponse = page.waitForResponse(response => response.request().method() === 'POST'
+    && new URL(response.url()).pathname.endsWith('/initial-start'));
+  page.once('dialog', dialog => dialog.accept()); await page.locator('#btn-run').click();
+  await expect(page.locator('.doc-pane--active .doc-run-binding')).toContainText('Listening');
+  const response = await initialResponse;
+  expect(response.status()).toBe(202);
+  const accepted = await response.json();
+  expect(accepted).toEqual({ outcome: 'ACCEPTED', requestId: response.request().postDataJSON().requestId,
+    processInstanceId: '10000000-0000-0000-0000-000000000001',
+    traversalId: '20000000-0000-0000-0000-000000000002' });
+  try {
+    await expect.poll(() => page.evaluate(() => globalThis.__initialStartBodyWaiting)).toBe(true);
+    // The actual accepted response exists, but the application has not consumed its body.
+    // READY alone must not become the immutable comparison baseline with null START identities.
+    expect(await page.evaluate(id => {
+      const run = window.ravenroot.workspace.find(id).deploymentRun;
+      return [run.processInstanceId, run.traversalId];
+    }, originId)).toEqual([null, null]);
+  } finally { releaseInitialBody(); }
+  await expectInitialAdmissionBound(page, originId);
+  const original = await page.evaluate(() => ({ id: window.ravenroot.activeDocument().id,
+    binding: { ...window.ravenroot.activeDocument().deploymentRun } }));
+  expect(original.id).toBe(originId);
+  expect(original.binding).toMatchObject({ tenantId: 'tenant-authenticated', incarnationId: 'runtime-original',
+    registrationIdentity: null, initialStartRequestId: accepted.requestId,
+    processInstanceId: accepted.processInstanceId, traversalId: accepted.traversalId });
+  expect(original.binding.graphVersion).toHaveLength(64);
+  expect(response.request().postDataJSON()).toEqual({
+    incarnationId: original.binding.incarnationId,
+    graphVersion: original.binding.graphVersion,
+    requestId: original.binding.initialStartRequestId,
+    input: JSON.parse(original.binding.inputJson),
+  });
+
+  await page.locator('#btn-modify').click(); await page.locator('#btn-add-node').click();
+  await page.locator('#node-editor input[name="id"]').fill('local-draft-only');
+  await page.locator('#node-editor button[type="submit"]').click();
+  await page.evaluate(() => { window.ravenroot.openDocument({ name: 'focused-other.graphml' }); });
+  const focused = await page.evaluate(() => window.ravenroot.activeDocument().id);
+  release();
+  await expect.poll(() => page.evaluate(id => window.ravenroot.workspace.find(id).execution.events.some(
+    event => event.executionId === '20000000-0000-4000-8000-000000000002' && event.nodeId === 'post-task-log'), original.id)).toBe(true);
+  expect(await page.evaluate(() => window.ravenroot.activeDocument().id)).toBe(focused);
+  expect(await page.evaluate(() => window.ravenroot.activeDocument().execution.events.length)).toBe(0);
+  const retained = await page.evaluate(id => {
+    const owner = window.ravenroot.workspace.find(id);
+    return { binding: { ...owner.deploymentRun }, localNode: owner.graph.nodeMap['local-draft-only']?.id,
+      state: owner.cy.getElementById('source').data('runtimeState') || 'idle',
+      endState: owner.cy.getElementById('end').data('runtimeState') || 'idle',
+      ownership: owner.sourceSession.processOwners.get('10000000-0000-4000-8000-000000000001') };
+  }, original.id);
+  expect(retained.binding).toEqual(original.binding);
+  expect(initialRequests).toHaveLength(1);
+  expect(retained.localNode).toBe('local-draft-only'); expect(retained.state).toBe('idle');
+  expect(retained.endState, 'a null-deployment continuation also stays off the mutable draft').toBe('idle');
+  expect(retained.ownership).toMatchObject({ originTraversalId: '20000000-0000-4000-8000-000000000001',
+    graphVersion: original.binding.graphVersion, runtimeIncarnationId: original.binding.incarnationId });
+});

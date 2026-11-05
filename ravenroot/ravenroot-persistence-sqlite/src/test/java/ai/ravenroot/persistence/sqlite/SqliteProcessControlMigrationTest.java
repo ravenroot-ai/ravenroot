@@ -45,6 +45,7 @@ class SqliteProcessControlMigrationTest {
             // These tables arrived in migration 36. A synthetic downgrade must remove later
             // structures as well as lowering user_version; leaving them behind creates a shape no
             // released database could have and correctly makes the non-idempotent migration fail.
+            LegacyHistorySchema.removeEmptyHistoryStep(connection);
             statement.execute("DROP TABLE replay_invocation_evidence");
             statement.execute("DROP TABLE replay_source_settlement");
             statement.execute("DROP TABLE derived_execution_ancestry");

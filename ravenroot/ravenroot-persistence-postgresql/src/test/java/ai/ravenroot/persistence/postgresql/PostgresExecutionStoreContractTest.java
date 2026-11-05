@@ -80,7 +80,10 @@ class PostgresExecutionStoreContractTest extends ExecutionStoreContract {
                         StoreCapability.HUMAN_TASK_CONFIRMATIONS, StoreCapability.EXECUTION_PAUSES,
                         StoreCapability.SELECTIVE_REPLAY_EVIDENCE,
                         StoreCapability.AGENT_AUTHORITY_BUDGETS, StoreCapability.DURABLE_SAGAS,
-                        StoreCapability.FLOW_INVOCATIONS),
+                        StoreCapability.FLOW_INVOCATIONS, StoreCapability.INITIAL_START_ADMISSION,
+                        StoreCapability.BUSINESS_HISTORIES, StoreCapability.CORRELATED_JOINS,
+                        StoreCapability.EXECUTION_HISTORY, StoreCapability.DEPLOYMENT_ENTRY_CUSTODY,
+                        StoreCapability.BUSINESS_CLOSURE_SIGNALS),
                 Set.copyOf(store().capabilities()),
                 "the declared set is exactly what this build implements. A capability added here without "
                         + "an implementation would make the suite assert against behaviour that does not "

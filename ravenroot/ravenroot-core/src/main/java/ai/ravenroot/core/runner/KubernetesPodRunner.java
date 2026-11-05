@@ -3,6 +3,7 @@ package ai.ravenroot.core.runner;
 import ai.ravenroot.api.persistence.OpaquePayload;
 import ai.ravenroot.api.runner.*;
 import java.io.*;
+import java.math.BigDecimal;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
@@ -206,6 +207,7 @@ public final class KubernetesPodRunner implements RunnerDriver {
                 || !job.runner().equals(registration) || !images.containsKey(job.definition().runtimeProfile())
                 || !job.authority().equals(RunnerPolicy.effective(job.authority(), job.definition().policy(), job.command(), registration.capabilities())))
             throw new IllegalArgumentException("assignment is not approved for this Kubernetes driver");
+        if (!reportOnly) containerCpu(assignment.workspace().profile().cpuMillicores());
         if ((!reportOnly && job.state() != RunnerJob.State.CLAIMED) || job.fence() < 1 || job.leaseUntil() == null
                 || !clock.instant().isBefore(job.leaseUntil())) throw new IllegalStateException("live fenced claim required");
         if (!reportOnly && persistent(assignment) && assignment.lifecycleCommand() == null) {
@@ -223,6 +225,14 @@ public final class KubernetesPodRunner implements RunnerDriver {
             if (currentFence(assignment) > assignment.job().fence())
                 throw new IllegalStateException("a newer report-only fence revoked Agent execution");
         } catch (IOException failure) { throw new UncheckedIOException(failure); }
+    }
+
+    // Keep the Pod's scheduling reservation and total ceiling, while giving its only
+    // container a lower bandwidth limit. Equal hierarchical CFS quotas can exhaust
+    // the parent before the child's own throttling counter advances.
+    static int containerCpu(int approved) {
+        if (approved < 20) throw new IllegalArgumentException("Kubernetes CPU ceiling must be at least 20m");
+        return (int) (4L * approved / 5);
     }
 
     /** Pure construction: no graph value can introduce Pod spec fields, mounts or credentials. */
@@ -243,9 +253,11 @@ public final class KubernetesPodRunner implements RunnerDriver {
                 "allowPrivilegeEscalation", false, "readOnlyRootFilesystem", true, "capabilities", Map.of("drop", List.of("ALL")),
                 "seccompProfile", Map.of("type", "RuntimeDefault")));
         var resources = Map.of("cpu", profile.cpuMillicores() + "m", "memory", Long.toString(limits.memoryBytes()));
-        container.put("resources", Map.of("requests", resources, "limits", resources));
+        var activeResources = Map.of("cpu", containerCpu(profile.cpuMillicores()) + "m", "memory", Long.toString(limits.memoryBytes()));
+        container.put("resources", Map.of("requests", activeResources, "limits", activeResources));
         container.put("volumeMounts", List.of(Map.of("name", "workspace", "mountPath", "/workspace")));
         var spec = new LinkedHashMap<String, Object>();
+        spec.put("resources", Map.of("requests", resources, "limits", resources));
         spec.put("restartPolicy", "Never"); spec.put("automountServiceAccountToken", false);
         spec.put("serviceAccountName", configuration.serviceAccount()); spec.put("enableServiceLinks", false);
         spec.put("terminationGracePeriodSeconds", configuration.terminationGraceSeconds());
@@ -348,12 +360,13 @@ public final class KubernetesPodRunner implements RunnerDriver {
             telemetry.increment(RunnerTelemetry.Counter.KUBERNETES_CREATE);
             atomic(saved, RunnerJson.write(Map.of("uid", uid(pod))));
         }
+        requireInvocation(pod, assignment);
         long deadline = System.nanoTime() + configuration.creationTimeout().toNanos();
         while (!"Running".equals(RunnerJson.map(pod.getOrDefault("status", Map.of())).get("phase"))) {
             requireAdmitted(assignment);
             if (System.nanoTime() >= deadline) throw new IllegalStateException("Kubernetes scheduling deadline exceeded; ownership retained");
             Thread.sleep(100);
-            var next = api.get("pod", podName(assignment)); requireOwned(next, assignment); requireUid(next, uid(pod)); pod = next;
+            var next = api.get("pod", podName(assignment)); requireOwned(next, assignment); requireUid(next, uid(pod)); requireInvocation(next, assignment); pod = next;
         }
         pvc = api.get("pvc", claimName(assignment)); requireOwned(pvc, assignment);
         requireUid(pvc, RunnerJson.text(RunnerJson.read(read(volume)), "uid"));
@@ -370,6 +383,7 @@ public final class KubernetesPodRunner implements RunnerDriver {
         } else if (!uid(pod).equals(RunnerJson.text(RunnerJson.read(read(network)), "uid"))) {
             throw new IllegalStateException("network attestation Pod identity changed");
         }
+        requireInvocation(pod, assignment);
         var proof = api.attest(podName(assignment));
         var limits = persistent(assignment) || assignment.lifecycleCommand() != null
                 ? assignment.workspace().profile().policy().limits() : assignment.job().authority().limits();
@@ -385,7 +399,7 @@ public final class KubernetesPodRunner implements RunnerDriver {
                 || RunnerJson.number(proof, "enforcedBytes") > limits.workspaceBytes()
                 || RunnerJson.number(proof, "memoryLimitBytes") < 1 || RunnerJson.number(proof, "cpuMillicores") < 1
                 || RunnerJson.number(proof, "memoryLimitBytes") > limits.memoryBytes()
-                || RunnerJson.number(proof, "cpuMillicores") > assignment.workspace().profile().cpuMillicores()
+                || RunnerJson.number(proof, "cpuMillicores") != containerCpu(assignment.workspace().profile().cpuMillicores())
                 || RunnerJson.number(proof, "cpuMillicores") < 1000 && !Boolean.TRUE.equals(proof.get("cpuThrottlingObserved"))
                 || RunnerJson.number(proof, "processLimit") < 1 || RunnerJson.number(proof, "processLimit") > limits.processes()
                 || RunnerJson.number(proof, "requestedBytes") != limits.workspaceBytes())
@@ -437,14 +451,45 @@ public final class KubernetesPodRunner implements RunnerDriver {
         // API defaulting is permitted, authority-affecting fields are not.
         for (String field : List.of("serviceAccountName", "automountServiceAccountToken", "restartPolicy", "enableServiceLinks"))
             if (!expected.get(field).equals(actual.get(field))) throw new IllegalStateException("Kubernetes Pod authority changed");
+        requireResources(actual.get("resources"), expected.get("resources"));
         var containers = (List<?>) actual.get("containers");
         if (containers.size() != 1 || actual.containsKey("initContainers") || actual.containsKey("ephemeralContainers"))
             throw new IllegalStateException("Kubernetes Pod container authority changed");
         var container = RunnerJson.map(containers.getFirst());
         var wanted = RunnerJson.map(((List<?>) expected.get("containers")).getFirst());
+        requireResources(container.get("resources"), wanted.get("resources"));
         for (String field : List.of("image", "command", "workingDir", "securityContext"))
             if (!wanted.get(field).equals(container.get(field))) throw new IllegalStateException("Kubernetes Agent authority changed");
     }
+    private static void requireResources(Object observed, Object expected) {
+        var actual = RunnerJson.map(observed); var wanted = RunnerJson.map(expected);
+        if (!actual.keySet().equals(wanted.keySet())) throw new IllegalStateException("Kubernetes resource hierarchy is absent or changed");
+        for (String boundary : List.of("requests", "limits")) {
+            var values = RunnerJson.map(actual.get(boundary)); var limits = RunnerJson.map(wanted.get(boundary));
+            if (!values.keySet().equals(limits.keySet())) throw new IllegalStateException("Kubernetes resource ceilings changed");
+            for (String key : limits.keySet())
+                if (quantity(values.get(key)).compareTo(quantity(limits.get(key))) != 0)
+                    throw new IllegalStateException("Kubernetes resource ceiling changed");
+        }
+    }
+
+    // Kubernetes canonicalizes our decimal CPU and byte quantities (e.g. 128Mi).
+    // Accept equivalent canonical representations, never an unparsed fallback.
+    private static BigDecimal quantity(Object value) {
+        if (!(value instanceof String text) || text.length() > 64) throw new IllegalStateException("Invalid Kubernetes quantity");
+        var match = java.util.regex.Pattern.compile("([0-9]+(?:\\.[0-9]+)?)([numkMGTPE]|[KMGTPE]i|[eE][+-]?[0-9]+)?").matcher(text);
+        if (!match.matches()) throw new IllegalStateException("Invalid Kubernetes quantity");
+        var amount = new BigDecimal(match.group(1)); var suffix = match.group(2);
+        if (suffix == null) return amount;
+        if (suffix.endsWith("i")) return amount.multiply(BigDecimal.valueOf(1024).pow("KMGTPE".indexOf(suffix.charAt(0)) + 1));
+        if (suffix.length() > 1) return amount.scaleByPowerOfTen(Integer.parseInt(suffix.substring(1)));
+        return amount.scaleByPowerOfTen(switch (suffix) {
+            case "n" -> -9; case "u" -> -6; case "m" -> -3; case "k" -> 3;
+            case "M" -> 6; case "G" -> 9; case "T" -> 12; case "P" -> 15; case "E" -> 18;
+            default -> throw new IllegalStateException("Invalid Kubernetes quantity");
+        });
+    }
+
     private RunnerResult.WorkspaceObservation observation(RunnerAssignment assignment) throws Exception {
         Path saved = directory(assignment).resolve(podName(assignment) + ".pod");
         if (!Files.exists(saved)) {

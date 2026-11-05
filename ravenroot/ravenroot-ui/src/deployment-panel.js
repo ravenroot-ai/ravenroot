@@ -133,6 +133,7 @@ function validateDeploymentId(value) {
  */
 export function createDeploymentsWindow({
   dialog, client = null, currentDocument = () => null, onOpenDeployment = async () => {}, pollMs = 2000,
+  onDeploymentSource = null,
   onDeployments = () => {}, onRegistered = () => {}, onDeploymentSelected = () => {},
 } = {}) {
   if (!dialog) {
@@ -473,6 +474,30 @@ export function createDeploymentsWindow({
       view.dataset.deploymentView = entry.deploymentId;
       view.disabled = busy;
       actionsRow.append(view);
+      if (onDeploymentSource && typeof client?.deploymentSource === 'function') {
+        for (const action of ['open', 'draft', 'download']) {
+          const button = doc.createElement('button');
+          button.type = 'button'; button.className = 'btn';
+          button.dataset.deploymentSource = entry.deploymentId; button.dataset.sourceAction = action;
+          paintText(button, () => uiText(`workspace.deployment.source.${action}`));
+          button.disabled = busy;
+          actionsRow.append(button);
+        }
+      }
+      const rebuild = doc.createElement('button');
+      rebuild.type = 'button'; rebuild.className = 'btn';
+      rebuild.dataset.deploymentRebuild = entry.deploymentId;
+      paintText(rebuild, () => uiText('workspace.deployment.rebuild'));
+      rebuild.disabled = busy; actionsRow.append(rebuild);
+      if (entry.continuity === 'DURABLE' && typeof client?.newDeploymentExecution === 'function') {
+        const execute = doc.createElement('button');
+        execute.type = 'button'; execute.className = 'btn';
+        execute.dataset.deploymentExecute = entry.deploymentId;
+        paintText(execute, () => uiText(hasPendingExecution(entry) ? 'workspace.deployment.executionPending' : 'workspace.deployment.newExecution'));
+        execute.disabled = busy || !['READY', 'DEGRADED'].includes(entry.state);
+        actionsRow.append(execute);
+      }
+
       if (busy) {
         const pending = doc.createElement('small');
         paintText(pending, () => uiText("workspace.deployment.panel.working"));
@@ -860,13 +885,85 @@ export function createDeploymentsWindow({
     }
   }
 
-  async function openDeployment(deploymentId) {
+  function executionStorageKey(entry) {
+    return 'ravenroot.explicit-run.v1:' + JSON.stringify([client?.baseUrl || doc.location?.origin,
+      entry.tenantId, entry.deploymentId, entry.registrationIdentity, entry.graphVersion]);
+  }
+  function hasPendingExecution(entry) {
+    try { return Boolean(doc.defaultView?.localStorage?.getItem(executionStorageKey(entry))); }
+    catch { return false; }
+  }
+  function pendingExecution(entry) {
+    const raw = doc.defaultView?.localStorage?.getItem(executionStorageKey(entry));
+    if (!raw) return null;
+    const value = JSON.parse(raw);
+    if (!value || typeof value.requestId !== 'string' || !/^[a-f0-9-]{36}$/i.test(value.requestId)
+        || value.graphVersion !== entry.graphVersion || !Object.hasOwn(value, 'input'))
+      throw productError('workspace.deployment.executionInvalid', new Error('Invalid saved execution request'));
+    return value;
+  }
+  async function newExecution(deploymentId) {
+    if (!client || rowBusy.has(deploymentId)) return;
+    const entry = listing.deployments.find(value => value.deploymentId === deploymentId);
+    if (!entry) return;
+    const requestClient = client;
+    const storageKey = executionStorageKey(entry);
+    rowBusy.add(deploymentId);
+    try {
+      let request = pendingExecution(entry);
+      if (!request) {
+        if (!doc.defaultView?.confirm?.(uiText('workspace.deployment.newExecutionConfirm'))) return;
+        const rawInput = doc.defaultView.prompt(uiText('workspace.deployment.executionInput'), 'null');
+        if (rawInput === null) return;
+        request = { requestId: globalThis.crypto.randomUUID(), graphVersion: entry.graphVersion, input: JSON.parse(rawInput) };
+        doc.defaultView.localStorage.setItem(storageKey, JSON.stringify(request));
+      }
+      renderList();
+      const current = await requestClient.deployment(deploymentId);
+      if (disposed || client !== requestClient) return;
+      if (current.registrationIdentity !== entry.registrationIdentity || current.graphVersion !== entry.graphVersion)
+        throw productError('workspace.deployment.executionInvalid', new Error('Deployment identity changed'));
+      // Attach monitoring before admission so fast traversals can be observed.
+      // A presentation failure must never prevent independently requested execution.
+      try { await onOpenDeployment(deploymentId, requestClient, false); } catch { /* admission stays independent */ }
+      if (disposed || client !== requestClient) return;
+      const result = await requestClient.newDeploymentExecution(deploymentId, { ...request,
+        incarnationId: current.runtimeIncarnationId });
+      doc.defaultView.localStorage.removeItem(storageKey);
+      if (disposed || client !== requestClient) return;
+      say(() => uiText('workspace.deployment.executionAccepted', { processId: result.processInstanceId }), 'ok');
+      close();
+    } catch (error) {
+      say(() => uiText('workspace.deployment.executionUncertain', { reason: uiErrorReason(error) }), 'error');
+    } finally { rowBusy.delete(deploymentId); if (!disposed) renderList(); }
+  }
+
+  async function openDeploymentSource(deploymentId, action) {
+    if (!client || rowBusy.has(deploymentId) || !onDeploymentSource) return;
+    const entry = listing.deployments.find(value => value.deploymentId === deploymentId);
+    if (!entry) return;
+    const sourceClient = client;
+    rowBusy.add(deploymentId); renderList();
+    try {
+      const source = await sourceClient.deploymentSource({ deploymentId,
+        incarnationId: entry.runtimeIncarnationId, graphVersion: entry.graphVersion });
+      if (disposed || sourceClient !== client) return;
+      await onDeploymentSource(source, action);
+      if (action !== 'download') close();
+      else say(() => uiText('workspace.deployment.source.downloaded'), 'ok');
+    } catch (error) {
+      if (!disposed && sourceClient === client)
+        say(() => uiText('workspace.deployment.source.failed', { reason: uiErrorReason(error) }), 'error');
+    } finally { rowBusy.delete(deploymentId); if (!disposed) renderList(); }
+  }
+
+  async function openDeployment(deploymentId, rebuild = false) {
     if (!client || rowBusy.has(deploymentId)) return;
     rowBusy.add(deploymentId);
     renderList();
     say(() => uiText("workspace.deployment.panel.opening.a.read.only.live.view.of", { deploymentId: deploymentId }));
     try {
-      await onOpenDeployment(deploymentId, client);
+      await onOpenDeployment(deploymentId, client, rebuild);
       if (!disposed) {
         say(() => uiText("workspace.deployment.panel.is.open.in.a.read.only.deployment.canvas", { deploymentId: deploymentId }), 'ok');
         close();
@@ -917,6 +1014,17 @@ export function createDeploymentsWindow({
     void register();
   };
   const onDialogClick = event => {
+    const source = event.target.closest('[data-deployment-source]');
+    if (source) { void openDeploymentSource(source.dataset.deploymentSource, source.dataset.sourceAction); return; }
+    const execute = event.target.closest?.('[data-deployment-execute]');
+    if (execute) { void newExecution(execute.dataset.deploymentExecute); return; }
+    const rebuild = event.target.closest?.('[data-deployment-rebuild]');
+    if (rebuild) {
+      if (doc.defaultView?.confirm?.(uiText('workspace.deployment.rebuildConfirm')))
+        void openDeployment(rebuild.dataset.deploymentRebuild, true);
+      return;
+    }
+
     const viewButton = event.target.closest?.('[data-deployment-view]');
     if (viewButton) {
       void openDeployment(viewButton.dataset.deploymentView);

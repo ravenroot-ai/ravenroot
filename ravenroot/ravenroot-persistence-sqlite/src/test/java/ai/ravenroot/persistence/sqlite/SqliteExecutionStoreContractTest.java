@@ -61,7 +61,10 @@ class SqliteExecutionStoreContractTest extends ExecutionStoreContract {
                         StoreCapability.EXECUTION_PAUSES, StoreCapability.AGENT_AUTHORITY_BUDGETS,
                         StoreCapability.EXECUTION_RESULTS, StoreCapability.RUNNER_JOBS,
                         StoreCapability.DURABLE_SAGAS, StoreCapability.SELECTIVE_REPLAY_EVIDENCE,
-                        StoreCapability.FLOW_INVOCATIONS),
+                        StoreCapability.FLOW_INVOCATIONS, StoreCapability.INITIAL_START_ADMISSION,
+                        StoreCapability.BUSINESS_HISTORIES, StoreCapability.CORRELATED_JOINS,
+                        StoreCapability.EXECUTION_HISTORY, StoreCapability.DEPLOYMENT_ENTRY_CUSTODY,
+                        StoreCapability.BUSINESS_CLOSURE_SIGNALS),
                 Set.copyOf(store().capabilities()),
                 "the exact capability set keeps every conformance assertion active");
     }

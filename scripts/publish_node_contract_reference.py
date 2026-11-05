@@ -15,7 +15,7 @@ SOURCE = ROOT / "docs/reference/node-descriptor-contracts.tsv"
 GOVERNED_SOURCE = ROOT / "docs/reference/governed-node-descriptor-contracts.tsv"
 OUTPUT = ROOT / "docs/reference/node-contracts.md"
 CORE = {"log", "delay", "timer", "crontab", "human-task", "template", "json-parse", "bigint-op", "cel-transform",
-        "cel-decision", "json-path", "http-request", "program", "boundary-guard"}
+        "cel-decision", "json-path", "http-request", "program", "boundary-guard", "correlation-close", "correlation-derive"}
 BUNDLES = {
     "llm-prompt": "ai", "agent": "ai", "amqp.publish": "amqp091", "amqp.consume": "amqp091",
     "discord.send": "discord", "discord.interactions": "discord", "filesystem.read": "filesystem",

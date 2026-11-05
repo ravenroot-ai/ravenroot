@@ -8,14 +8,15 @@ import ai.ravenroot.api.node.service.NodePackageServices;
 /**
  * Opts a {@link NodeBehavior} into deployment-scoped inbound source lifecycle.
  *
- * <h2>An addition, not a replacement</h2>
- * <p>A behavior that also needs to poll, subscribe or listen implements this alongside
- * {@link NodeBehavior}, unchanged. {@link NodeBehavior#create} keeps building the per-message
- * {@code NodeAction} exactly as it does today, for the one-shot {@code startGraphMl} path and the
- * playground, neither of which this interface has any bearing on. {@link #createSource} is consulted
- * only when a node using this behavior is spawned inside a {@link GraphDeployment#start} — never at
- * package load, never at catalog registration, and never for a behavior used only outside a
- * deployment. A behavior that does not implement this interface is unaffected in every respect.</p>
+ * <h2>Owned listeners and runtime-owned SOURCE emission</h2>
+ * <p>A behavior implements this alongside {@link NodeBehavior}. An effective SOURCE starts its
+ * listener only during validated deployment activation. Authenticated source-local ingress emits
+ * the accepted input from that owning entry into its successors. Reaching a SOURCE from a parent
+ * traversal settles that branch at the source boundary; its ordinary {@code NodeAction} is never
+ * composed. This also applies to one-shot execution and the playground. A dual SOURCE/WORKER
+ * descriptor may permit an explicit WORKER override, which uses the ordinary action instead.</p>
+ * <p>{@link #createSource} runs during deployment activation, never at package load, catalog
+ * registration or a one-shot Test. A behavior without this interface has no listener lifecycle.</p>
  */
 public interface InboundSourceCapable {
     /**
@@ -28,10 +29,9 @@ public interface InboundSourceCapable {
     }
 
     /**
-     * Builds this node's inbound source. Called once per node, at the same point in a deployment's
-     * startup where {@link NodeBehavior#create} builds that node's action — configuration parsing and
-     * any client construction belong here, not deferred into {@link InboundSource#start}, for the same
-     * reason {@link NodeBehavior#create}'s own Javadoc gives.
+     * Builds this node's inbound source once per owned listener activation, after graph validation
+     * and before the listener's readiness stage completes. Configuration parsing and client
+     * construction belong here; readiness and listener startup belong in {@link InboundSource#start}.
      *
      * @param configuration this node's configuration — the same instance {@link NodeBehavior#create}
      *                       would receive for it

@@ -68,7 +68,7 @@
         "if": { "properties": { "enabled": { "const": true } } },
         "then": { "properties": {
           "credentialSecretName": { "minLength": 1 }, "tenantNamespaces": { "minLength": 3 },
-          "artifactBaseUrl": { "pattern": "^https://" }
+          "artifactBaseUrl": { "pattern": "^(?:$|https://)" }
         } }
       }, {
         "if": { "properties": { "enabled": { "const": true }, "provider": { "const": "github" } } },

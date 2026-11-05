@@ -124,6 +124,7 @@ class SqliteDeploymentRegistryRetentionTest {
             // process incarnation origin is migration 34. The recovery indexes and selective
             // replay tables are migrations 35 and 36, so every later structure and history row
             // must be removed before exercising the identity backfill.
+            LegacyHistorySchema.removeEmptyHistoryStep(connection);
             statement.execute("DROP TABLE replay_invocation_evidence");
             statement.execute("DROP TABLE replay_source_settlement");
             statement.execute("DROP TABLE derived_execution_ancestry");

@@ -66,10 +66,11 @@ class DefaultGraphDeploymentProjectedRequestReplyTest {
                   <data key="kind">behavior</data>
                   <data key="behavior">test.projection.listener</data>
                 </node>
+                <node id="worker"><data key="kind">behavior</data><data key="behavior">test.projection.worker</data></node>
                 <node id="end"><data key="kind">end</data></node>
                 <node id="error"><data key="kind">error</data></node>
                 <edge source="start" target="listener"/>
-                <edge source="listener" target="end"/>
+                <edge source="listener" target="worker"/><edge source="worker" target="end"/>
               </graph>
             </graphml>
             """;
@@ -115,7 +116,7 @@ class DefaultGraphDeploymentProjectedRequestReplyTest {
 
             var seen = new AtomicReference<RequestReplyContext>();
             RequestReplyExchange exchange = accepted(deployment.requestReply()
-                    .requestProjected(IngressTarget.start(), context -> {
+                    .requestProjected(IngressTarget.node("listener"), context -> {
                         seen.set(context);
                         return PayloadValue.of("composition-root");
                     }, Instant.now().plusSeconds(5)));
@@ -174,13 +175,13 @@ class DefaultGraphDeploymentProjectedRequestReplyTest {
             deployment.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
 
             var refusal = assertInstanceOf(RequestReplyAdmission.Refused.class,
-                    deployment.requestReply().requestProjected(IngressTarget.start(), context -> {
+                    deployment.requestReply().requestProjected(IngressTarget.node("listener"), context -> {
                         throw PayloadException.tooLarge(64, 16);
                     }, Instant.now().plusSeconds(5)));
             assertEquals(RequestReplyRefusal.PAYLOAD_REJECTED, refusal.reason());
             assertEquals(0, listener.invocations.get(), "a refused projection starts no traversal");
 
-            RequestReplyExchange next = accepted(deployment.requestReply().request(IngressTarget.start(),
+            RequestReplyExchange next = accepted(deployment.requestReply().request(IngressTarget.node("listener"),
                     PayloadValue.of("after-refusal"), Instant.now().plusSeconds(5)));
             assertEquals("after-refusal",
                     next.completion().toCompletableFuture().get(10, TimeUnit.SECONDS).payload());
@@ -200,7 +201,7 @@ class DefaultGraphDeploymentProjectedRequestReplyTest {
 
             var ran = new AtomicInteger();
             var refusal = assertInstanceOf(RequestReplyAdmission.Refused.class,
-                    deployment.requestReply().requestProjected(IngressTarget.start(), context -> {
+                    deployment.requestReply().requestProjected(IngressTarget.node("listener"), context -> {
                         ran.incrementAndGet();
                         return PayloadValue.of("late");
                     }, Instant.now().plusSeconds(5)));
@@ -242,7 +243,10 @@ class DefaultGraphDeploymentProjectedRequestReplyTest {
             }
         };
         return new DefaultGraphDeployment(DeploymentId.of("projected"), engine,
-                NodePackages.register(new BehaviorRegistry(), nodePackage), new ExecutionMonitor(),
+                NodePackages.register(new BehaviorRegistry(), nodePackage).register("test.projection.worker", message -> {
+                    listener.invocations.incrementAndGet();
+                    return CompletableFuture.completedFuture(NodeResult.continueWith(message.payload()));
+                }), new ExecutionMonitor(),
                 ExecutionIdentitySource.randomUuids(), GRAPH.getBytes(StandardCharsets.UTF_8),
                 DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY);
     }

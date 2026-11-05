@@ -593,7 +593,7 @@ public final class AgentNodeBehavior implements ai.ravenroot.api.node.GovernedAg
         NodeMessage restored = new NodeMessage(supplied.security(), supplied.processInstanceId(),
                 supplied.traversalId(), supplied.invocationId(), supplied.attemptId(),
                 supplied.parentInvocationIds(), supplied.nodeId(), null, checkpoint.inboundAttributes(),
-                supplied.command());
+                supplied.command(), supplied.applicationCorrelation());
         AgentResourceSession resources;
         try {
             resources = services.agentResources().resume(input, resourceRequest(settings));

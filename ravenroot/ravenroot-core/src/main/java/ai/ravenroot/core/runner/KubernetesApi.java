@@ -18,11 +18,47 @@ import java.util.concurrent.TimeUnit;
 public final class KubernetesApi implements KubernetesTransport {
     /** Bounded diagnostic classes; none is permission to replay a failed operation. */
     enum FailureKind { QUOTA, ADMISSION, AUTHORIZATION, CONFLICT, UNAVAILABLE }
+    enum CommandKind { OTHER, ATTEST, NETWORK_CONTROL }
+    enum DiagnosticOrigin { UNKNOWN, ATTESTER_MARKER, CLIENT_DEADLINE }
+    enum AttestationPhase { UNKNOWN, NETWORK, IDENTITY, PRIVILEGES, CREDENTIAL, ROOT, LANDLOCK,
+        CEILINGS, STORAGE, PROCESS, CGROUP, WORKSPACE, CONTROL, MEMORY_BOUNDARY, ARGUMENTS }
+    enum AttestationReason { UNKNOWN, REFUSED, OS_ERROR, INVALID_VALUE, PROCESS_EXIT, PROCESS_TIMEOUT,
+        CPU_THROTTLING_MISSING, SEED_UNCERTAIN, SEED_IDENTITY_CHANGED }
+    record Diagnostic(DiagnosticOrigin origin, AttestationPhase phase, AttestationReason reason) {
+        static final Diagnostic UNKNOWN = new Diagnostic(DiagnosticOrigin.UNKNOWN, AttestationPhase.UNKNOWN, AttestationReason.UNKNOWN);
+    }
+
+    // This is unverified forensic context from the original fixed image command, never proof or
+    // authority. Reject the whole diagnostic on extra data; never publish remote stderr itself.
+    static Diagnostic attestationDiagnostic(CommandKind command, byte[] stderr) {
+        if (command == CommandKind.OTHER || stderr.length > 512) return Diagnostic.UNKNOWN;
+        String text = new String(stderr, StandardCharsets.US_ASCII);
+        String suffix = "command terminated with exit code 1\n";
+        if (text.endsWith(suffix)) text = text.substring(0, text.length() - suffix.length());
+        var match = java.util.regex.Pattern.compile("RR_ATTESTATION_FAILURE_V1:([A-Z_]+):([A-Z_]+)\\n").matcher(text);
+        if (!match.matches()) return Diagnostic.UNKNOWN;
+        try {
+            var phase = AttestationPhase.valueOf(match.group(1));
+            var reason = AttestationReason.valueOf(match.group(2));
+            if (phase == AttestationPhase.UNKNOWN || phase == AttestationPhase.ARGUMENTS || phase == AttestationPhase.MEMORY_BOUNDARY
+                    || command == CommandKind.ATTEST && phase == AttestationPhase.CONTROL
+                    || command == CommandKind.NETWORK_CONTROL && phase != AttestationPhase.CONTROL
+                    || reason == AttestationReason.CPU_THROTTLING_MISSING && phase != AttestationPhase.CGROUP
+                    || (reason == AttestationReason.SEED_UNCERTAIN || reason == AttestationReason.SEED_IDENTITY_CHANGED)
+                        && phase != AttestationPhase.WORKSPACE) return Diagnostic.UNKNOWN;
+            return new Diagnostic(DiagnosticOrigin.ATTESTER_MARKER, phase, reason);
+        } catch (IllegalArgumentException invalid) { return Diagnostic.UNKNOWN; }
+    }
+
     static final class OperationFailure extends IOException {
         final FailureKind kind;
         OperationFailure(FailureKind kind) { this(kind, -1); }
-        OperationFailure(FailureKind kind, int exitCode) {
-            super("Kubernetes operation " + kind + " (client exit " + exitCode + "); effect remains unconfirmed"); this.kind = kind;
+        OperationFailure(FailureKind kind, int exitCode) { this(kind, exitCode, CommandKind.OTHER, Diagnostic.UNKNOWN); }
+        OperationFailure(FailureKind kind, int exitCode, CommandKind command, Diagnostic diagnostic) {
+            super("Kubernetes operation " + kind + " (client exit " + exitCode + "); effect remains unconfirmed"
+                    + "; command=" + command + " diagnostic=" + diagnostic.origin()
+                    + " phase=" + diagnostic.phase() + " reason=" + diagnostic.reason());
+            this.kind = kind;
         }
     }
     static FailureKind classify(byte[] stderr) {
@@ -107,6 +143,10 @@ public final class KubernetesApi implements KubernetesTransport {
     }
 
     private byte[] command(byte[] input, String... operation) throws Exception {
+        return command(CommandKind.OTHER, input, operation);
+    }
+
+    private byte[] command(CommandKind kind, byte[] input, String... operation) throws Exception {
         Process process = start(operation);
         try (var streams = Executors.newVirtualThreadPerTaskExecutor()) {
             var output = streams.submit(() -> bounded(process.getInputStream(), bytes));
@@ -115,10 +155,12 @@ public final class KubernetesApi implements KubernetesTransport {
             try {
                 try (var stdin = process.getOutputStream()) { if (input != null) stdin.write(input); }
                 if (!process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS))
-                    throw new OperationFailure(FailureKind.UNAVAILABLE);
+                    throw new OperationFailure(FailureKind.UNAVAILABLE, -1, kind,
+                            new Diagnostic(DiagnosticOrigin.CLIENT_DEADLINE, AttestationPhase.UNKNOWN, AttestationReason.UNKNOWN));
                 byte[] result = output.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
                 byte[] diagnostic = errors.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
-                if (process.exitValue() != 0) throw new OperationFailure(classify(diagnostic), process.exitValue());
+                if (process.exitValue() != 0) throw new OperationFailure(classify(diagnostic), process.exitValue(), kind,
+                        attestationDiagnostic(kind, diagnostic));
                 return result;
             } finally {
                 if (process.isAlive()) process.destroyForcibly();
@@ -184,13 +226,13 @@ public final class KubernetesApi implements KubernetesTransport {
 
     /** Runs the image's fixed enforcement probe without passing graph data or a shell program. */
     public Map<String, Object> attest(String pod) throws Exception {
-        return RunnerJson.read(command(null, "exec", dnsLabel(pod), "--container=agent", "--",
+        return RunnerJson.read(command(CommandKind.ATTEST, null, "exec", dnsLabel(pod), "--container=agent", "--",
                 "python3", "/opt/kubernetes_attestation.py"));
     }
 
     /** Positive network-control probe before any Agent authority is delivered. */
     public Map<String, Object> networkControl(String pod) throws Exception {
-        return RunnerJson.read(command(null, "exec", dnsLabel(pod), "--container=agent", "--",
+        return RunnerJson.read(command(CommandKind.NETWORK_CONTROL, null, "exec", dnsLabel(pod), "--container=agent", "--",
                 "python3", "/opt/kubernetes_attestation.py", "--network-control"));
     }
 

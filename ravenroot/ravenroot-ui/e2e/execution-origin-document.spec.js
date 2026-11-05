@@ -1,4 +1,7 @@
 import { expect, test } from '@playwright/test';
+import { keepAuthenticationInMemory } from './memory-only-auth.mjs';
+import { PID, TID, deploymentService, interruptMockDeploymentObservation } from './deployment-run-fixture.mjs';
+test.beforeEach(async ({ page }) => keepAuthenticationInMemory(page));
 
 const frame = payload => `event: execution\ndata: ${JSON.stringify(payload)}\n\n`;
 
@@ -9,8 +12,10 @@ async function installDelayedRuntime(page, mode) {
   let releaseEvents;
   const submissionGate = new Promise(resolve => { releaseSubmission = resolve; });
   const eventGate = new Promise(resolve => { releaseEvents = resolve; });
-  const executionId = `${mode}-origin-execution`;
-  const graphVersion = `${mode}-origin-version`;
+  const executionId = mode === 'run' ? TID : `${mode}-origin-execution`;
+  const processInstanceId = mode === 'run' ? PID : `${mode}-process`;
+  const backend = mode === 'run' ? await deploymentService(page, { gate: { promise: submissionGate } }) : null;
+  const graphVersion = () => mode === 'run' ? [...backend.held.values()][0]?.graphVersion : `${mode}-origin-version`;
 
   await page.route('**/v1/node-types', route => route.fulfill({
     status: 200, contentType: 'application/json', body: '[]',
@@ -26,26 +31,34 @@ async function installDelayedRuntime(page, mode) {
       await submissionGate;
       return route.fulfill({
         status: 200, contentType: 'application/json',
-        body: JSON.stringify({ executionId, graphVersion, processInstanceId: `${mode}-process`,
+        body: JSON.stringify({ executionId, graphVersion: graphVersion(), processInstanceId,
           executionPolicy: mode === 'run' ? 'RUN' : 'TEST_PASSTHROUGH' }),
       });
     }
     return route.fulfill({
       status: 200, contentType: 'application/json',
-      body: JSON.stringify({ status: 'RUNNING', executionId }),
+      body: JSON.stringify({ status: 'RUNNING', executionId, traversalId: executionId, processInstanceId }),
     });
   });
 
   return {
     executionId,
-    graphVersion,
-    get postCount() { return postCount; },
-    get postedGraphMl() { return postedGraphMl; },
+    get graphVersion() { return graphVersion(); },
+    get deploymentId() { return [...(backend?.held?.keys() || [])][0]; },
+    get initialStartCalls() { return backend?.calls.filter(call => call.action === 'initial-start') || []; },
+    get postCount() { return backend ? backend.calls.filter(call => call.method === 'POST' && !call.action).length : postCount; },
+    get postedGraphMl() { return backend ? backend.calls.find(call => call.method === 'POST' && !call.action)?.body || '' : postedGraphMl; },
     releaseSubmission,
-    releaseEvents: () => releaseEvents(frame({
-      type: 'NODE_STARTED', executionId, graphVersion, processInstanceId: `${mode}-process`,
-      nodeId: 'dosomething', activeInstances: 1,
-    })),
+    releaseEvents: async () => {
+      // Retain this legacy-feed owner-routing case under an explicit native-channel outage.
+      // Native stream correctness has separate coverage; a live native stream suppresses duplicates.
+      if (backend) await interruptMockDeploymentObservation(page);
+      releaseEvents(frame({
+        type: 'NODE_STARTED', executionId, graphVersion: graphVersion(), processInstanceId,
+        ...(backend ? { deploymentId: [...backend.held.keys()][0] } : {}),
+        nodeId: 'dosomething', activeInstances: 1,
+      }));
+    },
   };
 }
 
@@ -86,8 +99,22 @@ for (const mode of ['test', 'run']) {
     const sibling = await page.evaluate(() => window.ravenroot.openDocument({ name: 'sibling.graphml' }));
     expect(await page.evaluate(() => window.ravenroot.activeDocument().documentId)).toBe(sibling);
     runtime.releaseSubmission();
-    await expect.poll(() => page.evaluate(id =>
-      window.ravenroot.workspace.find(id)?.execution.executionId, before.id)).toBe(runtime.executionId);
+    await expect.poll(() => page.evaluate(({ id, mode }) => {
+      const owner = window.ravenroot.workspace.find(id);
+      return mode === 'run' ? owner?.deploymentRun?.traversalId : owner?.execution.executionId;
+    }, { id: before.id, mode })).toBe(runtime.executionId);
+    if (mode === 'run') {
+      expect(runtime.initialStartCalls).toHaveLength(1);
+      const request = JSON.parse(runtime.initialStartCalls[0].body);
+      expect(await page.evaluate(id => {
+        const owner = window.ravenroot.workspace.find(id);
+        return { binding: owner.deploymentRun, oneShot: owner.execution.executionId };
+      }, before.id)).toMatchObject({ oneShot: null, binding: {
+        deploymentId: runtime.deploymentId, graphVersion: runtime.graphVersion,
+        incarnationId: 'runtime-1', processInstanceId: PID, traversalId: TID,
+        initialStartRequestId: request.requestId, phase: 'READY',
+      } });
+    }
 
     expect(await page.evaluate(([originId, siblingId]) => {
       const origin = window.ravenroot.workspace.find(originId);
@@ -118,7 +145,10 @@ for (const mode of ['test', 'run']) {
       sameRenderer: true,
       incarnation: before.incarnation,
       mode: before.mode,
-      provenance: await page.evaluate(() => window.__executionOrigin.provenance),
+      provenance: await page.evaluate(({ mode, deploymentId, graphVersion }) => {
+        const original = JSON.parse(window.__executionOrigin.provenance);
+        return JSON.stringify(mode === 'run' ? { ...original, deploymentId, sourceGraphVersion: graphVersion } : original);
+      }, { mode, deploymentId: runtime.deploymentId, graphVersion: runtime.graphVersion }),
       historyDepth: before.historyDepth,
       dirty: before.dirty,
       selected: before.selected,
@@ -135,7 +165,7 @@ for (const mode of ['test', 'run']) {
       origin.graph.nodes = origin.graph.nodes.filter(node => node.id !== 'dosomething');
       delete origin.graph.nodeMap.dosomething;
     }, before.id);
-    runtime.releaseEvents();
+    await runtime.releaseEvents();
     await expect.poll(() => page.evaluate(id =>
       window.ravenroot.workspace.find(id)?.execution.events.length, before.id)).toBe(1);
     expect(await page.evaluate(([originId, siblingId]) => ({

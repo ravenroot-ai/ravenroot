@@ -72,6 +72,8 @@ public final class StandardBehaviorFactories {
                 new DelayNodeBehaviorFactory(),
                 new TimerNodeBehaviorFactory(),
                 new CrontabNodeBehaviorFactory(),
+                new CorrelationCloseNodeBehaviorFactory(),
+                new CorrelationDeriveNodeBehaviorFactory(),
                 new HumanTaskNodeBehaviorFactory(humanTasks, humanTaskPolicy),
                 new TemplateNodeBehaviorFactory(),
                 new JsonParseNodeBehaviorFactory(),

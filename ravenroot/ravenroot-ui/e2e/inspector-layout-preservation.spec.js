@@ -23,6 +23,8 @@ function graphMl() {
 }
 
 async function replaceGraph(page, name = 'inspector-layout.graphml') {
+  await expect.poll(() => page.evaluate(() => window.ravenroot?.workspacePersistence().authority.state)).toBe('ready');
+  expect(await page.evaluate(() => window.ravenroot.graphDocumentByteLimit())).toBe(10 * 1024 * 1024);
   await page.evaluate(({ xml, filename }) =>
     window.ravenroot.replaceActiveDocumentFromText(xml, filename), { xml: graphMl(), filename: name });
   await expect(page.locator('.doc-pane--active')).not.toHaveAttribute('aria-busy', 'true');
@@ -96,6 +98,43 @@ const rendererWasRetained = page => page.evaluate(() => window.cy === window.__i
 test.beforeEach(async ({ page }) => {
   await page.goto('/');
   await replaceGraph(page);
+});
+
+test('replacement waits for validated configuration and preserves the layout after release', async ({ page }) => {
+  let releaseConfiguration, configurationEntered;
+  const held = new Promise(resolve => { releaseConfiguration = resolve; });
+  const entered = new Promise(resolve => { configurationEntered = resolve; });
+  await page.route('**/v1/configuration', async route => {
+    configurationEntered(); await held; await route.continue();
+  });
+  try {
+    await page.reload(); await entered;
+    await expect.poll(() => page.evaluate(() => window.ravenroot?.workspacePersistence().authority.state)).toBe('pending');
+    const graph = () => page.evaluate(() => window.ravenroot.serializeGraphML(window.ravenroot.activeDocument().graph));
+    const original = await graph();
+    await expect(page.evaluate(xml => window.ravenroot.replaceActiveDocumentFromText(xml, 'denied.graphml'), graphMl()))
+      .rejects.toThrow('Graph document loading is unavailable until the connected service returns valid configuration');
+    expect(await graph()).toBe(original);
+    await page.evaluate(() => {
+      const replace = window.ravenroot.replaceActiveDocumentFromText;
+      window.__fixtureReplacementCalls = 0;
+      window.ravenroot.replaceActiveDocumentFromText = (...args) => { window.__fixtureReplacementCalls++; return replace(...args); };
+    });
+    const replacing = replaceGraph(page, 'held-configuration.graphml');
+    // Observe the helper immediately without concealing a failure at the later explicit await.
+    const outcome = replacing.then(() => null, error => error);
+    expect(await page.evaluate(() => window.__fixtureReplacementCalls)).toBe(0);
+    expect(await graph()).toBe(original);
+    releaseConfiguration(); await replacing; expect(await outcome).toBeNull();
+    expect(await page.evaluate(() => window.__fixtureReplacementCalls)).toBe(1);
+    await arrange(page, 'Arrange — Hierarchical'); await startEditing(page, { autosave: false });
+    await selectOnly(page, 'n5'); const before = await markPresentation(page), routes = await routeGeometry(page);
+    await page.locator('#node-editor textarea[name="description"]').fill('Saved after validated configuration');
+    await page.getByRole('button', { name: 'Save node' }).click();
+    expect(await presentation(page)).toEqual(before); expect(await rendererWasRetained(page)).toBe(true);
+    expect(await routeGeometry(page)).toEqual(routes);
+    expect(await page.evaluate(() => window.ravenroot.activeDocument().graph.nodeMap.n5.description)).toBe('Saved after validated configuration');
+  } finally { releaseConfiguration(); }
 });
 
 test('Save node with Autosave OFF retains a Hierarchical canvas through undo and redo', async ({ page }) => {

@@ -44,12 +44,14 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * that code changed, without saying so. So the guard is here, in the fixture, and it is a fixture
  * assertion the test makes explicitly.</p>
  */
-final class SuspendFirstWriteExecutionStore implements ExecutionStore {
+final class SuspendFirstWriteExecutionStore implements ForwardingHistoryExecutionStore {
 
     /** Generously above any healthy duration: expiry is a failed test, never a quiet pass. */
     private static final Duration RELEASE_BOUND = Duration.ofSeconds(60);
 
     private final ExecutionStore delegate;
+
+    @Override public ExecutionStore delegate() { return delegate; }
     private final AtomicBoolean firstWriteClaimed = new AtomicBoolean();
     private final CountDownLatch firstWriteReached = new CountDownLatch(1);
     private final CountDownLatch releaseFirstWrite = new CountDownLatch(1);

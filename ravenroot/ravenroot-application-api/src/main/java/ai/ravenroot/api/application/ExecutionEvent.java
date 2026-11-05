@@ -153,6 +153,7 @@ import ai.ravenroot.api.application.RuntimeActivityData.TextProjection;
  * when the node reported nothing. Together with {@code attemptOrdinal} it separates the three things
  * that otherwise look alike: an initial attempt, a retry the orchestrator made, and retries a
  * connector made inside one attempt without producing a durable attempt at all
+ * @param applicationCorrelation established application context, absent for legacy uncorrelated records
  */
 public record ExecutionEvent(
         long sequence,
@@ -181,7 +182,51 @@ public record ExecutionEvent(
         OutputProjection authorOutput,
         String edgeId,
         int attemptOrdinal,
-        int connectorAttempts) {
+        int connectorAttempts,
+        ai.ravenroot.api.correlation.ApplicationCorrelationContext applicationCorrelation) {
+
+    /** Compatibility constructor for events produced before business identity was typed.
+     * @param sequence monotone position in the live local monitor stream
+     * @param occurredAt producer-clock diagnostic time; ordering uses sequence
+     * @param tenantId authenticated tenant owning the observation
+     * @param requestId causing request identity, independent from business correlation
+     * @param engineId execution engine reporting the observation
+     * @param graphVersion exact immutable graph version of the observed work
+     * @param processInstanceId actual owning process identity
+     * @param traversalId actual traversal identity within the process
+     * @param invocationId actual node-visit identity, absent above visit scope
+     * @param attemptId actual attempt identity, absent above attempt scope
+     * @param type observed execution lifecycle event
+     * @param nodeId actual graph node, absent above node scope
+     * @param activeInstances currently active runtime actor instances, distinct from visit count
+     * @param fallback whether this observation used an explicit fallback path
+     * @param detail trusted in-process diagnostic; never raw browser metadata
+     * @param joinWaitDuration measured join waiting duration when available
+     * @param processingDuration measured node processing duration when available
+     * @param nodeCatalogKey stable catalog type of the observed node when known
+     * @param deploymentId hosting logical deployment identity when known
+     * @param workloadId explicit owning workload identity when known
+     * @param inFlightArrivals current admitted arrivals awaiting settlement
+     * @param publicReason bounded payload-safe classifier; arbitrary diagnostic prose is absent
+     * @param authorMessage targeted-redacted bounded diagnostic for the authenticated author view
+     * @param authorOutput bounded trusted log output, separate from the final workflow payload
+     * @param edgeId stable authored or deterministic edge identity on traversal events
+     * @param attemptOrdinal one-based node attempt number, or zero when not recorded
+     * @param connectorAttempts transport attempts made within the reported node attempt
+     */
+    public ExecutionEvent(long sequence, Instant occurredAt, String tenantId, String requestId, String engineId,
+                          String graphVersion, UUID processInstanceId, UUID traversalId, UUID invocationId,
+                          UUID attemptId, ExecutionEventType type, String nodeId, int activeInstances,
+                          boolean fallback, String detail, Duration joinWaitDuration,
+                          Duration processingDuration, String nodeCatalogKey, String deploymentId,
+                          String workloadId, int inFlightArrivals, String publicReason,
+                          TextProjection authorMessage, OutputProjection authorOutput, String edgeId,
+                          int attemptOrdinal, int connectorAttempts) {
+        this(sequence, occurredAt, tenantId, requestId, engineId, graphVersion, processInstanceId, traversalId,
+                invocationId, attemptId, type, nodeId, activeInstances, fallback, detail, joinWaitDuration,
+                processingDuration, nodeCatalogKey, deploymentId, workloadId, inFlightArrivals, publicReason,
+                authorMessage, authorOutput, edgeId, attemptOrdinal, connectorAttempts, null);
+    }
 
     /**
  * Bound on {@code detail}, marker included, so an event cannot become an unbounded text sink.
@@ -297,7 +342,7 @@ public ExecutionEvent {
             if (processingDuration.isNegative()) {
                 throw new IllegalArgumentException("processingDuration cannot be negative");
             }
-            if (type != ExecutionEventType.NODE_COMPLETED && type != ExecutionEventType.NODE_BYPASSED
+            if (type != ExecutionEventType.SOURCE_BOUNDARY && type != ExecutionEventType.NODE_COMPLETED && type != ExecutionEventType.NODE_BYPASSED
                     && type != ExecutionEventType.NODE_FAILED
                     // A retried attempt has ENDED -- that is precisely what the event says -- so it
                     // has a processing duration in exactly the sense the other three do. Excluding it

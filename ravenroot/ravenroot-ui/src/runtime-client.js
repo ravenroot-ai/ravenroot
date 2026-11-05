@@ -108,7 +108,7 @@ export class RuntimeRequestError extends Error {
     const where = status == null ? `${method} ${route}` : `HTTP ${status} ${method} ${route}`;
     const hint = status == null
       ? ' -- check the runtime service address, its network reachability, or whether it allows this origin'
-      : status === 404
+      : status === 404 && !code
         ? ' -- check the runtime service address: the request reached a server but not an API route'
         : '';
     super(`${reason} (${where})${hint}`);
@@ -116,11 +116,11 @@ export class RuntimeRequestError extends Error {
     Object.defineProperty(this, 'uiMessageKey', { value: 'workspace.runtime.request.failure', enumerable: false });
     Object.defineProperty(this, 'uiMessageParams', { get: () => ({ reason: uiReasonKey ? uiText(uiReasonKey) : reason, where,
       hint: status == null ? uiText('workspace.runtime.request.networkHint')
-        : status === 404 ? uiText('workspace.runtime.request.routeHint') : '' }) });
+        : status === 404 && !code ? uiText('workspace.runtime.request.routeHint') : '' }) });
     withUiMessage(this, uiMessage('workspace.runtime.request.failure', {
       reason: uiReasonKey ? uiMessage(uiReasonKey) : reason, where,
       hint: status == null ? uiMessage('workspace.runtime.request.networkHint')
-        : status === 404 ? uiMessage('workspace.runtime.request.routeHint') : '',
+        : status === 404 && !code ? uiMessage('workspace.runtime.request.routeHint') : '',
     }));
     this.status = status;
     this.method = method;
@@ -138,6 +138,7 @@ const ADMISSION_PHASES = new Set([
   'SOURCE_CONSTRUCTION', 'SOURCE_START', 'MANAGED_INGRESS', 'STARTUP',
 ]);
 const ADMISSION_REASONS = new Set([
+  'SAGA_CONTRACT_INVALID', 'SAGA_PARTICIPANT_UNSUPPORTED', 'SAGA_DURABILITY_REQUIRED',
   'GRAPHML_REJECTED', 'INVALID_STRUCTURE', 'DUPLICATE_ELEMENT', 'MISSING_START', 'MISSING_END',
   'INVALID_TERMINAL_COUNT', 'DANGLING_EDGE', 'INVALID_PROPERTY', 'REQUIRED_PROPERTY_MISSING',
   'PROPERTY_TYPE_INVALID', 'PROPERTY_VALUE_NOT_ALLOWED', 'PROPERTY_OUT_OF_RANGE',
@@ -394,6 +395,9 @@ export function validateLocalDeploymentStatus(value, expectedDeploymentId = '') 
       || typeof value.deploymentId !== 'string' || !value.deploymentId
       || typeof value.tenantId !== 'string' || !value.tenantId
       || !LOCAL_DEPLOYMENT_STATES.has(value.state)
+      || (value.runtimeIncarnationId != null && (typeof value.runtimeIncarnationId !== 'string'
+        || !value.runtimeIncarnationId || value.runtimeIncarnationId.length > 256
+        || /[\u0000-\u001f\u007f-\u009f]/.test(value.runtimeIncarnationId)))
       || !Number.isSafeInteger(value.sourceCount) || value.sourceCount < 0
       || value.scope !== 'LOCAL_PROCESS'
       || (value.deploymentGeneration !== null && value.deploymentGeneration !== undefined
@@ -401,6 +405,9 @@ export function validateLocalDeploymentStatus(value, expectedDeploymentId = '') 
       || (value.graphVersion !== null && value.graphVersion !== undefined
         && (typeof value.graphVersion !== 'string' || !value.graphVersion))
       || !['PROCESS_LOCAL', 'DURABLE'].includes(value.continuity)
+      || (value.registrationIdentity !== null && value.registrationIdentity !== undefined
+        && (value.continuity !== 'DURABLE' || typeof value.registrationIdentity !== 'string'
+          || !value.registrationIdentity || value.registrationIdentity.length > 256))
       || (value.deploymentRevision !== null && (!safeGeneration(value.deploymentRevision)
         || value.deploymentRevision < 1))
       || (value.desiredState !== null && (typeof value.desiredState !== 'string' || !value.desiredState))
@@ -716,11 +723,94 @@ export class RavenrootRuntimeClient {
     return validateLocalDeploymentStatus(result, id);
   }
 
+  async deploymentSource(source, { signal } = {}) {
+    if (!source?.deploymentId || !source?.incarnationId || !source?.graphVersion)
+      throw runtimeClientValidationError('Deployment source requires an exact binding');
+    const query = new URLSearchParams({ incarnationId: source.incarnationId, graphVersion: source.graphVersion });
+    const result = await this.#json(`/v1/deployments/${encodeURIComponent(source.deploymentId)}/source?${query}`, {
+      method: 'GET', headers: { Accept: 'application/json' }, signal,
+    });
+    if (result?.deploymentId !== source.deploymentId || result?.incarnationId !== source.incarnationId
+        || result?.graphVersion !== source.graphVersion || typeof result?.graphMlBase64 !== 'string')
+      throw runtimeClientValidationError('Deployment source binding mismatch');
+    const bytes = Uint8Array.from(atob(result.graphMlBase64), character => character.charCodeAt(0));
+    if (bytes.length > MAX_GRAPH_DOCUMENT_BYTES) throw runtimeClientValidationError('Deployment source exceeds document limit');
+    return { ...result, graphMlBytes: bytes, graphMl: new TextDecoder('utf-8', { fatal: true }).decode(bytes) };
+  }
+
+  /** Reads one metadata or explicitly requested content page of an exact current deployment. */
+  async deploymentHistory(source, query, { signal } = {}) {
+    if (!source?.deploymentId || !source?.incarnationId || !source?.graphVersion)
+      throw runtimeClientValidationError('History requires an exact deployment source');
+    const parameters = new URLSearchParams({ ...query, graphVersion: source.graphVersion });
+    return this.#json(`/v1/deployments/${encodeURIComponent(source.deploymentId)}/history?${parameters}`, {
+      method: 'GET', headers: { Accept: 'application/json', 'X-Ravenroot-Deployment-Incarnation': source.incarnationId }, signal,
+    });
+  }
+
+  /** Evaluates explicit caller-supplied mapping and JSON sample without history admission. */
+  async previewCorrelation(properties, sample, { signal } = {}) {
+    return this.#json('/v1/correlation/preview', { method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ properties, sample }), signal });
+  }
+
+  /** Explicitly rehosts an existing durable registration from server-retained graph custody. */
+  async restoreDeployment(deploymentId, { registrationIdentity, graphVersion }) {
+    const result = await this.#json(`/v1/deployments/${encodeURIComponent(deploymentId)}/restore`, {
+      method: 'POST', headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ registrationIdentity, graphVersion }),
+    });
+    return validateLocalDeploymentStatus(result, deploymentId);
+  }
+
+  /** Reads original initial START identities without admitting work, including after rehydration. */
+  async reconcileInitialStartDeployment(deploymentId, { incarnationId, graphVersion, requestId }) {
+    const query = new URLSearchParams({ incarnationId, graphVersion, requestId });
+    const value = await this.#json(`/v1/deployments/${encodeURIComponent(deploymentId)}/initial-start?${query}`, {
+      method: 'GET', headers: { Accept: 'application/json' },
+    });
+    if (!value || value.outcome !== 'DUPLICATE' || value.requestId !== requestId
+        || ![value.processInstanceId, value.traversalId].every(id => typeof id === 'string'
+          && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)))
+      throw runtimeClientValidationError('Invalid permanent initial START observation');
+    return value;
+  }
+
+  /** Runs or reconciles the permanent initial START of this exact deployment incarnation. */
+  async initialStartDeployment(deploymentId, request, { canAdmit } = {}) {
+    if (typeof deploymentId !== 'string' || !deploymentId || !request || typeof request.incarnationId !== 'string'
+        || !request.incarnationId || typeof request.graphVersion !== 'string' || !request.graphVersion
+        || typeof request.requestId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(request.requestId)
+        || !Object.hasOwn(request, 'input')) throw runtimeClientValidationError('Invalid deployment initial START request');
+    const result = await this.#json(`/v1/deployments/${encodeURIComponent(deploymentId)}/initial-start`, {
+      method: 'POST', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: JSON.stringify(request),
+    }, canAdmit);
+    if (!result || !['ACCEPTED', 'DUPLICATE'].includes(result.outcome) || result.requestId !== request.requestId
+        || ![result.processInstanceId, result.traversalId].every(value => typeof value === 'string'
+          && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)))
+      throw runtimeClientValidationError('Invalid deployment initial START response');
+    return result;
+  }
+
+  /** Explicit independent run; retries must reuse the persisted requestId and input. */
+  async newDeploymentExecution(deploymentId, request) {
+    const result = await this.#json(`/v1/deployments/${encodeURIComponent(deploymentId)}/executions`, {
+      method: 'POST', headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    });
+    if (!result || !['ACCEPTED', 'DUPLICATE'].includes(result.outcome) || result.requestId !== request.requestId
+        || ![result.processInstanceId, result.traversalId].every(id =>
+          typeof id === 'string' && /^[0-9a-f-]{36}$/i.test(id)))
+      throw runtimeClientValidationError('Invalid explicit execution response');
+    return result;
+  }
+
   /** Resolves one immutable, tenant-scoped deployment presentation without returning raw GraphML. */
-  async deploymentView(deploymentId, { signal } = {}) {
+  async deploymentView(deploymentId, { signal, rebuild = false } = {}) {
     const id = String(deploymentId || '');
     if (!id) throw runtimeClientValidationError('Deployment view requires an id');
-    const result = await this.#json(`/v1/deployments/${encodeURIComponent(id)}/view`, {
+    const result = await this.#json(`/v1/deployments/${encodeURIComponent(id)}/view${rebuild ? '?layout=reset' : ''}`, {
       method: 'GET', headers: { Accept: 'application/json' }, signal,
     });
     return validateDeploymentViewEnvelope(result, id);
@@ -731,22 +821,31 @@ export class RavenrootRuntimeClient {
    * Credentials never enter the URL and the server remains responsible for filtering before a
    * frame is queued or serialized.
    */
-  connectDeploymentView(envelope, onFrame, onConnectionChange = () => {}) {
+  connectDeploymentView(envelope, onFrame, onConnectionChange = () => {}, { diagnostics = false } = {}) {
     const view = validateDeploymentViewEnvelope(envelope);
+    return this.#connectDeploymentObservation(view.source, onFrame, onConnectionChange, diagnostics);
+  }
+
+  /** Observes a closed exact source without requiring or manufacturing a drawing projection. */
+  connectDeploymentObservation(source, onFrame, onConnectionChange = () => {}, { diagnostics = false } = {}) {
+    return this.#connectDeploymentObservation(validateDeploymentObservationSource(source), onFrame, onConnectionChange, diagnostics, true);
+  }
+
+  #connectDeploymentObservation(source, onFrame, onConnectionChange, diagnostics, strictSource = false) {
     const controller = new AbortController();
     this.deploymentConnections.add(controller);
-    void this.#consumeDeploymentEvents(view, controller.signal, onFrame, onConnectionChange)
+    void this.#consumeDeploymentEvents(source, controller.signal, onFrame, onConnectionChange, diagnostics, strictSource)
       .finally(() => this.deploymentConnections.delete(controller));
     return () => controller.abort();
   }
 
-  async #consumeDeploymentEvents(view, signal, onFrame, onConnectionChange) {
+  async #consumeDeploymentEvents(source, signal, onFrame, onConnectionChange, diagnostics, strictSource) {
     let failures = 0;
     let cursor = '';
     while (!signal.aborted && failures <= this.maxRetries) {
-      const source = view.source;
       const path = `/v1/deployments/${encodeURIComponent(source.deploymentId)}/events`
-        + `?graphVersion=${encodeURIComponent(source.graphVersion)}`;
+        + `?graphVersion=${encodeURIComponent(source.graphVersion)}`
+        + (diagnostics ? '&include=diagnostics' : '');
       try {
         const credential = await this.#requestCredential();
         if (signal.aborted) return;
@@ -773,7 +872,7 @@ export class RavenrootRuntimeClient {
         const read = await this.#readDeploymentStream(response.body.getReader(), signal, source, frame => {
           cursor = frame.cursor || cursor;
           onFrame(frame);
-        });
+        }, strictSource);
         if (signal.aborted || read.terminal) return;
         failures += 1;
         onConnectionChange('reconnecting', 'Deployment observation disconnected; reconnecting', () => uiText("workspace.runtime.deployment.disconnected"));
@@ -796,7 +895,7 @@ export class RavenrootRuntimeClient {
     }
   }
 
-  async #readDeploymentStream(reader, signal, source, onFrame) {
+  async #readDeploymentStream(reader, signal, source, onFrame, strictSource) {
     const decoder = new TextDecoder();
     let buffer = '';
     let retryDelay = this.retryDelayMs;
@@ -819,6 +918,9 @@ export class RavenrootRuntimeClient {
         }
         if (!parsed.data) continue;
         const payload = JSON.parse(parsed.data);
+        if (strictSource && ['deploymentId', 'graphVersion', 'incarnationId'].some(key => payload[key] !== source[key])) {
+          throw runtimeClientValidationError('Deployment observation frame changed or omitted its exact source identity');
+        }
         const type = parsed.type === 'execution' ? 'execution'
           : parsed.type === 'source-gap' ? 'gap'
             : parsed.type === 'source-invalidated' ? 'invalidated' : parsed.type;
@@ -887,17 +989,30 @@ export class RavenrootRuntimeClient {
   }
 
   async #deploymentCommand(deploymentId, action,
-    { expectedGeneration, idempotencyKey, reason, disposition } = {}) {
+    { expectedGeneration, idempotencyKey, reason, disposition, binding } = {}) {
     const id = String(deploymentId || '');
     if (!id) throw runtimeClientValidationError(`Deployment ${action} requires an id`);
     const path = action === 'undeploy' ? `/v1/deployments/${encodeURIComponent(id)}`
       : `/v1/deployments/${encodeURIComponent(id)}/${action}`;
     const method = action === 'undeploy' ? 'DELETE' : 'POST';
+    let bindingHeaders = {};
+    if (binding !== undefined) {
+      const safe = value => typeof value === 'string' && value.length > 0 && value.length <= 256
+        && !/[\u0000-\u001f\u007f-\u009f]/.test(value);
+      if (!['start', 'stop'].includes(action) || !safe(binding?.incarnationId)
+          || !/^[a-f0-9]{64}$/.test(binding?.graphVersion)
+          || binding.registrationIdentity !== null && !safe(binding.registrationIdentity))
+        throw runtimeClientValidationError('Invalid identity-fenced deployment lifecycle binding');
+      bindingHeaders = { 'X-Ravenroot-Deployment-Incarnation': binding.incarnationId,
+        'X-Ravenroot-Graph-Version': binding.graphVersion,
+        ...(binding.registrationIdentity ? { 'X-Ravenroot-Registration-Identity': binding.registrationIdentity } : {}) };
+    }
+
 
     // Absence means a compatibility deployment. Presence switches the entire command onto the
     // durable contract; unsafe int64 values are refused rather than rounded into another fence.
     if (expectedGeneration === undefined || expectedGeneration === null) {
-      const result = await this.#json(path, { method, headers: { Accept: 'application/json' } });
+      const result = await this.#json(path, { method, headers: { Accept: 'application/json', ...bindingHeaders } });
       return validateLocalDeploymentStatus(result, id);
     }
     if (!safeGeneration(expectedGeneration)) {
@@ -916,7 +1031,7 @@ export class RavenrootRuntimeClient {
       throw runtimeClientValidationError('Secure deployment idempotency key generation is unavailable');
     }
     const headers = {
-      Accept: 'application/json',
+      Accept: 'application/json', ...bindingHeaders,
       'Idempotency-Key': key,
       'X-Ravenroot-Expected-Generation': String(expectedGeneration),
       ...((['pause', 'cancel', 'stop', 'undeploy'].includes(action))
@@ -1576,9 +1691,13 @@ export class RavenrootRuntimeClient {
       body: JSON.stringify({ expectedRevision, resolution }) });
   }
 
-  async #json(path, options) {
+  async #json(path, options, initialAdmissionCheck) {
     if (!this.fetchImpl) throw runtimeClientValidationError('Fetch API is not supported by this browser');
     const credential = await this.#requestCredential();
+    // Only initial deployment admission supplies this guard. Credentials may resolve after the
+    // observer disconnected; no asynchronous boundary may separate this check from fetch.
+    if (initialAdmissionCheck && !initialAdmissionCheck())
+      throw productError('workspace.run.observationFailed', new Error('OBSERVATION_NOT_CONFIRMED'));
     const method = options.method || 'GET';
     let response;
     try {
@@ -1689,6 +1808,18 @@ export class RavenrootRuntimeClient {
   }
 }
 
+/** Closed source-only observation contract; credentials never form part of this value. */
+export function validateDeploymentObservationSource(source) {
+  if (!source || typeof source !== 'object' || Array.isArray(source) || source.kind !== 'deployment'
+      || Object.keys(source).length !== 4
+      || !['deploymentId', 'incarnationId', 'graphVersion'].every(key =>
+        typeof source[key] === 'string' && source[key].trim() === source[key]
+          && source[key].length > 0 && source[key].length <= 256)) {
+    throw runtimeClientValidationError('Deployment observation requires an exact closed source identity');
+  }
+  return Object.freeze({ ...source });
+}
+
 export function validateDeploymentViewEnvelope(value, expectedDeploymentId = '') {
   const source = value?.source;
   const projection = value?.projection;
@@ -1724,6 +1855,10 @@ export function deploymentExecutionEvent(payload) {
   return {
     type: value?.type,
     executionId: value?.executionId ?? value?.traversalId,
+    ...Object.fromEntries(['processInstanceId', 'traversalId', 'invocationId', 'attemptId',
+      'engineId', 'sequence', 'processingDuration', 'message', 'messageRedacted', 'messageTruncated',
+      'output', 'outputRedacted', 'outputTruncated'].filter(key => Object.hasOwn(value || {}, key))
+      .map(key => [key, value[key]])),
     nodeId: value?.nodeId ?? null,
     edgeId: value?.edgeId ?? null,
     activeInstances: Number(value?.activeInstances) || 0,
@@ -1796,6 +1931,18 @@ function validateVersionedRuntimeEvent(value) {
     if (Object.hasOwn(value, field)
         && value[field] !== null
         && (typeof value[field] !== 'string' || value[field].length === 0)) invalid();
+  }
+  if (Object.hasOwn(value, 'applicationCorrelationAvailability')) {
+    const availability = value.applicationCorrelationAvailability;
+    if (!['AVAILABLE', 'NOT_RECORDED', 'NOT_PROJECTED'].includes(availability)) invalid();
+    for (const field of ['applicationCorrelationId', 'contributionId', 'contributionKind', 'roundId', 'publicReference']) {
+      const identity = value[field];
+      if (availability !== 'AVAILABLE') {
+        if (identity != null) invalid();
+      } else if (identity == null) {
+        if (field === 'applicationCorrelationId' || field === 'roundId') invalid();
+      } else if (typeof identity !== 'string' || !identity.trim() || identity.length > 4096) invalid();
+    }
   }
   const nativeCursor = value.source === 'RING' ? value.sequence : value.journalOffset;
   // JSON.parse rounds unsafe native numbers. This checks their representable value only; the

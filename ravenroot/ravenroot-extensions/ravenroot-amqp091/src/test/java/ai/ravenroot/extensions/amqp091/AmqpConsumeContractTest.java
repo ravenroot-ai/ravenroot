@@ -422,7 +422,8 @@ class AmqpConsumeContractTest {
         ingress.receipts.add(new IngressReceipt.Duplicate("ignored"));
         source = source(new AmqpConsumerTestSupport.FakeProtocol(owner), AmqpConsumerTestSupport.policy(),
                 configuration(Map.of()), ignored -> secret());
-        source.start(new AmqpConsumerTestSupport.Context(ingress)).toCompletableFuture().join();
+        var context = new AmqpConsumerTestSupport.Context(ingress, 2);
+        source.start(context).toCompletableFuture().join();
 
         owner.deliver(AmqpConsumerTestSupport.delivery(21, "stable", false));
         AmqpConsumerTestSupport.await(owner.acked);
@@ -433,6 +434,9 @@ class AmqpConsumeContractTest {
         assertEquals(ingress.keys.get(0), ingress.keys.get(1));
         assertEquals(1, ingress.payloads.get(0).get("attempt"));
         assertEquals(2, ingress.payloads.get(1).get("attempt"));
+        AmqpConsumerTestSupport.await(context.healthyLatch);
+        assertTrue(context.degraded.contains("ambiguous-ingress"));
+        assertEquals(AmqpConsumerSource.State.READY, source.state());
     }
 
     @Test
@@ -453,6 +457,28 @@ class AmqpConsumeContractTest {
 
         assertEquals(java.util.List.of("31:true", "32:false"), owner.nacks);
         assertTrue(context.degraded.contains("amqp-delivery-dead-lettered"));
+    }
+
+    @Test
+    void durableAcceptanceClearsDegradationEvenWhenLocalStateWasAlreadyReady() {
+        var owner = new AmqpConsumerTestSupport.FakeOwner();
+        var ingress = new AmqpConsumerTestSupport.Ingress(2);
+        ingress.receipts.add(new IngressReceipt.Refused("full"));
+        var context = new AmqpConsumerTestSupport.Context(ingress, 2);
+        source = source(new AmqpConsumerTestSupport.FakeProtocol(owner), AmqpConsumerTestSupport.policy(),
+                configuration(Map.of("poisonAttempts", 1)), ignored -> secret());
+        source.start(context).toCompletableFuture().join();
+
+        owner.deliver(AmqpConsumerTestSupport.delivery(33, "refused", false));
+        AmqpConsumerTestSupport.await(owner.nacked);
+        assertTrue(context.degraded.contains("amqp-delivery-dead-lettered"));
+        assertEquals(AmqpConsumerSource.State.READY, source.state());
+
+        owner.deliver(AmqpConsumerTestSupport.delivery(34, "accepted", false));
+        AmqpConsumerTestSupport.await(context.healthyLatch);
+        assertEquals(java.util.List.of(34L), owner.acks);
+        assertEquals(2, context.healthy.get());
+        assertEquals(AmqpConsumerSource.State.READY, source.state());
     }
 
     @Test
@@ -508,7 +534,7 @@ class AmqpConsumeContractTest {
     }
 
     @Test
-    void missingStableIdentityAndOversizedBodiesRejectWithoutTraversal() {
+    void missingStableIdentityAndOversizedBodiesRejectWithoutDegradingListening() {
         var owner = new AmqpConsumerTestSupport.FakeOwner(2);
         var ingress = new AmqpConsumerTestSupport.Ingress();
         source = source(new AmqpConsumerTestSupport.FakeProtocol(owner), AmqpConsumerTestSupport.policy(),
@@ -524,7 +550,13 @@ class AmqpConsumeContractTest {
 
         assertEquals(java.util.List.of("51:false", "52:false"), owner.nacks);
         assertTrue(ingress.payloads.isEmpty());
-        assertTrue(context.degraded.containsAll(java.util.List.of("missing-stable-message-identity", "body-too-large")));
+        assertTrue(context.degraded.isEmpty(), "invalid deliveries must not degrade the source");
+        assertEquals(AmqpConsumerSource.State.READY, source.state());
+        owner.deliver(AmqpConsumerTestSupport.delivery(53, "valid-after-invalid", false));
+        AmqpConsumerTestSupport.await(owner.acked);
+        assertEquals(java.util.List.of(53L), owner.acks);
+        assertEquals(1, ingress.payloads.size());
+        assertTrue(context.degraded.isEmpty());
     }
 
     @Test
@@ -541,7 +573,12 @@ class AmqpConsumeContractTest {
 
         assertEquals(java.util.List.of("55:false"), owner.nacks);
         assertTrue(ingress.payloads.isEmpty());
-        assertTrue(context.degraded.contains("headers-too-large"));
+        assertTrue(context.degraded.isEmpty(), "adapter rejection must not degrade the source");
+        assertEquals(AmqpConsumerSource.State.READY, source.state());
+        owner.deliver(AmqpConsumerTestSupport.delivery(56, "valid-after-rejection", false));
+        AmqpConsumerTestSupport.await(owner.acked);
+        assertEquals(java.util.List.of(56L), owner.acks);
+        assertTrue(context.degraded.isEmpty());
     }
 
     @Test

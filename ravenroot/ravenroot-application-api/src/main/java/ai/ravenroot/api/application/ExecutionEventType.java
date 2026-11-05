@@ -167,7 +167,10 @@ public enum ExecutionEventType {
      * {@link #EXECUTION_FAILED} obey: exactly one of the three per traversal, never followed by
      * {@link #EXECUTION_PAUSED}, and published after the traversal has stopped dispatching.</p>
      */
-    EXECUTION_CANCELLED;
+    EXECUTION_CANCELLED,
+
+    /** A graph edge arrived at a deployed SOURCE and stopped without emitting downstream. */
+    SOURCE_BOUNDARY;
 
     /**
      * Whether this type ends a traversal -- exactly {@link #EXECUTION_COMPLETED},
@@ -199,7 +202,7 @@ public enum ExecutionEventType {
     public boolean isTraversalTerminal() {
         return switch (this) {
             case EXECUTION_COMPLETED, EXECUTION_FAILED, EXECUTION_CANCELLED -> true;
-            case EXECUTION_STARTED, NODE_STARTED, NODE_BYPASSED, NODE_DEFAULTED, NODE_COMPLETED,
+            case SOURCE_BOUNDARY, EXECUTION_STARTED, NODE_STARTED, NODE_BYPASSED, NODE_DEFAULTED, NODE_COMPLETED,
                     EDGE_TRAVERSED, NODE_FAILED, NODE_RETRY_SCHEDULED, JOIN_SATISFIED,
                     JOIN_ITERATION_BACKLOG, JOIN_ARRIVAL_DISCARDED, JOIN_FAILED, EXECUTION_PAUSED,
                     EXECUTION_RESUMED -> false;

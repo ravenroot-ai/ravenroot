@@ -12,6 +12,15 @@ import java.util.concurrent.CompletionStage;
  * business completion only from a participant-owned receipt bound to the exact operation and
  * fingerprint. A broker acknowledgement or an unknown participant outcome is not business
  * completion.</p>
+ *
+ * <p>The graph participant envelope may include an optional {@code applicationContext} object with
+ * the established application correlation ID, contribution ID and kind, round ID, and public
+ * reference. Absent optional values are JSON null; historical uncorrelated envelopes omit the
+ * object. Preserve this committed causal identity when applying explicitly authored business-header
+ * mappings. Identity-like payload or attribute text is not a replacement. The frozen context and
+ * original process, traversal, visit and attempt IDs grant no current security or credential
+ * authority: {@code SagaCommandAuthority} and the connector's current operator policy still govern
+ * every publication.</p>
  */
 public interface SagaCommandTransport {
     /**

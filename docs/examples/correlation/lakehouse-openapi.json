@@ -1,0 +1,136 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Bounded lakehouse events",
+    "version": "1"
+  },
+  "paths": {
+    "/landing": {
+      "post": {
+        "operationId": "landFile",
+        "parameters": [
+          {
+            "name": "X-Business-Operation",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 64
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "ingestionId": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "filename": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "version": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "round": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "stage": {
+                    "type": "string",
+                    "maxLength": 64
+                  }
+                },
+                "required": [
+                  "ingestionId",
+                  "filename",
+                  "version",
+                  "round",
+                  "stage"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Durable source receipt"
+          }
+        }
+      }
+    },
+    "/silver": {
+      "post": {
+        "operationId": "silverPartition",
+        "parameters": [
+          {
+            "name": "X-Business-Operation",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 64
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "ingestionId": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "filename": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "version": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "round": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "stage": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "partition": {
+                    "type": "string",
+                    "maxLength": 64
+                  }
+                },
+                "required": [
+                  "ingestionId",
+                  "filename",
+                  "version",
+                  "round",
+                  "stage",
+                  "partition"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Durable source receipt"
+          }
+        }
+      }
+    }
+  }
+}

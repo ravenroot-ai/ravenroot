@@ -46,6 +46,7 @@ describe('tenant workspace snapshot', () => {
   it('persists browser-safe repository identity and the complete stale-state revision', () => {
     const source = document_('repository');
     source.authoring = {
+      repositoryScope: JSON.stringify(['https://runtime.example', 'tenant-a', 'github', 'example/graphs', 'main']),
       providerDocumentId: 'orders.graphml',
       revision: { draft: 'd', release: 'r', publication: 'p' },
       graphId: 'orders', releaseVersion: 8, releasedGraphId: 'orders', releasedVersion: 7,
@@ -54,6 +55,8 @@ describe('tenant workspace snapshot', () => {
     };
     const stored = persistedDocument(source);
     expect(stored.authoring).toEqual({
+      localChanges: false,
+      repositoryScope: source.authoring.repositoryScope,
       providerDocumentId: 'orders.graphml',
       revision: { draft: 'd', release: 'r', publication: 'p' },
       graphId: 'orders', releaseVersion: 8, releasedGraphId: 'orders', releasedVersion: 7,
@@ -63,24 +66,43 @@ describe('tenant workspace snapshot', () => {
     expect(JSON.stringify(stored)).not.toContain('never-persist-error-state');
   });
 
-  it('keeps live deployment attachments session-only without changing existing document persistence', () => {
+  it('keeps restored managed changes protected until an acknowledged clean baseline is persisted', () => {
+    const scope = workspaceScope('https://runtime.example', 'tenant-a');
+    const source = document_('managed');
+    source.authoring = { providerDocumentId: 'orders.graphml', repositoryScope: 'exact-scope',
+      revision: { draft: 'd1', release: 'r1', publication: 'absent' } };
+    source.history = { isDirty: () => true };
+    const stored = workspaceSnapshot(scope, [source], source.documentId);
+    expect(stored.documents[0].authoring.localChanges).toBe(true);
+    expect(validateWorkspaceSnapshot(stored, scope).documents[0].authoring)
+      .toMatchObject({ repositoryScope: 'exact-scope', localChanges: true,
+        revision: source.authoring.revision });
+    source.authoring.saveError = 'conflict';
+    expect(persistedDocument(source).authoring.localChanges).toBe(true);
+    source.authoring.localChanges = false;
+    source.history = { isDirty: () => false };
+    expect(persistedDocument(source).authoring.localChanges).toBe(false);
+  });
+
+  it('preserves read-only deployment views and active selection without persisting runtime connections', () => {
     const scope = workspaceScope('https://runtime.example', 'tenant-a');
     const draft = document_('draft');
-    const graphify = document_('graphify');
-    graphify.graph = { format: 'graphify', sourceJson: '{}', nodes: [{ id: 'file' }], edges: [],
-      nodeMap: { file: { id: 'file' } } };
     const deployment = { ...document_('live'), mode: 'deployed',
-      graph: { format: 'deployment', nodes: [{ id: 'start' }], edges: [],
-        nodeMap: { start: { id: 'start' } } } };
-
-    const snapshot = workspaceSnapshot(scope, [draft, deployment, graphify], 'live');
-
-    expect(snapshot.documents.map(item => item.documentId)).toEqual(['draft', 'graphify']);
-    expect(snapshot.activeDocumentId).toBe('graphify');
-    expect(() => persistedDocument(deployment)).toThrow(/session-only/);
-    expect(() => validateWorkspaceSnapshot({ ...snapshot,
-      documents: [...snapshot.documents, { ...snapshot.documents[0], documentId: 'stale-live',
-        mode: 'deployed', graph: deployment.graph }] }, scope)).toThrow(/session-only/);
+      deploymentView: { disconnect: () => {}, state: { continuity: 'LIVE' } },
+      graph: { format: 'deployment', nodes: [{ id: 'start', runtimeObserved: true }], edges: [],
+        viewerBinding: { deploymentId: 'd', graphVersion: 'v', incarnationId: 'i', registrationIdentity: 'r' } } };
+    const snapshot = workspaceSnapshot(scope, [draft, deployment], 'live');
+    expect(snapshot.documents.map(item => item.documentId)).toEqual(['draft', 'live']);
+    expect(snapshot.activeDocumentId).toBe('live');
+    const restored = validateWorkspaceSnapshot(snapshot, scope).documents[1];
+    expect(restored.mode).toBe('deployed');
+    expect(restored.graph.viewerBinding).toEqual(deployment.graph.viewerBinding);
+    expect(restored.graph.nodes[0].runtimeObserved).toBe(false);
+    expect(restored.deploymentView).toBeUndefined();
+    expect(restored.deploymentRun).toBeNull();
+    delete deployment.graph.viewerBinding.registrationIdentity;
+    expect(() => persistedDocument(deployment)).toThrow();
+    expect(workspaceSnapshot(scope, [draft, deployment], 'live').documents).toHaveLength(1);
   });
 
   it('resets runtime projections while preserving arbitrary authored property names and artifact identity', () => {

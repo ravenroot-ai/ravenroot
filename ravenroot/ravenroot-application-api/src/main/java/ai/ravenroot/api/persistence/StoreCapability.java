@@ -196,5 +196,23 @@ public enum StoreCapability {
     RUNNER_JOBS,
 
     /** Versioned saga aggregates and application-command outbox rows share the execution batch. */
-    DURABLE_SAGAS
+    DURABLE_SAGAS,
+
+    /** Non-expiring logical-deployment initial START arbitration and original work retention. */
+    INITIAL_START_ADMISSION,
+
+    /** Bounded retained deployment-entry input and runtime-owned first-dispatch checkpoints. */
+    DEPLOYMENT_ENTRY_CUSTODY,
+
+    /** Durable scoped application histories and immutable traversal relations. */
+    BUSINESS_HISTORIES,
+
+    /** Fenced authored close barriers atomically linked to original visit completions. */
+    BUSINESS_CLOSURE_SIGNALS,
+
+    /** Cross-traversal contribution CAS and atomic continuation outbox. */
+    CORRELATED_JOINS,
+
+    /** Store-limited traversal, visit, attempt and causal-parent keyset reads. */
+    EXECUTION_HISTORY
 }

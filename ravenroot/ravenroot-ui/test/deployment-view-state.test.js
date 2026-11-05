@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  applyDeploymentViewFrame,
+  applyDeploymentViewFrame, applyTraversalSummaries,
   applyDeploymentViewStateToRenderer,
   createDeploymentViewState,
 } from '../src/deployment-view-state.js';
@@ -132,5 +132,22 @@ describe('deployment viewer runtime state', () => {
     })).toMatchObject({ accepted: true, reason: 'authority-changed', terminal: true });
     expect(revoked).toMatchObject({ continuity: 'DETACHED', lifecycle: 'READY',
       gap: 'AUTHORITY_CHANGED' });
+  });
+});
+
+describe('actual traversal history summaries', () => {
+  it('keeps counts and stable edges without invented timing or recent activity', () => {
+    const state = createDeploymentViewState(binding);
+    applyTraversalSummaries(state, { nodes: [{ nodeId: 'worker', visitCount: 1000, activeVisits: 2, completedVisits: 997, failedVisits: 1, attemptCount: 2000 }], edges: [{ edgeId: 'stable-edge', traversalCount: 999 }] });
+    expect(state.nodeStates.get('worker')).toMatchObject({ runtimeState: 'active', visitCount: 1000, attemptCount: 2000, processingDuration: null, lastOccurredAt: null });
+    expect(state.edgeStates.get('stable-edge')).toEqual({ count: 999, recent: 0 });
+    applyTraversalSummaries(state, { nodes: [], edges: [], edgeAvailability: 'NOT_RECORDED' });
+    expect(state.edgeHistoryAvailability).toBe('NOT_RECORDED'); expect(state.edgeStates.size).toBe(0);
+  });
+  it('ignores another actual traversal of the same process without clearing the selected one', () => {
+    const state = createDeploymentViewState({ ...binding, processInstanceId: 'process', traversalId: 'selected' });
+    applyTraversalSummaries(state, { nodes: [{ nodeId: 'worker', visitCount: 1, activeVisits: 0, completedVisits: 1, failedVisits: 0, attemptCount: 1 }], edges: [] });
+    const ignored = applyDeploymentViewFrame(state, frame({ processInstanceId: 'process', event: { type: 'NODE_STARTED', nodeId: 'other', executionId: 'another' } }));
+    expect(ignored).toMatchObject({ accepted: false, reason: 'traversal-selection' }); expect(state.nodeStates.has('worker')).toBe(true); expect(state.nodeStates.has('other')).toBe(false);
   });
 });

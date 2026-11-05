@@ -50,8 +50,10 @@ public final class OpenApiRequestReplyNodeBehavior implements NodeBehavior, Inbo
                 lower("maxResponseBytes", "Response bytes"), lower("deadlineMs", "Deadline"),
                 lower("maxConcurrency", "Concurrency")),
                 Set.of("inbound-source", "network", "request-reply"), null, Set.of(), Set.of("respond"))
-                .withOutcomes(NodeOutcomeDescriptor.literal("responded",
-                        "A declared response was accepted for the active HTTP exchange."));
+                .withOutcomes(NodeOutcomeDescriptor.literal("continue",
+                        "An admitted request enters this SOURCE and continues downstream."),
+                        NodeOutcomeDescriptor.literal("responded",
+                        "An explicit respond command accepted a response for the active HTTP exchange."));
     }
 
     private static NodePropertyDescriptor lower(String name, String label) {

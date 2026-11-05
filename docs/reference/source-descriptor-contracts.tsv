@@ -1,0 +1,16 @@
+behavior	origin	bundleId	lifecycleOwner	defaultNature	allowedNatures	emissionOutcome
+amqp.consume	BUNDLE	ai.ravenroot.extensions.amqp091	ai.ravenroot.extensions.amqp091.AmqpConsumeNodeBehavior	SOURCE	SOURCE	continue
+crontab	CORE		ai.ravenroot.core.runtime.builtin.ScheduledSourceNodeFactory	SOURCE	SOURCE	continue
+discord.interactions	BUNDLE	ai.ravenroot.extensions.discord	ai.ravenroot.extensions.discord.DiscordInteractionsSourceBehavior	SOURCE	SOURCE	continue
+github-events-source	BUNDLE	ai.ravenroot.extensions.github	ai.ravenroot.extensions.github.GithubEventsSourceBehavior	SOURCE	SOURCE	continue
+kafka.consume	BUNDLE	ai.ravenroot.extensions.kafka	ai.ravenroot.extensions.kafka.KafkaConsumeNodeBehavior	SOURCE	SOURCE	continue
+mail.imap.consume	BUNDLE	ai.ravenroot.extensions.mail	ai.ravenroot.extensions.mail.imap.MailImapConsumeNodeBehavior	SOURCE	SOURCE	continue
+matrix.sync	BUNDLE	ai.ravenroot.extensions.matrix	ai.ravenroot.extensions.matrix.MatrixSyncSourceBehavior	SOURCE	SOURCE	continue
+mattermost.outgoing-webhook	BUNDLE	ai.ravenroot.extensions.mattermost	ai.ravenroot.extensions.mattermost.MattermostOutgoingWebhookSourceBehavior	SOURCE	SOURCE	continue
+openapi.receive	BUNDLE	ai.ravenroot.extensions.openapi.server	ai.ravenroot.extensions.openapi.server.OpenApiReceiveNodeBehavior	SOURCE	SOURCE	continue
+openapi.request-reply	BUNDLE	ai.ravenroot.extensions.openapi.server	ai.ravenroot.extensions.openapi.server.OpenApiRequestReplyNodeBehavior	SOURCE	SOURCE	continue
+slack.commands	BUNDLE	ai.ravenroot.extensions.slack	ai.ravenroot.extensions.slack.SlackCommandsSourceBehavior	SOURCE	SOURCE	continue
+slack.events	BUNDLE	ai.ravenroot.extensions.slack	ai.ravenroot.extensions.slack.SlackEventsSourceBehavior	SOURCE	SOURCE	continue
+teams.outgoing-webhook	BUNDLE	ai.ravenroot.extensions.teams	ai.ravenroot.extensions.teams.TeamsOutgoingWebhookSourceBehavior	SOURCE	SOURCE	continue
+timer	CORE		ai.ravenroot.core.runtime.builtin.ScheduledSourceNodeFactory	SOURCE	SOURCE	continue
+websocket.receive	BUNDLE	ai.ravenroot.extensions.websocket	ai.ravenroot.extensions.websocket.WebSocketReceiveNodeBehavior	SOURCE	SOURCE	continue

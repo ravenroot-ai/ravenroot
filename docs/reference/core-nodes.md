@@ -1,6 +1,6 @@
 # Core node reference
 
-These 14 node types are registered by the standard core catalog at the documented development
+These 16 node types are registered by the standard core catalog at the documented development
 baseline. The running `GET /v1/node-types` response remains authoritative for a particular
 deployment. Optional bundle nodes are in the [bundle reference](bundles/).
 
@@ -36,6 +36,8 @@ Use the maintained complete GraphML file for the behavior you want to try:
   [`http-request`](../examples/nodes/http-request.graphml),
   [`program`](../examples/nodes/program.graphml), and
   [`boundary-guard`](../examples/nodes/boundary-guard.graphml)
+- [`correlation-close`](../examples/nodes/correlation-close.graphml) and
+  [`correlation-derive`](../examples/nodes/correlation-derive.graphml)
 
 Each file already declares its property keys, uses one consistently named `action` node, routes every
 declared outcome, and has a separate unlabelled failure edge to `error`. Do not paste an `action`
@@ -388,6 +390,26 @@ Replace all placeholders with an operator-installed immutable profile and its ca
 Connect both `continue` and `violation`. The default catalog exposes the node descriptor but resolves
 no policy profiles, so this example fails closed until the host supplies one. See
 [Publication boundary policies](../security/publication-boundaries.md).
+
+## `correlation-close`
+
+Requests explicit business completion in the current immutable traversal context. The required
+`auditReason` is a literal bounded non-secret reason. `disposition` is `COMPLETED`, `FAILED` or
+`CANCELLED`. The fenced signal and completed visit commit together; ordinary `continue` edges remain
+in the original traversal. New external admissions are refused after the signal, while already
+admitted work and its authorized READY join continuation can settle. A requested success cannot
+erase failures or missing contributions. Legacy uncorrelated work fails explicitly.
+See [business close and derivation](business-correlation-operations.md).
+
+## `correlation-derive`
+
+Establishes a distinct context from transformed input through the shared bounded `correlation.*`
+mapping and a required literal `auditReason`. Exactly one `continue` successor becomes the new
+traversal's entry; this branch of the original traversal ends at the derive node. The original
+context remains immutable and the child retains causal process/traversal/visit/attempt lineage.
+The original completion and bounded retained child input commit atomically before dispatch.
+Its computed identity must differ from the original. See
+[business close and derivation](business-correlation-operations.md) for fencing and recovery.
 
 ## `human-task`
 

@@ -1,3 +1,4 @@
+import { persistedDeploymentRun } from './deployment-run.js';
 import { productError } from './product-error.js';
 import {
   documentModeViewStates,
@@ -26,13 +27,15 @@ function nullableString(value, label) {
   return value;
 }
 
-function persistedAuthoring(value) {
+function persistedAuthoring(value, localChanges = false) {
   if (!value?.providerDocumentId) return null;
   const revision = value.revision;
   if (!revision || ['draft', 'release', 'publication'].some(key => typeof revision[key] !== 'string' || !revision[key])) {
     throw productError("workspace.error.workspace.persistence.repository.authoring.revision.is.invalid", new TypeError('Repository authoring revision is invalid'));
   }
-  return Object.freeze({ providerDocumentId: nullableString(value.providerDocumentId, 'providerDocumentId'),
+  return Object.freeze({ localChanges: Boolean(localChanges),
+    repositoryScope: nullableString(value.repositoryScope, 'repositoryScope'),
+    providerDocumentId: nullableString(value.providerDocumentId, 'providerDocumentId'),
     revision: Object.freeze({ draft: revision.draft, release: revision.release, publication: revision.publication }),
     graphId: nullableString(value.graphId, 'graphId'),
     releaseVersion: Number.isSafeInteger(value.releaseVersion) && value.releaseVersion > 0 ? value.releaseVersion : null,
@@ -71,9 +74,13 @@ export function persistedDocument(document_) {
   if (!document_.graph || !Array.isArray(document_.graph.nodes) || !Array.isArray(document_.graph.edges)) {
     throw productError("workspace.error.workspace.persistence.workspace.document.graph.is.invalid", new TypeError('Workspace document graph is invalid'));
   }
-  if (document_.graph.format === 'deployment') {
-    throw productError("workspace.error.workspace.persistence.live.deployment.attachments.are.session.only.workspace.documents", new TypeError('Live deployment attachments are session-only workspace documents'));
+  if (document_.graph.format === 'deployment' && !document_.deploymentRun) {
+    const binding = document_.graph.viewerBinding;
+    if (document_.mode !== 'deployed' || !binding
+        || ['deploymentId', 'graphVersion', 'incarnationId', 'registrationIdentity'].some(key => typeof binding[key] !== 'string' || !binding[key]))
+      throw productError('workspace.run.associationChanged', new TypeError('Invalid saved deployment view binding'));
   }
+  if (document_.deploymentRun && document_.deploymentRun.tenantId !== tenantId) throw productError('workspace.run.associationChanged', new Error('RUN_TENANT_MISMATCH'));
   const graph = canonicalGraphSnapshot(document_.graph);
   return Object.freeze({
     documentId,
@@ -89,7 +96,10 @@ export function persistedDocument(document_) {
       sourceGraphVersion: nullableString(document_.provenance?.sourceGraphVersion, 'sourceGraphVersion'),
       deploymentId: nullableString(document_.provenance?.deploymentId, 'deploymentId'),
     }),
-    authoring: persistedAuthoring(document_.authoring),
+    deploymentRun: persistedDeploymentRun(document_.deploymentRun),
+    authoring: persistedAuthoring(document_.authoring, document_.history
+      ? document_.history.isDirty() || document_.visualGroupPresentationDirty || document_.authoring?.localChanges
+      : document_.authoring?.localChanges),
     graph,
     presentation: Object.freeze({
       ...visualGroupPresentation(document_),
@@ -114,7 +124,7 @@ export function persistedDocument(document_) {
 
 export function workspaceSnapshot(scope, documents, activeDocumentId) {
   const storedDocuments = documents.filter(document_ => document_.tenantId === scope.tenantId
-      && document_.graph?.format !== 'deployment')
+      && (document_.graph?.format !== 'deployment' || document_.deploymentRun || document_.graph.viewerBinding?.registrationIdentity))
     .map(persistedDocument);
   return Object.freeze({
     key: scope.key,

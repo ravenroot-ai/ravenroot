@@ -56,9 +56,8 @@ import java.util.UUID;
  * {@code InvocationAdded} structure, which is where the binding is durably
  * recorded (the envelope itself deliberately carries no node id — see
  * {@code EventEnvelope}'s Javadoc). {@code null} when {@code invocationId} is
- * absent, or when the instance's current state could not be loaded to resolve
- * it (a declared best-effort join, not a second source of truth: the instance
- * state can have its own, independent retention from the journal's)
+ * absent, or when its retained metadata binding is unavailable. Only bindings requested by the
+ * bounded journal page are read; replay does not load a whole process aggregate.
  * @param edgeId stable edge identity decoded from an {@code EDGE_TRAVERSED} event body;
  * absent on older rows and every other event type
  * @param handlerId durable handler identity decoded from a handler-lifecycle event body
@@ -69,11 +68,15 @@ import java.util.UUID;
  * consumer already verifies. Carrying it here is what lets a reader tell the four
  * levels apart -- which process, which traversal, which handler, which node
  * invocation -- without inferring any of them
+ * @param applicationCorrelation retained immutable business context, absent for uncorrelated legacy rows
+ * @param outcome safe retained node outcome classifier, absent when not recorded or not representable
  */
 public record DurableExecutionEvent(UUID eventId, long journalOffset, long streamSequence, String tenantId,
                                     String eventType, UUID processInstanceId, UUID traversalId, UUID invocationId,
                                     UUID attemptId, UUID causationId, String correlationId, String graphVersion,
-                                    Instant occurredAt, String nodeId, String edgeId, UUID handlerId) {
+                                    Instant occurredAt, String nodeId, String edgeId, UUID handlerId,
+                                    ai.ravenroot.api.correlation.ApplicationCorrelationContext applicationCorrelation,
+                                    String outcome) {
 
 /**
  * Normalizes durable execution-event fields required for replay and ordered observation.
@@ -98,12 +101,40 @@ public record DurableExecutionEvent(UUID eventId, long journalOffset, long strea
             throw new IllegalArgumentException("correlationId cannot be blank");
         }
         java.util.Objects.requireNonNull(occurredAt, "occurredAt");
+        if (outcome != null && !outcome.matches("[A-Za-z0-9._:-]{1,128}")) outcome = null;
         if (edgeId != null) {
             edgeId = StableEdgeId.requireValid(edgeId);
         }
         if (ExecutionEventType.EDGE_TRAVERSED.name().equals(eventType)) {
             EdgeTraversalWireBudget.requireDurableProjection(eventType, graphVersion, nodeId);
         }
+    }
+
+    /** Compatibility projection for rows without a retained business context or safe classifier.
+     * @param eventId durable journal deduplication identity
+     * @param journalOffset tenant-local durable cursor assigned by the store
+     * @param streamSequence contiguous position within the process-instance event stream
+     * @param tenantId authenticated tenant that owns the event
+     * @param eventType domain event type recorded in the journal
+     * @param processInstanceId original owning process identity
+     * @param traversalId actual traversal identity within that process
+     * @param invocationId actual node visit identity, absent above invocation scope
+     * @param attemptId actual attempt identity, absent above attempt scope
+     * @param causationId original journal cause, absent for an external cause
+     * @param correlationId transport request correlation identity
+     * @param graphVersion pinned graph version for the execution
+     * @param occurredAt recorded event time
+     * @param nodeId retained invocation-to-node binding, absent when unavailable
+     * @param edgeId stable edge identity, absent on other event types
+     * @param handlerId durable handler identity, absent on other event types
+     */
+    public DurableExecutionEvent(UUID eventId, long journalOffset, long streamSequence, String tenantId,
+            String eventType, UUID processInstanceId, UUID traversalId, UUID invocationId, UUID attemptId,
+            UUID causationId, String correlationId, String graphVersion, Instant occurredAt, String nodeId,
+            String edgeId, UUID handlerId) {
+        this(eventId, journalOffset, streamSequence, tenantId, eventType, processInstanceId, traversalId,
+                invocationId, attemptId, causationId, correlationId, graphVersion, occurredAt, nodeId, edgeId,
+                handlerId, null, null);
     }
 
     /**

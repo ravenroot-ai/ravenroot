@@ -44,6 +44,19 @@ final class StoredUuid {
         return optional(rows.getString(column), table, column, key);
     }
 
+    static UUID required(String stored, String table, String column, String tenantId) {
+        return required(stored, table, column, diagnosticKey(tenantId));
+    }
+
+    /** Cursor text is caller input, so invalid identifiers are a request error, never stored corruption. */
+    static UUID cursor(String value) {
+        try {
+            return required(value, "history_cursor", "identity", diagnosticKey("cursor"));
+        } catch (ExecutionStoreException malformed) {
+            throw new IllegalArgumentException("invalid history cursor identity");
+        }
+    }
+
     static UUID required(String stored, String table, String column, ExecutionKey key) {
         return decode(stored, table, column, key, false);
     }

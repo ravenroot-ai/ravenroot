@@ -124,6 +124,39 @@ class StructuredExecutionLoggerTest {
                 "the SSE frame carries only rendered presentation the audit line has no reader for");
     }
 
+    @Test
+    void carriesOnlyTheBoundedTypedBusinessContextWithHonestAbsence() {
+        var absent = attemptEvent(1, UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+                ExecutionEventType.NODE_STARTED, null, 1, 0);
+        String legacy = StructuredExecutionLogger.toJson(absent);
+        assertTrue(legacy.contains("\"applicationCorrelationAvailability\":\"NOT_RECORDED\""));
+        assertTrue(legacy.contains("\"applicationCorrelationId\":null"));
+        String value = "商".repeat(4096);
+        var context = new ai.ravenroot.api.correlation.ApplicationCorrelationContext(value,
+                java.util.Optional.of("part-1"), java.util.Optional.of("silver"), "round-2",
+                java.util.Optional.of("report\".csv"));
+        var event = new ExecutionEvent(absent.sequence(), absent.occurredAt(), absent.tenantId(), absent.requestId(),
+                absent.engineId(), absent.graphVersion(), absent.processInstanceId(), absent.traversalId(),
+                absent.invocationId(), absent.attemptId(), absent.type(), absent.nodeId(), absent.activeInstances(),
+                absent.fallback(), absent.detail(), absent.joinWaitDuration(), absent.processingDuration(),
+                absent.nodeCatalogKey(), absent.deploymentId(), absent.workloadId(), absent.inFlightArrivals(),
+                absent.publicReason(), ai.ravenroot.api.application.RuntimeActivityData.message("author-only-message"),
+                ai.ravenroot.api.application.RuntimeActivityData.output(java.util.Map.of("unrelated", "author-only-output")), absent.edgeId(),
+                absent.attemptOrdinal(), absent.connectorAttempts(), context);
+        String line = StructuredExecutionLogger.toJson(event);
+        assertTrue(line.contains("\"applicationCorrelationId\":\"" + value + "\""));
+        assertTrue(line.contains("\"publicReference\":\"report\\\".csv\""));
+        assertTrue(line.contains("\"contributionId\":\"part-1\""));
+        assertTrue(line.contains("\"contributionKind\":\"silver\""));
+        assertTrue(line.contains("\"roundId\":\"round-2\""));
+        assertTrue(line.contains("\"applicationCorrelationAvailability\":\"AVAILABLE\""));
+        assertEquals(topLevelKeys(legacy), topLevelKeys(line), "context never adds arbitrary keys");
+        org.junit.jupiter.api.Assertions.assertFalse(line.contains("author-only-"),
+                "adding typed correlation must never copy optional activity content into audit metadata");
+        assertTrue(line.getBytes(java.nio.charset.StandardCharsets.UTF_8).length < 100_000,
+                "the typed hard ceiling bounds business metadata independently from payload capture");
+    }
+
     /**
      * Top-level keys of a flat JSON object, by name.
      *

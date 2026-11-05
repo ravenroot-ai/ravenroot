@@ -77,9 +77,14 @@ public final class GraphAuthoringHttpApi implements AutoCloseable {
                 if ("GET".equalsIgnoreCase(exchange.getRequestMethod())) {
                     operation = "open";
                     require(context, AuthorizationAction.GRAPH_READ, documentId);
-                    var document = await(repository.open(actor, documentId,
-                            "release".equals(query(exchange).get("source"))));
-                    write(exchange, 200, document(document));
+                    String source = query(exchange).getOrDefault("source", "draft");
+                    if (!source.equals("draft") && !source.equals("release"))
+                        throw new IllegalArgumentException("source");
+                    var document = await(repository.open(actor, documentId, "release".equals(source)));
+                    var response = document(document);
+                    response.put("canWrite", authorization.decide(context, AuthorizationAction.GRAPH_WRITE,
+                            ProtectedResource.owned("graph-authoring", documentId, context.tenantId())).allowed());
+                    write(exchange, 200, response);
                     return;
                 }
                 if ("PUT".equalsIgnoreCase(exchange.getRequestMethod())) {
@@ -126,6 +131,15 @@ public final class GraphAuthoringHttpApi implements AutoCloseable {
                     operation = "discard"; requireMethod(exchange, "POST");
                     require(context, AuthorizationAction.GRAPH_WRITE, documentId);
                     write(exchange, 200, document(await(repository.discardDraft(actor,
+                            mutation(exchange, documentId, "")))));
+                    audited(http, actor, operation, documentId, "success");
+                }
+                case "versions" -> {
+                    operation = "versions"; requireMethod(exchange, "POST");
+                    require(context, AuthorizationAction.GRAPH_WRITE, documentId);
+                    if (!repository.capabilities().contains(GraphAuthoringRepository.Capability.CREATE_NEXT_VERSION))
+                        throw new GraphAuthoringException(GraphAuthoringException.Failure.UNSUPPORTED_PROVIDER);
+                    write(exchange, 200, document(await(repository.createNextVersion(actor,
                             mutation(exchange, documentId, "")))));
                     audited(http, actor, operation, documentId, "success");
                 }

@@ -72,6 +72,268 @@ class DeploymentLifecycleHttpTest {
     private static final String CORRELATION_PLACEHOLDER = "<correlation>";
 
     @Test
+    void namedTriggerRefusesUnsupportedStoresAndDisabledSources() throws Exception {
+        for (boolean custody : List.of(false, true)) try (var fixture = new Fixture(true, null, custody)) {
+            String graph = custody ? SOURCE_GRAPH.replace("<graph id=", "<key id=\"bypass\" for=\"node\" attr.name=\"execution.bypass\" attr.type=\"boolean\"/><graph id=")
+                    .replace("<node id=\"listener\">", "<node id=\"listener\"><data key=\"bypass\">true</data>") : SOURCE_GRAPH;
+            var registered = fixture.request("POST", "/v1/deployments?id=closed", graph, "tenant-a");
+            assertEquals(200, fixture.command("/v1/deployments/closed/start", "tenant-a", "start-closed", 0, null).statusCode());
+            var view = fixture.application.localDeploymentView("tenant-a", "closed").orElseThrow().source();
+            String body = "{\"registrationIdentity\":\"" + field(registered.body(), "registrationIdentity")
+                    + "\",\"incarnationId\":\"" + view.incarnationId() + "\",\"graphVersion\":\"" + view.graphVersion()
+                    + "\",\"sourceNodeId\":\"listener\",\"requestId\":\"one\",\"input\":{}}";
+            assertEquals(custody ? 400 : 409, fixture.request("POST", "/v1/deployments/closed/trigger", body, "tenant-a").statusCode());
+        }
+    }
+
+    @Test
+    void namedTriggerRequiresDurableRegistrationAuthorityAndOpenAdmission() throws Exception {
+        try (var fixture = new Fixture(true, null, true)) {
+            var registered = fixture.request("POST", "/v1/deployments?id=demand", SOURCE_GRAPH, "tenant-a");
+            String registration = field(registered.body(), "registrationIdentity");
+            assertEquals(200, fixture.command("/v1/deployments/demand/start", "tenant-a", "start-demand", 0, null).statusCode());
+            var binding = fixture.application.localDeploymentView("tenant-a", "demand").orElseThrow().source();
+            String body = "{\"registrationIdentity\":\"" + registration + "\",\"incarnationId\":\"" + binding.incarnationId()
+                    + "\",\"graphVersion\":\"" + binding.graphVersion()
+                    + "\",\"sourceNodeId\":\"listener\",\"requestId\":\"demand-one\",\"input\":{\"original\":true}}";
+            assertEquals(202, fixture.request("POST", "/v1/deployments/demand/trigger", body, "tenant-a").statusCode());
+            var repeated = fixture.request("POST", "/v1/deployments/demand/trigger", body.replace("true", "false"), "tenant-a");
+            assertTrue(Set.of(200, 503).contains(repeated.statusCode()), repeated.body());
+            var concurrent = new java.util.ArrayList<CompletableFuture<HttpResponse<String>>>();
+            for (int index = 0; index < 2; index++) concurrent.add(CompletableFuture.supplyAsync(() -> {
+                try { return fixture.request("POST", "/v1/deployments/demand/trigger", body.replace("demand-one", "concurrent-operation"), "tenant-a"); }
+                catch (Exception failure) { throw new java.util.concurrent.CompletionException(failure); }
+            }));
+            var arrivals = concurrent.stream().map(CompletableFuture::join).toList();
+            assertEquals(1, arrivals.stream().filter(response -> response.statusCode() == 202).count(), arrivals.toString());
+            assertTrue(arrivals.stream().allMatch(response -> Set.of(200, 202, 503).contains(response.statusCode())));
+            assertEquals(403, fixture.request("POST", "/v1/deployments/demand/trigger", body, "tenant-a-viewer").statusCode());
+            assertEquals(409, fixture.request("POST", "/v1/deployments/demand/trigger", body, "tenant-b").statusCode());
+            for (String wrong : List.of(registration, binding.incarnationId(), binding.graphVersion()))
+                assertEquals(409, fixture.request("POST", "/v1/deployments/demand/trigger", body.replace(wrong, "stale"), "tenant-a").statusCode());
+            for (String wrong : List.of("end", "start", "missing"))
+                assertEquals(400, fixture.request("POST", "/v1/deployments/demand/trigger", body.replace("listener", wrong), "tenant-a").statusCode());
+            assertEquals(1, fixture.source.starts.get(), "a trigger never starts a source or the deployment");
+            assertEquals(200, fixture.command("/v1/deployments/demand/pause", "tenant-a", "pause-demand", 1, "hold").statusCode());
+            assertEquals(409, fixture.request("POST", "/v1/deployments/demand/trigger", body.replace("demand-one", "paused"), "tenant-a").statusCode());
+            assertEquals(200, fixture.command("/v1/deployments/demand/stop", "tenant-a", "stop-demand", 2, "stop").statusCode());
+            assertEquals(409, fixture.request("POST", "/v1/deployments/demand/trigger", body.replace("demand-one", "stopped"), "tenant-a").statusCode());
+        }
+        try (var fixture = new Fixture(false, null, true)) {
+            var registered = fixture.request("POST", "/v1/deployments?id=volatile", SOURCE_GRAPH, "tenant-a");
+            assertState(fixture.request("POST", "/v1/deployments/volatile/start", "", "tenant-a"), "READY");
+            String body = "{\"registrationIdentity\":\"unregistered\",\"incarnationId\":\"" + field(registered.body(), "runtimeIncarnationId")
+                    + "\",\"graphVersion\":\"" + field(registered.body(), "graphVersion")
+                    + "\",\"sourceNodeId\":\"listener\",\"requestId\":\"one\",\"input\":{}}";
+            assertEquals(409, fixture.request("POST", "/v1/deployments/volatile/trigger", body, "tenant-a").statusCode());
+        }
+    }
+
+    @Test
+    void exactSourceIsCompleteReadOnlyAndIndependentOfRepositoryOrActivation() throws Exception {
+        try (var fixture = new Fixture()) {
+            var registered = fixture.request("POST", "/v1/deployments?id=source-copy", SOURCE_GRAPH, "tenant-a");
+            String incarnation = field(registered.body(), "runtimeIncarnationId"), version = field(registered.body(), "graphVersion");
+            String path = "/v1/deployments/source-copy/source?incarnationId=" + incarnation + "&graphVersion=" + version;
+            var cold = fixture.request("GET", path, "", "tenant-a");
+            assertEquals(200, cold.statusCode(), cold.body());
+            assertEquals(SOURCE_GRAPH, new String(java.util.Base64.getDecoder().decode(field(cold.body(), "graphMlBase64")), java.nio.charset.StandardCharsets.UTF_8));
+            assertEquals(0, fixture.source.starts.get());
+            assertEquals("private, no-store", cold.headers().firstValue("Cache-Control").orElseThrow());
+            assertEquals(403, fixture.request("GET", path, "", "tenant-a-monitor").statusCode());
+            assertEquals(404, fixture.request("GET", path, "", "tenant-b").statusCode());
+            assertEquals(409, fixture.request("GET", path.replace(incarnation, "stale"), "", "tenant-a").statusCode());
+            assertEquals(409, fixture.request("GET", path.replace(version, "wrong"), "", "tenant-a").statusCode());
+            assertEquals(400, fixture.request("GET", "/v1/deployments/source-copy/source", "", "tenant-a").statusCode());
+            assertState(fixture.request("POST", "/v1/deployments/source-copy/start", "", "tenant-a"), "READY");
+            assertEquals(cold.body(), fixture.request("GET", path, "", "tenant-a").body());
+            assertEquals(1, fixture.source.starts.get());
+            assertEquals(1, fixture.source.active.get());
+        }
+    }
+
+    @Test
+    void allowedBrowserOriginCanPreflightOnlyTheFiniteDeploymentBindingHeaders() throws Exception {
+        try (var fixture = new Fixture()) {
+            String fields = "authorization,content-type,idempotency-key,x-ravenroot-expected-generation,"
+                    + "x-ravenroot-reason,x-ravenroot-deployment-incarnation,x-ravenroot-graph-version,"
+                    + "x-ravenroot-registration-identity";
+            for (String origin : List.of("https://editor.example", "https://untrusted.example")) {
+                var request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + fixture.server.port()
+                                + "/v1/deployments/bound/stop"))
+                        .header("Origin", origin).header("Access-Control-Request-Method", "POST")
+                        .header("Access-Control-Request-Headers", fields)
+                        .method("OPTIONS", HttpRequest.BodyPublishers.noBody()).build();
+                var response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString());
+                assertEquals(origin.equals("https://editor.example") ? 204 : 403, response.statusCode());
+            }
+            var unknown = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + fixture.server.port()
+                            + "/v1/deployments/bound/stop"))
+                    .header("Origin", "https://editor.example").header("Access-Control-Request-Method", "POST")
+                    .header("Access-Control-Request-Headers", fields + ",x-ravenroot-arbitrary-authority")
+                    .method("OPTIONS", HttpRequest.BodyPublishers.noBody()).build();
+            assertEquals(403, HttpClient.newHttpClient().send(unknown, HttpResponse.BodyHandlers.ofString()).statusCode());
+            assertEquals(0, fixture.source.starts.get(), "preflight grants no lifecycle mutation");
+        }
+    }
+
+    @Test
+    void boundStopRefusesARecreatedLocalAliasEvenForIdenticalGraphBytes() throws Exception {
+        try (var fixture = new Fixture()) {
+            assertEquals(200, fixture.request("POST", "/v1/deployments?id=bound", SOURCE_GRAPH, "tenant-a").statusCode());
+            assertState(fixture.request("POST", "/v1/deployments/bound/start", "", "tenant-a"), "READY");
+            var first = fixture.request("GET", "/v1/deployments/bound/view", "", "tenant-a");
+            String incarnation = field(first.body(), "incarnationId"), version = field(first.body(), "graphVersion");
+            assertEquals(200, fixture.request("DELETE", "/v1/deployments/bound", "", "tenant-a").statusCode());
+            assertEquals(200, fixture.request("POST", "/v1/deployments?id=bound", SOURCE_GRAPH, "tenant-a").statusCode());
+            assertState(fixture.request("POST", "/v1/deployments/bound/start", "", "tenant-a"), "READY");
+            assertEquals(409, fixture.boundStop("bound", "tenant-a", incarnation, version, null, null).statusCode());
+            assertState(fixture.request("GET", "/v1/deployments/bound", "", "tenant-a"), "READY");
+            var current = fixture.request("GET", "/v1/deployments/bound/view", "", "tenant-a");
+            String currentIncarnation = field(current.body(), "incarnationId");
+            assertNotEquals(incarnation, currentIncarnation);
+            assertEquals(403, fixture.boundStop("bound", "tenant-a-viewer", currentIncarnation, version, null, null).statusCode());
+            assertEquals(404, fixture.boundStop("bound", "tenant-b", currentIncarnation, version, null, null).statusCode());
+            assertEquals(409, fixture.boundStop("bound", "tenant-a", currentIncarnation, "f".repeat(64), null, null).statusCode());
+            assertEquals(1, fixture.source.active.get(), "stale or denied bindings cannot stop the replacement listener");
+            assertState(fixture.boundStop("bound", "tenant-a", currentIncarnation, version, null, null), "STOPPED");
+            assertEquals(0, fixture.source.active.get());
+        }
+    }
+
+    @Test
+    void boundStopCanRetireAColdRegistrationWithoutOpeningItsSourceOrViewer() throws Exception {
+        try (var fixture = new Fixture()) {
+            var registered = fixture.request("POST", "/v1/deployments?id=cold", SOURCE_GRAPH, "tenant-a");
+            String incarnation = field(registered.body(), "runtimeIncarnationId"), version = field(registered.body(), "graphVersion");
+            assertEquals(503, fixture.request("GET", "/v1/deployments/cold/view", "", "tenant-a").statusCode());
+            assertState(fixture.boundStop("cold", "tenant-a", incarnation, version, null, null), "STOPPED");
+            assertEquals(0, fixture.source.starts.get()); assertEquals(0, fixture.source.active.get());
+        }
+    }
+
+    @Test
+    void boundStartRefusesReplacementBeforeActivationAndCannotBorrowSiblingAuthority() throws Exception {
+        try (var fixture = new Fixture()) {
+            var first = fixture.request("POST", "/v1/deployments?id=bound", SOURCE_GRAPH, "tenant-a");
+            String incarnation = field(first.body(), "runtimeIncarnationId"), version = field(first.body(), "graphVersion");
+            assertEquals(0, fixture.source.starts.get());
+            assertEquals(200, fixture.request("DELETE", "/v1/deployments/bound", "", "tenant-a").statusCode());
+            var replacement = fixture.request("POST", "/v1/deployments?id=bound", SOURCE_GRAPH, "tenant-a");
+            String current = field(replacement.body(), "runtimeIncarnationId");
+            assertNotEquals(incarnation, current);
+            assertEquals(409, fixture.boundCommand("start", "bound", "tenant-a", incarnation, version, null, null).statusCode());
+            assertEquals(409, fixture.boundCommand("start", "bound", "tenant-a", current, "f".repeat(64), null, null).statusCode());
+            assertEquals(403, fixture.boundCommand("start", "bound", "tenant-a-viewer", current, version, null, null).statusCode());
+            assertEquals(404, fixture.boundCommand("start", "bound", "tenant-b", current, version, null, null).statusCode());
+            assertEquals(0, fixture.source.starts.get(), "replacement remains cold after every stale or denied Start");
+            assertState(fixture.boundCommand("start", "bound", "tenant-a", current, version, null, null), "READY");
+            assertEquals(1, fixture.source.active.get());
+        }
+    }
+
+    @Test
+    void boundStopDuringActualPendingSourceActivationClosesInitialAdmissionUntilExplicitRun() throws Exception {
+        try (var fixture = new Fixture(false, null, true)) {
+            var registered = fixture.request("POST", "/v1/deployments?id=pending", SOURCE_GRAPH, "tenant-a");
+            String incarnation = field(registered.body(), "runtimeIncarnationId"), version = field(registered.body(), "graphVersion");
+            fixture.source.startGate = new CompletableFuture<>();
+            var start = CompletableFuture.supplyAsync(() -> {
+                try { return fixture.boundCommand("start", "pending", "tenant-a", incarnation, version, null, null); }
+                catch (Exception error) { throw new java.util.concurrent.CompletionException(error); }
+            });
+            assertTrue(fixture.source.startEntered.await(10, TimeUnit.SECONDS));
+            var stop = CompletableFuture.supplyAsync(() -> {
+                try { return fixture.boundStop("pending", "tenant-a", incarnation, version, null, null); }
+                catch (Exception error) { throw new java.util.concurrent.CompletionException(error); }
+            });
+            pollUntil(fixture, "/v1/deployments/pending", "tenant-a", "STOPPING");
+            fixture.source.startGate.complete(null);
+            assertEquals(200, start.get(10, TimeUnit.SECONDS).statusCode());
+            assertState(stop.get(10, TimeUnit.SECONDS), "STOPPED");
+            assertEquals(0, fixture.source.active.get());
+            String body = "{\"incarnationId\":\"" + incarnation + "\",\"graphVersion\":\"" + version
+                    + "\",\"requestId\":\"original-initial\",\"input\":{\"original\":true}}";
+            var late = fixture.request("POST", "/v1/deployments/pending/initial-start", body, "tenant-a");
+            assertEquals(409, late.statusCode(), late.body());
+            fixture.source.startGate = null;
+            assertState(fixture.boundCommand("start", "pending", "tenant-a", incarnation, version, null, null), "READY");
+            var accepted = fixture.request("POST", "/v1/deployments/pending/initial-start", body, "tenant-a");
+            assertEquals(202, accepted.statusCode(), accepted.body());
+            String process = field(accepted.body(), "processInstanceId"), traversal = field(accepted.body(), "traversalId");
+            long settledBound = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+            while (!fixture.entryStore.load(new ai.ravenroot.api.persistence.ExecutionKey("tenant-a", UUID.fromString(process))).toCompletableFuture().get().state().status().terminal()) {
+                assertTrue(System.nanoTime() < settledBound, "the admitted initial traversal actually settles");
+                Thread.sleep(10);
+            }
+            assertState(fixture.boundStop("pending", "tenant-a", incarnation, version, null, null), "STOPPED");
+            assertState(fixture.boundCommand("start", "pending", "tenant-a", incarnation, version, null, null), "READY");
+            var duplicate = fixture.request("POST", "/v1/deployments/pending/initial-start", body.replace("original-initial", "later-explicit-run"), "tenant-a");
+            assertEquals(200, duplicate.statusCode(), duplicate.body());
+            assertEquals(process, field(duplicate.body(), "processInstanceId"));
+            assertEquals(traversal, field(duplicate.body(), "traversalId"));
+        }
+    }
+
+    @Test
+    void boundDurableStopRequiresExactRegistrationGraphAndCurrentGeneration() throws Exception {
+        try (var fixture = new Fixture(true)) {
+            var registered = fixture.request("POST", "/v1/deployments?id=bound", SOURCE_GRAPH, "tenant-a");
+            String identity = field(registered.body(), "registrationIdentity"), version = field(registered.body(), "graphVersion");
+            assertEquals(200, fixture.command("/v1/deployments/bound/start", "tenant-a", "activate-bound", 0, null).statusCode());
+            String incarnation = field(fixture.request("GET", "/v1/deployments/bound/view", "", "tenant-a").body(), "incarnationId");
+            assertEquals(409, fixture.boundStop("bound", "tenant-a", incarnation, version, "wrong-identity", 1L).statusCode());
+            assertEquals(409, fixture.boundStop("bound", "tenant-a", "retired-runtime", version, identity, 1L).statusCode());
+            assertEquals(409, fixture.boundCommand("start", "bound", "tenant-a", "retired-runtime", version, identity, 1L).statusCode());
+            assertEquals(409, fixture.boundStop("bound", "tenant-a", incarnation, "f".repeat(64), identity, 1L).statusCode());
+            var stale = fixture.boundStop("bound", "tenant-a", incarnation, version, identity, 0L);
+            assertEquals(200, stale.statusCode()); assertTrue(stale.body().contains("STALE_GENERATION"), stale.body());
+            assertEquals(1, fixture.source.active.get());
+            var stopped = fixture.boundStop("bound", "tenant-a", incarnation, version, identity, 1L);
+            assertEquals(200, stopped.statusCode(), stopped.body());
+            assertState(fixture.request("GET", "/v1/deployments/bound", "", "tenant-a"), "STOPPED");
+            assertEquals(0, fixture.source.active.get());
+        }
+    }
+
+    @Test
+    void explicitDurableRestoreUsesOnlyRetainedAuthorityAndRollsBackFailedListeners() throws Exception {
+        try (var fixture = new Fixture(true)) {
+            var registered = fixture.request("POST", "/v1/deployments?id=restore", SOURCE_GRAPH.replace("<node id=\"end\">", "<node id=\"listener-b\"><data key=\"kind\">BEHAVIOR</data><data key=\"behavior\">test.http.source</data></node><node id=\"end\">"), "tenant-a");
+            assertEquals(200, registered.statusCode(), registered.body());
+            var metadata = (ai.ravenroot.api.payload.PayloadValue.MapValue) ai.ravenroot.api.payload.PayloadJson.read(
+                    registered.body().getBytes(java.nio.charset.StandardCharsets.UTF_8), ai.ravenroot.api.payload.PayloadLimits.DEFAULTS);
+            String identity = ((ai.ravenroot.api.payload.PayloadValue.TextValue) metadata.entries().get("registrationIdentity")).value();
+            String version = ((ai.ravenroot.api.payload.PayloadValue.TextValue) metadata.entries().get("graphVersion")).value();
+            String body = "{\"registrationIdentity\":\"" + identity + "\",\"graphVersion\":\"" + version + "\"}";
+            assertEquals(200, fixture.command("/v1/deployments/restore/start", "tenant-a", "activate", 0, null).statusCode());
+            assertEquals(2, fixture.source.active.get());
+            fixture.application.undeployLocalDeployment("tenant-a", "restore").toCompletableFuture().join();
+            assertEquals(0, fixture.source.active.get());
+            assertEquals(404, fixture.request("GET", "/v1/deployments/restore", "", "tenant-a").statusCode());
+            assertEquals(403, fixture.request("POST", "/v1/deployments/restore/restore", body, "tenant-a-viewer").statusCode());
+            assertEquals(404, fixture.request("POST", "/v1/deployments/restore/restore", body, "tenant-b").statusCode());
+            assertEquals(404, fixture.request("POST", "/v1/deployments/restore/restore", body.replace(identity, UUID.randomUUID().toString()), "tenant-a").statusCode());
+            assertEquals(404, fixture.request("POST", "/v1/deployments/restore/restore", body.replace(version, "f".repeat(64)), "tenant-a").statusCode());
+            assertTrue(fixture.application.localDeployment("tenant-a", "restore").isEmpty());
+            var restored = fixture.request("POST", "/v1/deployments/restore/restore", body, "tenant-a");
+            assertState(restored, "READY"); assertEquals(2, fixture.source.active.get());
+            int starts = fixture.source.starts.get();
+            assertState(fixture.request("POST", "/v1/deployments/restore/restore", body, "tenant-a"), "READY");
+            assertEquals(starts, fixture.source.starts.get(), "repeat restore must not duplicate listeners");
+            var sdk = fixture.application.restoreLocalDeployment(new ai.ravenroot.api.security.SecurityContext("sdk", "tenant-a", "tenant-a", ai.ravenroot.api.security.PrincipalType.USER, "urn:ravenroot:test"), "restore", identity, version).orElseThrow();
+            assertEquals(identity, sdk.registrationIdentity().orElseThrow()); assertEquals(starts, fixture.source.starts.get());
+            fixture.application.undeployLocalDeployment("tenant-a", "restore").toCompletableFuture().join();
+            fixture.source.failStart.set(true);
+            assertState(fixture.request("POST", "/v1/deployments/restore/restore", body, "tenant-a"), "FAILED");
+            assertEquals(0, fixture.source.active.get(), "failed rehost must leave no active listener");
+            assertEquals(200, fixture.undeploy("/v1/deployments/restore", "tenant-a", "retire", 1, "retired", "CANCEL_IN_FLIGHT").statusCode());
+            assertEquals(404, fixture.request("POST", "/v1/deployments/restore/restore", body, "tenant-a").statusCode());
+            assertTrue(fixture.application.localDeployment("tenant-a", "restore").isEmpty());
+        }
+    }
+
+    @Test
     void durableLifecycleHttpCommandsExposeGenerationAndIdempotentOutcomes() throws Exception {
         try (var fixture = new Fixture(true)) {
             var registered = fixture.request(
@@ -178,7 +440,7 @@ class DeploymentLifecycleHttpTest {
         try (var fixture = new Fixture()) {
             assertEquals(200, fixture.request("POST", "/v1/deployments?id=observed",
                     NO_SOURCE_GRAPH, "tenant-a").statusCode());
-            assertEquals(404, fixture.request("GET", "/v1/deployments/observed/view", "", "tenant-a")
+            assertEquals(503, fixture.request("GET", "/v1/deployments/observed/view", "", "tenant-a")
                     .statusCode(), "a cold registration has no successfully opened viewer definition");
             assertState(fixture.request("POST", "/v1/deployments/observed/start", "", "tenant-a"), "READY");
             var view = fixture.request("GET", "/v1/deployments/observed/view", "", "tenant-a");
@@ -189,6 +451,12 @@ class DeploymentLifecycleHttpTest {
             assertFalse(view.body().toLowerCase().contains("graphml"), view.body());
             String incarnation = field(view.body(), "incarnationId");
             String version = field(view.body(), "graphVersion");
+            var rebuilt = fixture.request("GET", "/v1/deployments/observed/view?layout=reset", "", "tenant-a");
+            assertEquals(200, rebuilt.statusCode(), rebuilt.body());
+            assertTrue(rebuilt.body().contains("\"renderingStatus\":\"REBUILT\""));
+            assertEquals(incarnation, field(rebuilt.body(), "incarnationId"));
+            assertEquals(version, field(rebuilt.body(), "graphVersion"));
+            assertEquals(400, fixture.request("GET", "/v1/deployments/observed/view?layout=invalid", "", "tenant-a").statusCode());
 
             assertEquals(404, fixture.request("GET", "/v1/deployments/observed/view", "", "tenant-b")
                     .statusCode());
@@ -211,6 +479,87 @@ class DeploymentLifecycleHttpTest {
                 assertTrue(data.contains("\"lifecycle\":\"READY\""), data);
             }
         }
+    }
+
+    @Test
+    void observationAndFirstTraversalRemainAvailableWithoutDrawing() throws Exception {
+        var projection = new DeploymentViewRace();
+        try (var fixture = new Fixture(false, projection, true)) {
+            assertEquals(200, fixture.request("POST", "/v1/deployments?id=no-drawing", NO_SOURCE_GRAPH, "tenant-a").statusCode());
+            assertState(fixture.request("POST", "/v1/deployments/no-drawing/start", "", "tenant-a"), "READY");
+            var status = fixture.request("GET", "/v1/deployments/no-drawing", "", "tenant-a");
+            String incarnation = field(status.body(), "runtimeIncarnationId"), version = field(status.body(), "graphVersion");
+            projection.unavailableDrawing = true;
+            assertEquals(503, fixture.request("GET", "/v1/deployments/no-drawing/view", "", "tenant-a").statusCode());
+            var stream = fixture.stream("/v1/deployments/no-drawing/events?graphVersion=" + version, "tenant-a", incarnation);
+            assertEquals(200, stream.statusCode());
+            try (var reader = new java.io.BufferedReader(new java.io.InputStreamReader(stream.body()))) {
+                assertEquals("event: lifecycle", reader.readLine());
+                String handshake = reader.readLine(); reader.readLine();
+                assertTrue(field(handshake, "cursor").matches("[A-Za-z0-9_-]{43}"), handshake);
+                var admission = fixture.request("POST", "/v1/deployments/no-drawing/initial-start",
+                        "{\"incarnationId\":\"" + incarnation + "\",\"graphVersion\":\"" + version
+                                + "\",\"requestId\":\"first\",\"input\":null}", "tenant-a");
+                assertEquals(202, admission.statusCode(), admission.body());
+                assertEquals(7, executionFrames(reader).size());
+            }
+        }
+    }
+
+    @Test
+    void handshakeReplayPositionSurvivesAnotherDropBeforeBacklogDelivery() throws Exception {
+        try (var fixture = new Fixture(false, null, true)) {
+            assertEquals(200, fixture.request("POST", "/v1/deployments?id=anchored", NO_SOURCE_GRAPH, "tenant-a").statusCode());
+            assertState(fixture.request("POST", "/v1/deployments/anchored/start", "", "tenant-a"), "READY");
+            var status = fixture.request("GET", "/v1/deployments/anchored", "", "tenant-a");
+            String incarnation = field(status.body(), "runtimeIncarnationId"), version = field(status.body(), "graphVersion");
+            String path = "/v1/deployments/anchored/events?graphVersion=" + version;
+            String anchor;
+            try (var reader = new java.io.BufferedReader(new java.io.InputStreamReader(fixture.stream(path, "tenant-a", incarnation).body()))) {
+                assertEquals("event: lifecycle", reader.readLine()); anchor = field(reader.readLine(), "cursor");
+            }
+            var admission = fixture.request("POST", "/v1/deployments/anchored/initial-start",
+                    "{\"incarnationId\":\"" + incarnation + "\",\"graphVersion\":\"" + version
+                            + "\",\"requestId\":\"first\",\"input\":null}", "tenant-a");
+            assertEquals(202, admission.statusCode(), admission.body());
+            String process = field(admission.body(), "processInstanceId");
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+            while (true) {
+                var history = HttpClient.newHttpClient().send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + fixture.server.port()
+                        + "/v1/deployments/anchored/history?graphVersion=" + version + "&view=process-traversals&processInstanceId=" + process))
+                        .header("X-Test-Tenant", "tenant-a").header("X-Ravenroot-Deployment-Incarnation", incarnation).GET().build(), HttpResponse.BodyHandlers.ofString());
+                assertEquals(200, history.statusCode(), history.body());
+                if (history.body().contains("\"status\":\"COMPLETED\"")) break;
+                assertTrue(System.nanoTime() < deadline, history.body()); Thread.sleep(10);
+            }
+            String retryAnchor;
+            try (var reader = new java.io.BufferedReader(new java.io.InputStreamReader(fixture.stream(path, "tenant-a", incarnation, anchor).body()))) {
+                assertEquals("event: lifecycle", reader.readLine()); retryAnchor = field(reader.readLine(), "cursor");
+                // Drop immediately without accepting even the first replayed execution frame.
+            }
+            try (var reader = new java.io.BufferedReader(new java.io.InputStreamReader(fixture.stream(path, "tenant-a", incarnation, retryAnchor).body()))) {
+                assertEquals("event: lifecycle", reader.readLine()); reader.readLine(); reader.readLine();
+                assertEquals(7, executionFrames(reader).size());
+            }
+            try (var reader = new java.io.BufferedReader(new java.io.InputStreamReader(fixture.stream(path, "tenant-b", incarnation, anchor).body()))) {
+                assertEquals("event: source-gap", reader.readLine());
+                assertTrue(reader.readLine().contains("CURSOR_UNAVAILABLE"));
+            }
+        }
+    }
+
+    private static List<String> executionFrames(java.io.BufferedReader reader) throws Exception {
+        var task = java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            var result = new java.util.ArrayList<String>();
+            try {
+                for (String line; (line = reader.readLine()) != null;) {
+                    if (line.startsWith("data:") && line.contains("\"type\":\"execution\"")) result.add(line);
+                    if (line.contains("\"type\":\"EXECUTION_COMPLETED\"")) return result;
+                }
+                return result;
+            } catch (java.io.IOException failure) { throw new java.io.UncheckedIOException(failure); }
+        });
+        return task.get(10, TimeUnit.SECONDS);
     }
 
     @Test
@@ -305,6 +654,11 @@ class DeploymentLifecycleHttpTest {
                 "configured fallback", null, null, null, "engine", null, 1, null, null, null);
 
         String nativeJson = RavenrootServer.deploymentExecutionJson(binding, event);
+        String diagnosticJson = RavenrootServer.deploymentDiagnosticJson(binding, event);
+        assertTrue(diagnosticJson.contains("\"processInstanceId\":\"" + event.processInstanceId()), diagnosticJson);
+        assertTrue(diagnosticJson.contains("\"invocationId\":\"" + event.invocationId()), diagnosticJson);
+        assertFalse(diagnosticJson.contains("\"detail\":"), diagnosticJson);
+        assertFalse(nativeJson.contains("\"message\":"), nativeJson);
         var embedSerializer = ai.ravenroot.server.embed.EmbedBrowserHttpHandler.class
                 .getDeclaredMethod("executionJson", DeploymentObservationCursorStore.Binding.class,
                         ai.ravenroot.api.application.ExecutionEvent.class);
@@ -315,6 +669,42 @@ class DeploymentLifecycleHttpTest {
         assertTrue(nativeJson.contains("\"fallback\":true"), nativeJson);
         assertTrue(embedJson.contains("\"type\":\"NODE_DEFAULTED\""), embedJson);
         assertTrue(embedJson.contains("\"fallback\":true"), embedJson);
+    }
+
+    @Test
+    void nativeDeploymentDiagnosticsDeliverHostedLogOutputAndIdentities() throws Exception {
+        try (var fixture = new Fixture(false, null, true)) {
+            String graph = NO_SOURCE_GRAPH.replace("<graph id=", "<key id=\"behavior\" for=\"node\" attr.name=\"behavior\" attr.type=\"string\"/><graph id=")
+                    .replace("<edge source=\"start\" target=\"end\"/>",
+                            "<node id=\"log\"><data key=\"kind\">BEHAVIOR</data><data key=\"behavior\">log</data></node><edge source=\"start\" target=\"log\"/><edge source=\"log\" target=\"end\"/>");
+            var registered = fixture.request("POST", "/v1/deployments?id=diagnostic", graph, "tenant-a");
+            assertEquals(200, registered.statusCode(), registered.body());
+            String incarnation = field(registered.body(), "runtimeIncarnationId"), version = field(registered.body(), "graphVersion");
+            assertState(fixture.request("POST", "/v1/deployments/diagnostic/start", "", "tenant-a"), "READY");
+            var stream = fixture.stream("/v1/deployments/diagnostic/events?graphVersion=" + version + "&include=diagnostics", "tenant-a", incarnation);
+            assertEquals(200, stream.statusCode());
+            try (var reader = new java.io.BufferedReader(new java.io.InputStreamReader(stream.body()))) {
+                assertEquals("event: lifecycle", reader.readLine());
+                reader.readLine();
+                String body = "{\"incarnationId\":\"" + incarnation + "\",\"graphVersion\":\"" + version
+                        + "\",\"requestId\":\"diagnostic-start\",\"input\":\"retained log fixture\"}";
+                var accepted = fixture.request("POST", "/v1/deployments/diagnostic/initial-start", body, "tenant-a");
+                assertEquals(202, accepted.statusCode(), accepted.body());
+                String output = CompletableFuture.supplyAsync(() -> {
+                    try {
+                        String line;
+                        while ((line = reader.readLine()) != null) {
+                            if (line.startsWith("data: ") && line.contains("\"output\":")) return line;
+                        }
+                        return "";
+                    } catch (java.io.IOException failure) { throw new java.io.UncheckedIOException(failure); }
+                }).get(10, TimeUnit.SECONDS);
+                assertTrue(output.contains("retained log fixture"), output);
+                assertTrue(output.contains(field(accepted.body(), "processInstanceId")), output);
+                assertTrue(output.contains(field(accepted.body(), "traversalId")), output);
+                assertFalse(output.contains("\"detail\":"), output);
+            }
+        }
     }
 
     private static String terminalData(java.io.BufferedReader reader) throws Exception {
@@ -589,6 +979,8 @@ class DeploymentLifecycleHttpTest {
         private final PekkoExecutionEngine engine;
         private final DefaultRavenrootApplication application;
         private final RavenrootServer server;
+        private final SourceBehavior source = new SourceBehavior();
+        private final ai.ravenroot.persistence.sqlite.SqliteExecutionStore entryStore;
 
         Fixture() throws Exception {
             this(false, null);
@@ -602,19 +994,22 @@ class DeploymentLifecycleHttpTest {
             this(false, race);
         }
 
-        private Fixture(boolean durable, DeploymentViewRace race) throws Exception {
-            var behavior = new SourceBehavior();
+        private Fixture(boolean durable, DeploymentViewRace race) throws Exception { this(durable, race, false); }
+
+        private Fixture(boolean durable, DeploymentViewRace race, boolean custody) throws Exception {
+            entryStore = custody ? new ai.ravenroot.persistence.sqlite.SqliteExecutionStore(java.nio.file.Files.createTempDirectory("deployment-stop-custody").resolve("entry.db"), Clock.systemUTC(), ai.ravenroot.persistence.sqlite.SqliteStoreConfig.defaults()) : null;
+            var behavior = source;
             NodePackage nodePackage = new NodePackage() {
                 @Override public String id() { return "test.deployment.http.package"; }
                 @Override public String version() { return "1.0.0"; }
                 @Override public String sdkContract() { return NodeSdk.CONTRACT; }
                 @Override public List<NodeBehavior> behaviors() { return List.of(behavior); }
             };
-            BehaviorRegistry behaviors = NodePackages.register(new BehaviorRegistry(), nodePackage);
+            BehaviorRegistry behaviors = NodePackages.register(custody ? BehaviorRegistry.standard() : new BehaviorRegistry(), nodePackage);
             engine = new PekkoExecutionEngine("deployment-lifecycle-http");
             application = new DefaultRavenrootApplication(engine, new ExecutionMonitor(), behaviors,
                     new InMemoryArtifactRegistry(), new DisabledProgramRuntime(),
-                    ExecutionIdentitySource.randomUuids(), null, 8, UnknownBehaviorPolicy.passThrough());
+                    ExecutionIdentitySource.randomUuids(), entryStore, 8, UnknownBehaviorPolicy.passThrough());
             RavenrootApplication servedApplication = race == null ? application : race.wrap(application);
             var httpSecurity = new HttpSecurityConfiguration(
                     new BrowserOriginPolicy(Set.of("https://editor.example")),
@@ -633,9 +1028,30 @@ class DeploymentLifecycleHttpTest {
                         "http-owner", Duration.ofMinutes(1), Duration.ofSeconds(1), clock);
                 server.installDurableDeploymentControl(
                         new ai.ravenroot.core.deployment.DurableLocalDeploymentControl(
-                                application, registry, coordinator, clock));
+                                application, registry, coordinator,
+                                new ai.ravenroot.core.deployment.DeploymentReconciler(registry, application.localDeploymentTargets(), singleFlight,
+                                        List.of(), "http-owner", Duration.ofMinutes(1), Duration.ofSeconds(1), 32, clock), Duration.ofSeconds(1), clock));
             }
             server.start();
+        }
+
+        HttpResponse<String> boundStop(String id, String tenant, String incarnation, String version,
+                String registrationIdentity, Long generation) throws Exception {
+            return boundCommand("stop", id, tenant, incarnation, version, registrationIdentity, generation);
+        }
+
+        HttpResponse<String> boundCommand(String action, String id, String tenant, String incarnation, String version,
+                String registrationIdentity, Long generation) throws Exception {
+            var request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port()
+                            + "/v1/deployments/" + id + "/" + action))
+                    .header("X-Test-Tenant", tenant)
+                    .header("X-Ravenroot-Deployment-Incarnation", incarnation)
+                    .header("X-Ravenroot-Graph-Version", version);
+            if (registrationIdentity != null) request.header("X-Ravenroot-Registration-Identity", registrationIdentity);
+            if (generation != null) request.header("X-Ravenroot-Expected-Generation", generation.toString())
+                    .header("Idempotency-Key", UUID.randomUUID().toString()).header("X-Ravenroot-Reason", "explicit document close");
+            return HttpClient.newHttpClient().send(request.POST(HttpRequest.BodyPublishers.noBody()).build(),
+                    HttpResponse.BodyHandlers.ofString());
         }
 
         HttpResponse<String> command(String path, String tenant, String key, long generation,
@@ -676,10 +1092,15 @@ class DeploymentLifecycleHttpTest {
 
         HttpResponse<java.io.InputStream> stream(String path, String tenant, String incarnation)
                 throws Exception {
-            var request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + path))
+            return stream(path, tenant, incarnation, null);
+        }
+
+        HttpResponse<java.io.InputStream> stream(String path, String tenant, String incarnation, String cursor) throws Exception {
+            var builder = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + path))
                     .header("X-Test-Tenant", tenant)
-                    .header("X-Ravenroot-Deployment-Incarnation", incarnation)
-                    .GET().build();
+                    .header("X-Ravenroot-Deployment-Incarnation", incarnation);
+            if (cursor != null) builder.header("Last-Event-ID", cursor);
+            var request = builder.GET().build();
             return HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofInputStream());
         }
 
@@ -687,6 +1108,7 @@ class DeploymentLifecycleHttpTest {
         public void close() {
             server.close();
             engine.close();
+            if (entryStore != null) entryStore.close();
         }
     }
 
@@ -695,6 +1117,7 @@ class DeploymentLifecycleHttpTest {
         private final AtomicBoolean armed = new AtomicBoolean();
         private final CountDownLatch lookupReturned = new CountDownLatch(1);
         private final CountDownLatch continueLookup = new CountDownLatch(1);
+        private volatile boolean unavailableDrawing;
 
         private void arm() {
             armed.set(true);
@@ -705,13 +1128,16 @@ class DeploymentLifecycleHttpTest {
                     RavenrootApplication.class.getClassLoader(),
                     new Class<?>[] { RavenrootApplication.class },
                     (proxy, method, arguments) -> {
+                        if (unavailableDrawing && method.getName().equals("localDeploymentView"))
+                            throw new ai.ravenroot.api.application.DeploymentViewException(
+                                    ai.ravenroot.api.application.DeploymentViewException.Reason.PROJECTION_UNAVAILABLE);
                         Object result;
                         try {
                             result = method.invoke(delegate, arguments);
                         } catch (InvocationTargetException reflected) {
                             throw reflected.getCause();
                         }
-                        if ("localDeploymentView".equals(method.getName())
+                        if ("localDeployment".equals(method.getName())
                                 && armed.compareAndSet(true, false)) {
                             lookupReturned.countDown();
                             try {
@@ -733,12 +1159,13 @@ class DeploymentLifecycleHttpTest {
         public AuthenticatedPrincipal authenticate(Headers headers) throws AuthenticationException {
             String tenant = headers.getFirst("X-Test-Tenant");
             if (tenant == null || tenant.isBlank()) throw new AuthenticationException("missing tenant");
-            boolean viewer = "tenant-a-viewer".equals(tenant);
+            boolean viewer = "tenant-a-viewer".equals(tenant) || "tenant-a-monitor".equals(tenant);
             return new AuthenticatedPrincipal(tenant, AuthenticatedPrincipal.Type.USER,
                     "urn:ravenroot:test", viewer ? "tenant-a" : tenant,
                     viewer ? Set.of(Role.OPERATOR) : Set.of(Role.OPERATOR, Role.PLATFORM_ADMIN),
                     java.util.Arrays.stream(AuthorizationAction.values())
                             .filter(AuthorizationAction::available)
+                            .filter(action -> !"tenant-a-monitor".equals(tenant) || action != AuthorizationAction.GRAPH_READ)
                             .filter(action -> !viewer || action != AuthorizationAction.EXECUTION_START
                                     && action != AuthorizationAction.EXECUTION_CONTROL)
                             .map(AuthorizationAction::requiredScope)
@@ -747,6 +1174,11 @@ class DeploymentLifecycleHttpTest {
     }
 
     private static final class SourceBehavior implements NodeBehavior, InboundSourceCapable {
+        private final java.util.concurrent.atomic.AtomicInteger active = new java.util.concurrent.atomic.AtomicInteger();
+        private final java.util.concurrent.atomic.AtomicInteger starts = new java.util.concurrent.atomic.AtomicInteger();
+        private final AtomicBoolean failStart = new AtomicBoolean();
+        private volatile CompletableFuture<Void> startGate;
+        private final CountDownLatch startEntered = new CountDownLatch(1);
         private final CopyOnWriteArrayList<InboundSourceContext> contexts = new CopyOnWriteArrayList<>();
 
         @Override
@@ -764,11 +1196,17 @@ class DeploymentLifecycleHttpTest {
         @Override
         public InboundSource createSource(NodeConfiguration configuration, InboundSourceContext context) {
             return new InboundSource() {
+                private boolean running;
                 @Override public CompletionStage<Void> start(InboundSourceContext started) {
+                    starts.incrementAndGet();
+                    if (failStart.get() && configuration.nodeId().equals("listener-b")) return CompletableFuture.failedFuture(new IllegalStateException("restore startup fixture"));
+                    if (!running) { active.incrementAndGet(); running = true; }
                     contexts.add(started);
-                    return CompletableFuture.completedFuture(null);
+                    startEntered.countDown();
+                    return startGate == null ? CompletableFuture.completedFuture(null) : startGate;
                 }
                 @Override public CompletionStage<Void> stop() {
+                    if (running) { active.decrementAndGet(); running = false; }
                     return CompletableFuture.completedFuture(null);
                 }
             };

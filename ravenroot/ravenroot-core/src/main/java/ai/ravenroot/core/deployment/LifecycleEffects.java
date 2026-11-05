@@ -79,7 +79,7 @@ final class LifecycleEffects {
             case LifecycleCommand.Undeploy undeploy -> {
                 await(target.closeAdmission(generation));
                 switch (undeploy.disposition()) {
-                    case DRAIN_FIRST -> await(target.drain(drainBound, generation));
+                    case DRAIN_FIRST -> requireDrained(target, drainBound, generation);
                     case CANCEL_IN_FLIGHT -> await(target.barrier(generation));
                     // Nothing was in flight when the condition was checked under this deployment's
                     // own single-flight and lease, so there is nothing to dispose of.
@@ -132,9 +132,23 @@ final class LifecycleEffects {
             }
             case REMOVED -> {
                 await(target.closeAdmission(generation));
-                await(target.drain(drainBound, generation));
+                requireDrained(target, drainBound, generation);
                 await(target.terminateDomain(generation));
             }
+        }
+    }
+
+    private static void requireDrained(DeploymentLifecycleTarget target, Duration bound, long generation) {
+        if (!Boolean.TRUE.equals(await(target.drain(bound, generation)))) {
+            // A drain timeout never grants authority to discard admitted work. Keep the durable
+            // removal intent and closed admission so recovery can retry when that work settles.
+            throw new DrainIncompleteException();
+        }
+    }
+
+    static final class DrainIncompleteException extends IllegalStateException {
+        DrainIncompleteException() {
+            super("deployment drain incomplete; admitted work retained");
         }
     }
 

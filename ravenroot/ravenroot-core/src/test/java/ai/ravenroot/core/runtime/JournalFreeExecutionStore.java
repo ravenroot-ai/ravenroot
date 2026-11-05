@@ -34,9 +34,11 @@ import java.util.concurrent.CompletionStage;
  * capability from a store that is otherwise fully working is the only way to observe that branch
  * without also changing what the store does.</p>
  */
-final class JournalFreeExecutionStore implements ExecutionStore {
+final class JournalFreeExecutionStore implements ForwardingHistoryExecutionStore {
 
     private final ExecutionStore delegate;
+
+    @Override public ExecutionStore delegate() { return delegate; }
 
     JournalFreeExecutionStore(ExecutionStore delegate) {
         this.delegate = delegate;

@@ -34,10 +34,15 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import stat
 import re
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
+from datetime import datetime, timezone
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
 WORKFLOW = Path(__file__).resolve().parents[1] / ".github" / "workflows" / "ci.yml"
@@ -66,6 +71,7 @@ POLICY_JOBS = {
 }
 
 PRODUCT_JOBS = {
+    "full-configurator": "full-configurator / configurator",
     "full-preflight": "full-preflight",
     "full-ui-audit": "full-ui-audit",
     "full-ui-unit-tests": "full-ui-unit-tests",
@@ -115,12 +121,15 @@ REQUIRED_BY_TIER = {
 # convention, so a future edit cannot reintroduce a partial tier here without failing closed.
 ALLOWED_TIERS_BY_EVENT = {
     ("pull_request", "dev"): frozenset({"full"}),
+    ("pull_request", "release/0.8"): frozenset({"full"}),
+    ("push", "release/0.8"): frozenset({"postmerge"}),
+    ("pull_request", "main", "release/0.8"): frozenset({"promotion"}),
     # A pull request into main is keyed by its head as well: only this repository's `dev` is a
     # promotion, a `hotfix/*` runs the full tier, and any other head is not part of the model.
     ("pull_request", "main", "dev"): frozenset({"promotion"}),
     ("pull_request", "main", "hotfix"): frozenset({"full"}),
     ("push", "dev"): frozenset({"postmerge"}),
-    ("push", "main"): frozenset({"full", "docs"}),
+    ("push", "main"): frozenset({"full", "docs", "promotion"}),
     ("workflow_dispatch", ""): frozenset({"full"}),
     ("merge_group", ""): frozenset({"full"}),
     ("schedule", ""): frozenset({"full"}),
@@ -147,6 +156,17 @@ EXPECTED_CONDITIONS = {
     "full-preflight": AGGREGATOR_CONDITION,
     "full-ui-e2e": AGGREGATOR_CONDITION,
     "full-regression": AGGREGATOR_CONDITION,
+}
+
+# Explicit !cancelled() is a status function: omitted/failed needs do not implicitly skip selected
+# consumers or barriers, while server-side cancellation can stop expensive work. The cheap final
+# gate remains always() so cancellation cannot become a GitHub-successful skipped required check.
+EXPECTED_CONDITIONS = {
+    job: ("${{ !cancelled() && " + condition.removeprefix("always() && ") + " && "
+          + ("needs.release-classification.result == 'success' && "
+             if job not in {'full-preflight', 'full-regression', 'full-ui-e2e'} else "")
+          + f"contains(fromJSON(needs.release-classification.outputs.jobs || '[]'), '{job}')" + " }}")
+    for job, condition in EXPECTED_CONDITIONS.items()
 }
 
 
@@ -204,6 +224,40 @@ def declared_condition(block: str) -> str | None:
     return match.group(1).strip() if match else None
 
 
+# CI transport only; this is not an operator-configurable runtime resource policy.
+MAX_NEEDS_BYTES = 8 * 1024 * 1024
+NEEDS_DELIMITER = "RAVENROOT_NEEDS_JSON"
+
+
+def needs_file_script(job: str) -> str:
+    """The typed data materializer required in each large-payload consumer."""
+    filename = f'$RUNNER_TEMP/{job}-needs.json'
+    return ("set -euo pipefail\numask 077\nset -o noclobber\n"
+            f'cat > "{filename}" <<\'{NEEDS_DELIMITER}\'\n'
+            "${{ toJSON(needs) }}\n" + NEEDS_DELIMITER + "\n"
+            f'test "$(wc -c < "{filename}")" -le {MAX_NEEDS_BYTES}\n')
+
+
+def verify_needs_transport(blocks: dict[str, str]) -> list[str]:
+    problems = []
+    predicate = ('to_entries | all(.key as $key | if $key == "release-classification" '
+                 'or ($jobs | index($key)) then .value.result == "success" '
+                 'else .value.result == "skipped" end)')
+    for job in (GATE_JOB, "full-preflight", "full-regression"):
+        block = blocks.get(job, "")
+        expected = needs_file_script(job)
+        indented = "\n".join("          " + line for line in expected.splitlines()) + "\n"
+        command = (f'python3 scripts/ci_required.py --needs-file "$RUNNER_TEMP/{job}-needs.json"'
+                   if job == GATE_JOB else
+                   f'jq -e --argjson jobs "$PLAN_JOBS" \'{predicate}\' '
+                   f'"$RUNNER_TEMP/{job}-needs.json" >/dev/null')
+        if indented + "          " + command + "\n" not in block:
+            problems.append(f"{job}: complete typed needs must use the bounded exclusive file transport and exact consumer.")
+        if re.search(r"(?m)^          (?:IMPACT_PLAN|NEEDS_JSON|RESULTS):", block):
+            problems.append(f"{job}: large JSON must not be transported in an environment value.")
+    return problems
+
+
 def verify_workflow(contents: str) -> list[str]:
     """Report every way `ci.yml` no longer matches the topology declared above."""
     problems: list[str] = []
@@ -240,6 +294,15 @@ def verify_workflow(contents: str) -> list[str]:
                 f"{GATE_JOB}: must run with `if: always()`, or a skipped dependency would skip the "
                 "gate itself and leave the ruleset waiting on a context that never reports."
             )
+        if "          CI_CANCELLED: ${{ job.status != 'success' }}" not in gate:
+            problems.append(f"{GATE_JOB}: must bind the gate status into the verifier.")
+        if "      - name: Require every job this event demanded\n        if: ${{ success() && !cancelled() }}\n" not in gate:
+            problems.append(f"{GATE_JOB}: verifier must require successful guards and an uncancelled workflow.")
+        checkout_position = gate.find("      - name: Check out repository\n")
+        if PRECHECKOUT_CANCELLATION_GUARD not in gate or checkout_position < 0 or gate.index(PRECHECKOUT_CANCELLATION_GUARD) > checkout_position:
+            problems.append(f"{GATE_JOB}: must refuse cancellation before checkout.")
+        if not gate.rstrip().endswith(CANCELLATION_GUARD.rstrip()):
+            problems.append(f"{GATE_JOB}: must end with the cancellation refusal after verification.")
         observed = declared_needs(gate)
         wanted = {CLASSIFICATION_JOB} | set(GATED_JOBS)
         for job in sorted(wanted - observed):
@@ -247,6 +310,7 @@ def verify_workflow(contents: str) -> list[str]:
         for job in sorted(observed - wanted):
             problems.append(f"{job}: listed in the {GATE_JOB} `needs` list but not in the topology.")
 
+    problems.extend(verify_needs_transport(blocks))
     problems.extend(verify_triggers(contents))
     problems.extend(verify_dispatch_routing(blocks.get(CLASSIFICATION_JOB, ""), blocks.get(GATE_JOB, "")))
 
@@ -307,16 +371,16 @@ def verify_triggers(contents: str) -> list[str]:
     """
     problems: list[str] = []
     triggers = trigger_block(contents)
-    if "  pull_request:\n    branches: [dev, main]\n" not in triggers:
+    if "  pull_request:\n    branches: [dev, main, release/0.8]\n" not in triggers:
         problems.append(
-            "ci.yml: `pull_request` must name exactly `[dev, main]`. A pull request's own event is "
+            "ci.yml: `pull_request` must name exactly `[dev, main, release/0.8]`. A pull request's own event is "
             "what publishes ci-required for it; a dispatched run's check suite never enters that pull "
             "request's rollup, so removing this trigger leaves ci-required absent rather than green, "
             "and the pull request can never be queued or merged."
         )
-    if "  push:\n    branches: [dev, main]\n" not in triggers:
+    if "  push:\n    branches: [dev, main, release/0.8]\n" not in triggers:
         problems.append(
-            "ci.yml: `push` must name exactly `[dev, main]`. Work-branch pushes belong to the fast "
+            "ci.yml: `push` must name exactly `[dev, main, release/0.8]`. Work-branch pushes belong to the fast "
             "tier in ci-fast.yml; the full tier on every push would saturate the runners."
         )
     if "\n  merge_group:\n" not in triggers:
@@ -367,6 +431,23 @@ CLASSIFICATION_GUARD = (
     "          CLASSIFICATION: ${{ needs.release-classification.result }}\n"
     "        run: |\n"
     "          if [ \"$CLASSIFICATION\" != success ]; then\n"
+)
+
+
+PRECHECKOUT_CANCELLATION_GUARD = (
+    "      - name: Refuse cancellation before checkout\n"
+    "        if: ${{ cancelled() }}\n"
+    "        run: |\n"
+    '          echo "A cancelled workflow cannot execute checked-out gate code." >&2\n'
+    "          exit 1\n"
+)
+
+CANCELLATION_GUARD = (
+    "      - name: Refuse cancellation after verification\n"
+    "        if: ${{ cancelled() }}\n"
+    "        run: |\n"
+    '          echo "A cancelled workflow cannot establish ci-required evidence." >&2\n'
+    "          exit 1\n"
 )
 
 
@@ -514,7 +595,7 @@ def event_key(
     """Key an event the way ALLOWED_TIERS_BY_EVENT does."""
     if event_name == "pull_request" and base_ref == "main":
         same = bool(repository) and head_repository == repository
-        head = "dev" if same and head_ref == "dev" else "hotfix" if same and head_ref.startswith("hotfix/") else "other"
+        head = head_ref if same and head_ref in {"dev", "release/0.8"} else "hotfix" if same and head_ref.startswith("hotfix/") else "other"
         return (event_name, base_ref, head)
     if event_name == "pull_request":
         return (event_name, base_ref)
@@ -551,8 +632,8 @@ FULL_TIER_EVENTS = frozenset({"merge_group", "workflow_dispatch"})
 
 
 def is_integration_branch(branch: Any) -> bool:
-    """`dev`, or a merge-queue branch for `dev`: where the promoted commit was verified."""
-    return branch == "dev" or (isinstance(branch, str) and branch.startswith("gh-readonly-queue/dev/"))
+    """An exact supported integration branch or its queue, never arbitrary release/* refs."""
+    return branch in {"dev", "release/0.8"} or (isinstance(branch, str) and (branch.startswith("gh-readonly-queue/dev/") or branch.startswith("gh-readonly-queue/release/0.8/")))
 
 
 def verify_promotion_evidence(payload: dict[str, Any] | None, sha: str) -> list[str]:
@@ -568,19 +649,27 @@ def verify_promotion_evidence(payload: dict[str, Any] | None, sha: str) -> list[
     if not isinstance(runs, list):
         return ["no workflow-run evidence was collected for the promoted commit"]
     for run in runs:
-        if (run.get("path") == WORKFLOW_PATH and run.get("head_sha") == sha
+        try:
+            completed = datetime.fromisoformat(str(run.get('updated_at', '')).replace('Z', '+00:00'))
+            age = (datetime.now(timezone.utc) - completed).total_seconds()
+        except (ValueError, TypeError):
+            continue
+        trusted = run.get('head_repository', {}).get('full_name') == 'ravenroot-ai/ravenroot'
+        if (trusted and 0 <= age <= 24 * 60 * 60 and run.get("path") == WORKFLOW_PATH and run.get("head_sha") == sha
                 and run.get("event") in FULL_TIER_EVENTS and run.get("conclusion") == "success"
                 and is_integration_branch(run.get("head_branch"))):
             return []
     return [
-        f"no full-tier ci.yml run on dev has passed on {sha} (merge queue or dispatch). "
+        f"no fresh trusted full-tier ci.yml integration run has passed on {sha} (merge queue or dispatch). "
         "A promotion re-runs no functional job, so it may be green only on a full run of this exact "
         "commit; re-run this check once that run has passed."
     ]
 
 
-def verify_results(tier: str, results: dict[str, str]) -> list[str]:
+def verify_results(tier: str, results: dict[str, str], plan: dict | None = None, *, cancelled: bool = False) -> list[str]:
     """Report every way the observed job results fall short of what the event demanded."""
+    if cancelled:
+        return ["cancelled or unknown workflow state cannot establish ci-required evidence"]
     if tier not in REQUIRED_BY_TIER:
         return [
             f"Unknown CI tier {tier!r}. Expected one of: {', '.join(sorted(REQUIRED_BY_TIER))}. "
@@ -591,6 +680,16 @@ def verify_results(tier: str, results: dict[str, str]) -> list[str]:
     observed = set(results)
     expected = {CLASSIFICATION_JOB} | set(GATED_JOBS)
     required = {CLASSIFICATION_JOB} | REQUIRED_BY_TIER[tier]
+    if plan is not None and tier == 'full':
+        try:
+            from scripts.impact_plan import make_plan
+            recomputed = make_plan(plan['baseline'], plan['candidate'], plan['event'], plan['lane'], plan['full'])
+            # Recomputing selections independently rejects forged omission lists and missing jobs.
+            if any(recomputed[key] != plan.get(key) for key in ('jobs', 'build', 'test', 'full', 'integrations', 'candidate', 'tree', 'native_acceptance', 'extension_pack', 'independent_build_scopes', 'job_reasons')) or not set(plan['jobs']) <= set(GATED_JOBS):
+                return ['impact plan jobs do not match independently recomputed scope']
+            required = {CLASSIFICATION_JOB} | set(plan['jobs'])
+        except (KeyError, ValueError, TypeError):
+            return ['invalid or incomplete impact plan']
 
     for job in sorted(expected - observed):
         problems.append(f"{job}: no result reported to {GATE_JOB}.")
@@ -626,6 +725,52 @@ def parse_results(raw: str) -> dict[str, str]:
     return {job: (value or {}).get("result", "unknown") for job, value in payload.items()}
 
 
+def strict_json(raw: str) -> object:
+    def pairs(items):
+        result = {}
+        for key, value in items:
+            if key in result:
+                raise ValueError(f"duplicate JSON key: {key}")
+            result[key] = value
+        return result
+    def invalid_constant(value):
+        raise ValueError(f"invalid JSON constant: {value}")
+    return json.loads(raw, object_pairs_hook=pairs, parse_constant=invalid_constant)
+
+
+def load_needs_file(path: Path | None) -> tuple[dict, dict]:
+    """Read the entire job-owned envelope; invalid files never fall back to environment data."""
+    if path is None:
+        raise ValueError("normal verification requires --needs-file")
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_NEEDS_BYTES:
+            raise ValueError("needs input must be a regular file of at most 8 MiB")
+        with os.fdopen(descriptor, "rb") as source:
+            descriptor = -1
+            raw = source.read(MAX_NEEDS_BYTES + 1)
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+    if len(raw) > MAX_NEEDS_BYTES:
+        raise ValueError("needs input exceeds 8 MiB")
+    payload = strict_json(raw.decode("utf-8"))
+    if not isinstance(payload, dict) or any(not isinstance(value, dict)
+            or ("result" in value and not isinstance(value["result"], str))
+            or ("outputs" in value and not isinstance(value["outputs"], dict))
+            for value in payload.values()):
+        raise ValueError("needs input must contain complete job-result objects")
+    outputs = payload.get(CLASSIFICATION_JOB, {}).get("outputs", {})
+    raw_plan = outputs.get("plan")
+    if not isinstance(raw_plan, str):
+        raise ValueError("classification did not produce an impact plan")
+    plan = strict_json(raw_plan)
+    if not isinstance(plan, dict) or not plan:
+        raise ValueError("classification did not produce an impact plan object")
+    return payload, plan
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -639,6 +784,7 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help=f"Act as {FAST_GATE_JOB}: require every fast job, and the single-publisher constraint.",
     )
+    parser.add_argument("--needs-file", type=Path, help="Complete typed needs JSON from this job.")
     arguments = parser.parse_args(argv)
 
     if arguments.print_contexts:
@@ -648,8 +794,14 @@ def main(argv: list[str] | None = None) -> int:
 
     gate = FAST_GATE_JOB if arguments.fast else GATE_JOB
     try:
-        results = parse_results(os.environ.get("NEEDS_JSON", "{}"))
-    except (json.JSONDecodeError, ValueError) as exc:
+        if arguments.fast:
+            if arguments.needs_file is not None:
+                raise ValueError("--fast uses its small result-only environment, not --needs-file")
+            results = parse_results(os.environ.get("NEEDS_JSON", "{}"))
+        else:
+            payload, plan = load_needs_file(arguments.needs_file)
+            results = parse_results(json.dumps(payload))
+    except (OSError, UnicodeError, ValueError) as exc:
         print(f"{gate} could not read the job results: {exc}", file=sys.stderr)
         return 1
 
@@ -691,7 +843,19 @@ def main(argv: list[str] | None = None) -> int:
             evidence = None
         problems.extend(verify_promotion_evidence(evidence, os.environ.get("PROMOTED_SHA", "")))
     problems.extend(verify_workflow(WORKFLOW.read_text(encoding="utf-8")))
-    problems.extend(verify_results(tier, results))
+    if not plan:
+        problems.append('classification did not produce an impact plan')
+    else:
+        if plan.get('candidate') != subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip():
+            problems.append('impact plan is not bound to the checked-out candidate')
+        lane = os.environ.get('IMPACT_LANE', '').removeprefix('refs/heads/')
+        lane = lane if lane in {'dev', 'release/0.8'} else 'dev'
+        if plan.get('lane') != lane or plan.get('event') != os.environ.get('EVENT_NAME', ''):
+            problems.append('impact plan lane/event does not match the actual triggering event')
+        event_base = os.environ.get('IMPACT_BASE', '')
+        if event_base and plan.get('baseline') != event_base:
+            problems.append('impact plan baseline does not match the actual event baseline')
+    problems.extend(verify_results(tier, results, plan, cancelled=os.environ.get("CI_CANCELLED", "unknown") != "false"))
 
     if problems:
         print(f"ci-required refuses tier {tier!r}:", file=sys.stderr)

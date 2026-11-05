@@ -34,6 +34,38 @@ lifecycle capabilities. A disabled command is evidence that a precondition is no
 
 ## Read Monitoring mode
 
+**Monitoring** restores the elastic graph. Node and edge highlights follow live events from the
+pinned deployment, in both the originating document and **Open read-only view**. Switching between
+Design and Monitoring keeps the saved layout for each mode. A local draft whose executable content
+has changed does not receive the deployment's highlights; open the pinned read-only view to monitor it.
+
+**History**, beside Monitoring (also **View → Deployment history**), opens the separate history
+browser for the exact deployed version. Returning to the graph preserves the selected rendering mode.
+Reloading a saved association only checks deployment status; it does not activate the deployment or
+submit another initial traversal. Stop becomes available after the runtime confirms an active state.
+Search **Exact application ID** or **Exact public reference** (for example a filename), or provide
+both. Submit **Search histories** to run the scoped server query. The resulting list remains paginated;
+it does not download and filter every retained history. **Clear search** restores the first bounded
+page. Search does not admit START or activate a deployment. Selecting another search retires old
+previews and delayed responses, so an earlier result cannot decorate the new selection.
+
+The History workspace keeps business histories in the left sidebar and deployment identity, version,
+and lifecycle state in the header. A completed traversal does not imply that its deployment has stopped
+listening. Select a business history to open its first available traversal in **Graph & timeline**;
+select another traversal above the graph to inspect its own recorded path. The graph keeps the original
+deployed positions. **Traversal map** compares the two most recently opened previews; opening another
+replaces the oldest preview, while all other traversals remain available through the paginated chooser.
+It does not imply a causal connection between those previews. Switching back to **Graph & timeline**
+shows only the selected preview.
+
+Select a node to open visits and attempts beneath the graph. IDs and full record metadata remain in
+**Record details**. Explicit coverage controls distinguish omitted rows from known zero visits; node
+visits and traversal lists load in bounded pages. Activity content is a separate authorized bounded
+read with capture/redaction availability. The native History toolbar offers **Review Human Tasks**
+when an actionable task is known; it returns to the graph and selects the relevant node without
+settling the task.
+See the executed [six-callback walkthrough](../examples/correlation/lakehouse.md) for real screenshots.
+
 Monitoring overlays activity on the graph selected in the current document or deployment view.
 Confirm the selected deployment and execution before interpreting highlights. A highlighted node or
 edge means matching evidence exists for that scope; it does not by itself prove business completion,
@@ -155,3 +187,63 @@ before changing a running environment:
 
 These guides describe separate authority, persistence, and failure boundaries. A successful visual
 action does not imply that a different tenant, deployment, runner, or recovery topology is ready.
+
+## Closing a bound document
+
+First **Run** associates the originating document with one exact deployment, including a graph
+without SOURCE nodes. **Test** remains a separate one-shot execution. Closing a bound document offers
+**Stop and Close**, **Close and keep running**, and **Cancel**. Keep Running detaches this browser's
+observation only; it sends no Stop, Undeploy, or initial START. Closing never removes a registration.
+Close All captures the document incarnations and bindings present when invoked; documents opened
+later remain open. Cancelling while an explicit Stop is pending cancels closure, while the server's
+actual stop result remains authoritative.
+
+Stop and Close reads the binding's current tenant, immutable graph, and runtime or durable
+registration identity. The server checks that identity at mutation time. Process-local Stop captures
+the exact runtime incarnation. Durable Stop additionally uses the current generation, an idempotency
+key, and an explicit operator reason. A replaced registration, different graph, denied authority,
+unavailable response, or a state other than authoritative STOPPED keeps the document open. An
+ordinary operator Stop from the deployment console retains its existing lifecycle contract.
+
+For HTTP clients, `POST /v1/deployments/{id}/stop` accepts the optional paired headers
+`X-Ravenroot-Deployment-Incarnation` and `X-Ravenroot-Graph-Version`. Durable bound Stop also requires
+`X-Ravenroot-Registration-Identity`, plus the existing generation, idempotency and reason headers.
+Changed bindings return 409 before mutation. The ordinary Java SDK exposes the equivalent
+`stopLocalDeployment(tenantId, deploymentId, incarnationId, graphVersion)` overload for process-local
+bindings; durable hosts use the lifecycle coordinator's registration and generation fences. CLI
+operator Stop retains its explicit alias and current-generation contract; it does not claim to stop
+an earlier browser document incarnation.
+
+
+The authenticated deployment status includes optional `runtimeIncarnationId`, the exact hosted runtime identity available before activation. Compatibility status producers may omit it. The editor captures that identity, the tenant, graph version, and durable registration identity before issuing Start or Stop. Conditional Start uses the same three binding headers as conditional Stop. A replacement under the same name is refused before opening a listener. The ordinary operator lifecycle endpoints and SDK overloads continue to support explicitly unconditional control of the current named deployment.
+
+When observation ends or loses continuity, the originating graph clears its previous runtime node
+highlights and edge activity. This is a presentation reset; retained execution and history identities
+remain intact. An unavailable observer does not authorize another traversal.
+
+Before the first traversal, Run confirms live observation of that exact deployment. If observation
+cannot be confirmed within ten seconds, the deployment may still truthfully show READY. Use Run
+again to retry the same saved deployment, input and execution request. No second registration or
+initial traversal is created. A missing drawing is a presentation problem; it does not prevent
+execution when live observation is available.
+
+Stop requested during a pending Run waits for the captured registration or activation to resolve. It prevents an initial START request that has not yet been issued, then stops the exact runtime. Closing the originating document after requesting Stop does not cancel that cleanup; changing authentication or tenant authority does. A successful Stop closes admission, so a delayed initial START request is refused. A later explicit Run can activate the same deployment again and reconcile its permanent initial marker: an already admitted initial traversal keeps its original process and traversal IDs.
+
+The native history monitor shows current Human Task attention separately from visit history. **Review tasks in graph** returns to the originating graph and selects a node with actionable tasks. Task decisions retain their existing confirmation, exact-generation, and current-authorization checks. Unknown or unavailable attention is displayed explicitly.
+
+### Traversal highlights and a removed deployment
+
+Design highlights live traversal activity directly on the authoring canvas: completed nodes and
+traversed paths remain green, while recent edge traffic pulses briefly. Monitoring shows the same
+activity in the elastic graph. Test preserves its pass-through semantics: bypassed nodes remain
+identified as bypassed, and traversed edges still show the route taken.
+
+A durable deployment removed with Undeploy cannot be restored under its retired identity. If the
+saved association is unavailable, verify the selected service. **Run** offers to start a new deployment
+directly; declining keeps the saved association unchanged. The separate **Run → Run as new deployment…** command
+opens a separate draft from the current graph and submits a new Run through the usual confirmation.
+The original document keeps its previous deployment and initial traversal identity; ordinary Run
+continues to reconcile that original association.
+
+Program approval appears only when a program build requires approval. Its control and readiness
+summary are grouped separately from the service connection fields.

@@ -1,9 +1,11 @@
 import contextlib
+import hashlib
 import io
 import json
 from pathlib import Path
 import tempfile
 import unittest
+import re
 from unittest.mock import patch
 
 from scripts import publish_environment_reference as publisher
@@ -22,12 +24,90 @@ from scripts.publish_environment_reference import (
 
 
 class PublishEnvironmentReferenceTest(unittest.TestCase):
+    def test_history_bindings_are_concrete_exact_and_have_independent_semantics(self):
+        expected = {
+            "RAVENROOT_HISTORY_MAX_HISTORIES_PER_SCOPE", "RAVENROOT_HISTORY_MAX_OPEN_JOINS",
+            "RAVENROOT_HISTORY_MAX_RETAINED_JOINS", "RAVENROOT_HISTORY_MAX_CONTRIBUTIONS",
+            "RAVENROOT_HISTORY_MAX_JOIN_PAYLOAD_BYTES", "RAVENROOT_HISTORY_MAX_PENDING_ENTRIES",
+            "RAVENROOT_HISTORY_MAX_PENDING_ENTRY_BYTES", "RAVENROOT_HISTORY_MAX_PAGE_SIZE",
+            "RAVENROOT_HISTORY_RETENTION_SECONDS", "RAVENROOT_HISTORY_JOIN_DEADLINE_SECONDS",
+            "RAVENROOT_HISTORY_MAX_ID_CHARACTERS", "RAVENROOT_HISTORY_MAX_SELECTOR_CHARACTERS",
+            "RAVENROOT_HISTORY_MAX_SELECTOR_SEGMENTS", "RAVENROOT_HISTORY_MAX_MANIFEST_ITEMS",
+            "RAVENROOT_HISTORY_MAX_CAS_ATTEMPTS", "RAVENROOT_HISTORY_READ_TIMEOUT_MS",
+            "RAVENROOT_HISTORY_RESPONSE_MAX_BYTES", "RAVENROOT_HISTORY_RESPONSE_MAX_VALUES",
+        }
+        actual = {name: paths for name, paths in variables().items() if name.startswith("RAVENROOT_HISTORY_")}
+        self.assertEqual(expected, set(actual))
+        self.assertEqual(expected, publisher.HISTORY_VARIABLES)
+        section = render().split("## Business history and correlated joins", 1)[1].split("## ", 1)[0]
+        self.assertIn("configuration.md#business-history-and-correlated-join-limits", section)
+        for name, paths in actual.items():
+            with self.subTest(name=name):
+                self.assertEqual((publisher.SOURCE / publisher.HISTORY_BINDING_SOURCE[0],), paths)
+                self.assertEqual("history", group(name))
+                self.assertIn(f"| `{name}` |", section)
+                self.assertIn("startup positive integer", boundary(name))
+                self.assertIn("takes precedence, blank delegates to environment", boundary(name))
+                self.assertIn("default `", boundary(name))
+                self.assertIn("ravenroot.history.", boundary(name))
+        self.assertIn("maximum `1000`", boundary("RAVENROOT_HISTORY_MAX_PAGE_SIZE"))
+        self.assertIn("oversize responses are refused", boundary("RAVENROOT_HISTORY_RESPONSE_MAX_BYTES"))
+        self.assertNotIn("| `RAVENROOT_HISTORY_` |", render())
+        contract = (publisher.ROOT / "docs/reference/configuration.md").read_text(encoding="utf-8")
+        documented = dict(re.findall(r'\| `ravenroot.history.[^`]+` \| `(RAVENROOT_HISTORY_[A-Z_]+)` \| `(\d+)`', contract))
+        self.assertEqual(expected, set(documented))
+        for name, default in documented.items():
+            self.assertIn(f"default `{default}`", boundary(name))
+
+    def test_history_extraction_requires_the_exact_reviewed_loader(self):
+        relative, _ = publisher.HISTORY_BINDING_SOURCE
+        original = (publisher.SOURCE / relative).read_text(encoding="utf-8")
+        mutations = (
+            original.replace('"max-open-joins"', '"unknown-history-name"'),
+            original.replace("name.toUpperCase(Locale.ROOT).replace('-', '_')", "name"),
+            original + '\nclass AddedUse { String value = System.getenv("RAVENROOT_HISTORY_"); }\n',
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / relative
+            target.parent.mkdir(parents=True)
+            with patch.object(publisher, "SOURCE", root):
+                target.write_text(original, encoding="utf-8")
+                self.assertEqual(publisher.HISTORY_VARIABLES, set(variables()))
+                for content in mutations:
+                    with self.subTest(mutation=content[-100:]):
+                        target.write_text(content, encoding="utf-8")
+                        with self.assertRaisesRegex(ValueError, "history environment binding source changed"):
+                            render()
+                unknown = mutations[0]
+                target.write_text(unknown, encoding="utf-8")
+                # Reviewing a new fingerprint alone cannot bless a new setting.
+                with patch.object(publisher, "HISTORY_BINDING_SOURCE", (relative, hashlib.sha256(unknown.encode()).hexdigest())):
+                    with self.assertRaisesRegex(ValueError, "suffixes differ"):
+                        render()
+
+    def test_unknown_history_bindings_and_unreviewed_prefix_uses_are_refused(self):
+        for name in ("RAVENROOT_HISTORY_", "RAVENROOT_HISTORY_UNKNOWN_HISTORY_NAME"):
+            with self.subTest(name=name):
+                with self.assertRaisesRegex(ValueError, name):
+                    group(name)
+                with tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    target = root / "other/src/main/java/Other.java"
+                    target.parent.mkdir(parents=True)
+                    target.write_text(f'class Other {{ String value = System.getenv("{name}"); }}', encoding="utf-8")
+                    with patch.object(publisher, "SOURCE", root):
+                        self.assertEqual({name}, set(variables()))
+                        with self.assertRaisesRegex(ValueError, name):
+                            render()
+
     def test_graph_authoring_bindings_are_exact_and_link_their_operator_contract(self):
         names = variables()
         actual = {
             name for name in names
             if name.startswith("RAVENROOT_GRAPH_AUTHORING_")
             or name.startswith("RAVENROOT_GRAPH_ARTIFACT_")
+            or name == "RAVENROOT_GRAPH_RELEASE_AUTOMATION"
         }
         self.assertEqual(GRAPH_AUTHORING_VARIABLES, actual)
         for name in GRAPH_AUTHORING_VARIABLES:
@@ -48,8 +128,35 @@ class PublishEnvironmentReferenceTest(unittest.TestCase):
         self.assertIn("defaults to `LOCAL`", section)
         self.assertIn("defaults to `10485760`", section)
         self.assertIn("maximum `120000` milliseconds", section)
-        self.assertIn("eligible GitHub and GitLab `GET` failures", section)
+        self.assertIn("eligible GitHub `GET` and GitLab `GET`/`HEAD` read failures", section)
         self.assertIn("mutations are never retried blindly", section)
+
+        webhook_names = {
+            "RAVENROOT_GRAPH_AUTHORING_WEBHOOK_AUTH",
+            "RAVENROOT_GRAPH_AUTHORING_WEBHOOK_CREDENTIAL_REF",
+        }
+        self.assertEqual(webhook_names, {
+            name for name in GRAPH_AUTHORING_VARIABLES
+            if name.startswith("RAVENROOT_GRAPH_AUTHORING_WEBHOOK_")
+        })
+        for name in webhook_names:
+            with self.subTest(webhook=name):
+                self.assertIn(f"`{name}`", section)
+                self.assertIn(
+                    "../operator-guide/graph-source-control.md#provider-webhook-delivery",
+                    boundary(name),
+                )
+        credential = boundary("RAVENROOT_GRAPH_AUTHORING_WEBHOOK_CREDENTIAL_REF")
+        self.assertIn("separate repository-specific webhook secret", credential)
+        self.assertIn("unset disables the receiver", credential)
+        self.assertIn("resolved fresh", credential)
+        self.assertIn("including duplicates", credential)
+        authentication = boundary("RAVENROOT_GRAPH_AUTHORING_WEBHOOK_AUTH")
+        self.assertIn("defaults to `SIGNATURE`", authentication)
+        self.assertIn("300-second timestamp window", authentication)
+        self.assertIn("`TOKEN` selects GitLab legacy token authentication only", authentication)
+        self.assertIn("no automatic fallback", authentication)
+        self.assertIn("bearer and cookie credentials confer no authority", authentication)
 
     def test_independent_ui_mapping_tracks_runtime_and_shared_java_setting(self):
         names = publisher.ui_settings()

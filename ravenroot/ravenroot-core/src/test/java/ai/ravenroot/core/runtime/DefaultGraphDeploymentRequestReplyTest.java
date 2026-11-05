@@ -111,13 +111,13 @@ class DefaultGraphDeploymentRequestReplyTest {
                 PrincipalType.WORKLOAD, "urn:ravenroot:test:request-reply");
 
         try (var engine = new SameThreadExecutionEngine()) {
-            var deployment = new DefaultGraphDeployment(DeploymentId.of("request-reply"), engine, registry,
+            var deployment = new DefaultGraphDeployment(DeploymentId.of("request-reply"), engine, ManualSourceFixture.register(registry),
                     new ExecutionMonitor(), ExecutionIdentitySource.randomUuids(),
-                    GRAPH.getBytes(StandardCharsets.UTF_8), 4);
+                    ManualSourceFixture.graph(GRAPH).getBytes(StandardCharsets.UTF_8), 4);
             deployment.start(identity).toCompletableFuture().get(10, TimeUnit.SECONDS);
 
             var accepted = assertInstanceOf(RequestReplyAdmission.Accepted.class,
-                    deployment.requestReply().request(IngressTarget.start(), PayloadValue.of("payload"),
+                    deployment.requestReply().request(IngressTarget.node("start"), PayloadValue.of("payload"),
                             Instant.now().plusSeconds(5)));
             var exchange = accepted.exchange();
             var outcome = exchange.completion().toCompletableFuture().get(10, TimeUnit.SECONDS);
@@ -151,12 +151,12 @@ class DefaultGraphDeploymentRequestReplyTest {
 
         try (var engine = new JoinTestEngine()) {
             var deployment = new DefaultGraphDeployment(DeploymentId.of("request-reply-failure"), engine,
-                    registry, new ExecutionMonitor(), ExecutionIdentitySource.randomUuids(),
-                    FAILURE_ROUTE_GRAPH.getBytes(StandardCharsets.UTF_8), 2);
+                    ManualSourceFixture.register(registry), new ExecutionMonitor(), ExecutionIdentitySource.randomUuids(),
+                    ManualSourceFixture.graph(FAILURE_ROUTE_GRAPH).getBytes(StandardCharsets.UTF_8), 2);
             deployment.start(identity).toCompletableFuture().get(10, TimeUnit.SECONDS);
 
             var exchange = assertInstanceOf(RequestReplyAdmission.Accepted.class,
-                    deployment.requestReply().request(IngressTarget.start(), PayloadValue.of("payload"),
+                    deployment.requestReply().request(IngressTarget.node("start"), PayloadValue.of("payload"),
                             Instant.now().plusSeconds(5))).exchange();
             var outcome = exchange.completion().toCompletableFuture().get(10, TimeUnit.SECONDS);
 

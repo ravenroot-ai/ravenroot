@@ -24,6 +24,14 @@ function workspaceOf(...names) {
 // statistics all follow it, so an ambiguous answer shows up as a panel describing the wrong graph.
 
 describe('exactly one document is active, and which one is not left to chance', () => {
+  it('warns before leaving a restored managed graph with unsaved persisted changes', () => {
+    const workspace = workspaceOf('restored');
+    workspace.active.authoring.localChanges = true;
+    expect(hasUnsavedWork(workspace)).toBe(true);
+    workspace.active.authoring.localChanges = false;
+    expect(hasUnsavedWork(workspace)).toBe(false);
+  });
+
   it('keeps durable document identity separate from transient incarnation', () => {
     const document_ = createDocumentRecord({ id: 'durable-id' });
     expect(document_.documentId).toBe('durable-id');
@@ -486,5 +494,30 @@ describe('the per-document runtime event tail', () => {
         'outcomeClaim', 'paused', 'processInstanceId', 'reconciliationClient', 'reconciliationController',
         'reconciliationState', 'retiredOutcomeClaim',
       ]);
+  });
+});
+
+describe('durable deployment event ownership', () => {
+  function fixture() {
+    const workspace = workspaceOf('origin', 'other');
+    const origin = workspace.documents[0]; origin.tenantId = 'tenant';
+    origin.deploymentRun = { deploymentId: 'local-name', registrationIdentity: 'server-identity', graphVersion: 'v1', incarnationId: 'inc-1' };
+    const event = { type: 'NODE_COMPLETED', executionId: 'traversal-1', processInstanceId: 'process-1', graphVersion: 'v1', deploymentId: 'server-identity' };
+    return { workspace, origin, event };
+  }
+  it('routes stable registration identity and learns a fenced continuation', () => {
+    const { workspace, origin, event } = fixture();
+    expect(documentForRuntimeEvent(workspace, event, { tenantId: 'tenant' })).toBe(origin);
+    expect(documentForRuntimeEvent(workspace, { ...event, deploymentId: null, executionId: 'traversal-2' }, { tenantId: 'tenant' })).toBe(origin);
+    origin.deploymentRun = { ...origin.deploymentRun };
+    expect(documentForRuntimeEvent(workspace, { ...event, deploymentId: null }, { tenantId: 'tenant' })).toBeNull();
+  });
+  it('requires the trusted tenant, pinned version and an unambiguous identity', () => {
+    const { workspace, origin, event } = fixture();
+    expect(documentForRuntimeEvent(workspace, event, { tenantId: 'foreign' })).toBeNull();
+    expect(documentForRuntimeEvent(workspace, { ...event, graphVersion: 'v2' }, { tenantId: 'tenant' })).toBeNull();
+    expect(documentForRuntimeEvent(workspace, { ...event, deploymentId: 'foreign' }, { tenantId: 'tenant' })).toBeNull();
+    workspace.documents[1].tenantId = 'tenant'; workspace.documents[1].deploymentRun = { ...origin.deploymentRun };
+    expect(documentForRuntimeEvent(workspace, event, { tenantId: 'tenant' })).toBeNull();
   });
 });

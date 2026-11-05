@@ -86,6 +86,14 @@ final class ExecutionBudget {
         return List.copyOf(reservations);
     }
 
+    /** Recreates live slots for original SOURCE deliveries whose monotone charges are already durable. */
+    synchronized List<Hop> resumeFanOut(int count) {
+        if (count < 0) throw new IllegalArgumentException("negative retained delivery count");
+        require(GraphExecutionLimitException.Reason.IN_FLIGHT_HOPS, (long) inFlightHops + count, limits.maxInFlightHopsPerTraversal());
+        inFlightHops += count;
+        var hops = new ArrayList<Hop>(count); for (int i = 0; i < count; i++) hops.add(new Hop(this)); return List.copyOf(hops);
+    }
+
     /** Charges a fresh attempt without taking a second concurrent-hop slot for the same visit. */
     synchronized void reserveRetry(boolean amplified, long bytes) {
         if (bytes < 0) throw new IllegalArgumentException("budget charge cannot be negative");

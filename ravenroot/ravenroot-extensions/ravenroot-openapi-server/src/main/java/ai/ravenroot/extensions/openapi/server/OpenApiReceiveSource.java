@@ -118,7 +118,7 @@ final class OpenApiReceiveSource implements ManagedIngressSource {
             Object payload = payload(request, match, key);
             IngressReceipt receipt;
             try {
-                receipt = activeContext.ingress().offerDurably(activeContext.identity(), settings.profile().target(),
+                receipt = activeContext.ingress().offerDurably(activeContext.identity(), ai.ravenroot.api.deployment.IngressTarget.node(activeContext.nodeId()),
                         payload, activeContext.nodeId(), match.operationId() + ":" + key);
             } catch (RuntimeException failure) {
                 return response(503);

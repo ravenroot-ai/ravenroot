@@ -26,7 +26,9 @@ class AmqpNodePackageTest {
                 // The publish offers the recovery contract, because a consumer keyed on
                 // messageId can make a repeat harmless. amqp.consume does not — see
                 // AmqpRecoveryRepeatabilityTest for what each of the two tells the recovery loop.
-                "recovery.repeatable"), names);
+                "recovery.repeatable", "correlation.outgoing.applicationHeader", "correlation.outgoing.kindHeader",
+                "correlation.outgoing.referenceHeader", "correlation.outgoing.roundHeader",
+                "correlation.outgoing.contributionHeader"), names);
         assertTrue(descriptor.capabilities().containsAll(java.util.Set.of("network", "credential-reference", "side-effect")));
         assertTrue(descriptor.capabilities().contains("saga-adapter:ravenroot.amqp-inbox.v1"));
         assertFalse(names.stream().anyMatch(name -> name.matches("(?i).*(host|port|password|credential|tls|vhost).*")));

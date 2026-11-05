@@ -252,6 +252,25 @@ describe('versioned execution stream normalization', () => {
     });
   });
 
+  it.each([versionedRingEvent, versionedDurableEvent])('keeps explicit correlation projection availability distinct from legacy absence', event => {
+    const notProjected = event({ applicationCorrelationAvailability: 'NOT_PROJECTED', applicationCorrelationId: null,
+      contributionId: null, contributionKind: null, roundId: null, publicReference: null });
+    expect(normalizeRuntimeEvent(notProjected)).toMatchObject(notProjected);
+    expect(normalizeRuntimeEvent(event())).not.toHaveProperty('applicationCorrelationAvailability');
+    expect(normalizeRuntimeEvent(event({ applicationCorrelationAvailability: 'NOT_RECORDED' })))
+      .toHaveProperty('applicationCorrelationAvailability', 'NOT_RECORDED');
+    expect(normalizeRuntimeEvent(event({ applicationCorrelationAvailability: 'AVAILABLE',
+      applicationCorrelationId: 'original', roundId: 'round', publicReference: 'same.csv' })))
+      .toMatchObject({ applicationCorrelationId: 'original', publicReference: 'same.csv' });
+    for (const fields of [
+      { applicationCorrelationAvailability: 'UNKNOWN' },
+      { applicationCorrelationAvailability: 'NOT_PROJECTED', applicationCorrelationId: 'invented' },
+      { applicationCorrelationAvailability: 'NOT_RECORDED', roundId: 'invented' },
+      { applicationCorrelationAvailability: 'AVAILABLE', applicationCorrelationId: 'missing-round' },
+      { applicationCorrelationAvailability: 'AVAILABLE', applicationCorrelationId: 'x'.repeat(4097), roundId: 'round' },
+    ]) expect(() => normalizeRuntimeEvent(event(fields))).toThrow();
+  });
+
   it.each(['schemaVersion', 'source', 'id', 'eventType', 'occurredAt', 'processInstanceId', 'traversalId'])
   ('does not treat a partial declared version as legacy when %s is absent', field => {
     const event = versionedDurableEvent();
@@ -740,6 +759,7 @@ describe('process-local deployment client', () => {
 
     const result = await client.stopDeployment('deployment-1', {
       expectedGeneration: 7, idempotencyKey: 'intent-7', reason: 'maintenance',
+      binding: { incarnationId: 'runtime-1', graphVersion: 'a'.repeat(64), registrationIdentity: 'registry-1' },
     });
 
     expect(result).toEqual({ outcome: accepted, status: stopped });
@@ -747,8 +767,21 @@ describe('process-local deployment client', () => {
       'Idempotency-Key': 'intent-7',
       'X-Ravenroot-Expected-Generation': '7',
       'X-Ravenroot-Reason': 'maintenance',
+      'X-Ravenroot-Deployment-Incarnation': 'runtime-1', 'X-Ravenroot-Graph-Version': 'a'.repeat(64),
+      'X-Ravenroot-Registration-Identity': 'registry-1',
     }));
     expect(fetchImpl.mock.calls[1][0]).toBe('/v1/deployments/deployment-1');
+  });
+
+  it('refuses malformed conditional Stop bindings and binding on other commands before I/O', async () => {
+    const fetchImpl = vi.fn(), client = new RavenrootRuntimeClient('', { fetchImpl });
+    const valid = { incarnationId: 'runtime-1', graphVersion: 'a'.repeat(64), registrationIdentity: null };
+    for (const binding of [{ ...valid, incarnationId: '' }, { ...valid, graphVersion: 'wrong' },
+      { ...valid, registrationIdentity: 'x'.repeat(257) }, { ...valid, incarnationId: 'bad\nheader' }]) {
+      await expect(client.stopDeployment('deployment-1', { binding })).rejects.toThrow(/binding/);
+    }
+    await expect(client.restartDeployment('deployment-1', { binding: valid })).rejects.toThrow(/binding/);
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it('retries an ambiguous durable delivery once with identical intent metadata', async () => {
@@ -2415,10 +2448,21 @@ describe('deployment viewer client', () => {
       activeInstances: 2, publicReason: 'IllegalStateException',
       payload: 'DO-NOT-LEAK', detail: 'DO-NOT-LEAK', secret: 'DO-NOT-LEAK',
     } })).toEqual({
-      type: 'NODE_FAILED', executionId: 'execution-1', nodeId: 'worker', edgeId: null,
+      type: 'NODE_FAILED', executionId: 'execution-1', traversalId: 'execution-1', nodeId: 'worker', edgeId: null,
       activeInstances: 2, inFlightArrivals: 0, fallback: false, occurredAt: null,
       publicReason: 'IllegalStateException', description: '',
     });
+  });
+
+  it('preserves native bounded log diagnostics and causal identities without raw payloads', () => {
+    expect(deploymentExecutionEvent({ event: { type: 'NODE_COMPLETED', executionId: 't1',
+      traversalId: 't1', processInstanceId: 'p1', invocationId: 'i1', attemptId: 'a1',
+      output: 'workflow log', outputRedacted: false, outputTruncated: false,
+      payload: 'private', detail: 'private' } })).toMatchObject({
+      traversalId: 't1', processInstanceId: 'p1', invocationId: 'i1', attemptId: 'a1',
+      output: 'workflow log', outputRedacted: false, outputTruncated: false });
+    expect(deploymentExecutionEvent({ event: { payload: 'private', detail: 'private' } }))
+      .not.toHaveProperty('payload');
   });
 
   it('retains the server fallback bit in the closed execution projection', () => {
@@ -2474,4 +2518,83 @@ describe('deployment viewer client', () => {
     expect(changes.some(([status]) => status === 'connected')).toBe(true);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
+});
+
+it('does not misdiagnose a structured missing execution as a missing API route', () => {
+  const missing = new RuntimeRequestError('unknown execution', { status: 404, method: 'GET', path: '/v1/executions/old', code: 'UNKNOWN_EXECUTION' });
+  expect(missing.message).not.toContain('not an API route');
+  expect(missing.uiMessageParams.hint).toBe('');
+  expect(new RuntimeRequestError('not found', { status: 404, method: 'GET', path: '/wrong-prefix' }).message).toContain('not an API route');
+});
+
+
+describe('exact deployment source', () => {
+  const source = { deploymentId: 'local-file', incarnationId: 'runtime', graphVersion: 'a'.repeat(64) };
+  it('decodes the full UTF-8 source and sends the exact binding', async () => {
+    const graphMl = '<graphml>è — complete properties</graphml>';
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ ...source,
+      graphMlBase64: Buffer.from(graphMl).toString('base64') }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    const client = new RavenrootRuntimeClient('http://localhost:8080', { fetchImpl });
+    expect((await client.deploymentSource(source)).graphMl).toBe(graphMl);
+    expect(fetchImpl.mock.calls[0][0]).toContain('/local-file/source?incarnationId=runtime&graphVersion=');
+    expect(fetchImpl.mock.calls[0][1].method).toBe('GET');
+  });
+  it('rejects a different version before opening or downloading it', async () => {
+    const client = new RavenrootRuntimeClient('http://localhost:8080', { fetchImpl: async () => new Response(
+      JSON.stringify({ ...source, graphVersion: 'wrong', graphMlBase64: '' }), { status: 200 }) });
+    await expect(client.deploymentSource(source)).rejects.toThrow();
+  });
+});
+
+
+it('observes an exact source without a drawing and replays from its lifecycle anchor before the first event', async () => {
+  const source = { kind: 'deployment', deploymentId: 'original', incarnationId: 'runtime', graphVersion: 'version' };
+  const anchor = 'a'.repeat(43), eventCursor = 'b'.repeat(43), frames = [];
+  const lifecycle = `event: lifecycle\ndata: ${JSON.stringify({ ...source, lifecycle: 'READY', cursor: anchor })}\n\n`;
+  const execution = `id: ${eventCursor}\nevent: execution\ndata: ${JSON.stringify({ ...source,
+    event: { type: 'NODE_COMPLETED', executionId: 'first', nodeId: 'start', activeInstances: 0 } })}\n\n`;
+  const gap = `event: source-gap\ndata: ${JSON.stringify({ ...source, reason: 'CURSOR_UNAVAILABLE' })}\n\n`;
+  const fetchImpl = vi.fn().mockResolvedValueOnce(streamResponse([lifecycle]))
+    .mockResolvedValueOnce(streamResponse([lifecycle, execution, gap]));
+  const client = new RavenrootRuntimeClient('https://service', { fetchImpl, sleep: vi.fn(async () => {}) });
+  expect(() => client.connectDeploymentView({ source, lifecycle: 'READY' }, () => {})).toThrow();
+  for (const invalid of [{ ...source, token: 'never-in-source' }, { ...source, incarnationId: '' }, { ...source, kind: 'draft' }])
+    expect(() => client.connectDeploymentObservation(invalid, () => {})).toThrow();
+  const disconnect = client.connectDeploymentObservation(source, frame => frames.push(frame));
+  await vi.waitFor(() => expect(frames).toHaveLength(4)); disconnect();
+  expect(fetchImpl.mock.calls[0][1].headers['Last-Event-ID']).toBeUndefined();
+  expect(fetchImpl.mock.calls[1][1].headers['Last-Event-ID']).toBe(anchor);
+  expect(frames.filter(frame => frame.type === 'execution')).toHaveLength(1);
+});
+
+it('refuses initial admission when observation disconnects during credential resolution, then retries the same request', async () => {
+  const credential = deferredValue(), entered = deferredValue();
+  let live = true;
+  const request = { incarnationId: 'runtime', graphVersion: 'version', requestId: 'original-request', input: { original: true } };
+  const receipt = { outcome: 'ACCEPTED', requestId: request.requestId,
+    processInstanceId: '10000000-0000-0000-0000-000000000001', traversalId: '20000000-0000-0000-0000-000000000002' };
+  const fetchImpl = vi.fn(async () => new Response(JSON.stringify(receipt), { status: 202 }));
+  const tokenProvider = { getAccessToken: vi.fn(() => { entered.resolve(); return credential.promise; }) };
+  const client = new RavenrootRuntimeClient('https://service', { fetchImpl, tokenProvider });
+  const attempt = client.initialStartDeployment('original', request, { canAdmit: () => live });
+  await entered.promise; live = false; credential.resolve('header-only-token');
+  await expect(attempt).rejects.toThrow(); expect(fetchImpl).not.toHaveBeenCalled();
+  live = true;
+  await expect(client.initialStartDeployment('original', request, { canAdmit: () => live })).resolves.toEqual(receipt);
+  expect(fetchImpl).toHaveBeenCalledTimes(1);
+  expect(JSON.parse(fetchImpl.mock.calls[0][1].body)).toEqual(request);
+  expect(fetchImpl.mock.calls[0][0]).not.toContain('header-only-token');
+});
+
+it.each([
+  { lifecycle: 'READY', cursor: 'a'.repeat(43) },
+  { deploymentId: 'foreign', incarnationId: 'runtime', graphVersion: 'version', lifecycle: 'READY', cursor: 'a'.repeat(43) },
+])('refuses incomplete or foreign observation frames before source fallback %#', async frame => {
+  const source = { kind: 'deployment', deploymentId: 'original', incarnationId: 'runtime', graphVersion: 'version' };
+  const received = [], changes = [];
+  const client = new RavenrootRuntimeClient('https://service', { maxRetries: 0,
+    fetchImpl: async () => streamResponse([`event: lifecycle\ndata: ${JSON.stringify(frame)}\n\n`]), sleep: async () => {} });
+  const disconnect = client.connectDeploymentObservation(source, frame => received.push(frame), state => changes.push(state));
+  await vi.waitFor(() => expect(changes).toContain('error')); disconnect();
+  expect(received).toEqual([]);
 });

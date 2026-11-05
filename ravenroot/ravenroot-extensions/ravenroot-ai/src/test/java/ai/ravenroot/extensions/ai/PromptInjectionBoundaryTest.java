@@ -159,13 +159,17 @@ class PromptInjectionBoundaryTest {
     @Test
     void approvedBuiltInCallResumesFromStrictCompleteCheckpoint() throws Exception {
         var checkpoint = new AtomicReference<byte[]>();
+        var calls = new java.util.concurrent.atomic.AtomicInteger();
+        var resumedContext = new AtomicReference<ai.ravenroot.api.correlation.ApplicationCorrelationContext>();
         ToolCallAuthorizationService approvals = (message, tool, arguments) -> {
+            boolean initial = calls.incrementAndGet() == 1;
+            if (!initial) resumedContext.set(message.applicationCorrelation());
             byte[] canonical = PayloadJson.write(PayloadJson.read(arguments, PayloadLimits.DEFAULTS))
                     .getBytes(StandardCharsets.UTF_8);
             return new ToolCallAuthorization() {
                 private final UUID id = UUID.randomUUID();
                 @Override public UUID callId() { return id; }
-                @Override public Disposition disposition() { return Disposition.REQUIRE_APPROVAL; }
+                @Override public Disposition disposition() { return initial ? Disposition.REQUIRE_APPROVAL : Disposition.ALLOW; }
                 @Override public String argumentsDigest() {
                     return ToolApprovalRegistration.digest(canonical);
                 }
@@ -179,6 +183,7 @@ class PromptInjectionBoundaryTest {
         };
         var http = new AiTestSupport.RoutedHttp(CHAT).authorizing(approvals).chatting(
                 AiTestSupport.asksFor("call-1", LoadSkillTool.NAME, "{\"name\":\"search\"}"),
+                AiTestSupport.asksFor("call-2", LoadSkillTool.NAME, "{\"name\":\"search\"}"),
                 AiTestSupport.answers("resumed"));
         var behavior = new AgentNodeBehavior(AiTestSupport.resolving(AiTestSupport.profile(CHAT)),
                 AiTestSupport.resolvingMcp());
@@ -186,8 +191,9 @@ class PromptInjectionBoundaryTest {
                 "provider", "local", "instructions", "use skills", "objective", "work",
                 "skills.1.name", "search", "skills.1.description", "safe",
                 "skills.1.instructions", "body"));
-        NodeMessage original = AiTestSupport.message("tenant-a", "private payload",
-                Map.of("trace", "kept"));
+        var established = new ai.ravenroot.api.correlation.ApplicationCorrelationContext("derived-child-business", java.util.Optional.empty(), java.util.Optional.empty(), "round-1", java.util.Optional.empty());
+        NodeMessage base = AiTestSupport.message("tenant-a", "private payload", Map.of("trace", "kept", "applicationCorrelationId", "stale-parent-metadata"));
+        NodeMessage original = new NodeMessage(base.security(), base.processInstanceId(), base.traversalId(), base.invocationId(), base.attemptId(), base.parentInvocationIds(), base.nodeId(), base.payload(), base.attributes(), base.command(), established);
         assertThrows(java.util.concurrent.CompletionException.class,
                 () -> behavior.create(configuration, http).handle(original).toCompletableFuture().join());
 
@@ -195,7 +201,7 @@ class PromptInjectionBoundaryTest {
         byte[] canonical = "{\"name\":\"search\"}".getBytes(StandardCharsets.UTF_8);
         var action = behavior.createToolCallContinuation(configuration, http).orElseThrow();
         NodeMessage reentry = new NodeMessage(original.security(), original.processInstanceId(),
-                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), "ask", null, Map.of());
+                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), java.util.Set.of(), "ask", null, Map.of("applicationCorrelationId", "forged-reentry-attribute"), original.command(), established);
         var input = new ToolCallContinuationInput(reentry, UUID.randomUUID(), original.traversalId(),
                 original.invocationId(), original.attemptId(), LoadSkillTool.NAME, canonical,
                 ToolApprovalRegistration.digest(canonical), ToolCallContinuationInput.Decision.APPROVED,
@@ -209,7 +215,8 @@ class PromptInjectionBoundaryTest {
         assertEquals("resumed", resumedNode.payload());
         assertTrue(resumed.effectSucceeded());
         assertEquals("kept", resumedNode.attributes().get("trace"));
-        assertEquals(2, http.chatBodies().size());
+        assertEquals(established, resumedContext.get(), "current typed context survives restoration of stale checkpoint attributes");
+        assertEquals(3, http.chatBodies().size());
         var unknownVersion = new ToolCallContinuationInput(reentry, input.approvalId(),
                 input.originalTraversalId(), input.originalInvocationId(), input.originalAttemptId(),
                 input.tool(), input.canonicalArguments(), input.argumentsDigest(), input.decision(), 2,

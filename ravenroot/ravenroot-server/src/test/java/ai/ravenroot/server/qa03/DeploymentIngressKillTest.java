@@ -24,7 +24,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
-import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -47,13 +46,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * rationale and why a real production seam was neither needed nor available (ADR 0010 section 12.4).
  *
  * <h2>What this proves</h2>
- * <p>{@link ai.ravenroot.api.deployment.TrustedIngress#offerDurably}'s own Javadoc declares a
- * guarantee narrower than "resumes after a crash": <em>"the fact of commitment is never lost, and a
- * redelivered copy of the same event is always recognised as a duplicate rather than re-admitted"</em>
- * — nothing more. This cell proves exactly that boundary, both directions: the receipt survives the
- * kill, no process instance was ever created (the traversal is genuinely and permanently lost, not
- * merely unresumed), and a redelivery of the identical event after the kill is recognised as
- * {@link IngressReceipt.Duplicate} rather than starting a second traversal.</p>
+ * <p>The exact source input, correlation, receipt and causal identities survive process death before
+ * the first process write. A later deployment activation recovers without producer retry; it runs
+ * the downstream effect once. Identical later deliveries remain duplicates with one original
+ * process/traversal and one inbox row. No initial START is admitted.</p>
  *
  * <h2>Coverage is Pekko; process death, not machine death; no seed</h2>
  * <p>Same declared scope as the rest of the matrix (see {@code CrashReplayMatrixScopeTest} in
@@ -75,7 +71,7 @@ class DeploymentIngressKillTest {
     Path databaseDirectory;
 
     @Test
-    void aRedeliveredEventAfterAKillBetweenTheReceiptAndTheInstanceIsRecognisedAsDuplicate() throws Exception {
+    void retainedSourceInputRecoversAfterKillBeforeInstanceAndLaterRedeliveryIsDuplicate() throws Exception {
         Path file = databaseDirectory.resolve("deployment-ingress-kill.db");
 
         KillResult killed = runUntilBoundaryThenKill(file);
@@ -95,50 +91,70 @@ class DeploymentIngressKillTest {
                                 + "openTraversalRecorder's first write, before it could commit");
                 assertInstanceOf(ExecutionStoreFailure.NotFound.class, noInstance.failure());
 
-                // Redelivery: the same event, offered again through a fresh deployment over the same
-                // recovered store -- what a restarted runtime, or the source's own at-least-once
-                // redelivery, actually does.
-                IngressReceipt redelivered = redeliverThroughFreshDeployment(recovered);
-                var duplicate = assertInstanceOf(IngressReceipt.Duplicate.class, redelivered,
-                        "a redelivered copy of an event already durably committed must be recognised as "
-                                + "a duplicate, never re-admitted as a second traversal");
-                assertEquals(DeploymentIngressKillBoundary.IDEMPOTENT_KEY, duplicate.idempotentKey());
-
+                var original = await(recovered.deploymentEntry(key)).orElseThrow();
+                assertEquals(DeploymentIngressKillBoundary.INSTANCE_ID, original.processInstanceId());
+                assertEquals(DeploymentIngressKillBoundary.TRAVERSAL_ID, original.traversalId());
+                assertEquals("source", original.entryNodeId());
+                assertEquals(DeploymentIngressKillBoundary.SECURITY, original.identity());
+                assertEquals("payload", ai.ravenroot.api.payload.PayloadJson.read(original.input().bytes(),
+                        ai.ravenroot.api.payload.PayloadLimits.DEFAULTS).toJava());
+                recoverAndRedeliver(recovered, original);
                 assertEquals(1L, await(recovered.inboxRecordCount(DeploymentIngressKillBoundary.TENANT)),
-                        "redelivery must not add a second receipt");
-                var stillNoInstance = assertThrows(ExecutionStoreException.class, () -> await(recovered.load(key)),
-                        "and must not silently start the traversal it could never resume -- "
-                                + "TrustedIngress#offerDurably's guarantee is narrower than resumption, "
-                                + "and a redelivery that quietly started one would be a correctness "
-                                + "surprise, not a recovery");
-                assertInstanceOf(ExecutionStoreFailure.NotFound.class, stillNoInstance.failure());
+                        "recovery and duplicate replay must not add another receipt");
+                var settled = await(recovered.load(key));
+                assertEquals(1, settled.state().traversals().size());
+                assertTrue(settled.state().status().terminal());
+                assertTrue(await(recovered.initialStart(DeploymentIngressKillBoundary.TENANT, "qa03-deployment")).isEmpty(),
+                        "SOURCE recovery must not synthesize initial START");
             }
         } catch (AssertionError failure) {
             throw withArtifact(failure, "DEPLOYMENT_INGRESS/BEFORE_INSTANCE_CREATED", snapshot, killed, file);
         }
     }
 
-    /** Offers the identical event again, through a second deployment over the same recovered store. */
-    private IngressReceipt redeliverThroughFreshDeployment(SqliteExecutionStore recovered) throws Exception {
-        var security = new SecurityContext("qa03-redelivery", DeploymentIngressKillBoundary.TENANT,
-                "qa03-redelivery-worker", PrincipalType.USER, "urn:ravenroot:qa03");
-        try (var engine = new PekkoExecutionEngine("qa03-deployment-ingress-redelivery")) {
+    /** Recovers before any producer retry, then proves duplicate replays cannot repeat the effect. */
+    private void recoverAndRedeliver(SqliteExecutionStore recovered,
+                                    ai.ravenroot.api.persistence.DeploymentEntryIntent original) throws Exception {
+        var security = DeploymentIngressKillBoundary.SECURITY;
+        var served = new java.util.concurrent.atomic.AtomicInteger();
+        var delivered = new java.util.concurrent.CompletableFuture<ai.ravenroot.api.execution.NodeMessage>();
+        try (var engine = new PekkoExecutionEngine("qa03-deployment-ingress-recovery")) {
             var deployment = new DefaultGraphDeployment(DeploymentId.of("qa03-deployment"), engine,
-                    BehaviorRegistry.standard(), new ExecutionMonitor(), ExecutionIdentitySource.randomUuids(),
+                    DeploymentIngressKillBoundary.registry(message -> {
+                        served.incrementAndGet(); delivered.complete(message);
+                        return java.util.concurrent.CompletableFuture.completedFuture(
+                                ai.ravenroot.api.execution.NodeResult.continueWith(message.payload()));
+                    }), new ExecutionMonitor(), ExecutionIdentitySource.randomUuids(),
                     DeploymentIngressKillBoundary.GRAPH.getBytes(StandardCharsets.UTF_8),
                     DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY, recovered,
-                    DefaultGraphDeployment.DEFAULT_INBOX_RETENTION, "qa03-redelivery-worker",
+                    DefaultGraphDeployment.DEFAULT_INBOX_RETENTION, "qa03-recovery-worker",
                     DeploymentIngressKillBoundary.LEASE_TTL);
             deployment.start(security).toCompletableFuture().get(20, TimeUnit.SECONDS);
-            IngressReceipt receipt = deployment.ingress().offerDurably(security, IngressTarget.start(), "payload",
-                    DeploymentIngressKillBoundary.SOURCE_ID, DeploymentIngressKillBoundary.IDEMPOTENT_KEY);
-            deployment.stop().toCompletableFuture().get(20, TimeUnit.SECONDS);
-            return receipt;
+            try {
+                var message = delivered.get(20, TimeUnit.SECONDS);
+                assertEquals(original.processInstanceId(), message.processInstanceId());
+                assertEquals(original.traversalId(), message.traversalId());
+                assertEquals(original.context(), message.applicationCorrelation());
+                assertEquals(original.identity(), message.security());
+                assertEquals("payload", message.payload());
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(20);
+                while (!await(recovered.load(original.key())).state().status().terminal()
+                        && System.nanoTime() < deadline) Thread.sleep(5);
+                assertTrue(await(recovered.load(original.key())).state().status().terminal(), "recovered source must settle");
+                for (int replay = 0; replay < 2; replay++) {
+                    var receipt = deployment.ingress().offerDurably(security, IngressTarget.node("source"), "payload",
+                            DeploymentIngressKillBoundary.SOURCE_ID, DeploymentIngressKillBoundary.IDEMPOTENT_KEY);
+                    var duplicate = assertInstanceOf(IngressReceipt.Duplicate.class, receipt,
+                            "the original receipt and recovered work must remain one source event");
+                    assertEquals(DeploymentIngressKillBoundary.IDEMPOTENT_KEY, duplicate.idempotentKey());
+                }
+                assertEquals(1, served.get(), "neither recovery nor producer replay may repeat an established effect");
+            } finally { deployment.stop().toCompletableFuture().get(20, TimeUnit.SECONDS); }
         }
     }
 
     private SqliteExecutionStore openAt(Path file) {
-        return new SqliteExecutionStore(file, Clock.fixed(DeploymentIngressKillBoundary.NOW, ZoneOffset.UTC));
+        return new SqliteExecutionStore(file, Clock.systemUTC());
     }
 
     /** Appends the {@code KillMatrixArtifact} location to a failing assertion and rethrows it. */

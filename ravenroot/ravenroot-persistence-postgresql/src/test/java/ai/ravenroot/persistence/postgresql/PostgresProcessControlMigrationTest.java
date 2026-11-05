@@ -38,6 +38,7 @@ class PostgresProcessControlMigrationTest {
             // Migrations 16-19 created saga, palette, and selective-replay structures; leaving any
             // of them behind would synthesize a database no released build could have produced and
             // would make the migration-20 IF NOT EXISTS compatibility check fail for the wrong reason.
+            LegacyHistorySchema.removeEmptyHistoryStep(connection);
             statement.execute("DROP TABLE saga_command_outbox");
             statement.execute("DROP TABLE saga_instance");
             statement.execute("DROP TABLE node_template");
@@ -93,6 +94,7 @@ class PostgresProcessControlMigrationTest {
             // These tables arrived in migration 16. A synthetic downgrade must remove later
             // structures as well as lowering store_schema_version; leaving them behind creates a
             // shape no released database could have and correctly makes migration 16 fail.
+            LegacyHistorySchema.removeEmptyHistoryStep(connection);
             statement.execute("DROP TABLE replay_invocation_evidence");
             statement.execute("DROP TABLE replay_source_settlement");
             statement.execute("DROP TABLE derived_execution_ancestry");

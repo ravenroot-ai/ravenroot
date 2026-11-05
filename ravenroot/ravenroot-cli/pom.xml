@@ -6,11 +6,20 @@
     <parent>
         <groupId>ai.ravenroot</groupId>
         <artifactId>ravenroot-parent</artifactId>
-        <version>0.8.0-alpha.1</version>
+        <version>0.9.0-alpha.1</version>
     </parent>
     <artifactId>ravenroot-cli</artifactId>
     <name>Ravenroot CLI</name>
     <description>Command-line adapter over the Ravenroot application API.</description>
+    <properties>
+        <!--
+            CLI contract tests create bare JDK HTTP servers as well as RavenrootServer. Configure
+            the process-wide cap before the reused test fork loads either server implementation;
+            a test dependency does not inherit ravenroot-server's Surefire properties. Populate
+            the parent's composable property so its separately protected locale flags remain.
+        -->
+        <ravenroot.surefire.extraArgLine>-Dsun.net.httpserver.maxReqHeaderSize=2097152</ravenroot.surefire.extraArgLine>
+    </properties>
     <dependencies>
         <dependency>
             <groupId>ai.ravenroot</groupId>

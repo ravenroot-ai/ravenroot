@@ -111,9 +111,10 @@ public sealed interface ExecutionStoreConfiguration {
      *
      * @param location the directory holding the execution, definition and manifest databases.
      */
-    record SingleHost(SqliteStoreLocation location) implements ExecutionStoreConfiguration {
+    record SingleHost(SqliteStoreLocation location, ai.ravenroot.persistence.sqlite.SqliteStoreConfig storeConfig) implements ExecutionStoreConfiguration {
+        public SingleHost(SqliteStoreLocation location) { this(location, ai.ravenroot.persistence.sqlite.SqliteStoreConfig.defaults()); }
         public SingleHost {
-            Objects.requireNonNull(location, "location");
+            Objects.requireNonNull(location, "location"); Objects.requireNonNull(storeConfig, "storeConfig");
         }
     }
 
@@ -163,6 +164,7 @@ public sealed interface ExecutionStoreConfiguration {
     private static ExecutionStoreConfiguration fromSources(Map<String, String> properties,
                                                            Map<String, String> environment) {
         Objects.requireNonNull(environment, "environment");
+        var historyPolicy = BusinessHistoryConfiguration.fromSources(properties, environment);
         String selector = selectorIn(properties, environment);
         if (!POSTGRESQL_SELECTOR.equals(selector)
                 && postgresqlOnlyPolicyConfigured(properties, environment)) {
@@ -192,9 +194,10 @@ public sealed interface ExecutionStoreConfiguration {
             return new Disabled(singleHostLocation(environment));
         }
         return switch (selector) {
-            case SQLITE_SELECTOR -> new SingleHost(singleHostLocation(environment));
+            case SQLITE_SELECTOR -> new SingleHost(singleHostLocation(environment),
+                    ai.ravenroot.persistence.sqlite.SqliteStoreConfig.defaults().withBusinessHistories(historyPolicy));
             case POSTGRESQL_SELECTOR -> {
-                PostgresStoreConfig config = PostgresStoreConfiguration.fromSources(properties, environment);
+                PostgresStoreConfig config = PostgresStoreConfiguration.fromSources(properties, environment).withBusinessHistories(historyPolicy);
                 yield new Shared(SharedStoreConnection.fromSources(properties, environment, config),
                     positiveInt(environment, MANIFEST_PIN_ATTEMPTS_VARIABLE,
                             DEFAULT_MANIFEST_PIN_ATTEMPTS), config);

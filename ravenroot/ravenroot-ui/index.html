@@ -7,6 +7,7 @@
   <link rel="icon" href="/assets/brand/ravenroot-nav-raven-ice.svg">
   <!-- Synchronous, CSP-compatible and before CSS: the resolved preference is present at first paint. -->
   <script vite-ignore src="%BASE_URL%theme-bootstrap.js"></script>
+  <link rel="stylesheet" href="%BASE_URL%viewer-shell.css">
   <link rel="stylesheet" href="./src/styles.css">
 </head>
 <body>
@@ -156,6 +157,9 @@
     <button class="btn" role="radio" aria-checked="false" tabindex="-1" id="btn-monitoring"
             data-command-id="layout.monitoring" title="Restore the saved Monitoring view" data-i18n-title="shell.btn-monitoring.title" data-i18n="shell.btn-monitoring.text" data-i18n-prefix="◉">◉ Monitoring</button>
   </div>
+  <button class="btn command-mirrors" id="btn-history" data-command-id="view.deploymentHistory"
+          data-i18n="shell.btn-history.text" data-i18n-title="shell.btn-history.title"
+          title="Open deployment history and traversal graphs">History</button>
   <button class="btn command-mirrors render-mirror" id="btn-render" data-command-id="layout.render"
           title="Recompute the active graph view" data-i18n-title="shell.btn-render.title" data-i18n="shell.btn-render.text" data-i18n-prefix="↻">↻ Render</button>
   <div class="vr command-mirrors view-mirrors"></div>
@@ -244,6 +248,7 @@
     <button class="btn" id="btn-connect" type="button" data-command-id="edit.connect"
             aria-pressed="false" disabled title="Connect a source node directly to a target node" data-i18n-title="shell.btn-connect.title" data-i18n="shell.btn-connect.text" data-i18n-prefix="↗">↗ Connect</button>
     <button class="btn" id="btn-add-node" data-command-id="edit.addNode" title="Add a flow node" data-i18n-title="shell.btn-add-node.title" data-i18n="shell.btn-add-node.text" data-i18n-prefix="⬡">⬡ Node</button>
+    <button class="btn" id="btn-saga-scopes" type="button" data-i18n="shell.saga-scopes.text">Saga scopes</button>
     <button class="btn" id="btn-add-edge" data-command-id="edit.addEdge" title="Connect two nodes" data-i18n-title="shell.btn-add-edge.title" data-i18n="shell.btn-add-edge.text" data-i18n-prefix="↗">↗ Edge</button>
     <button class="btn" id="btn-undo" data-command-id="edit.undo" disabled
             aria-label="Undo the last change" title="Nothing to undo" data-i18n-aria-label="shell.btn-undo.aria-label" data-i18n-title="shell.btn-undo.title" data-i18n="shell.btn-undo.text" data-i18n-prefix="↶">↶ Undo</button>

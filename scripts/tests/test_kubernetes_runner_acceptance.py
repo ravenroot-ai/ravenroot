@@ -413,6 +413,68 @@ class KubernetesAcceptanceFixtureTest(unittest.TestCase):
                       "PARENT_AFTER 10000 100 5 1000", f"CHILD_AFTER 8000 100 {int(positive)} 1000", "NOISE_AFTER 1000 100 1 100"]
         return ("\n".join(lines) + "\nCLEANUP\n").encode()
 
+    def run_cpu_worker_timing(self, start, end, own):
+        source = (fixture.ROOT / "scripts/fixtures/kubernetes_cpu_hierarchy_probe.sh").read_text()
+        begin = source.index("read -r uptime rest </proc/uptime\n")
+        finish = source.index("; fi'", begin) + len("; fi")
+        measured = source[begin:finish]
+        self.assertEqual(2, measured.count("</proc/uptime"))
+        # Only redirect the clock input for portability. The actual worker's loop,
+        # counter reads, arithmetic, branch and WORKER output remain under test.
+        measured = measured.replace("</proc/uptime", '<"$path/clock"')
+        harness = r'''set -euo pipefail
+path=$1; role=child; first=$2; last=$3; own_after=$4
+clock_reads=0; counter_reads=0
+read() {
+  if [[ $* == '-r uptime rest' ]]; then
+    if ((clock_reads==0)); then uptime=$first; else uptime=$last; fi
+    rest=0; clock_reads=$((clock_reads+1)); return 0
+  fi
+  if builtin read "$@"; then
+    if [[ $* == '-r key value' && $key == nr_throttled ]]; then
+      if ((counter_reads==0)); then value=0; else value=$own_after; fi
+      counter_reads=$((counter_reads+1))
+    fi
+    return 0
+  fi
+  return 1
+}
+'''
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)
+            (path / "clock").write_text("controlled clock input\n")
+            (path / "cpu.stat").write_text("nr_throttled 1\n")
+            result = subprocess.run(["bash", "-c", harness + measured, "timing-test", directory,
+                                     start, end, str(own)], capture_output=True, text=True,
+                                    timeout=5, check=True)
+        self.assertRegex(result.stdout, r"^WORKER [0-9]+ [0-9]+ [0-9]+\n$")
+        return list(map(int, result.stdout.split()[1:]))
+
+    def test_native_cpu_probe_shell_syntax_is_valid(self):
+        subprocess.run(["bash", "-n", str(fixture.ROOT / "scripts/fixtures/kubernetes_cpu_hierarchy_probe.sh")],
+                       capture_output=True, text=True, timeout=5, check=True)
+
+    def test_quantized_worker_time_is_a_conservative_strict_ten_second_bound(self):
+        cases = (
+            ("same tick", "100.00", "100.00", 1, [0, 1, 10000], True),
+            ("last provable tick", "100.00", "109.99", 1, [0, 1, 10000000], True),
+            ("ambiguous ten second edge", "100.00", "110.00", 1, [0, 1, 10010000], False),
+            ("no own throttling", "100.00", "110.00", 0, [0, 0, 10010000], False),
+        )
+        for label, start, end, own, expected, positive in cases:
+            with self.subTest(case=label):
+                measured = self.run_cpu_worker_timing(start, end, own)
+                self.assertEqual(expected, measured)
+                raw = self.cpu_probe_output().replace(b"WORKER 0 1 100000",
+                        ("WORKER " + " ".join(map(str, measured))).encode())
+                report = fixture.cpu_hierarchy_report(raw)
+                self.assertEqual(positive, report["cases"][1]["ownThrottlingWithinTenSeconds"])
+                self.assertTrue(report["cleanup"])
+        # A bound must not become an excuse to accept literal zero evidence.
+        with self.assertRaisesRegex(ValueError, "INVALID_DURATION"):
+            fixture.cpu_hierarchy_report(self.cpu_probe_output().replace(
+                    b"WORKER 0 1 100000", b"WORKER 0 1 0"))
+
     def test_probe_records_both_control_outcomes_and_refuses_malformed_or_stale_evidence(self):
         for positive in (False, True):
             report = fixture.cpu_hierarchy_report(self.cpu_probe_output(positive))

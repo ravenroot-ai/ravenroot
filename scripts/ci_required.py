@@ -34,6 +34,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import stat
 import re
 import subprocess
 import sys
@@ -223,6 +224,40 @@ def declared_condition(block: str) -> str | None:
     return match.group(1).strip() if match else None
 
 
+# CI transport only; this is not an operator-configurable runtime resource policy.
+MAX_NEEDS_BYTES = 8 * 1024 * 1024
+NEEDS_DELIMITER = "RAVENROOT_NEEDS_JSON"
+
+
+def needs_file_script(job: str) -> str:
+    """The typed data materializer required in each large-payload consumer."""
+    filename = f'$RUNNER_TEMP/{job}-needs.json'
+    return ("set -euo pipefail\numask 077\nset -o noclobber\n"
+            f'cat > "{filename}" <<\'{NEEDS_DELIMITER}\'\n'
+            "${{ toJSON(needs) }}\n" + NEEDS_DELIMITER + "\n"
+            f'test "$(wc -c < "{filename}")" -le {MAX_NEEDS_BYTES}\n')
+
+
+def verify_needs_transport(blocks: dict[str, str]) -> list[str]:
+    problems = []
+    predicate = ('to_entries | all(.key as $key | if $key == "release-classification" '
+                 'or ($jobs | index($key)) then .value.result == "success" '
+                 'else .value.result == "skipped" end)')
+    for job in (GATE_JOB, "full-preflight", "full-regression"):
+        block = blocks.get(job, "")
+        expected = needs_file_script(job)
+        indented = "\n".join("          " + line for line in expected.splitlines()) + "\n"
+        command = (f'python3 scripts/ci_required.py --needs-file "$RUNNER_TEMP/{job}-needs.json"'
+                   if job == GATE_JOB else
+                   f'jq -e --argjson jobs "$PLAN_JOBS" \'{predicate}\' '
+                   f'"$RUNNER_TEMP/{job}-needs.json" >/dev/null')
+        if indented + "          " + command + "\n" not in block:
+            problems.append(f"{job}: complete typed needs must use the bounded exclusive file transport and exact consumer.")
+        if re.search(r"(?m)^          (?:IMPACT_PLAN|NEEDS_JSON|RESULTS):", block):
+            problems.append(f"{job}: large JSON must not be transported in an environment value.")
+    return problems
+
+
 def verify_workflow(contents: str) -> list[str]:
     """Report every way `ci.yml` no longer matches the topology declared above."""
     problems: list[str] = []
@@ -275,6 +310,7 @@ def verify_workflow(contents: str) -> list[str]:
         for job in sorted(observed - wanted):
             problems.append(f"{job}: listed in the {GATE_JOB} `needs` list but not in the topology.")
 
+    problems.extend(verify_needs_transport(blocks))
     problems.extend(verify_triggers(contents))
     problems.extend(verify_dispatch_routing(blocks.get(CLASSIFICATION_JOB, ""), blocks.get(GATE_JOB, "")))
 
@@ -689,6 +725,52 @@ def parse_results(raw: str) -> dict[str, str]:
     return {job: (value or {}).get("result", "unknown") for job, value in payload.items()}
 
 
+def strict_json(raw: str) -> object:
+    def pairs(items):
+        result = {}
+        for key, value in items:
+            if key in result:
+                raise ValueError(f"duplicate JSON key: {key}")
+            result[key] = value
+        return result
+    def invalid_constant(value):
+        raise ValueError(f"invalid JSON constant: {value}")
+    return json.loads(raw, object_pairs_hook=pairs, parse_constant=invalid_constant)
+
+
+def load_needs_file(path: Path | None) -> tuple[dict, dict]:
+    """Read the entire job-owned envelope; invalid files never fall back to environment data."""
+    if path is None:
+        raise ValueError("normal verification requires --needs-file")
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_NEEDS_BYTES:
+            raise ValueError("needs input must be a regular file of at most 8 MiB")
+        with os.fdopen(descriptor, "rb") as source:
+            descriptor = -1
+            raw = source.read(MAX_NEEDS_BYTES + 1)
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+    if len(raw) > MAX_NEEDS_BYTES:
+        raise ValueError("needs input exceeds 8 MiB")
+    payload = strict_json(raw.decode("utf-8"))
+    if not isinstance(payload, dict) or any(not isinstance(value, dict)
+            or ("result" in value and not isinstance(value["result"], str))
+            or ("outputs" in value and not isinstance(value["outputs"], dict))
+            for value in payload.values()):
+        raise ValueError("needs input must contain complete job-result objects")
+    outputs = payload.get(CLASSIFICATION_JOB, {}).get("outputs", {})
+    raw_plan = outputs.get("plan")
+    if not isinstance(raw_plan, str):
+        raise ValueError("classification did not produce an impact plan")
+    plan = strict_json(raw_plan)
+    if not isinstance(plan, dict) or not plan:
+        raise ValueError("classification did not produce an impact plan object")
+    return payload, plan
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -702,6 +784,7 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help=f"Act as {FAST_GATE_JOB}: require every fast job, and the single-publisher constraint.",
     )
+    parser.add_argument("--needs-file", type=Path, help="Complete typed needs JSON from this job.")
     arguments = parser.parse_args(argv)
 
     if arguments.print_contexts:
@@ -711,8 +794,14 @@ def main(argv: list[str] | None = None) -> int:
 
     gate = FAST_GATE_JOB if arguments.fast else GATE_JOB
     try:
-        results = parse_results(os.environ.get("NEEDS_JSON", "{}"))
-    except (json.JSONDecodeError, ValueError) as exc:
+        if arguments.fast:
+            if arguments.needs_file is not None:
+                raise ValueError("--fast uses its small result-only environment, not --needs-file")
+            results = parse_results(os.environ.get("NEEDS_JSON", "{}"))
+        else:
+            payload, plan = load_needs_file(arguments.needs_file)
+            results = parse_results(json.dumps(payload))
+    except (OSError, UnicodeError, ValueError) as exc:
         print(f"{gate} could not read the job results: {exc}", file=sys.stderr)
         return 1
 
@@ -754,8 +843,6 @@ def main(argv: list[str] | None = None) -> int:
             evidence = None
         problems.extend(verify_promotion_evidence(evidence, os.environ.get("PROMOTED_SHA", "")))
     problems.extend(verify_workflow(WORKFLOW.read_text(encoding="utf-8")))
-    raw_plan = os.environ.get('IMPACT_PLAN', '')
-    plan = json.loads(raw_plan) if raw_plan else None
     if not plan:
         problems.append('classification did not produce an impact plan')
     else:

@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createServer, request as httpRequest } from 'node:http';
+import { createObservationReplayProxy } from './observation-replay-proxy.mjs';
 let replayProxy = null, cutReplayStream = null;
 
 const origin = process.env.RAVENROOT_DEPLOYMENT_PERSISTENCE_ORIGIN;
@@ -34,23 +34,8 @@ for (const mode of ['normal', 'slow', 'first-failure', 'drawing-unavailable', 'r
     if (mode === 'replay') {
       // Cut the genuine HTTP response after exactly its first frame. No synthetic event or store
       // response can make this case pass: the runtime must replay its completed traversal.
-      replayProxy = createServer((incoming, outgoing) => {
-        const destination = new URL(incoming.url, origin);
-        const forwarded = httpRequest(destination, { headers: { ...incoming.headers, host: destination.host } }, upstream => {
-          outgoing.writeHead(upstream.statusCode, upstream.headers);
-          let bytes = Buffer.alloc(0);
-          upstream.on('data', chunk => {
-            bytes = Buffer.concat([bytes, chunk]); const boundary = bytes.indexOf('\n\n');
-            if (boundary < 0) return;
-            outgoing.write(bytes.subarray(0, boundary + 2));
-            // Keep confirmation live through admission, then drop before forwarding any event.
-            cutReplayStream = () => { replayCut = true; outgoing.end(); upstream.destroy(); };
-            upstream.removeAllListeners('data');
-            upstream.on('data', () => {});
-          });
-          upstream.on('error', () => { if (!outgoing.writableEnded) outgoing.end(); });
-        });
-        forwarded.on('error', () => outgoing.destroy()); forwarded.end();
+      replayProxy = createObservationReplayProxy(origin, cut => {
+        cutReplayStream = () => { replayCut = true; cut(); };
       });
       await new Promise(resolve => replayProxy.listen(0, '127.0.0.1', resolve));
     }

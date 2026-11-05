@@ -126039,7 +126039,7 @@
   {
    "id": "oc-5a68946f004c6340821b",
    "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java",
-   "line": 3406,
+   "line": 3415,
    "symbol": "deployment",
    "kind": "operational-declaration",
    "role": "graphBytes",
@@ -126055,7 +126055,7 @@
   {
    "id": "oc-d0e947ccf540d38e537d",
    "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java",
-   "line": 4272,
+   "line": 4281,
    "symbol": "requireTenant",
    "kind": "fixed-declaration",
    "role": "LOCAL_ID",
@@ -126073,7 +126073,7 @@
   {
    "id": "oc-c2ef6da38ace43e5331d",
    "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java",
-   "line": 4329,
+   "line": 4338,
    "symbol": "if",
    "kind": "inline-operational-call",
    "role": "Duration.ofSeconds",
@@ -126091,7 +126091,7 @@
   {
    "id": "oc-03f170950d627e254ae9",
    "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java",
-   "line": 4345,
+   "line": 4354,
    "symbol": "if",
    "kind": "inline-operational-call",
    "role": "timeunit-get",
@@ -1545963,6 +1545963,18 @@
    "mappings": [],
    "retirements": [],
    "additions": []
+  },
+  {
+   "id": "issue-613-terminal-result-read-reconciliation-v1",
+   "issue": "#613",
+   "sourceRevision": "132304c1284f02c533ea852281ac37565ce5acc3",
+   "targetRevision": "b9de3ad2bb96d17cd8faf57df88aca4d3b00592f",
+   "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+   "sourceInventoryDigest": "001d13b416207fd63bbe1de4d617ef98c7d6f6d4680494b570b633357a9f1937",
+   "targetCandidateDigest": "d74dff448d93b3cca58a8b6b9a0f52f5c9117477ef19e5c13bf060c3248f5877",
+   "mappings": [],
+   "retirements": [],
+   "additions": []
   }
  ],
  "semanticReviewHistory": [
@@ -1615296,7 +1615308,7 @@
     },
     {
      "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java",
-     "digest": "0424e2449c57d14fd0a1c0d5c81aeb06a767eb2124b15f014cf1a5c737b2356c"
+     "digest": "e0e3e2b3651cf3c839d27f1519ec8a686b073ea7085097ab8607abf530d7ae51"
     },
     {
      "path": "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/persistence/ExecutionStoreConfigurationTest.java",
@@ -1617145,7 +1617157,7 @@
     },
     {
      "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java",
-     "digest": "0424e2449c57d14fd0a1c0d5c81aeb06a767eb2124b15f014cf1a5c737b2356c"
+     "digest": "e0e3e2b3651cf3c839d27f1519ec8a686b073ea7085097ab8607abf530d7ae51"
     },
     {
      "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
@@ -1622289,7 +1622301,7 @@
     },
     {
      "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java",
-     "digest": "0424e2449c57d14fd0a1c0d5c81aeb06a767eb2124b15f014cf1a5c737b2356c"
+     "digest": "e0e3e2b3651cf3c839d27f1519ec8a686b073ea7085097ab8607abf530d7ae51"
     },
     {
      "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/builtin/ProgramNodeBehaviorFactory.java",

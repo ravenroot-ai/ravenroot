@@ -102,7 +102,7 @@ while (( now - start < 1000 )); do
   read -r uptime rest </proc/uptime; now=${uptime/./}
   if [[ $role == child ]] && (( own > before )); then break; fi
 done
-# Quantized monotonic samples bound elapsed time strictly below one extra tick.
+# Add one quantization tick for a strict upper bound on actual monotonic elapsed time.
 # Preserve strict ten-second decoder proof; never report a same-tick zero.
 if [[ $role == child ]]; then echo "WORKER $before $own $(( (now-start+1)*10000 ))"; fi'
 while read -r key value rest; do

@@ -450,6 +450,10 @@ read() {
         self.assertRegex(result.stdout, r"^WORKER [0-9]+ [0-9]+ [0-9]+\n$")
         return list(map(int, result.stdout.split()[1:]))
 
+    def test_native_cpu_probe_shell_syntax_is_valid(self):
+        subprocess.run(["bash", "-n", str(fixture.ROOT / "scripts/fixtures/kubernetes_cpu_hierarchy_probe.sh")],
+                       capture_output=True, text=True, timeout=5, check=True)
+
     def test_quantized_worker_time_is_a_conservative_strict_ten_second_bound(self):
         cases = (
             ("same tick", "100.00", "100.00", 1, [0, 1, 10000], True),

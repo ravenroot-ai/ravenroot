@@ -103,7 +103,7 @@ while (( now - start < 1000 )); do
   if [[ $role == child ]] && (( own > before )); then break; fi
 done
 # Quantized monotonic samples bound elapsed time strictly below one extra tick.
-# Keep the decoder's strict ten-second proof; never report a same-tick zero.
+# Preserve strict ten-second decoder proof; never report a same-tick zero.
 if [[ $role == child ]]; then echo "WORKER $before $own $(( (now-start+1)*10000 ))"; fi'
 while read -r key value rest; do
     if [[ $key == Cpus_allowed_list: ]]; then cpu=${value%%[-,]*}; fi

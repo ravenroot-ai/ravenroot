@@ -1699,7 +1699,10 @@ public final class RavenrootServer implements AutoCloseable {
                 boolean executionPath = path.equals("/v1/executions") || path.startsWith("/v1/executions/");
                 boolean submission = exchange.getRequestMethod().equals("POST")
                         && (path.equals("/v1/executions") || path.equals("/v1/executions/"));
-                boolean personalContext = (path.equals("/v1/events") || executionPath && !submission)
+                boolean personalResource = executionPath && !submission
+                        || path.equals("/v1/events") || path.equals("/v1/events/recent")
+                        || path.equals("/v1/activity") || path.equals("/v1/human-tasks") || path.startsWith("/v1/human-tasks/");
+                boolean personalContext = personalResource
                         && "personal".equals(exchange.getRequestHeaders().getFirst("X-Ravenroot-Execution-Context"));
                 boolean personalAssistant = path.equals("/v1/assistant/messages")
                         && "personal".equals(exchange.getRequestHeaders().getFirst("X-Ravenroot-Assistant-Mode"));

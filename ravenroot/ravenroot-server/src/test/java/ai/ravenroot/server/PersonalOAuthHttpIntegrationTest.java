@@ -243,6 +243,18 @@ class PersonalOAuthHttpIntegrationTest {
                 assertFalse(aEvents.isEmpty());
                 assertTrue(aEvents.stream().allMatch(e -> e.processInstanceId().toString().equals(aProcess)));
                 assertTrue(authorized.durableEventsAfter(ownerB, 0, 200).stream().allMatch(e -> e.processInstanceId().toString().equals(bProcess)));
+                var aRecent = get(server, "/v1/events/recent", a, true);
+                var bRecent = get(server, "/v1/events/recent", b, true);
+                var systemRecent = get(server, "/v1/events/recent", a, false);
+                assertEquals(200, aRecent.statusCode(), aRecent.body());
+                assertEquals(200, bRecent.statusCode(), bRecent.body());
+                assertEquals(200, systemRecent.statusCode(), systemRecent.body());
+                assertTrue(aRecent.body().contains(aProcess));
+                assertFalse(aRecent.body().contains(bProcess));
+                assertTrue(bRecent.body().contains(bProcess));
+                assertFalse(bRecent.body().contains(aProcess));
+                assertFalse(systemRecent.body().contains(aProcess));
+                assertFalse(systemRecent.body().contains(bProcess));
                 assertEquals(2, effects.get());
                 // Source deployment remains in the original operator namespace.
                 assertTrue(app.localDeployment("local", "shared-configmap").isPresent());

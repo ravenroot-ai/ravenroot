@@ -5658,7 +5658,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "e6be0547118e6b6efc678fc7da0b2b27d8b9b7614a58051d880012db6800ac94",
+          "digest": "4d795ae19b57d05188540800ef687fdeb578ad9112dc825a4fa6a92c6d45c01c",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #550 preserves this reviewed authority while adding bounded Git graph authoring, immutable publication evidence, dependency revalidation, and explicit UI persistence capabilities. Rechecked for #590 source alignment: the retained atom keeps its reviewed meaning alongside explicit deployment, business history and correlation additions; new candidates have separate row-level review. #605 adds strict pinned source/execution handlers and typed projection errors; existing route authentication, limits, environment and resource consumers remain intact. #605 observation correction removes drawing dependency solely from scoped stream initial, lease and per-frame validation, and issues lifecycle replay anchors at the existing scoped position; route, cursor and diagnostic security bounds are unchanged. #606 Adds strict trigger input and truthful custody response mapping; existing monitoring/history/source/START/lifecycle handlers remain."
         },
         {
@@ -5688,7 +5688,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "e6be0547118e6b6efc678fc7da0b2b27d8b9b7614a58051d880012db6800ac94",
+          "digest": "4d795ae19b57d05188540800ef687fdeb578ad9112dc825a4fa6a92c6d45c01c",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #550 preserves this reviewed authority while adding bounded Git graph authoring, immutable publication evidence, dependency revalidation, and explicit UI persistence capabilities. Rechecked for #590 source alignment: the retained atom keeps its reviewed meaning alongside explicit deployment, business history and correlation additions; new candidates have separate row-level review. #605 adds strict pinned source/execution handlers and typed projection errors; existing route authentication, limits, environment and resource consumers remain intact. #605 observation correction removes drawing dependency solely from scoped stream initial, lease and per-frame validation, and issues lifecycle replay anchors at the existing scoped position; route, cursor and diagnostic security bounds are unchanged. #606 Adds strict trigger input and truthful custody response mapping; existing monitoring/history/source/START/lifecycle handlers remain."
         },
         {
@@ -5761,7 +5761,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "e6be0547118e6b6efc678fc7da0b2b27d8b9b7614a58051d880012db6800ac94",
+          "digest": "4d795ae19b57d05188540800ef687fdeb578ad9112dc825a4fa6a92c6d45c01c",
           "assertion": "Server composition consumes exact process environment keys. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #550 preserves this reviewed authority while adding bounded Git graph authoring, immutable publication evidence, dependency revalidation, and explicit UI persistence capabilities. Rechecked for #590 source alignment: the retained atom keeps its reviewed meaning alongside explicit deployment, business history and correlation additions; new candidates have separate row-level review. #605 adds strict pinned source/execution handlers and typed projection errors; existing route authentication, limits, environment and resource consumers remain intact. #605 observation correction removes drawing dependency solely from scoped stream initial, lease and per-frame validation, and issues lifecycle replay anchors at the existing scoped position; route, cursor and diagnostic security bounds are unchanged. #606 Adds strict trigger input and truthful custody response mapping; existing monitoring/history/source/START/lifecycle handlers remain."
         },
         {
@@ -6223,7 +6223,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "e6be0547118e6b6efc678fc7da0b2b27d8b9b7614a58051d880012db6800ac94",
+          "digest": "4d795ae19b57d05188540800ef687fdeb578ad9112dc825a4fa6a92c6d45c01c",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #550 preserves this reviewed authority while adding bounded Git graph authoring, immutable publication evidence, dependency revalidation, and explicit UI persistence capabilities. Rechecked for #590 source alignment: the retained atom keeps its reviewed meaning alongside explicit deployment, business history and correlation additions; new candidates have separate row-level review. #605 adds strict pinned source/execution handlers and typed projection errors; existing route authentication, limits, environment and resource consumers remain intact. #605 observation correction removes drawing dependency solely from scoped stream initial, lease and per-frame validation, and issues lifecycle replay anchors at the existing scoped position; route, cursor and diagnostic security bounds are unchanged. #606 Adds strict trigger input and truthful custody response mapping; existing monitoring/history/source/START/lifecycle handlers remain."
         },
         {
@@ -6364,7 +6364,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "e6be0547118e6b6efc678fc7da0b2b27d8b9b7614a58051d880012db6800ac94",
+          "digest": "4d795ae19b57d05188540800ef687fdeb578ad9112dc825a4fa6a92c6d45c01c",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #550 preserves this reviewed authority while adding bounded Git graph authoring, immutable publication evidence, dependency revalidation, and explicit UI persistence capabilities. Rechecked for #590 source alignment: the retained atom keeps its reviewed meaning alongside explicit deployment, business history and correlation additions; new candidates have separate row-level review. #605 adds strict pinned source/execution handlers and typed projection errors; existing route authentication, limits, environment and resource consumers remain intact. #605 observation correction removes drawing dependency solely from scoped stream initial, lease and per-frame validation, and issues lifecycle replay anchors at the existing scoped position; route, cursor and diagnostic security bounds are unchanged. #606 Adds strict trigger input and truthful custody response mapping; existing monitoring/history/source/START/lifecycle handlers remain."
         }
       ],

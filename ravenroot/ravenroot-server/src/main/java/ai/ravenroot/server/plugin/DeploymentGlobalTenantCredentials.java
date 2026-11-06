@@ -2,11 +2,15 @@ package ai.ravenroot.server.plugin;
 
 import ai.ravenroot.api.security.CredentialResolver;
 import ai.ravenroot.api.security.SecretValue;
+import ai.ravenroot.api.security.SecurityContext;
 import ai.ravenroot.core.security.nodepackage.TenantCredentialResolver;
 
+import java.net.URI;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.function.Function;
 
 /**
  * Adapts the server's single composed {@link CredentialResolver} to the
@@ -113,6 +117,7 @@ public final class DeploymentGlobalTenantCredentials implements TenantCredential
      */
     @Override
     public Optional<SecretValue> resolve(String packageId, String tenantId, String opaqueReference) {
+        if (opaqueReference != null && opaqueReference.startsWith("personal:")) return Optional.empty();
         return delegate.resolve(opaqueReference);
     }
 
@@ -141,6 +146,25 @@ public final class DeploymentGlobalTenantCredentials implements TenantCredential
 
     private record ReferenceRestricted(TenantCredentialResolver delegate, Set<String> allowed)
             implements TenantCredentialResolver {
+
+        @Override
+        public <T> CompletableFuture<T> dispatchHttp(String packageId, SecurityContext executor,
+                URI destination, String reference, Function<SecretValue, CompletableFuture<T>> handoff) {
+            if (reference == null || !allowed.contains(reference)) throw new SecurityException("Credential unavailable");
+            return delegate.dispatchHttp(packageId, executor, destination, reference, handoff);
+        }
+
+        @Override
+        public void requireHttpActive(String packageId, SecurityContext executor, URI destination, String reference) {
+            if (!allowed.contains(reference)) throw new SecurityException("Credential unavailable");
+            delegate.requireHttpActive(packageId, executor, destination, reference);
+        }
+
+        @Override
+        public Optional<SecretValue> resolveHttp(String packageId, SecurityContext executor, URI destination, String reference) {
+            if (reference == null || !allowed.contains(reference)) return Optional.empty();
+            return delegate.resolveHttp(packageId, executor, destination, reference);
+        }
 
         @Override
         public Optional<SecretValue> resolve(String packageId, String tenantId, String opaqueReference) {

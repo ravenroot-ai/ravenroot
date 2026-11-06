@@ -52,6 +52,7 @@ GROUPS = {
     "activity": Group(
         "Activity content archive", "../operator-guide/activity-capture.md#service-configuration"
     ),
+    "personal": Group("Personal OpenAI connections", "../security/personal-openai-connections.md#operator-configuration"),
     "assistant": Group("Authoring assistant", "../operator-guide/authoring-assistant.md#setting-reference"),
     "bundle": Group("Bundle profile", "bundles/"),
     "credential": Group("Credentials and egress", "configuration.md#secret-handling"),
@@ -387,6 +388,8 @@ def group(name: str) -> str:
         "RAVENROOT_GRAPH_RUNNER_SHUTDOWN_STEP_SECONDS",
     }:
         return "execution-runtime"
+    if name.startswith("RAVENROOT_PERSONAL_"):
+        return "personal"
     if name.startswith("RAVENROOT_ASSISTANT_"):
         return "assistant"
     if name in INTERACTION_WEBSOCKET_VARIABLES:

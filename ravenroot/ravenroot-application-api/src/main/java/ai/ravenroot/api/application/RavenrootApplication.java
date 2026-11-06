@@ -467,6 +467,17 @@ public interface RavenrootApplication extends AutoCloseable {
     }
 
     /**
+     * Resolves exact immutable deployment bytes for a trusted adapter that separately authorizes the source and executor.
+     * @param tenantId source deployment tenant, established by the adapter
+     * @param deploymentId source deployment identifier in that tenant
+     * @param incarnationId exact physical deployment incarnation
+     * @param graphVersion exact registered graph version
+     * @return cloned definition bytes, or empty if any pinned source identity differs
+     */
+    default java.util.Optional<byte[]> localDeploymentGraphMl(String tenantId, String deploymentId,
+            String incarnationId, String graphVersion) { return java.util.Optional.empty(); }
+
+    /**
  * Every deployment registered by {@code tenantId} in this process, in id order.
  *
  * <p>Tenant-scoped by construction rather than by a filter the caller applies: another tenant's

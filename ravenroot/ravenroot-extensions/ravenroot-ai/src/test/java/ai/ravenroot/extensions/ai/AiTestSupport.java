@@ -353,7 +353,10 @@ final class AiTestSupport {
                     NodePackageCapability.TOOL_AUTHORIZATION);
         }
 
-        @Override public ToolCallAuthorizationService toolAuthorization() { return allowingTools(); }
+        final AtomicInteger toolAuthorizations = new AtomicInteger();
+        @Override public ToolCallAuthorizationService toolAuthorization() {
+            return (message, tool, arguments) -> { toolAuthorizations.incrementAndGet(); return allowingTools().authorize(message, tool, arguments); };
+        }
 
         @Override public ai.ravenroot.api.node.service.AgentResourceService agentResources() {
             return resources;

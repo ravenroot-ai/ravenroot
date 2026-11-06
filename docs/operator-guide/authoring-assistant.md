@@ -10,6 +10,11 @@ the deployment configuration and restarting or recreating the server. They are n
 the API. Per-author consent is durable in its own SQLite file; OAuth access tokens remain process-local
 and require reconnection after restart.
 
+For optional personal ChatGPT sign-in and plan usage, use the separate
+[personal OpenAI connection setup](../security/personal-openai-connections.md). Its explicit
+personal mode uses verified browser identity and bounded browser authorization. The system assistant
+settings and existing device-flow adapter below retain their current behavior.
+
 ## Setting reference
 
 | Variable | Type and default | Effect |

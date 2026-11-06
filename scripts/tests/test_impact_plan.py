@@ -161,6 +161,35 @@ class MaintenanceReleasePolicyTest(unittest.TestCase):
         with patch('scripts.impact_plan.make_plan',return_value={'jobs':['backend-build']}):
             self.assertTrue(ci_required.verify_results('full',results,forged))
 
+class DispatchRangeTest(unittest.TestCase):
+    def test_dispatch_resolves_the_selected_trusted_lane_before_planning(self):
+        import contextlib
+        import io
+        import sys
+        for lane in ('dev', 'release/0.8'):
+            with self.subTest(lane=lane), tempfile.TemporaryDirectory() as directory:
+                output = Path(directory) / 'plan.json'
+                plan = dict(baseline=BASE, candidate=HEAD, lane=lane, full=False,
+                            jobs=[], build=[], test=[], reasons=[])
+                with patch.object(sys, 'argv', ['impact_plan', '--event', 'workflow_dispatch',
+                                               '--lane', lane, '--candidate', HEAD,
+                                               '--output', str(output)]), \
+                        patch.dict(os.environ, {}, clear=True), \
+                        patch.object(impact, 'git', return_value=BASE) as git, \
+                        patch.object(impact, 'make_plan', return_value=plan) as make_plan, \
+                        contextlib.redirect_stdout(io.StringIO()):
+                    impact.main()
+                git.assert_called_once_with('merge-base', f'origin/{lane}', HEAD)
+                make_plan.assert_called_once_with(BASE, HEAD, 'workflow_dispatch', lane, False)
+                self.assertEqual(json.loads(output.read_text()), plan)
+
+    def test_workflow_uses_one_lane_authority_for_planning_and_gate(self):
+        workflow = (impact.ROOT / '.github/workflows/ci.yml').read_text()
+        self.assertNotIn('integration_base', workflow)
+        self.assertEqual(workflow.count('inputs.integration_ref || github.base_ref'), 2)
+        self.assertIn('PLAN: ${{ needs.release-classification.outputs.plan }}', workflow)
+
+
 class MavenModelTest(unittest.TestCase):
     def test_managed_inherited_test_and_plugin_relationships_and_version_changes(self):
         prefix='<project xmlns="http://maven.apache.org/POM/4.0.0"><modelVersion>4.0.0</modelVersion>'

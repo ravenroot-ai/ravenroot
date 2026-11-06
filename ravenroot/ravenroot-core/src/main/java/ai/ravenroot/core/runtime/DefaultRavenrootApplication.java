@@ -3579,6 +3579,15 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
     }
 
     @Override
+    public java.util.Optional<byte[]> localDeploymentGraphMl(String tenantId, String deploymentId,
+            String incarnationId, String graphVersion) {
+        var record = localDeployments.get(new LocalDeploymentKey(requireTenant(tenantId), requireLocalDeploymentId(deploymentId)));
+        if (record == null || !record.deployment().incarnationId().equals(incarnationId)
+                || !record.deployment().graphVersion().equals(graphVersion)) return java.util.Optional.empty();
+        return java.util.Optional.of(record.deployment().graphDocument());
+    }
+
+    @Override
     public EmbedDeploymentStart startEmbedDeploymentExecution(SecurityContext security,
                                                                String deploymentId,
                                                                String incarnationId,

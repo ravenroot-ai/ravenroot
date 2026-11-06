@@ -234,6 +234,7 @@ import {
 } from './activity-visibility.js';
 import { executionOutcomeMessages } from './execution-outcome-description.js';
 import { RavenrootAssistantClient } from './assistant-client.js';
+import { mountPersonalConnections } from './personal-connections.js';
 import {
   applyAcceptedGraphMl,
   GraphAuthoringClient,
@@ -1369,6 +1370,10 @@ async function loadHumanTaskDetail(owner, locator, capability, recoveryGeneratio
 // and discovered otherwise on the first send would already have told the user it was working, which
 // is the exact "never pretending" prohibition — so the optimistic state is not the initial one.
 let assistantClient = null;
+let personalConnections = null;
+let personalAccountModels = [];
+let personalAssistantMode = false;
+let personalIdentityGeneration = 0;
 
 // ── CREDENTIALS ───────────────────────────────────────────────────────────────────────────
 // The window itself, and the ONE fact about it this file keeps: which references the author holds.
@@ -7418,7 +7423,11 @@ function catalogPropertyFieldsHtml(descriptor, values, owner) {
   // hidden. Other descriptors keep the established rule that conditions see retained hidden values.
   const conditionValues = descriptor.behavior === 'amqp.publish' && resolvedValues.mode === 'Publisher'
     ? { ...resolvedValues, queue: '' } : resolvedValues;
-  const fields = descriptor.properties.map(property => {
+  const fields = descriptor.properties.map(declaredProperty => {
+    const property = declaredProperty.name === 'model' && resolvedValues.credentialMode === 'personal'
+      && ['llm-prompt', 'agent'].includes(descriptor.behavior) && personalAccountModels.length
+      ? { ...declaredProperty, allowedValues: personalAccountModels.map(model => model.slug) }
+      : declaredProperty;
     const value = resolvedValues[property.name];
     const title = property.displayName || property.name;
     const fieldIds = fieldIdsFor(property.name);
@@ -11945,7 +11954,10 @@ async function connectRuntime(atBoot = false) {
   if (connectionGeneration !== runtimeConnectionGeneration) return { kind: 'superseded' };
   if (runtimeDisconnect) runtimeDisconnect();
   runtimeClient = new RavenrootRuntimeClient(baseUrl, {
-    tokenProvider: runtimeTokenProvider,
+    tokenProvider: runtimeTokenProvider, browserSessions: true,
+    onExecutionAccepted: result => {
+      if (result.executionContext === 'personal') personalConnections?.showExecution(result.executionId);
+    },
   });
   graphAuthoringClient = new GraphAuthoringClient(baseUrl, { tokenProvider: runtimeTokenProvider });
   namedAgentCatalog = [];
@@ -11986,6 +11998,28 @@ async function connectRuntime(atBoot = false) {
       const scope = await switchWorkspacePersistence(configuration, connectedClient);
       if (!scope?.failed && authorizeWorkspaceClient(connectedClient, scope, authorityGeneration)) {
         assistantClient = new RavenrootAssistantClient(baseUrl, { tokenProvider: runtimeTokenProvider });
+        personalConnections?.destroy();
+        const personalHost = document.querySelector('[data-panel-id="assistant"] .assistant');
+        if (personalHost) personalConnections = mountPersonalConnections({
+          host: personalHost, baseUrl, tokenProvider: runtimeTokenProvider,
+          onIdentity: () => { personalIdentityGeneration += 1; clearAssistantConversation();
+            const draft = document.getElementById('assistant-draft'); if (draft) draft.value = '';
+            if (runtimeClient?.personalContext) {
+              workspace.documents.forEach(owner => { detachExecution(owner); owner.execution.events = []; });
+              clearActivity();
+              if (workspace.active) resetRuntimeState(workspace.active, cy, graphData, layoutMode, visualStyle);
+            }
+            if (runtimeClient) runtimeClient.personalContext = false;
+          },
+          onMode: (mode, model, authorized) => {
+            personalAssistantMode = mode === 'personal';
+            assistantClient.personalMode = personalAssistantMode; assistantClient.personalModel = model;
+            assistantClient.personalReady = authorized; void refreshAssistantAvailability();
+          },
+          onCatalog: models => { personalAccountModels = models; },
+          onHistory: mode => { runtimeClient.personalContext = mode === 'personal'; runtimeClient.lastEventId = ''; },
+          onRun: () => { runtimeClient.personalContext = true; },
+        });
         void refreshAssistantAvailability();
         void credentialsWindow?.setClient(
           new RavenrootCredentialClient(baseUrl, { tokenProvider: runtimeTokenProvider }));
@@ -12860,6 +12894,7 @@ async function playGraph(mode = 'test') {
 // about. An event that matches no open document is dropped: painting it on whichever graph happens
 // to be in front of the user is how a run in one document used to light up another.
 function handleRuntimeEvent(event, client = runtimeClient) {
+  if (client?.personalContext) return;
   const streamScope = runtimeEventScope(client);
   if (!streamScope) return;
   const target = documentForRuntimeEvent(workspace, event, streamScope);
@@ -13967,6 +14002,7 @@ async function submitAssistantDraft() {
   draft.value = '';
 
   assistantBusy = true;
+  const identityGeneration = personalIdentityGeneration;
   assistantError = null;
   renderAssistantState();
   try {
@@ -13981,9 +14017,11 @@ async function submitAssistantDraft() {
     const reply = await assistantClient.send({
       prompt: verdict.text, context: assistantContext, document: documentBinding,
     });
+    if (identityGeneration !== personalIdentityGeneration) return;
     pushAssistantTurn({ role: ASSISTANT, text: reply.text });
     if (reply.proposal) renderAssistantProposal(reply.proposal);
   } catch (error) {
+    if (identityGeneration !== personalIdentityGeneration) return;
     // Reported in the transcript AND in the state banner. Never a silent failure, and never a
     // fabricated answer standing in for one.
     assistantError = { uiMessageKey: error?.uiMessageKey, uiMessageParams: error?.uiMessageParams, reason: error?.reason || null, message: uiErrorReason(error) || uiText("workspace.assistant.requestFailed") };
@@ -14125,7 +14163,9 @@ async function refreshAssistantAvailability() {
     return;
   }
   try {
-    assistantAvailability = await assistantClient.status();
+    assistantAvailability = personalAssistantMode
+      ? { reachable: true, configured: true, allowlisted: true, signedIn: true, linkRequired: !assistantClient.personalReady }
+      : await assistantClient.status();
   } catch {
     assistantAvailability = { reachable: false, configured: false, allowlisted: false, signedIn: false };
   }

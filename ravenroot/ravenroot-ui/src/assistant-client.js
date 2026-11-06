@@ -1,5 +1,6 @@
 import { uiText } from './ui-text.js';
 import { productError } from './product-error.js';
+import { browserSessionCredentials } from './browser-credentials.js';
 import { requestCredential, invalidateRejectedCredential } from './credential-request.js';
 // The panel's only way out of the browser — and it goes to this product's own service, never to a
 // model provider (the per-author credential contract and the design record's §1).
@@ -373,9 +374,12 @@ export class RavenrootAssistantClient {
     if (!this.fetchImpl) throw productError("workspace.error.assistant.client.fetch.api.is.not.supported.by.this.browser", new Error('Fetch API is not supported by this browser'));
     const credential = await requestCredential(this.tokenProvider);
     const { token } = credential;
+    if (this.personalMode && path === ASSISTANT_PATHS.messages) options = { ...options, headers: {
+      ...options.headers, 'X-Ravenroot-Assistant-Mode': 'personal', 'X-Ravenroot-Assistant-Model': this.personalModel || '',
+    } };
     const response = await this.fetchImpl(assistantUrl(this.baseUrl, path), {
       ...options,
-      credentials: 'omit',
+      credentials: browserSessionCredentials(this.baseUrl, this.personalMode),
       cache: 'no-store',
       headers: token
         ? { ...options.headers, Authorization: `Bearer ${token}` }

@@ -1003,6 +1003,22 @@ public final class AuthorizedRavenrootApplication {
     }
 
     /**
+     * Resolves exact deployment bytes under a separately authenticated source tenant.
+     * @param source authenticated source request whose deployment-read authority is checked
+     * @param deploymentId deployment identifier in the source tenant
+     * @param incarnationId exact physical deployment incarnation
+     * @param graphVersion exact registered graph version
+     * @return cloned source definition bytes, or empty if the pinned identity is unavailable
+     */
+    public java.util.Optional<byte[]> localDeploymentGraphMl(RequestContext source, String deploymentId,
+            String incarnationId, String graphVersion) {
+        require(source, AuthorizationAction.EXECUTION_READ,
+                ProtectedResource.owned("deployment", requireText(deploymentId, "deployment id"), source.tenantId()));
+        return delegate.localDeploymentGraphMl(source.tenantId(), deploymentId,
+                requireText(incarnationId, "incarnation id"), requireText(graphVersion, "graph version"));
+    }
+
+    /**
  * Starts one of the caller tenant's deployments under the caller's own identity.
  * @param context authenticated request context supplying the owning tenant and serving identity
  * @param deploymentId the deployment to start

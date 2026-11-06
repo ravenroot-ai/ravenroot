@@ -58,6 +58,53 @@ public final class BehaviorRegistry {
     }
 
     public ai.ravenroot.api.flow.FlowInvocationCapability flowInvocations() { return flowInvocations; }
+    private java.util.function.BiConsumer<ai.ravenroot.api.security.SecurityContext, java.util.Set<String>> personalAuthority =
+            (identity, providers) -> { throw new SecurityException("Personal connection authorization required"); };
+
+    /** Trusted composition hook; the default refuses personal graphs on every non-HTTP entry point. */
+    public BehaviorRegistry withPersonalConnectionAuthority(java.util.function.BiConsumer<
+            ai.ravenroot.api.security.SecurityContext, java.util.Set<String>> authority) {
+        personalAuthority = java.util.Objects.requireNonNull(authority); return this;
+    }
+
+    private java.util.function.Function<ai.ravenroot.api.security.SecurityContext, String> definitionTenant =
+            ai.ravenroot.api.security.SecurityContext::tenantId;
+
+    /** Source definitions are selected by a trusted adapter; execution data retains its executor partition. */
+    public BehaviorRegistry withPersonalDefinitionTenant(java.util.function.Function<
+            ai.ravenroot.api.security.SecurityContext, String> authority) {
+        definitionTenant = java.util.Objects.requireNonNull(authority); return this;
+    }
+
+    /** Resolves only operator-approved source-definition authority, retaining executor identity elsewhere. */
+    public String definitionTenantFor(ai.ravenroot.api.security.SecurityContext executor) {
+        return definitionTenant.apply(executor);
+    }
+
+    public void requirePersonalConnections(ai.ravenroot.api.security.SecurityContext identity,
+                                           ai.ravenroot.core.graph.GraphDefinition graph) {
+        var providers = new java.util.HashSet<String>();
+        for (var node : graph.nodes()) {
+            Object mode = node.properties().getOrDefault("credentialMode", "system");
+            if ("personal".equals(mode)) {
+                if (!java.util.Set.of("llm-prompt", "agent").contains(node.behavior()))
+                    throw new SecurityException("Personal connection provider unavailable");
+                providers.add("openai");
+            } else if (!"system".equals(mode)) throw new SecurityException("Invalid credential mode");
+        }
+        if (!providers.isEmpty()) {
+            requirePersonalRuntimeCompatibility(graph);
+            personalAuthority.accept(identity, java.util.Set.copyOf(providers));
+        }
+    }
+
+    /** External Workspace runtimes have no trusted Responses credential channel. */
+    public static void requirePersonalRuntimeCompatibility(ai.ravenroot.core.graph.GraphDefinition graph) {
+        if (graph.nodes().stream().anyMatch(node -> "personal".equals(node.properties().get("credentialMode")))
+                && graph.nodes().stream().anyMatch(ai.ravenroot.core.runner.GovernedAgent::usesWorkspace))
+            throw new PersonalExecutionAdmissionException();
+    }
+
     private static final java.util.Set<String> LEGACY_CORE_WITHOUT_EXTERNAL_IO = java.util.Set.of(
             "log", "delay", "human-task", "template", "json-parse", "bigint-op", "cel-transform",
             "cel-decision", "json-path", "boundary-guard");
@@ -364,7 +411,8 @@ public final class BehaviorRegistry {
         for (var definition : runnerJobs.definitions(node)) {
             var actions = new java.util.HashMap<String, ai.ravenroot.api.node.NodeAction>();
             definition.commands().forEach((name, command) -> actions.put(name, capable.createGoverned(
-                    node.id(), sdk.services(), definition, command, runnerJobs.ordinaryAuthority(definition, command))));
+                    node.id(), sdk.services(), definition, command, runnerJobs.ordinaryAuthority(definition, command),
+                    java.util.Objects.toString(node.properties().getOrDefault("credentialMode", "system")))));
             bindings.put(definition.reference().tenantId(), new Binding(definition, Map.copyOf(actions)));
         }
         var snapshot = Map.copyOf(bindings);
@@ -379,7 +427,7 @@ public final class BehaviorRegistry {
             @Override public java.util.concurrent.CompletionStage<ai.ravenroot.api.execution.NodeResult> handle(
                     ai.ravenroot.api.execution.NodeMessage message, ai.ravenroot.api.execution.CancellationSignal cancellation) {
                 try {
-                    Binding binding = snapshot.get(message.tenantId());
+                    Binding binding = snapshot.get(definitionTenantFor(message.security()));
                     if (binding == null) throw new IllegalArgumentException("Agent definition is not approved for this tenant");
                     runnerJobs.requireApproved(binding.definition());
                     var action = binding.actions().get(message.command().name());

@@ -1610,9 +1610,12 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                     "policyForNodeAdmission(behaviorNodes)",
                     "policyForNodes(behaviorNodes)")
             rejects(audit.EXTERNAL_IO_MANAGED_SERVICES_PATH,
-                    "response = pending.get(effectiveDeadline.toNanos(), TimeUnit.NANOSECONDS);\n"
-                    "                        credentials.requireHttpActive(packageId, identity.identity(), destination, binding.reference());",
-                    "response = pending.get(effectiveDeadline.toNanos(), TimeUnit.NANOSECONDS);")
+                    "var response = pending.get(deadline.toNanos(), TimeUnit.NANOSECONDS);\n"
+                    "            credentials.requireHttpActive(packageId, executor, destination, binding.reference());",
+                    "var response = pending.get(deadline.toNanos(), TimeUnit.NANOSECONDS);")
+            rejects(audit.EXTERNAL_IO_MANAGED_SERVICES_PATH,
+                    "pending = credentials.dispatchHttp(packageId, executor, destination, binding.reference(), secret -> {",
+                    "pending = dispatchWithoutAuthority(secret -> {")
             rejects(audit.EXTERNAL_IO_DEPLOYMENT_PATH,
                     'throw new SecurityException("Personal connections require an explicit browser execution");',
                     'if (false) throw new SecurityException("Personal connections require an explicit browser execution");')

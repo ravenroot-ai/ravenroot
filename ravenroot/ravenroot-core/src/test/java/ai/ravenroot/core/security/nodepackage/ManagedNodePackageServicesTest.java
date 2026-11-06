@@ -34,11 +34,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -566,8 +568,13 @@ class ManagedNodePackageServicesTest {
                 .allowHttpMethod("POST").bindCredential("personal", new NodePackageEgressPolicy.Origin("http", "localhost", port), "Authorization", "Bearer ").build();
         TenantCredentialResolver resolver = new TenantCredentialResolver() {
             @Override public java.util.Optional<SecretValue> resolve(String pkg, String tenant, String ref) { return java.util.Optional.empty(); }
-            @Override public java.util.Optional<SecretValue> resolveHttp(String pkg, SecurityContext owner, URI uri, String ref) {
-                seen.set(owner); return java.util.Optional.of(new SecretValue("personal-subject".toCharArray()));
+            @Override public <T> CompletableFuture<T> dispatchHttp(String pkg, SecurityContext owner, URI uri, String ref,
+                    Function<SecretValue, CompletableFuture<T>> handoff) {
+                requireHttpActive(pkg, owner, uri, ref);
+                seen.set(owner);
+                try (var secret = new SecretValue("personal-subject".toCharArray())) {
+                    return handoff.apply(secret);
+                }
             }
             @Override public void requireHttpActive(String pkg, SecurityContext owner, URI uri, String ref) {
                 if (revoked.get()) throw new SecurityException("revoked");
@@ -582,6 +589,35 @@ class ManagedNodePackageServicesTest {
             revoked.set(true);
             assertThrows(java.util.concurrent.ExecutionException.class, () -> call.completion().toCompletableFuture().get(5, TimeUnit.SECONDS));
         } finally { release.countDown(); }
+    }
+
+    @Test
+    void personalHttpCannotFallBackToAResolverWithoutDispatchAdmission() throws Exception {
+        var requests = new AtomicInteger();
+        var resolutions = new AtomicInteger();
+        server = server(exchange -> {
+            requests.incrementAndGet();
+            respond(exchange, 200, "unexpected");
+        });
+        int port = server.getAddress().getPort();
+        URI destination = uri(port, "/responses");
+        var policy = NodePackageEgressPolicy.builder().allowOrigin("http", "localhost", port)
+                .allowHttpMethod("POST").bindCredential("personal", new NodePackageEgressPolicy.Origin("http", "localhost", port),
+                        "Authorization", "Bearer ").build();
+        TenantCredentialResolver resolver = new TenantCredentialResolver() {
+            @Override public java.util.Optional<SecretValue> resolve(String pkg, String tenant, String ref) { return java.util.Optional.empty(); }
+            @Override public java.util.Optional<SecretValue> resolveHttp(String pkg, SecurityContext owner, URI uri, String ref) {
+                resolutions.incrementAndGet();
+                return java.util.Optional.of(new SecretValue("must-not-resolve".toCharArray()));
+            }
+            @Override public void requireHttpActive(String pkg, SecurityContext owner, URI uri, String ref) { }
+        };
+        var services = services(policy, Set.of(NodePackageCapability.OUTBOUND_HTTP), resolver);
+        var call = services.outboundHttp().execute(message("tenant-A", Map.of()), new OutboundHttpRequest(destination,
+                "POST", Map.of(), new byte[0], Duration.ofSeconds(10), new OutboundCredentialBinding("personal", "personal:openai")));
+        assertReason(NodePackageServiceException.Reason.CREDENTIAL_UNAVAILABLE, call);
+        assertEquals(0, resolutions.get());
+        assertEquals(0, requests.get());
     }
 
     private ManagedNodePackageServices services(NodePackageEgressPolicy policy,

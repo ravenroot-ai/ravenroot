@@ -370,7 +370,7 @@ public class PersonalOAuthServiceTest {
         try { if (!latch.await(10, TimeUnit.SECONDS)) throw new AssertionError("provider response was not released"); }
         catch (InterruptedException failure) { Thread.currentThread().interrupt(); throw new AssertionError(failure); }
     }
-    private static final class MutableClock extends Clock {
+    static final class MutableClock extends Clock {
         volatile Instant now = Instant.parse("2026-11-04T00:00:00Z");
         public ZoneId getZone() { return ZoneOffset.UTC; }
         public Clock withZone(ZoneId zone) { return this; }
@@ -683,7 +683,7 @@ public class PersonalOAuthServiceTest {
         final AtomicInteger tokens = new AtomicInteger(), refreshes = new AtomicInteger(), inferences = new AtomicInteger(), revocations = new AtomicInteger();
         String scope = "openid profile email offline_access resource.invoke chatgpt.tokens.use.direct";
         int initialExpiry = 3600; String inferenceBearer;
-        String refreshScope; String refreshedSubject; String refreshError;
+        String refreshScope; String refreshedSubject; String refreshError; String refreshedAccess;
         String authorizationError;
         public void failAuthorization(String error) { authorizationError = error; }
         public void expireInitialToken() { initialExpiry = 1; }
@@ -694,11 +694,12 @@ public class PersonalOAuthServiceTest {
         Runnable beforeModelsResponse = () -> { };
         Runnable afterInferenceAdmission = () -> { };
         CompletableFuture<Void> responseHeaders;
+        CompletableFuture<?> inferenceResponse;
         final List<String> authorizationRequests = new CopyOnWriteArrayList<>();
         public String responseText = "completed-answer";
         public Map<String, Object> usage = Map.of("input_tokens", 2, "output_tokens", 2);
         Map<String, Object> lastInference = Map.of();
-        @Override @SuppressWarnings("unchecked") public <T> HttpResponse<T> send(HttpRequest request, HttpResponse.BodyHandler<T> handler) {
+        @Override public <T> HttpResponse<T> send(HttpRequest request, HttpResponse.BodyHandler<T> handler) {
             byte[] result;
             String path = request.uri().getPath();
             String authorizationFailure = null;
@@ -707,7 +708,8 @@ public class PersonalOAuthServiceTest {
                 if (refresh) { refreshes.incrementAndGet(); beforeRefreshResponse.run(); }
                 else { authorizationRequests.add(body); authorizationFailure = authorizationError; beforeAuthorizationResponse.run(); }
                 String subject = body.contains("code=B") ? "B" : body.contains("code=C") ? "C" : "A";
-                result = ProtectedConnectionStore.json(Map.of("access_token", "access-" + subject, "refresh_token", "refresh-" + tokens.get(), "id_token", refresh && refreshedSubject != null ? refreshedSubject : subject,
+                result = ProtectedConnectionStore.json(Map.of("access_token", refresh && refreshedAccess != null ? refreshedAccess : "access-" + subject,
+                        "refresh_token", "refresh-" + tokens.get(), "id_token", refresh && refreshedSubject != null ? refreshedSubject : subject,
                         "scope", refresh && refreshScope != null ? refreshScope : scope, "token_type", "Bearer", "expires_in", refresh ? 3600 : initialExpiry));
             } else if (path.equals("/v1/models")) {
                 beforeModelsResponse.run();
@@ -734,13 +736,31 @@ public class PersonalOAuthServiceTest {
             String failure = path.endsWith("/oauth/token") && requestBody(request).contains("grant_type=refresh_token") ? refreshError : authorizationFailure;
             int status = failure != null ? 400 : 200;
             if (status != 200) result = ProtectedConnectionStore.json(Map.of("error", failure));
-            InputStream input = new ByteArrayInputStream(result);
+            var headers = HttpHeaders.of(Map.of("Content-Type", List.of(path.equals("/v1/responses")
+                    ? "text/event-stream" : "application/json")), (a, b) -> true);
+            var subscriber = handler.apply(new HttpResponse.ResponseInfo() {
+                @Override public int statusCode() { return status; }
+                @Override public HttpHeaders headers() { return headers; }
+                @Override public Version version() { return Version.HTTP_1_1; }
+            });
+            var bytes = List.of(ByteBuffer.wrap(result));
+            subscriber.onSubscribe(new Flow.Subscription() {
+                private boolean sent;
+                @Override public void request(long count) {
+                    if (sent) return;
+                    sent = true;
+                    subscriber.onNext(bytes);
+                    subscriber.onComplete();
+                }
+                @Override public void cancel() { sent = true; }
+            });
+            T body = subscriber.getBody().toCompletableFuture().join();
             return new HttpResponse<>() {
                 @Override public int statusCode() { return status; }
                 @Override public HttpRequest request() { return request; }
                 @Override public Optional<HttpResponse<T>> previousResponse() { return Optional.empty(); }
-                @Override public HttpHeaders headers() { return HttpHeaders.of(Map.of(), (a, b) -> true); }
-                @Override public T body() { return (T) input; }
+                @Override public HttpHeaders headers() { return headers; }
+                @Override public T body() { return body; }
                 @Override public Optional<SSLSession> sslSession() { return Optional.empty(); }
                 @Override public URI uri() { return request.uri(); }
                 @Override public Version version() { return Version.HTTP_1_1; }
@@ -769,8 +789,10 @@ public class PersonalOAuthServiceTest {
         @Override public <T> CompletableFuture<HttpResponse<T>> sendAsync(HttpRequest r, HttpResponse.BodyHandler<T> h) {
             var response = send(r, h);
             if (r.uri().getPath().equals("/v1/responses")) {
+                var pending = responseHeaders == null ? CompletableFuture.completedFuture(response) : responseHeaders.thenApply(ignored -> response);
+                inferenceResponse = pending;
                 afterInferenceAdmission.run();
-                if (responseHeaders != null) return responseHeaders.thenApply(ignored -> response);
+                return pending;
             }
             return CompletableFuture.completedFuture(response);
         }

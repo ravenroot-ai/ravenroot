@@ -11,7 +11,9 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.*;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
 
 /** Browser-bound optional identity, connection lifecycle, and finite execution authority. */
 public final class PersonalOAuthService implements TenantCredentialResolver {
@@ -47,8 +49,11 @@ public final class PersonalOAuthService implements TenantCredentialResolver {
     private record SignIn(String browser, int seconds, String authorizationUrl) { }
 
     /** Never acquire the store while holding the session monitor; provider I/O stays outside it. */
-    private <T> T authorityTransaction(java.util.function.Function<Map<String, Object>, T> action) {
+    private <T> T authorityTransaction(Function<Map<String, Object>, T> action) {
         return store.transaction(data -> { synchronized (pending) { return action.apply(data); } });
+    }
+    private <T> T inspectAuthority(Function<Map<String, Object>, T> action) {
+        return store.inspect(data -> { synchronized (pending) { return action.apply(data); } });
     }
     private void requireSession(String browser, BrowserSession session) {
         if (session == null || sessions.get(browser) != session || session.owner() == null
@@ -63,7 +68,9 @@ public final class PersonalOAuthService implements TenantCredentialResolver {
                 || !unlock.expires().isAfter(clock.instant()))) throw refused("unlock-required");
         if (unlock != null && !unlock.purpose().equals(purpose))
             throw refused(purpose.equals("execution") ? "unlock-execution-required" : "unlock-assistant-required");
-        var tokens = tokenMap(connection(data, session.owner(), session.connection()), browser);
+        return requireCurrentPlanTokens(tokenMap(connection(data, session.owner(), session.connection()), browser));
+    }
+    private Map<String, Object> requireCurrentPlanTokens(Map<String, Object> tokens) {
         if (text(tokens, "access_token").isBlank() || number(tokens, "expires") <= clock.instant().getEpochSecond())
             throw refused("reconnect-required");
         if (!scopes(tokens).containsAll(Set.of("chatgpt.tokens.use.direct", "resource.invoke"))) throw refused("plan-permission-required");
@@ -423,13 +430,7 @@ public final class PersonalOAuthService implements TenantCredentialResolver {
     public void requireExecutionAuthority(SecurityContext executor, Set<String> providers) {
         if (!providers.equals(Set.of("openai")) || !ISSUER.equals(executor.issuer())
                 || executor.principalType() != PrincipalType.USER || !executor.tenantId().equals("personal-" + executor.subject())) throw refused("login-required");
-        Map<String, Object> grant = store.transaction(data -> {
-            var value = cast(map(data, "executions").get(executor.requestId()));
-            if (!executor.subject().equals(value.get("owner")) || !executor.tenantId().equals(value.get("tenant"))
-                    || number(value, "expires") <= clock.instant().getEpochSecond()) throw refused("execution-authorization-expired");
-            return value;
-        });
-        if (requireTokens(executor.subject(), text(grant, "connection"), executor.requestId(), true).isBlank()) throw refused("reconnect-required");
+        requireTokens(executor.subject(), store.inspect(data -> executionConnection(data, executor)), executor.requestId(), true);
     }
 
     /** Resolves approved definitions under the independently authenticated source, never caller payload. */
@@ -450,36 +451,55 @@ public final class PersonalOAuthService implements TenantCredentialResolver {
     }
     @Override public Optional<SecretValue> resolveHttp(String packageId, SecurityContext executor, URI destination, String reference) {
         if (reference == null || !reference.startsWith("personal:")) return system.resolveHttp(packageId, executor, destination, reference);
-        if (!"personal:openai".equals(reference) || !"ai.ravenroot.extensions.ai".equals(packageId)
-                || !destination.equals(URI.create(RESOURCE + "/responses")) || !ISSUER.equals(executor.issuer())
-                || executor.principalType() != PrincipalType.USER) return Optional.empty();
         try {
-            Map<String, Object> grant = store.transaction(data -> {
-                var value = cast(map(data, "executions").get(executor.requestId()));
-                if (!executor.subject().equals(value.get("owner")) || !executor.tenantId().equals(value.get("tenant"))
-                        || number(value, "expires") <= clock.instant().getEpochSecond()) throw refused("execution-authorization-expired");
-                return value;
-            });
-            String token = requireTokens(executor.subject(), text(grant, "connection"), executor.requestId(), true);
-            return token.isBlank() ? Optional.empty() : Optional.of(new SecretValue(token.toCharArray()));
+            requirePersonalHttp(packageId, executor, destination, reference);
+            String connection = store.inspect(data -> executionConnection(data, executor));
+            return Optional.of(new SecretValue(requireTokens(executor.subject(), connection, executor.requestId(), true).toCharArray()));
         } catch (PersonalConnectionException failure) { return Optional.empty(); }
+    }
+
+    @Override public <T> CompletableFuture<T> dispatchHttp(String packageId, SecurityContext executor, URI destination,
+            String reference, Function<SecretValue, CompletableFuture<T>> handoff) {
+        requirePersonalHttp(packageId, executor, destination, reference);
+        String connection = store.inspect(data -> executionConnection(data, executor));
+        // A provider refresh can wait for I/O. Resolve it before final admission and then read current state again.
+        requireTokens(executor.subject(), connection, executor.requestId(), true);
+        return inspectAuthority(data -> {
+            String access = text(executionTokens(data, executor), "access_token");
+            char[] copied = access.toCharArray();
+            try (var secret = new SecretValue(copied)) {
+                return handoff.apply(secret);
+            } finally { Arrays.fill(copied, '\0'); }
+        });
     }
 
     @Override public void requireHttpActive(String packageId, SecurityContext executor, URI destination, String reference) {
         if (reference == null || !reference.startsWith("personal:")) {
             system.requireHttpActive(packageId, executor, destination, reference); return;
         }
-        if (!reference.equals("personal:openai") || !packageId.equals("ai.ravenroot.extensions.ai")
-                || !destination.equals(URI.create(RESOURCE + "/responses")) || !ISSUER.equals(executor.issuer())) throw refused("connection-unavailable");
-        store.transaction(data -> {
-            var grant = cast(map(data, "executions").get(executor.requestId()));
-            if (!executor.subject().equals(grant.get("owner")) || !executor.tenantId().equals(grant.get("tenant"))
-                    || number(grant, "expires") <= clock.instant().getEpochSecond()) throw refused("execution-authorization-expired");
-            var c = connection(data, executor.subject(), text(grant, "connection"));
-            var tokens = tokenMap(c, executor.requestId());
-            if (text(tokens, "access_token").isBlank() || !scopes(tokens).contains("chatgpt.tokens.use.direct")) throw refused("reconnect-required");
-            return null;
-        });
+        requirePersonalHttp(packageId, executor, destination, reference);
+        inspectAuthority(data -> executionTokens(data, executor));
+    }
+
+    private static void requirePersonalHttp(String packageId, SecurityContext executor, URI destination, String reference) {
+        if (!"personal:openai".equals(reference) || !"ai.ravenroot.extensions.ai".equals(packageId)
+                || !URI.create(RESOURCE + "/responses").equals(destination) || !ISSUER.equals(executor.issuer())
+                || executor.principalType() != PrincipalType.USER || !executor.tenantId().equals("personal-" + executor.subject()))
+            throw refused("connection-unavailable");
+    }
+
+    private String executionConnection(Map<String, Object> data, SecurityContext executor) {
+        var grant = cast(cast(data.get("executions")).get(executor.requestId()));
+        if (!executor.subject().equals(grant.get("owner")) || !executor.tenantId().equals(grant.get("tenant"))
+                || number(grant, "expires") <= clock.instant().getEpochSecond()) throw refused("execution-authorization-expired");
+        return text(grant, "connection");
+    }
+
+    private Map<String, Object> executionTokens(Map<String, Object> data, SecurityContext executor) {
+        var c = connection(data, executor.subject(), executionConnection(data, executor));
+        var unlock = unlocked.get(executor.requestId());
+        if (unlock != null && !unlock.purpose().equals("execution")) throw refused("unlock-execution-required");
+        return requireCurrentPlanTokens(tokenMap(c, executor.requestId()));
     }
 
     public String assistant(Headers headers, RequestContext context, String prompt, String requestedModel) {
@@ -839,7 +859,7 @@ public final class PersonalOAuthService implements TenantCredentialResolver {
     private static long number(Map<String, Object> map, String name) { return map.get(name) instanceof Number value ? value.longValue() : 0; }
     @SuppressWarnings("unchecked") private static Map<String, Object> cast(Object value) { return value instanceof Map<?, ?> map ? (Map<String, Object>) map : Map.of(); }
     private static Map<String, Object> map(Map<String, Object> parent, String key) { if (!parent.containsKey(key)) parent.put(key, new LinkedHashMap<String, Object>()); return cast(parent.get(key)); }
-    private static Map<String, Object> connection(Map<String, Object> data, String owner, String id) { var c = cast(map(data, "connections").get(Objects.toString(id, ""))); if (owner == null || !owner.equals(c.get("owner"))) throw refused("connection-unavailable"); return c; }
+    private static Map<String, Object> connection(Map<String, Object> data, String owner, String id) { var c = cast(cast(data.get("connections")).get(Objects.toString(id, ""))); if (owner == null || !owner.equals(c.get("owner"))) throw refused("connection-unavailable"); return c; }
     private static Set<String> scopes(Map<String, Object> tokens) { return new HashSet<>(Arrays.asList(text(tokens, "scope").split(" +"))); }
     private static PersonalConnectionException refused(String code) { return new PersonalConnectionException(code); }
     private static Map<String, Object> read(byte[] bytes) { return cast(ai.ravenroot.api.payload.PayloadJson.read(bytes, ProtectedConnectionStore.LIMITS).toJava()); }

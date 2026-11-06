@@ -599,28 +599,19 @@ public final class ManagedNodePackageServices implements NodePackageServices {
             HttpRequest.Builder builder = HttpRequest.newBuilder(destination).timeout(effectiveDeadline);
             outgoingHeaders.forEach((name, values) -> values.forEach(value -> builder.header(name, value)));
             identity.requireActive();
-            request.credential().ifPresent(binding -> injectCredential(builder, identity.identity(), destination, binding));
+            var binding = request.credential().orElse(null);
+            boolean revocable = binding != null && binding.reference().startsWith("personal:");
+            if (binding != null && !revocable) injectCredential(builder, identity.identity(), destination, binding);
             identity.requireActive();
             builder.method(method, body.length == 0
                     ? HttpRequest.BodyPublishers.noBody() : HttpRequest.BodyPublishers.ofByteArray(body));
             HttpResponse<byte[]> response;
             try {
-                if (request.credential().map(binding -> binding.reference().startsWith("personal:")).orElse(false)) {
-                    var binding = request.credential().orElseThrow();
-                    credentials.requireHttpActive(packageId, identity.identity(), destination, binding.reference());
-                    var pending = client().sendAsync(builder.build(),
-                            BoundedBodyHandlers.withLimits(limits, request.representationPolicy()));
-                    var currency = DEADLINES.scheduleAtFixedRate(() -> {
-                        try { credentials.requireHttpActive(packageId, identity.identity(), destination, binding.reference()); }
-                        catch (RuntimeException revoked) { pending.cancel(true); }
-                    }, 1, 1, TimeUnit.SECONDS);
-                    try {
-                        response = pending.get(effectiveDeadline.toNanos(), TimeUnit.NANOSECONDS);
-                        credentials.requireHttpActive(packageId, identity.identity(), destination, binding.reference());
-                    } finally { currency.cancel(false); if (!pending.isDone()) pending.cancel(true); }
+                var handler = BoundedBodyHandlers.withLimits(limits, request.representationPolicy());
+                if (revocable) {
+                    response = sendRevocableHttp(identity, destination, binding, builder.build(), handler, effectiveDeadline);
                 } else {
-                    response = client().send(builder.build(),
-                            BoundedBodyHandlers.withLimits(limits, request.representationPolicy()));
+                    response = client().send(builder.build(), handler);
                 }
             } catch (Throwable failure) {
                 throw mapFailure(failure);
@@ -628,6 +619,38 @@ public final class ManagedNodePackageServices implements NodePackageServices {
             return new OutboundHttpResponse(response.statusCode(), allowedResponseHeaders(response),
                     response.body(), limits.maximumOutputBytes());
         });
+    }
+
+    private HttpResponse<byte[]> sendRevocableHttp(IdentitySource identity, URI destination,
+            OutboundCredentialBinding binding, HttpRequest prepared, HttpResponse.BodyHandler<byte[]> handler,
+            Duration deadline) throws InterruptedException, ExecutionException, java.util.concurrent.TimeoutException {
+        var placement = requireCredentialPlacement(binding, destination);
+        var transport = client();
+        var executor = identity.identity();
+        CompletableFuture<HttpResponse<byte[]>> pending;
+        try {
+            pending = credentials.dispatchHttp(packageId, executor, destination, binding.reference(), secret -> {
+                identity.requireActive();
+                if (Thread.currentThread().isInterrupted()) throw refusal(NodePackageServiceException.Reason.CANCELLED);
+                var authorized = HttpRequest.newBuilder(prepared, (name, value) -> true);
+                placeCredential(authorized, placement, secret);
+                return transport.sendAsync(authorized.build(), handler);
+            });
+        } catch (SecurityException unavailable) {
+            throw refusal(NodePackageServiceException.Reason.CREDENTIAL_UNAVAILABLE);
+        }
+        var currency = DEADLINES.scheduleAtFixedRate(() -> {
+            try { credentials.requireHttpActive(packageId, executor, destination, binding.reference()); }
+            catch (RuntimeException revoked) { pending.cancel(true); }
+        }, 1, 1, TimeUnit.SECONDS);
+        try {
+            var response = pending.get(deadline.toNanos(), TimeUnit.NANOSECONDS);
+            credentials.requireHttpActive(packageId, executor, destination, binding.reference());
+            return response;
+        } finally {
+            currency.cancel(false);
+            if (!pending.isDone()) pending.cancel(true);
+        }
     }
 
     private OutboundCall<OutboundWebSocketSession> openWebSocket(IdentitySource identity,
@@ -728,20 +751,29 @@ public final class ManagedNodePackageServices implements NodePackageServices {
 
     private void injectCredential(HttpRequest.Builder builder, SecurityContext executor, URI destination,
                                   OutboundCredentialBinding binding) {
-        NodePackageEgressPolicy.CredentialPlacement placement;
+        var placement = requireCredentialPlacement(binding, destination);
+        try (SecretValue secret = credentials.resolveHttp(packageId, executor, destination, binding.reference())
+                .orElseThrow(() -> refusal(NodePackageServiceException.Reason.CREDENTIAL_UNAVAILABLE))) {
+            placeCredential(builder, placement, secret);
+        }
+    }
+
+    private NodePackageEgressPolicy.CredentialPlacement requireCredentialPlacement(OutboundCredentialBinding binding,
+                                                                                   URI destination) {
         try {
-            placement = policy.requireCredentialPlacement(binding.bindingId(), destination);
+            return policy.requireCredentialPlacement(binding.bindingId(), destination);
         } catch (IllegalArgumentException forbidden) {
             throw refusal(NodePackageServiceException.Reason.DESTINATION_FORBIDDEN);
         }
-        try (SecretValue secret = credentials.resolveHttp(packageId, executor, destination, binding.reference())
-                .orElseThrow(() -> refusal(NodePackageServiceException.Reason.CREDENTIAL_UNAVAILABLE))) {
-            char[] copied = secret.copy();
-            try {
-                builder.header(placement.headerName(), placement.prefix() + new String(copied));
-            } finally {
-                java.util.Arrays.fill(copied, '\0');
-            }
+    }
+
+    private static void placeCredential(HttpRequest.Builder builder,
+                                        NodePackageEgressPolicy.CredentialPlacement placement, SecretValue secret) {
+        char[] copied = secret.copy();
+        try {
+            builder.header(placement.headerName(), placement.prefix() + new String(copied));
+        } finally {
+            java.util.Arrays.fill(copied, '\0');
         }
     }
 

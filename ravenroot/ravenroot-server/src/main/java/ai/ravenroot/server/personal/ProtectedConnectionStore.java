@@ -50,8 +50,17 @@ public final class ProtectedConnectionStore {
     }
 
     /** Writes only when the callback succeeds; no partial token rotation can become visible. */
-    @SuppressWarnings("unchecked")
     public <T> T transaction(Function<Map<String, Object>, T> action) {
+        return access(action, true);
+    }
+
+    /** Observes state under the same cross-process lock without rewriting it. */
+    <T> T inspect(Function<Map<String, Object>, T> action) {
+        return access(action, false);
+    }
+
+    @SuppressWarnings("unchecked")
+    private <T> T access(Function<Map<String, Object>, T> action, boolean write) {
         synchronized (LOCKS.computeIfAbsent(directory, ignored -> new Object())) {
             Path lock = directory.resolve("connections.lock");
             try {
@@ -66,6 +75,7 @@ public final class ProtectedConnectionStore {
                 Map<String, Object> state = Files.exists(file)
                         ? (Map<String, Object>) PayloadJson.read(decrypt(key, Files.readAllBytes(file)), LIMITS).toJava()
                         : new LinkedHashMap<>();
+                if (!write) return action.apply(state);
                 // Payload maps are immutable; make a mutable tree within this lock.
                 state = mutable(state);
                 T result = action.apply(state);

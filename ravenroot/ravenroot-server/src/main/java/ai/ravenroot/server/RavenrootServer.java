@@ -3,6 +3,8 @@ package ai.ravenroot.server;
 import ai.ravenroot.api.application.RavenrootApplication;
 import ai.ravenroot.api.application.AuthorizedRavenrootApplication;
 import ai.ravenroot.api.application.ExecutionEvent;
+import ai.ravenroot.api.application.ExecutionPolicy;
+import ai.ravenroot.api.application.ExecutionSubmission;
 import ai.ravenroot.api.application.StableEdgeId;
 import ai.ravenroot.api.application.PublicExecutionDescription;
 import ai.ravenroot.api.application.RuntimeActivityData;
@@ -26,6 +28,8 @@ import ai.ravenroot.api.programming.ProgramRuntimeUnavailableException;
 import ai.ravenroot.api.programming.ProgramSourceRejectedException;
 import ai.ravenroot.api.security.AuthorizationService;
 import ai.ravenroot.api.security.DefaultAuthorizationService;
+import ai.ravenroot.api.security.RequestContext;
+import ai.ravenroot.core.graph.GraphManager;
 import ai.ravenroot.core.graph.GraphMlLimits;
 import ai.ravenroot.core.graph.GraphMlCompatibilityException;
 import ai.ravenroot.core.graph.GraphMlParseException;
@@ -43,6 +47,10 @@ import ai.ravenroot.server.error.StructuredPayloadRejectionLogger;
 import ai.ravenroot.server.payload.StructuredSubmission;
 import ai.ravenroot.server.payload.ArtifactTestSubmission;
 import ai.ravenroot.server.payload.ProgramBuildSubmission;
+import ai.ravenroot.server.personal.PersonalConnectionException;
+import ai.ravenroot.server.personal.PersonalOAuthService;
+import ai.ravenroot.core.runtime.BehaviorRegistry;
+import ai.ravenroot.core.runtime.PersonalExecutionAdmissionException;
 import ai.ravenroot.server.ratelimit.BoundedEventQueue;
 import ai.ravenroot.server.ratelimit.RateLimitAuditEvent;
 import ai.ravenroot.server.ratelimit.RateLimitConfiguration;
@@ -371,6 +379,126 @@ public final class RavenrootServer implements AutoCloseable {
      * which is what a client cannot distinguish from an unserved path.</p>
      */
     private final ai.ravenroot.server.credential.UserCredentialStore credentials;
+    private volatile PersonalOAuthService personalOAuth;
+    private final GraphMlLimits graphMlLimits;
+
+    synchronized void installPersonalOAuth(PersonalOAuthService service) {
+        if (personalOAuth != null) throw new IllegalStateException("Personal OAuth already installed");
+        personalOAuth = java.util.Objects.requireNonNull(service);
+    }
+
+    private void personalOAuth(HttpExchange exchange, HttpRequestContext context) throws IOException {
+        String path = exchange.getRequestURI().getPath();
+        if (personalOAuth == null) {
+            if (path.equals("/v1/personal") && method(exchange, context, "GET")) {
+                json(exchange, 200, "{\"state\":\"configuration-required\",\"connections\":[]}");
+            } else if (!path.equals("/v1/personal")) {
+                fail(exchange, context, ErrorCode.UNKNOWN_RESOURCE);
+            }
+            return;
+        }
+        if (path.equals("/v1/personal/executions")) {
+            personalDeploymentExecution(exchange, context);
+        } else {
+            personalOAuth.handle(exchange, context.requirePrincipal(), context.applicationContext());
+        }
+    }
+
+    private void personalDeploymentExecution(HttpExchange exchange, HttpRequestContext httpContext) throws IOException {
+        if (!method(exchange, httpContext, "POST")) return;
+        try {
+            var parsed = PayloadJson.read(boundedBody(exchange, MAX_ASSISTANT_TURN_BYTES),
+                    ai.ravenroot.server.assistant.AssistantTurn.TURN_LIMITS);
+            if (!(parsed instanceof PayloadValue.MapValue body)
+                    || !Set.of("deploymentId", "incarnationId", "graphVersion", "payload").containsAll(body.entries().keySet())
+                    || !(body.entries().get("deploymentId") instanceof PayloadValue.TextValue id)
+                    || !(body.entries().get("incarnationId") instanceof PayloadValue.TextValue incarnation)
+                    || !(body.entries().get("graphVersion") instanceof PayloadValue.TextValue version)) {
+                fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
+                return;
+            }
+            RequestContext source = httpContext.applicationContext();
+            byte[] graph = authorizedApplication.localDeploymentGraphMl(source, id.value(), incarnation.value(), version.value())
+                    .orElseThrow(IllegalArgumentException::new);
+            if (!requiresPersonalConnections(graph)) {
+                throw new PersonalConnectionException("system-graph-use-system-mode");
+            }
+            PayloadEnvelope payload = body.entries().containsKey("payload")
+                    ? PayloadEnvelope.fromValue(body.entries().get("payload"), payloadLimits)
+                    : PayloadEnvelope.legacyText("");
+            var submission = startPersonalGraph(exchange, httpContext, graph, payload, ExecutionPolicy.STANDARD,
+                    Map.of("tenant", source.tenantId(), "issuer", source.issuer(), "subject", source.subject(),
+                            "deploymentId", id.value(), "incarnationId", incarnation.value(), "graphVersion", version.value()));
+            if (submission == null) return;
+            json(exchange, 202, "{\"processInstanceId\":\"" + submission.processInstanceId()
+                    + "\",\"traversalId\":\"" + submission.traversalId() + "\",\"executionId\":\"" + submission.executionId()
+                    + "\",\"executionContext\":\"personal\",\"graphVersion\":\"" + escape(submission.graphVersion()) + "\"}");
+        } catch (PersonalExecutionAdmissionException failure) {
+            json(exchange, 409, "{\"state\":\"" + escape(failure.getMessage()) + "\"}");
+        } catch (PersonalConnectionException failure) {
+            json(exchange, 409, "{\"state\":\"" + escape(failure.code()) + "\"}");
+        } catch (ai.ravenroot.server.credential.CredentialAdmission.NotYours refused) {
+            fail(exchange, httpContext, ErrorCode.ACCESS_DENIED);
+        } catch (GraphMlParseException error) {
+            graphMlError(exchange, httpContext, error);
+        } catch (GraphMlCompatibilityException error) {
+            graphMlError(exchange, httpContext, error);
+        } catch (PayloadException rejection) {
+            failPayload(exchange, httpContext, rejection);
+        } catch (ai.ravenroot.api.application.GraphAdmissionException refusal) {
+            failGraphAdmission(exchange, httpContext, refusal);
+        } catch (ai.ravenroot.core.runtime.GraphExecutionLimitException rejection) {
+            failGraphExecutionLimit(exchange, httpContext, rejection);
+        } catch (IllegalArgumentException invalid) {
+            fail(exchange, httpContext, ErrorCode.INVALID_REQUEST);
+        } catch (IllegalStateException error) {
+            fail(exchange, httpContext, ErrorCode.CONFLICT);
+        }
+    }
+
+    private boolean requiresPersonalConnections(byte[] graph) {
+        try (var parsed = GraphManager.readGraphMl(new java.io.ByteArrayInputStream(graph), graphMlLimits)) {
+            BehaviorRegistry.requirePersonalRuntimeCompatibility(parsed.definition());
+            return parsed.definition().nodes().stream().anyMatch(node -> "personal".equals(node.properties().get("credentialMode")));
+        }
+    }
+
+    /** Charges the executor partition and validates local credentials before creating a personal grant. */
+    private ExecutionSubmission startPersonalGraph(HttpExchange exchange, HttpRequestContext httpContext, byte[] graph,
+            PayloadEnvelope payload, ExecutionPolicy policy, Map<String, String> source) throws IOException {
+        if (personalOAuth == null) throw new PersonalConnectionException("provider-unavailable");
+        var principal = personalOAuth.principal(exchange.getRequestHeaders(), httpContext.requirePrincipal());
+        if (!PersonalOAuthService.ISSUER.equals(principal.issuer())) throw new PersonalConnectionException("login-required");
+        var executor = httpContext.withPrincipal(principal);
+        var submissionBudget = rateLimiter.checkSubmissionRate(principal.tenantId());
+        if (!submissionBudget.isAllowed()) {
+            refuse(exchange, executor, submissionBudget);
+            return null;
+        }
+        var admission = rateLimiter.activeExecutions().checkAdmission(principal.tenantId());
+        if (!admission.isAllowed()) {
+            refuse(exchange, executor, admission);
+            return null;
+        }
+        try (var slot = rateLimiter.acquireSubmissionSlot(principal.tenantId())) {
+            if (!slot.granted()) {
+                refuse(exchange, executor, slot.refusal());
+                return null;
+            }
+            RequestContext context = executor.applicationContext();
+            credentialAdmission.require(context, graph);
+            personalOAuth.authorizeExecution(exchange.getRequestHeaders(), context, Set.of("openai"), source);
+            var submission = authorizedApplication.startGraphMl(context, new java.io.ByteArrayInputStream(graph),
+                    payload, payloadLimits, policy);
+            exchange.getResponseHeaders().set("X-Ravenroot-Execution-Context", "personal");
+            return submission;
+        }
+    }
+
+    private void personalCallback(HttpExchange exchange, HttpRequestContext context) throws IOException {
+        if (personalOAuth == null) { fail(exchange, context, ErrorCode.UNKNOWN_RESOURCE); return; }
+        personalOAuth.callback(exchange);
+    }
 
     /**
      * The rule that a submitted graph may only name stored credentials
@@ -721,6 +849,7 @@ public final class RavenrootServer implements AutoCloseable {
                     GraphMlLimits graphMlLimits) {
         this.programAuthoringLimits = java.util.Objects.requireNonNull(application, "application")
                 .programAuthoringLimits();
+        this.graphMlLimits = java.util.Objects.requireNonNull(graphMlLimits);
         this.servedConfiguration = ServedConfiguration.from(graphMlLimits, programAuthoringLimits);
         this.graphDocumentMaxBytes = servedConfiguration.graphDocumentMaxBytes();
         this.assistant = java.util.Objects.requireNonNull(assistant, "assistant");
@@ -823,6 +952,8 @@ public final class RavenrootServer implements AutoCloseable {
         // longest prefix, so "/v1/assistant/messages" reaches its own handler while "/v1/assistant"
         // keeps the shorter path -- and both are then table-driven and CORS-preflighted individually,
         // which the artifact-operation switch could not be.
+        apiContext("/v1/personal", this::personalOAuth);
+        server.createContext("/auth/callback", publicContext(this::personalCallback));
         apiContext("/v1/assistant", this::assistantStatus);
         apiContext("/v1/assistant/messages", this::assistantMessages);
         // Longest-prefix matching keeps this off the two above; see the comment on the
@@ -1564,6 +1695,24 @@ public final class RavenrootServer implements AutoCloseable {
             AuthenticatedPrincipal principal;
             try {
                 principal = authenticator.authenticate(exchange.getRequestHeaders());
+                String path = exchange.getRequestURI().getPath();
+                boolean executionPath = path.equals("/v1/executions") || path.startsWith("/v1/executions/");
+                boolean submission = exchange.getRequestMethod().equals("POST")
+                        && (path.equals("/v1/executions") || path.equals("/v1/executions/"));
+                boolean personalContext = (path.equals("/v1/events") || executionPath && !submission)
+                        && "personal".equals(exchange.getRequestHeaders().getFirst("X-Ravenroot-Execution-Context"));
+                boolean personalAssistant = path.equals("/v1/assistant/messages")
+                        && "personal".equals(exchange.getRequestHeaders().getFirst("X-Ravenroot-Assistant-Mode"));
+                if (personalContext || personalAssistant) {
+                    if (personalOAuth != null) principal = personalOAuth.principal(exchange.getRequestHeaders(), principal);
+                    if (!PersonalOAuthService.ISSUER.equals(principal.issuer())) {
+                        fail(exchange, httpContext, ErrorCode.AUTHENTICATION_REQUIRED);
+                        return;
+                    }
+                }
+            } catch (PersonalConnectionException denied) {
+                json(exchange, 403, "{\"state\":\"" + escape(denied.code()) + "\"}");
+                return;
             } catch (AuthenticationException denied) {
                 exchange.getResponseHeaders().set("WWW-Authenticate", "Bearer");
                 fail(exchange, httpContext, ErrorCode.AUTHENTICATION_REQUIRED);
@@ -1806,6 +1955,21 @@ public final class RavenrootServer implements AutoCloseable {
         }
         if (!assistant.offered()) {
             fail(exchange, httpContext, ErrorCode.UNKNOWN_RESOURCE);
+            return;
+        }
+        if ("personal".equals(exchange.getRequestHeaders().getFirst("X-Ravenroot-Assistant-Mode"))) {
+            if (personalOAuth == null) { json(exchange, 409, "{\"state\":\"provider-unavailable\"}"); return; }
+            try {
+                byte[] personalBody;
+                try (var input = exchange.getRequestBody()) { personalBody = input.readNBytes(MAX_ASSISTANT_TURN_BYTES + 1); }
+                if (personalBody.length > MAX_ASSISTANT_TURN_BYTES) throw new IllegalArgumentException();
+                var turn = ai.ravenroot.server.assistant.AssistantTurn.read(personalBody);
+                String answer = personalOAuth.assistant(exchange.getRequestHeaders(), httpContext.applicationContext(),
+                        turn.render(), exchange.getRequestHeaders().getFirst("X-Ravenroot-Assistant-Model"));
+                json(exchange, 200, new ai.ravenroot.server.assistant.AssistantOutcome.Reply(answer, null, false).toJson());
+            } catch (PersonalConnectionException failure) {
+                json(exchange, 409, "{\"state\":\"" + escape(failure.code()) + "\"}");
+            } catch (IllegalArgumentException failure) { fail(exchange, httpContext, ErrorCode.INVALID_REQUEST); }
             return;
         }
         if (!assistant.availability(
@@ -4199,6 +4363,11 @@ public final class RavenrootServer implements AutoCloseable {
                 if (graph == null) return;
                 var context = httpContext.applicationContext();
                 credentialAdmission.require(context, graph);
+                try (var parsed = GraphManager.readGraphMl(new java.io.ByteArrayInputStream(graph), graphMlLimits)) {
+                    if (parsed.definition().nodes().stream().anyMatch(node -> "personal".equals(node.properties().get("credentialMode")))) {
+                        json(exchange, 409, "{\"state\":\"personal-unattended-execution-refused\"}"); return;
+                    }
+                }
                 var status = authorizedApplication.startSourceSession(context, sessionId,
                         new java.io.ByteArrayInputStream(graph));
                 sourceSessionJson(exchange, 202, status);
@@ -5228,15 +5397,18 @@ public final class RavenrootServer implements AutoCloseable {
                 payload = PayloadEnvelope.legacyText(query(exchange).getOrDefault("payload", ""));
             }
             var context = httpContext.applicationContext();
-            // Before an execution id is minted and before the engine sees the
-            // document: a graph naming a stored credential this caller does not own is refused here,
-            // because this is the last point at which the caller's identity and the document are in
-            // the same method. Below this line the identity narrows to a SecurityContext and the
-            // credential reference becomes a bare string with no owner attached -- see
-            // CredentialAdmission for the full reasoning and for what it deliberately does not cover.
-            credentialAdmission.require(context, graph);
-            var submission = authorizedApplication.startGraphMl(context,
-                    new java.io.ByteArrayInputStream(graph), payload, payloadLimits, policy);
+            ExecutionSubmission submission;
+            if (requiresPersonalConnections(graph)) {
+                submission = startPersonalGraph(exchange, httpContext, graph, payload, policy,
+                        Map.of("tenant", context.tenantId(), "issuer", context.issuer(), "subject", context.subject()));
+                if (submission == null) return;
+            } else {
+                // Check stored references under the original perimeter identity.
+                credentialAdmission.require(context, graph);
+                submission = authorizedApplication.startGraphMl(context,
+                        new java.io.ByteArrayInputStream(graph), payload, payloadLimits, policy);
+                exchange.getResponseHeaders().set("X-Ravenroot-Execution-Context", "system");
+            }
             json(exchange, 202, "{\"processInstanceId\":\"" + submission.processInstanceId()
                     + "\",\"traversalId\":\"" + submission.traversalId()
                     + "\",\"executionId\":\"" + submission.executionId()
@@ -5246,6 +5418,10 @@ public final class RavenrootServer implements AutoCloseable {
                     + "\",\"payloadKind\":\"" + payload.kind()
                     + "\",\"payloadSchema\":\"" + escape(payload.schema())
                     + "\",\"payloadSchemaVersion\":\"" + escape(payload.schemaVersion()) + "\"}");
+        } catch (PersonalExecutionAdmissionException failure) {
+            json(exchange, 409, "{\"state\":\"" + escape(failure.getMessage()) + "\"}");
+        } catch (PersonalConnectionException refused) {
+            json(exchange, 409, "{\"code\":\"PERSONAL_CONNECTION_REQUIRED\",\"state\":\"" + escape(refused.code()) + "\"}");
         } catch (ai.ravenroot.server.credential.CredentialAdmission.NotYours refused) {
             // 403 and not 404: the caller is authenticated and the resource exists as far as they are
             // concerned -- it is the submission that is not permitted. Deliberately the same answer

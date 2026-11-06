@@ -70,6 +70,17 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * all the production code, and only the duration of the work is under test control.</p>
  */
 class ActiveExecutionAdmissionHttpTest {
+    private static final String SYSTEM_GRAPH = """
+            <graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+              <key id="kind" for="node" attr.name="kind" attr.type="string"/>
+              <graph id="admission" edgedefault="directed">
+                <node id="start"><data key="kind">START</data></node>
+                <node id="end"><data key="kind">END</data></node>
+                <node id="error"><data key="kind">ERROR</data></node>
+                <edge id="complete" source="start" target="end"/>
+              </graph>
+            </graphml>
+            """;
     private final AtomicLong nanos = new AtomicLong();
 
     @Test
@@ -307,6 +318,19 @@ class ActiveExecutionAdmissionHttpTest {
         }
     }
 
+    @Test
+    void malformedGraphIsRefusedBeforeTheStubOrAdmissionCapacityIsConsumed() throws Exception {
+        try (var fixture = fixture(limits(builder -> builder.activeExecutions(4)))) {
+            var client = HttpClient.newHttpClient();
+            var refused = fixture.submit(client, "tenant-a", "<graphml/>");
+            assertEquals(400, refused.statusCode(), refused.body());
+            assertTrue(refused.body().contains("GRAPHML_INVALID_GRAPH"), refused.body());
+            assertEquals(0, fixture.registry().total());
+            assertEquals(0, fixture.application().running.get());
+            assertEquals(202, fixture.submit(client, "tenant-a").statusCode());
+        }
+    }
+
     /** The registry cannot grow without bound even when nothing it counts ever terminates. */
     @Test
     void theRegistryIsBoundedWhenExecutionsArriveWithoutPassingAdmission() {
@@ -355,7 +379,7 @@ class ActiveExecutionAdmissionHttpTest {
         }
 
         HttpResponse<String> submit(HttpClient client, String tenant) throws Exception {
-            return submit(client, tenant, "<graphml/>");
+            return submit(client, tenant, SYSTEM_GRAPH);
         }
 
         HttpResponse<String> submit(HttpClient client, String tenant, String body) throws Exception {
@@ -410,7 +434,7 @@ class ActiveExecutionAdmissionHttpTest {
      */
     private static final class HoldingApplication implements RavenrootApplication {
         /** Request body that makes a submission fail after admission but before any execution starts. */
-        static final String REJECT = "reject-this-submission";
+        static final String REJECT = SYSTEM_GRAPH.replace("id=\"admission\"", "id=\"refused\"");
 
         private final List<Consumer<ExecutionEvent>> listeners = new CopyOnWriteArrayList<>();
         private final List<ExecutionEvent> history = new CopyOnWriteArrayList<>();

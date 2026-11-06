@@ -1,6 +1,7 @@
 import { uiMessage, withUiMessage, uiErrorMessage, renderUiMessage } from './ui-message.js';
 import { uiErrorReason, uiText } from './ui-text.js';
 import { productError } from './product-error.js';
+import { browserSessionCredentials } from './browser-credentials.js';
 
 const runtimeClientValidationError = message => productError('runtimeClient.validation.failed', message);
 
@@ -483,6 +484,8 @@ export class RavenrootRuntimeClient {
   constructor(baseUrl, options = {}) {
     this.baseUrl = normalizeBaseUrl(baseUrl);
     this.fetchImpl = options.fetchImpl || globalThis.fetch?.bind(globalThis);
+    this.browserSessions = options.browserSessions === true;
+    this.onExecutionAccepted = options.onExecutionAccepted || (() => {});
     this.tokenProvider = options.tokenProvider || memoryTokenProvider(options.accessToken);
     this.maxFrameBytes = options.maxFrameBytes || DEFAULT_MAX_FRAME_BYTES;
     this.maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
@@ -514,7 +517,7 @@ export class RavenrootRuntimeClient {
         const response = await this.fetchImpl(`${this.baseUrl}/v1/events?include=diagnostics`, {
           method: 'GET',
           headers: this.#headers(headers, credential.accessToken),
-          credentials: 'omit',
+          credentials: browserSessionCredentials(this.baseUrl, this.browserSessions),
           cache: 'no-store',
           signal,
         });
@@ -855,7 +858,8 @@ export class RavenrootRuntimeClient {
         };
         if (cursor) headers['Last-Event-ID'] = cursor;
         const response = await this.fetchImpl(`${this.baseUrl}${path}`, {
-          method: 'GET', headers: this.#headers(headers, credential.accessToken), credentials: 'omit',
+          method: 'GET', headers: this.#headers(headers, credential.accessToken),
+          credentials: browserSessionCredentials(this.baseUrl, this.browserSessions),
           cache: 'no-store', signal,
         });
         if (response.status === 401 || response.status === 403) {
@@ -1703,13 +1707,15 @@ export class RavenrootRuntimeClient {
     try {
       response = await this.fetchImpl(`${this.baseUrl}${path}`, {
         ...options,
-        credentials: 'omit',
+        credentials: browserSessionCredentials(this.baseUrl, this.browserSessions),
         cache: 'no-store',
         headers: this.#headers(options.headers, credential.accessToken),
       });
     } catch {
       throw new RuntimeRequestError('Service request failed', { method, path, uiReasonKey: 'workspace.runtime.request.failed' });
     }
+    const executionContext = response.headers?.get?.('X-Ravenroot-Execution-Context');
+    if (executionContext === 'personal' || executionContext === 'system') this.personalContext = executionContext === 'personal';
     if (response.status === 401 || response.status === 403) {
       if (response.status === 401) await this.#clearAccessTokenIfCurrent(credential);
       throw new RuntimeAuthorizationError(response.status === 401 ? 'Authentication expired' : 'Insufficient permissions',
@@ -1757,6 +1763,7 @@ export class RavenrootRuntimeClient {
     if (body === null) {
       throw new RuntimeRequestError('Service response is not valid JSON', { status: response.status, method, path, uiReasonKey: 'workspace.runtime.request.invalidJson' });
     }
+    if (executionContext && body?.executionId) this.onExecutionAccepted({ ...body, executionContext });
     return body;
   }
 
@@ -1797,6 +1804,7 @@ export class RavenrootRuntimeClient {
   }
 
   #headers(headers = {}, token = '') {
+    if (this.personalContext) headers = { ...headers, 'X-Ravenroot-Execution-Context': 'personal' };
     return token ? { ...headers, Authorization: `Bearer ${token}` } : { ...headers };
   }
 

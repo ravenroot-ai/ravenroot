@@ -73,11 +73,11 @@ AGENT_BUDGET_METHOD_DIGESTS = {
 AGENT_BUDGET_POLICY_CONSTRUCTOR_DIGEST = \
     "78e872f0c6350db3eaefcab90a2cb0ee4dbc4ada692b869b11dc6b3b39a1331f"
 AGENT_BUDGET_COMPOSITION_DIGEST = \
-    "48304fd3f668a7d542c055c452f1ac814695507e03bb8401adfb4f0b667723cb"
+    "ef04df48d52dceb9be8cdbe889520b84d52dfd7ec92e0dbbdaf897e050ec5ebe"
 AGENT_BUDGET_CONSUMER_DIGEST = \
     "5ba0f6548598db034990a2307684c25656f61426d7a5e9101dc360c964b70c64"
 AGENT_BUDGET_COMPOSITION_SOURCE_DIGEST = \
-    "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260"
+    "a6a9bb21af76d640d2b8140a2a555cafcaae09461d640d520213b8f1955d4b70"
 AGENT_BUDGET_CONSUMER_SOURCE_DIGEST = \
     "c830574e0a2c9b683d689fa7d437a206772d8043ce40f2ecaa21cf3345f83979"
 AGENT_BUDGET_VECTOR_SOURCE_DIGEST = \
@@ -199,7 +199,7 @@ EMBED_CENTRALIZATION_AFTER_REVISION = "9a77081bbac6133709685b6706fa0d400922160d"
 EMBED_SOURCE_DIGESTS = {
     EMBED_CONFIGURATION_PATH: "b7ae127c44b5f8c7068a83f07bd55856e9f9f2d0b07d80be0ec1777120a99e24",
     EMBED_STARTUP_CHECK_PATH: "4716ec286b5ae31d4284ca5b2bbf2c4eed5c53904021def303f8dd1dd9d78539",
-    EMBED_MAIN_PATH: "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260",
+    EMBED_MAIN_PATH: "a6a9bb21af76d640d2b8140a2a555cafcaae09461d640d520213b8f1955d4b70",
     EMBED_REPLICA_CHECK_PATH: "6a04a33061e6c2a1db2774877362722ee3af6339967585875d90b33afe311d19",
     EMBED_CONFIGURATION_TEST_PATH: "efc54784cd75dfa0cca6c0208d40add34f53aa0d62c40565f74716a03c1995ea",
     EMBED_MAIN_TEST_PATH: "f2699ce39d55985b13421068f812f50705be5c82050cf6769a621e3f49df37d3",
@@ -215,7 +215,7 @@ EMBED_METHOD_DIGESTS = {
     "EmbedStartupCheck.evaluate":
         "6edd7cf7715886c573f696bc865a76a3f951da2632bd199b241b144edc1b35df",
     "RavenrootServerMain.run":
-        "48304fd3f668a7d542c055c452f1ac814695507e03bb8401adfb4f0b667723cb",
+        "ef04df48d52dceb9be8cdbe889520b84d52dfd7ec92e0dbbdaf897e050ec5ebe",
     "RavenrootServerMain.refuseUnsupportablePackagedEmbed":
         "f7538d127b1848e9836bd69c9b43512154295f5221ec282c8cd7242f3acb7be7",
     "ReplicaTopologyStartupCheck.replicaLocalAuthorities":
@@ -3111,6 +3111,17 @@ FINAL_REVIEW_UI_SAVE_GROUPS = frozenset({
 FINAL_REVIEW_UI_SAVE_ANCHOR = "6ca1eac5aa04bc824256f332364f1eab028968a2"
 FINAL_REVIEW_UI_SAVE_BEFORE = "842fd8f12c013baee0a554f1dabb5015680fddf388758f3e0a712dcfecdfdb97"
 FINAL_REVIEW_UI_SAVE_AFTER = "00da74a8f8862de91ce136897edc3e7d5be61078acf1eb72751d9229e42aac05"
+FINAL_REVIEW_UI_PERSONAL_BASE = "b652243e21c25f3468f67e8094246dbbdc714f29"
+FINAL_REVIEW_UI_PERSONAL_AFTER = "2bd9236359e95fb8b1a9940af575b789e40b6b48f2ed6607481f111c60f27d07"
+FINAL_REVIEW_UI_PERSONAL_METHODS = (
+    "catalogPropertyFieldsHtml", "connectRuntime", "handleRuntimeEvent",
+    "submitAssistantDraft", "refreshAssistantAvailability",
+)
+FINAL_REVIEW_UI_PERSONAL_INSERTIONS = (
+    "import { mountPersonalConnections } from './personal-connections.js';\n",
+    "let personalConnections = null;\nlet personalAccountModels = [];\n"
+    "let personalAssistantMode = false;\nlet personalIdentityGeneration = 0;\n",
+)
 # These reviewed replacements are independent of inventory or refreshable method proof metadata.
 FINAL_REVIEW_UI_SAVE_METHODS = {
     "setRenderMode": "7959c6e6b5bfc85bffc8f79977e9c30ef3fac63ed5e74920c31a6ba1d07c5150",
@@ -3131,10 +3142,28 @@ def final_review_ui_save_correspondence(
         raw = (root / relative).read_bytes()
         head = subprocess.run(["git", "rev-parse", "--verify", "HEAD^{commit}"],
                               cwd=root, check=True, capture_output=True, text=True).stdout.strip()
-        if hashlib.sha256(raw).hexdigest() != FINAL_REVIEW_UI_SAVE_AFTER \
+        source = raw.decode("utf-8")
+        if hashlib.sha256(raw).hexdigest() == FINAL_REVIEW_UI_PERSONAL_AFTER:
+            if not revision_is_ancestor(root, FINAL_REVIEW_UI_PERSONAL_BASE, head):
+                return False
+            baseline = committed_source(root, FINAL_REVIEW_UI_PERSONAL_BASE, relative.as_posix())
+            if baseline is None:
+                return False
+            for method in FINAL_REVIEW_UI_PERSONAL_METHODS:
+                current = _javascript_function_span(source, method)
+                prior = _javascript_function_span(baseline, method)
+                if current is None or prior is None:
+                    return False
+                source = source[:current[0]] + baseline[slice(*prior)] + source[current[1]:]
+            for insertion in FINAL_REVIEW_UI_PERSONAL_INSERTIONS:
+                if source.count(insertion) != 1:
+                    return False
+                source = source.replace(insertion, "", 1)
+            if source != baseline:
+                return False
+        if _source_digest(source) != FINAL_REVIEW_UI_SAVE_AFTER \
                 or not revision_is_ancestor(root, FINAL_REVIEW_UI_SAVE_ANCHOR, head):
             return False
-        source = raw.decode("utf-8")
         anchor = committed_source(root, FINAL_REVIEW_UI_SAVE_ANCHOR, relative.as_posix())
         if anchor is None or hashlib.sha256(anchor.encode("utf-8")).hexdigest() != expected_digest:
             return False
@@ -6582,7 +6611,7 @@ def persistence_policy_authority_from_source(
         (PERSISTENCE_OWNERSHIP_CONFIGURATION_PATH, "ExecutionOwnershipConfiguration", "requireCompatible",
          "7dc8e183ddde66ccda77fff516efba5704ef5ab3dfe5518579685cea98844070"),
         (PERSISTENCE_SERVER_MAIN_PATH, "RavenrootServerMain", "run",
-         "48304fd3f668a7d542c055c452f1ac814695507e03bb8401adfb4f0b667723cb"),
+         "ef04df48d52dceb9be8cdbe889520b84d52dfd7ec92e0dbbdaf897e050ec5ebe"),
         (PERSISTENCE_AUDIT_DIRECTORY_PATH, "AuditTrailDirectory", "resolve",
          "fabf6b48115874f29c018fb61e71bc358a3f977634dfc1723a1bf3aa335fb227"),
         (PERSISTENCE_AUDIT_CONFIGURATION_PATH, "AuditTrailConfiguration", "fromEnvironment",
@@ -7808,15 +7837,17 @@ def external_io_policy_authority_from_source(
         (EXTERNAL_IO_BEHAVIOR_REGISTRY_PATH, "BehaviorRegistry", "registerSourceAuthority",
          "d64b7a830280e60898cb293447e518665e948780a6bdcd1dab0b5425c5070c22"),
         (EXTERNAL_IO_DEPLOYMENT_PATH, "DefaultGraphDeployment", "startSources",
-         "71cfdbff190e3bca09f37e9b14de0b849af9434bd6e1f11d036c105c5c5f1f33"),
+         "dd4a35b4ad3ad42af9d1fa54883a0933e0bb003c6143571fe09946630e3055b3"),
         (EXTERNAL_IO_DEPLOYMENT_PATH, "DefaultGraphDeployment", "rollbackSources",
          "cb3b6fa4e95c27de0dc2c576d6ef118fd2528e3645a7eb53e0216afac1934558"),
         (EXTERNAL_IO_DEPLOYMENT_PATH, "DefaultGraphDeployment", "doStop",
          "84243f4cef7a99d221dbb7453b3753297daf4feee9d0060d836b538b15860a5d"),
         (EXTERNAL_IO_MANAGED_SERVICES_PATH, "ManagedNodePackageServices", "executeHttp",
-         "f8baedda556637f780f48d6619ef5cfdd5aba613c710a38f0a5aa586055baf2f"),
+         "cd89b8c58c51c362c56cfe92950316b71a23d5684ca338c65b521b02cefaec5e"),
+        (EXTERNAL_IO_MANAGED_SERVICES_PATH, "ManagedNodePackageServices", "sendRevocableHttp",
+         "b4174ce1bd6e7bb6a6ebaefa37b550d65cb46668b356633486f95f493acc3c55"),
         (EXTERNAL_IO_MANAGED_SERVICES_PATH, "ManagedNodePackageServices", "openWebSocket",
-         "31f5c92efaa99d3fd68aa6c7e1008baf5fe3d443de400183517a5b29437fb593"),
+         "f919633ae0a0306cf8af442e6d5c94e790860194d42334892c56006519357a8c"),
         (EXTERNAL_IO_WS_RESOLVER_PATH, "EnvironmentWebSocketProfileResolver", "resolve",
          "e8af4a34ce24e201d041dae3198c81eeca626f2032a9d5ff7714be76a51b9af0"),
         (EXTERNAL_IO_WS_SEND_PATH, "WebSocketSendNodeBehavior", "resolveExecutionIoCapacity",
@@ -8225,7 +8256,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'java',
   'RavenrootServer',
   'RavenrootServer',
-  'daa9dc1df7af2d606a1d8d4a01d263d529e4651f80f6c6e6a8a928dcf983a563',
+  '10ad69db64195730684f02c8e9a461c3babaef7ae0cc62fb560c175afe4c95be',
   20),
  ('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java',
   'java',
@@ -8249,7 +8280,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'java',
   'RavenrootServerMain',
   'run',
-  '48304fd3f668a7d542c055c452f1ac814695507e03bb8401adfb4f0b667723cb',
+  'ef04df48d52dceb9be8cdbe889520b84d52dfd7ec92e0dbbdaf897e050ec5ebe',
   1),
  ('ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/manifest/ExecutionManifestResolver.java',
   'java',
@@ -8592,7 +8623,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'file',
   '',
   '',
-  '21ebe41b18a079e1c3b91df5648a62be859afcf9e3eb68971b46ac30009ec504',
+  '52787b668084e67ee8e2027e0431ab3d3e928dc7d7776fd1e9a8c6be1f014eb4',
   1),
  ('scripts/tests/test_program_authoring_platform_configuration.sh',
   'file',
@@ -13104,7 +13135,7 @@ INTERACTION_WEBSOCKET_PUBLISHER_TEST_PATH = 'scripts/tests/test_publish_environm
 INTERACTION_WEBSOCKET_FILE_PROOFS = {'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionWebSocketConfiguration.java': 'a49ee156e9490deaa52ff71ecb6878b3d799a4aa387dbc75399f3dd1aa4528ce',
  'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionWebSocketServer.java': 'a5a4d9c8f5ece7bb562e83e3a20ce792ef96c0d6794d9676eb9a544cc5a51886',
  'ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/interaction/InteractionProtocol.java': '4f719d5bf41335dd52dca43e444c18ccd03e730e48a4b0350a9d6108e317a2d2',
- 'scripts/publish_environment_reference.py': 'c42ed0efa122eee0018fa119846a3fbfde2e6e459494795a37370caa2160e718',
+ 'scripts/publish_environment_reference.py': 'a3a9d4d07f3d86ec12255d22e500d6f8726a95f3a60c02a7a438505c588b349b',
  'scripts/tests/test_publish_environment_reference.py': '30c28704e85f9d2fde948070938d193cbeef9d3d0ec3735cc2878f8a19a578ef',
  'ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/interaction/InteractionWebSocketConfigurationTest.java': '7563c54e2cbab0dcaca696fbc7457fbe712ab78c9bf5112750ebf93d4d9d71de',
  'ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/RavenrootServerInteractionLifecycleTest.java': '7073eb7ae8dc4a0b5da058ed74dfaf31698e10f1eb261ef8a6ad448f6a542e3f'}
@@ -13112,7 +13143,7 @@ INTERACTION_WEBSOCKET_FILE_PROOFS = {'ravenroot/ravenroot-server/src/main/java/a
 INTERACTION_WEBSOCKET_METHOD_PROOFS = [('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java',
  'RavenrootServerMain',
  'run',
-  '48304fd3f668a7d542c055c452f1ac814695507e03bb8401adfb4f0b667723cb'),
+  'ef04df48d52dceb9be8cdbe889520b84d52dfd7ec92e0dbbdaf897e050ec5ebe'),
  ('ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java',
   'RavenrootServer',
   'installInteractionWebSockets',
@@ -13860,6 +13891,84 @@ def manifest_pin_attempt_authority_errors(root: Path, setting: str,
             or any(entries.get(identifier, {}).get("setting") != setting
                    for identifier in expected["candidateIds"]):
         errors.append(f"{setting}: source candidate partition has drifted")
+    return errors
+
+
+PERSONAL_OAUTH_CONFIGURATION_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/personal/PersonalOAuthConfiguration.java")
+PERSONAL_OAUTH_CONFIGURATION_DIGEST = "e29c4ee6d6143d897c9e8fc85687fbad0630b681e6e89e997349ede26fb986f9"
+PERSONAL_OAUTH_SETTINGS = (
+    ("mode", "RAVENROOT_PERSONAL_OPENAI_MODE", '"disabled"', "disabled"),
+    ("callback", "RAVENROOT_PERSONAL_CALLBACK", '"http://127.0.0.1:8080/auth/callback"',
+     "http://127.0.0.1:8080/auth/callback"),
+    ("clientId", "RAVENROOT_PERSONAL_OPENAI_CLIENT_ID", '""',
+     "empty; required provisioned registration in registered mode"),
+    ("clientSecret", "RAVENROOT_PERSONAL_OPENAI_CLIENT_SECRET", '""', "empty (public client)"),
+    ("directory", "RAVENROOT_PERSONAL_STORE_DIR", '"/opt/ravenroot/data/personal"',
+     "/opt/ravenroot/data/personal"),
+    ("keyFile", "RAVENROOT_PERSONAL_KEY_FILE", 'directory.resolve("storage.key").toString()',
+     "storage.key under the configured state directory"),
+    ("allowedHosts", "RAVENROOT_PERSONAL_ALLOWED_HOSTS", '""',
+     "empty; provider network access unavailable"),
+    ("assistantModel", "RAVENROOT_PERSONAL_ASSISTANT_MODEL", '""',
+     "empty (select from visible account models)"),
+)
+
+
+def personal_oauth_configuration_authority_errors(
+        root: Path, entries: dict[str, dict[str, object]],
+        discovered: dict[str, Candidate]) -> list[str]:
+    """Close the heterogeneous OAuth record without pretending its fields are integer settings."""
+    path = PERSONAL_OAUTH_CONFIGURATION_PATH
+    owner = path.as_posix() + "#PersonalOAuthConfiguration"
+    if not (root / path).exists():
+        return (["personal OAuth settings exist without their typed source"]
+                if any(entry.get("owner") == owner for entry in entries.values()) else [])
+    source = (root / path).read_text(encoding="utf-8")
+    if current_source_owner(root, owner) is None \
+            or _source_digest(source) != PERSONAL_OAUTH_CONFIGURATION_DIGEST \
+            or java_record_components(source, "PersonalOAuthConfiguration") != tuple(
+                field for field, _binding, _fallback, _default in PERSONAL_OAUTH_SETTINGS):
+        return ["personal OAuth typed configuration source proof has drifted"]
+    factory = java_method_span(source, "PersonalOAuthConfiguration", "fromEnvironment")
+    if factory is None:
+        return ["personal OAuth configuration has no exact environment factory"]
+    errors: list[str] = []
+    assigned: set[str] = set()
+    for field, binding, fallback, default in PERSONAL_OAUTH_SETTINGS:
+        call = f'env.getOrDefault("{binding}", {fallback})'
+        if source.count(call) != 1:
+            errors.append(f"personal.{field}: exact environment fallback call has drifted")
+            continue
+        start = source.index(call)
+        end = start + len(call)
+        if not factory[0] <= start < end <= factory[1]:
+            errors.append(f"personal.{field}: fallback is outside the typed factory")
+            continue
+        ids = set(all_candidate_ids_in_source_span(path, source, start, end, discovered))
+        fallback_atom = '"storage.key"' if field == "keyFile" else fallback
+        defaults = sorted(identifier for identifier in ids
+                          if discovered[identifier].kind != "environment-binding"
+                          and discovered[identifier].expression == fallback_atom)
+        selected = {identifier for identifier, entry in entries.items()
+                    if entry.get("setting") == "personal." + field}
+        if not ids or selected != ids or len(defaults) != 1:
+            errors.append(f"personal.{field}: environment/default candidate partition has drifted")
+        assigned.update(ids)
+        for identifier in ids:
+            entry = entries.get(identifier, {})
+            if entry.get("status") != "already-centralized" \
+                    or entry.get("classification") != "operator-configurable" \
+                    or entry.get("owner") != owner or entry.get("field") != field \
+                    or entry.get("bindings") != [binding] or entry.get("default") != default \
+                    or entry.get("defaultEvidence") != defaults:
+                errors.append(f"personal.{field}: reviewed typed owner, binding or default has drifted")
+    remaining = {identifier for identifier, candidate in discovered.items()
+                 if candidate.path == path.as_posix()} - assigned
+    if len(remaining) != 1 or any(discovered[identifier].expression != '\",\"'
+                                 or entries.get(identifier, {}).get("classification")
+                                 != "protocol-or-format-invariant" for identifier in remaining):
+        errors.append("personal OAuth host delimiter is not the exact remaining protocol atom")
     return errors
 
 
@@ -14721,22 +14830,22 @@ STABLE_EDGE_TEST_PATH = Path(
 STABLE_EDGE_WIRE_TEST_PATH = Path(
     "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/StableEdgeIdWireContractTest.java")
 ROUTE_BOUND_CANDIDATES = {
-    "oc-03fbbe33ce337c8677ba": ("StableEdgeId.MAX_UTF8_BYTES",),
-    "oc-084e2c19b7628653479c":
+    "oc-2e0ff623fdf363463964": ("StableEdgeId.MAX_UTF8_BYTES",),
+    "oc-63d910b144ddbdcd3154":
         ("EdgeTraversalWireBudget.MAX_AUXILIARY_ESCAPED_VALUE_BYTES",),
-    "oc-e96c292555421fce6f8e": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
-    "oc-092469b3c68fe31fae09": (
+    "oc-18ffd5b6c0ac5fff6f15": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
+    "oc-8a8bd45cf30c0ef6762f": (
         "StableEdgeId.MAX_UTF8_BYTES",
         "EdgeTraversalWireBudget.MAX_AUXILIARY_ESCAPED_VALUE_BYTES",
     ),
-    "oc-6f39b00dc143c1e601af": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
+    "oc-e4c65682200aedc914d0": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
 }
 ROUTE_BOUND_PATHS = {
-    "oc-03fbbe33ce337c8677ba": "/v1/events",
-    "oc-084e2c19b7628653479c": "/v1/events",
-    "oc-e96c292555421fce6f8e": "/v1/events",
-    "oc-092469b3c68fe31fae09": "/v1/events/recent",
-    "oc-6f39b00dc143c1e601af": "/v1/events/recent",
+    "oc-2e0ff623fdf363463964": "/v1/events",
+    "oc-63d910b144ddbdcd3154": "/v1/events",
+    "oc-18ffd5b6c0ac5fff6f15": "/v1/events",
+    "oc-8a8bd45cf30c0ef6762f": "/v1/events/recent",
+    "oc-e4c65682200aedc914d0": "/v1/events/recent",
 }
 
 
@@ -15069,7 +15178,7 @@ GRAPH_AUTHORING_JAVA_METHOD_PROOFS = {
      "requireCredentialAvailable"):
         "a68b4baa15f401f8d904680e0429c934d5628d46f58a6c496bab91fa7efb1bda",
     (GRAPH_AUTHORING_MAIN_PATH, "RavenrootServerMain", "run"):
-        "48304fd3f668a7d542c055c452f1ac814695507e03bb8401adfb4f0b667723cb",
+        "ef04df48d52dceb9be8cdbe889520b84d52dfd7ec92e0dbbdaf897e050ec5ebe",
     (GRAPH_AUTHORING_SERVER_PATH, "RavenrootServer", "configureGraphAuthoring"):
         "b977d5c22a19b342d089a457adc7216a278e8a527a15dc1b78f640c17bbf1b46",
     (GRAPH_AUTHORING_SERVER_PATH, "RavenrootServer", "start"):
@@ -15141,7 +15250,7 @@ GRAPH_AUTHORING_UI_METHOD_PROOFS = {
     "repositoryDelete": "12486c92d762174b9161c1ec5be9a3c77e54436f945bff7b673b2407507d8893",
     "repositoryRelease": "de3b913d8a4fc56ac6c5027555849b4afef40e98acb5a08ac8a6cd193a1c7e13",
     "publishedArtifacts": "21ce0b20bfb0f6bb3bab951cc5662dd2d416788bf67684ca0bc749578b1a0637",
-    "connectRuntime": '9d8c41966918060e48f83d576318a64a7a7156cca769df6802810e670ea1bf60',
+    "connectRuntime": 'f73646cc07fa251f0eeeefedef8d1261cd0e77634974baa48137605c802ace56',
     "createStartupImportPlaceholder": "9b194ed16409f284ecdbe713a9be041d8cc60982f90a84b5d6f016c886e6feef",
 
     "startupImportBinding": "d6eb1a9106def1e00965ade2a2c485b422e51be0fd13641e5a2caee60a454952",
@@ -16764,9 +16873,9 @@ def route_table_authority_errors(root: Path, authorities: object,
         return ["RouteTable.ALL is not the supported direct RouteDescriptor table"]
     partitions, details, source_candidates = parsed
     errors: list[str] = []
-    expected_counts = {"methods": 144, "path": 131, "summary": 485, "successStatuses": 137}
-    if len(details) != 131 or {role: len(ids) for role, ids in partitions.items()} != expected_counts:
-        errors.append("RouteTable authority no longer has the reviewed 131/897 positional shape")
+    expected_counts = {"methods": 156, "path": 143, "summary": 497, "successStatuses": 149}
+    if len(details) != 143 or {role: len(ids) for role, ids in partitions.items()} != expected_counts:
+        errors.append("RouteTable authority no longer has the reviewed 143/945 positional shape")
     recorded = authority["candidateIdsByRole"]
     if not isinstance(recorded, dict) or set(recorded) != set(expected_counts) \
             or any(recorded.get(role) != partitions[role] for role in expected_counts):
@@ -17963,6 +18072,7 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
     errors.extend(ai_operational_authority_errors(
         root, document.get("aiOperationalAuthorities"), entries, discovered,
     ))
+    errors.extend(personal_oauth_configuration_authority_errors(root, entries, discovered))
 
     tracked_paths = set(tracked_files(root))
     representatives: dict[str, dict[str, object]] = {}
@@ -18003,6 +18113,10 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
         if representative.get("graphAuthoringAuthority") == GRAPH_AUTHORING_AUTHORITY_ID:
             continue
         if representative.get("aiOperationalAuthority") == AI_OPERATIONAL_AUTHORITY_ID:
+            continue
+        if setting in {"personal." + spec[0] for spec in PERSONAL_OAUTH_SETTINGS}:
+            # The mandatory source-derived family above proves every field, environment call,
+            # default and remaining lexical atom; no integer-only resolver is claimed here.
             continue
         if representative.get("finalReviewAuthority") == FINAL_REVIEW_AUTHORITY_ID \
                 and representative.get("finalReviewGroup") == "embed-enabled-operator-setting":

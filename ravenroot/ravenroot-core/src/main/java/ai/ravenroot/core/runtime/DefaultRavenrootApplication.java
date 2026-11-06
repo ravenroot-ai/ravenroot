@@ -2074,6 +2074,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
             // either validation or policy resolution refuses.
             GraphRunner.validateGraphAdmission(manager.definition(), behaviors, policy,
                     graphExecutionLimits, null);
+            behaviors.requirePersonalConnections(security, manager.definition());
             var manifestService = executionManifests();
             operationalPolicy = manifestService == null ? null
                     : manifestService.policyForNodeAdmission(behaviorNodes);

@@ -58,6 +58,7 @@ export function mountPersonalConnections({ host, baseUrl, tokenProvider, onMode,
   }
   function retireIdentity(identity = null) {
     generation += 1; state = null; priorIdentity = null;
+    health.textContent = '';
     currentMode = 'system'; mode.value = currentMode; currentModel = ''; history.value = 'system';
     resultId.value = ''; resultText.textContent = ''; registration.value = ''; password.value = '';
     payload.value = ''; connection.replaceChildren(); models.replaceChildren(); deployed.replaceChildren();

@@ -15,6 +15,7 @@ function setup(initial = signed()) {
     if (path.endsWith('/select')) state = signed(JSON.parse(options.body).connection);
     if (path.endsWith('/disconnect')) state = { ...signed(), connections: [] };
     let body = state;
+    if (path.endsWith('/disconnect')) body = { state: 'disconnected' };
     if (path.endsWith('/sign-in')) body = { authorizationUrl: `${location.origin}/authorize` };
     if (path.endsWith('/models')) body = { models: [{ slug: 'account-model', display_name: 'Account model' }] };
     if (path.endsWith('/registration')) body = { registration: 'opaque-returning-code', expiresIn: 600 };
@@ -55,8 +56,9 @@ async function replaceIdentity(fixture, action) {
     });
     await vi.waitFor(() => expect(account.value).toBe('connection-B'));
   } else {
-    button(fixture.host, 'personal.signOut').click();
-    await vi.waitFor(() => expect(button(fixture.host, 'personal.signOut').disabled).toBe(false));
+    const control = button(fixture.host, action === 'disconnect' ? 'personal.disconnect' : 'personal.signOut');
+    control.click();
+    await vi.waitFor(() => expect(control.disabled).toBe(false));
   }
 }
 
@@ -113,18 +115,41 @@ describe('optional personal account controls', () => {
     await vi.waitFor(() => expect(field(fixture.host, 'personal.executionResult').textContent).toContain('private personal answer'));
     expect(field(fixture.host, 'personal.executionId').value).toBe('execution-A');
   });
-  it.each(['sign-out', 'select'])('retires private presentation at %s success before the following refresh finishes', async action => {
-    const fixture = setup(); await mounted.refresh(); mounted.showExecution('execution-A');
+  it.each([
+    ['sign-out', 'signed-out'],
+    ['select', 'signed-in'],
+    ['disconnect', 'disconnected'],
+  ])('retires private presentation at %s success before the following refresh finishes', async (action, finalState) => {
+    const fixture = setup(); await mounted.refresh();
+    const status = fixture.host.querySelector('[role=status]');
+    button(fixture.host, 'personal.loadDeployments').click();
+    await vi.waitFor(() => expect(field(fixture.host, 'personal.deployment').value).toBe('deployed'));
+    field(fixture.host, 'personal.input').value = 'private input';
+    button(fixture.host, 'personal.runDeployment').click();
+    await vi.waitFor(() => expect(status.textContent).toBe(uiText('personal.started', { id: 'execution-A' })));
+    expect(field(fixture.host, 'personal.executionId').value).toBe('execution-A');
+    expect(fixture.callbacks.onRun).toHaveBeenCalledWith({ executionId: 'execution-A' });
     button(fixture.host, 'personal.readResult').click();
     await vi.waitFor(() => expect(fixture.host.textContent).toContain('private personal answer'));
+    button(fixture.host, 'personal.createCode').click();
+    await vi.waitFor(() => expect(field(fixture.host, 'personal.registrationCode').value).toBe('opaque-returning-code'));
     const refresh = fixture.hold('/v1/personal');
     const transition = replaceIdentity(fixture, action);
     await refresh.started;
     try {
+      expect(fixture.callbacks.onIdentity).toHaveBeenLastCalledWith(null);
+      expect(status.textContent).toBe('');
       expect(field(fixture.host, 'personal.executionId').value).toBe('');
       expect(field(fixture.host, 'personal.executionResult').textContent).toBe('');
+      expect(field(fixture.host, 'personal.registrationCode').value).toBe('');
+      expect(field(fixture.host, 'personal.input').value).toBe('');
+      for (const key of ['personal.account', 'personal.model', 'personal.deployment'])
+        expect(field(fixture.host, key).options).toHaveLength(0);
+      expect(fixture.callbacks.onMode).toHaveBeenLastCalledWith('system', '', false);
       expect(fixture.callbacks.onHistory).toHaveBeenLastCalledWith('system');
+      expect(fixture.callbacks.onCatalog).toHaveBeenLastCalledWith([]);
     } finally { refresh.release(); await transition; }
+    expect(status.textContent).toBe(uiText('personal.state', { state: finalState }));
   });
   it('does not let an old state refresh restore signed-in metadata after sign-out', async () => {
     const fixture = setup({ ...signed(), assistantAuthorized: true }); await mounted.refresh();

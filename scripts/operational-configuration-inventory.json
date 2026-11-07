@@ -321716,7 +321716,7 @@
   {
    "id": "oc-c15f5d22c2bb4c7a1cb6",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 12333,
+   "line": 12335,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "personalHost",
@@ -321732,7 +321732,7 @@
   {
    "id": "oc-9822099bf5c083b179e2",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 12337,
+   "line": 12339,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "draft",
@@ -321748,7 +321748,7 @@
   {
    "id": "oc-a009e8ceedb3e2f646f0",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 12426,
+   "line": 12428,
    "symbol": "catch",
    "kind": "fixed-declaration",
    "role": "outcome",
@@ -321768,7 +321768,7 @@
   {
    "id": "oc-8e5250309ca75768fbc5",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 12426,
+   "line": 12428,
    "symbol": "catch",
    "kind": "fixed-declaration",
    "role": "outcome",
@@ -321788,7 +321788,7 @@
   {
    "id": "oc-b5c54de77577b2b862e1",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 12427,
+   "line": 12429,
    "symbol": "catch",
    "kind": "fixed-declaration",
    "role": "outcome",
@@ -321808,7 +321808,7 @@
   {
    "id": "oc-31d3869a4b8236362994",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 12447,
+   "line": 12449,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "failures",
@@ -321828,7 +321828,7 @@
   {
    "id": "oc-6f3e9d8bd65c804b7ac8",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 12447,
+   "line": 12449,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "failures",
@@ -321848,7 +321848,7 @@
   {
    "id": "oc-da7920a2d757fb1e2b98",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 12448,
+   "line": 12450,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "failures",
@@ -321868,7 +321868,7 @@
   {
    "id": "oc-4fc7e75ed7b4c3d5d4f0",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 12448,
+   "line": 12450,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "failures",
@@ -321888,7 +321888,7 @@
   {
    "id": "oc-90ac24439302c05165df",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 12449,
+   "line": 12451,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "failures",
@@ -321908,7 +321908,7 @@
   {
    "id": "oc-aa7d82aaa08d0c520c2b",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 12449,
+   "line": 12451,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "failures",
@@ -321928,7 +321928,7 @@
   {
    "id": "oc-b969601546fabeafd09e",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 12450,
+   "line": 12452,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "failures",
@@ -321948,7 +321948,7 @@
   {
    "id": "oc-176b5989167c8dfdc3d1",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 12450,
+   "line": 12452,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "failures",
@@ -321968,7 +321968,7 @@
   {
    "id": "oc-d7c4bfe58b7186e2327d",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 12451,
+   "line": 12453,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "failures",
@@ -321988,7 +321988,7 @@
   {
    "id": "oc-5c1818ddf472195ec103",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 12451,
+   "line": 12453,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "failures",
@@ -322008,7 +322008,7 @@
   {
    "id": "oc-c8c144a50f77bf413e3a",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 12470,
+   "line": 12472,
    "symbol": "confirmRememberConnection",
    "kind": "fixed-declaration",
    "role": "dialog",
@@ -322023,7 +322023,7 @@
   {
    "id": "oc-ffea8714a27bfd05051e",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 12481,
+   "line": 12483,
    "symbol": "confirmRememberConnection",
    "kind": "fixed-declaration",
    "role": "close",
@@ -322038,7 +322038,7 @@
   {
    "id": "oc-912db6cb3112a8103b14",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 12565,
+   "line": 12567,
    "symbol": "setRuntimeConnectionState",
    "kind": "fixed-declaration",
    "role": "state",
@@ -322053,7 +322053,7 @@
   {
    "id": "oc-1bec2af7d7070c26d54a",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 12646,
+   "line": 12648,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "status",
@@ -322068,7 +322068,7 @@
   {
    "id": "oc-6cb9546a935983bfcec7",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 12647,
+   "line": 12649,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "paused",
@@ -322087,7 +322087,7 @@
   {
    "id": "oc-4c4c5df32e41f8442a27",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 12647,
+   "line": 12649,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "paused",
@@ -322106,7 +322106,7 @@
   {
    "id": "oc-e89887c78f6787b5894d",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 12673,
+   "line": 12675,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "changed",
@@ -322124,7 +322124,7 @@
   {
    "id": "oc-7384bc042157058b8db8",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 12743,
+   "line": 12745,
    "symbol": "while",
    "kind": "inline-operational-call",
    "role": "setTimeout",
@@ -322142,7 +322142,7 @@
   {
    "id": "oc-3e3c6266e42c078bd4bf",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 12954,
+   "line": 12956,
    "symbol": "reconcileTestCompletion",
    "kind": "fixed-declaration",
    "role": "reason",
@@ -322161,7 +322161,7 @@
   {
    "id": "oc-0b31058aa986fcfc51fb",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13016,
+   "line": 13018,
    "symbol": "diagnosticNodeRef",
    "kind": "fixed-declaration",
    "role": "digest",
@@ -322176,7 +322176,7 @@
   {
    "id": "oc-687154952e2bc6b4567b",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13017,
+   "line": 13019,
    "symbol": "diagnosticNodeRef",
    "kind": "fixed-declaration",
    "role": "hex",
@@ -322191,7 +322191,7 @@
   {
    "id": "oc-54086a7b503e51a2663d",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13017,
+   "line": 13019,
    "symbol": "diagnosticNodeRef",
    "kind": "fixed-declaration",
    "role": "hex",
@@ -322206,7 +322206,7 @@
   {
    "id": "oc-ff1f3a31389b2c217707",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13017,
+   "line": 13019,
    "symbol": "diagnosticNodeRef",
    "kind": "fixed-declaration",
    "role": "hex",
@@ -322221,7 +322221,7 @@
   {
    "id": "oc-eb1ab94e9726f8adcf69",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13017,
+   "line": 13019,
    "symbol": "diagnosticNodeRef",
    "kind": "fixed-declaration",
    "role": "hex",
@@ -322236,7 +322236,7 @@
   {
    "id": "oc-bac9e401aa0f36b648a3",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13065,
+   "line": 13067,
    "symbol": "presentRuntimeRefusal",
    "kind": "fixed-declaration",
    "role": "locations",
@@ -322251,7 +322251,7 @@
   {
    "id": "oc-6e246a76a434bc4db872",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13066,
+   "line": 13068,
    "symbol": "presentRuntimeRefusal",
    "kind": "fixed-declaration",
    "role": "locations",
@@ -322266,7 +322266,7 @@
   {
    "id": "oc-8c4cacab58abe317662c",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13068,
+   "line": 13070,
    "symbol": "presentRuntimeRefusal",
    "kind": "fixed-declaration",
    "role": "location",
@@ -322281,7 +322281,7 @@
   {
    "id": "oc-bdef32e5b33584948318",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13068,
+   "line": 13070,
    "symbol": "presentRuntimeRefusal",
    "kind": "fixed-declaration",
    "role": "location",
@@ -322300,7 +322300,7 @@
   {
    "id": "oc-beca41027b57db2405dc",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13070,
+   "line": 13072,
    "symbol": "presentRuntimeRefusal",
    "kind": "fixed-declaration",
    "role": "remediation",
@@ -322319,7 +322319,7 @@
   {
    "id": "oc-fe5b594dc53a541d9304",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13070,
+   "line": 13072,
    "symbol": "presentRuntimeRefusal",
    "kind": "fixed-declaration",
    "role": "remediation",
@@ -322338,7 +322338,7 @@
   {
    "id": "oc-35f807736413963bf1d2",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13071,
+   "line": 13073,
    "symbol": "presentRuntimeRefusal",
    "kind": "fixed-declaration",
    "role": "remediation",
@@ -322357,7 +322357,7 @@
   {
    "id": "oc-847abfe77c550f3ae403",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13071,
+   "line": 13073,
    "symbol": "presentRuntimeRefusal",
    "kind": "fixed-declaration",
    "role": "remediation",
@@ -322376,7 +322376,7 @@
   {
    "id": "oc-a3fdd899423931bd254e",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13072,
+   "line": 13074,
    "symbol": "presentRuntimeRefusal",
    "kind": "fixed-declaration",
    "role": "incident",
@@ -322391,7 +322391,7 @@
   {
    "id": "oc-aecaac5ef5a6de10ee6f",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13072,
+   "line": 13074,
    "symbol": "presentRuntimeRefusal",
    "kind": "fixed-declaration",
    "role": "incident",
@@ -322406,7 +322406,7 @@
   {
    "id": "oc-a1700a7dd03c1e90a1af",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13081,
+   "line": 13083,
    "symbol": "documentMatchesDeployment",
    "kind": "fixed-declaration",
    "role": "artifacts",
@@ -322421,7 +322421,7 @@
   {
    "id": "oc-732cd9f1f1e3881473db",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13109,
+   "line": 13111,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "release",
@@ -322436,7 +322436,7 @@
   {
    "id": "oc-f1058b93f01429c4192b",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13135,
+   "line": 13137,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "publishReset",
@@ -322451,7 +322451,7 @@
   {
    "id": "oc-3d07e0d4d9667f5423ec",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13216,
+   "line": 13218,
    "symbol": "if",
    "kind": "inline-operational-call",
    "role": "setTimeout",
@@ -322466,7 +322466,7 @@
   {
    "id": "oc-81c4c5d676929db759b4",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13229,
+   "line": 13231,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "persist",
@@ -322485,7 +322485,7 @@
   {
    "id": "oc-daa1d39f610df3466619",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13229,
+   "line": 13231,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "persist",
@@ -322504,7 +322504,7 @@
   {
    "id": "oc-58e0f68dfac0e3abd792",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13293,
+   "line": 13295,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "payload",
@@ -322522,7 +322522,7 @@
   {
    "id": "oc-7ea117527a354dfaec98",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13305,
+   "line": 13307,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "blocked",
@@ -322540,7 +322540,7 @@
   {
    "id": "oc-e382b3acfc6871008eaa",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13332,
+   "line": 13334,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "message",
@@ -322559,7 +322559,7 @@
   {
    "id": "oc-f26b93634c8c2f7c7d97",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13332,
+   "line": 13334,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "message",
@@ -322578,7 +322578,7 @@
   {
    "id": "oc-07117a855ac158be4eeb",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13336,
+   "line": 13338,
    "symbol": "if",
    "kind": "operational-declaration",
    "role": "sourceCount",
@@ -322596,7 +322596,7 @@
   {
    "id": "oc-ee8bfcbf19fd3788ff7c",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13336,
+   "line": 13338,
    "symbol": "if",
    "kind": "operational-declaration",
    "role": "sourceCount",
@@ -322614,7 +322614,7 @@
   {
    "id": "oc-21b3cd0fc22fa7104f79",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13451,
+   "line": 13453,
    "symbol": "handleRuntimeEvent",
    "kind": "fixed-declaration",
    "role": "isTerminal",
@@ -322632,7 +322632,7 @@
   {
    "id": "oc-62394ba1ded708f9c840",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13451,
+   "line": 13453,
    "symbol": "handleRuntimeEvent",
    "kind": "fixed-declaration",
    "role": "isTerminal",
@@ -322650,7 +322650,7 @@
   {
    "id": "oc-2b0f3f1d23c6a8d86802",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13452,
+   "line": 13454,
    "symbol": "handleRuntimeEvent",
    "kind": "fixed-declaration",
    "role": "isTerminal",
@@ -322668,7 +322668,7 @@
   {
    "id": "oc-19f379aa408ebe889bba",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13484,
+   "line": 13486,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "recoveredFromUnknown",
@@ -322683,7 +322683,7 @@
   {
    "id": "oc-e7e93d4454c6e5f59b80",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13522,
+   "line": 13524,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "delay",
@@ -322701,7 +322701,7 @@
   {
    "id": "oc-644f44521673cd26de65",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13522,
+   "line": 13524,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "delay",
@@ -322719,7 +322719,7 @@
   {
    "id": "oc-54c877c8c56bc6fe78ff",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13563,
+   "line": 13565,
    "symbol": "scheduleFrame",
    "kind": "inline-operational-call",
    "role": "setTimeout",
@@ -322734,7 +322734,7 @@
   {
    "id": "oc-9d53b11778a97aa92801",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13565,
+   "line": 13567,
    "symbol": "scheduleFrame",
    "kind": "inline-operational-call",
    "role": "setTimeout",
@@ -322749,7 +322749,7 @@
   {
    "id": "oc-b20144f7386d422c3d81",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13631,
+   "line": 13633,
    "symbol": "paintVisibleGroupRuntime",
    "kind": "fixed-declaration",
    "role": "priority",
@@ -322765,7 +322765,7 @@
   {
    "id": "oc-b7eb171e9c7628b7dfae",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13631,
+   "line": 13633,
    "symbol": "paintVisibleGroupRuntime",
    "kind": "fixed-declaration",
    "role": "priority",
@@ -322781,7 +322781,7 @@
   {
    "id": "oc-35938843d8b375aa5876",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13631,
+   "line": 13633,
    "symbol": "paintVisibleGroupRuntime",
    "kind": "fixed-declaration",
    "role": "priority",
@@ -322797,7 +322797,7 @@
   {
    "id": "oc-e46aefbe7f0141ea643b",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13631,
+   "line": 13633,
    "symbol": "paintVisibleGroupRuntime",
    "kind": "fixed-declaration",
    "role": "priority",
@@ -322813,7 +322813,7 @@
   {
    "id": "oc-2c985a2983e2b4eba888",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13631,
+   "line": 13633,
    "symbol": "paintVisibleGroupRuntime",
    "kind": "fixed-declaration",
    "role": "priority",
@@ -322829,7 +322829,7 @@
   {
    "id": "oc-10c73e7cdbeadd94181d",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13636,
+   "line": 13638,
    "symbol": "paintVisibleGroupRuntime",
    "kind": "fixed-declaration",
    "role": "internalPulses",
@@ -322845,7 +322845,7 @@
   {
    "id": "oc-b986fcbfd0576c160b5a",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13737,
+   "line": 13739,
    "symbol": "runtimeCountLabel",
    "kind": "fixed-declaration",
    "role": "noun",
@@ -322863,7 +322863,7 @@
   {
    "id": "oc-6337f560043d5cd01ca8",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13737,
+   "line": 13739,
    "symbol": "runtimeCountLabel",
    "kind": "fixed-declaration",
    "role": "noun",
@@ -322881,7 +322881,7 @@
   {
    "id": "oc-ecd36d0fd9f4fafec1f6",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13737,
+   "line": 13739,
    "symbol": "runtimeCountLabel",
    "kind": "fixed-declaration",
    "role": "noun",
@@ -322899,7 +322899,7 @@
   {
    "id": "oc-f072c8186da0a614b048",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13738,
+   "line": 13740,
    "symbol": "runtimeCountLabel",
    "kind": "fixed-declaration",
    "role": "queued",
@@ -322914,7 +322914,7 @@
   {
    "id": "oc-1af16154c4d334e7692d",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13738,
+   "line": 13740,
    "symbol": "runtimeCountLabel",
    "kind": "fixed-declaration",
    "role": "queued",
@@ -322936,7 +322936,7 @@
   {
    "id": "oc-feb70de8e6b4aedf5e82",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13744,
+   "line": 13746,
    "symbol": "runtimeNodeLabel",
    "kind": "fixed-declaration",
    "role": "arrivals",
@@ -322954,7 +322954,7 @@
   {
    "id": "oc-c68946b01f9c4d59d760",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13744,
+   "line": 13746,
    "symbol": "runtimeNodeLabel",
    "kind": "fixed-declaration",
    "role": "arrivals",
@@ -322972,7 +322972,7 @@
   {
    "id": "oc-2a0f2e644eaa7e50fdb7",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13745,
+   "line": 13747,
    "symbol": "runtimeNodeLabel",
    "kind": "fixed-declaration",
    "role": "attention",
@@ -322990,7 +322990,7 @@
   {
    "id": "oc-997885ff2deda6ace980",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13745,
+   "line": 13747,
    "symbol": "runtimeNodeLabel",
    "kind": "fixed-declaration",
    "role": "attention",
@@ -323008,7 +323008,7 @@
   {
    "id": "oc-e11187a12e99dd204ee7",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13746,
+   "line": 13748,
    "symbol": "runtimeNodeLabel",
    "kind": "fixed-declaration",
    "role": "attention",
@@ -323026,7 +323026,7 @@
   {
    "id": "oc-c60b7b5d6e2181cd4bc9",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13746,
+   "line": 13748,
    "symbol": "runtimeNodeLabel",
    "kind": "fixed-declaration",
    "role": "attention",
@@ -323044,7 +323044,7 @@
   {
    "id": "oc-9012a06e0cb5bee8d47c",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13750,
+   "line": 13752,
    "symbol": "runtimeNodeLabel",
    "kind": "fixed-declaration",
    "role": "failures",
@@ -323059,7 +323059,7 @@
   {
    "id": "oc-6af911333ce248c6ca68",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13750,
+   "line": 13752,
    "symbol": "runtimeNodeLabel",
    "kind": "fixed-declaration",
    "role": "failures",
@@ -323074,7 +323074,7 @@
   {
    "id": "oc-15fba6e9244a13ffc4a8",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13751,
+   "line": 13753,
    "symbol": "runtimeNodeLabel",
    "kind": "fixed-declaration",
    "role": "name",
@@ -323092,7 +323092,7 @@
   {
    "id": "oc-b394eb584887ea589a9f",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13751,
+   "line": 13753,
    "symbol": "runtimeNodeLabel",
    "kind": "fixed-declaration",
    "role": "name",
@@ -323110,7 +323110,7 @@
   {
    "id": "oc-8c61d60d12f81e53c2c7",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13757,
+   "line": 13759,
    "symbol": "runtimeNodeLabel",
    "kind": "fixed-declaration",
    "role": "literal",
@@ -323128,7 +323128,7 @@
   {
    "id": "oc-cd6c969cd50842b39cd9",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13758,
+   "line": 13760,
    "symbol": "runtimeNodeLabel",
    "kind": "fixed-declaration",
    "role": "literal",
@@ -323146,7 +323146,7 @@
   {
    "id": "oc-f8a1c8caa14357049faf",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13758,
+   "line": 13760,
    "symbol": "runtimeNodeLabel",
    "kind": "fixed-declaration",
    "role": "literal",
@@ -323164,7 +323164,7 @@
   {
    "id": "oc-42f970e6ae03eb1c65bc",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13758,
+   "line": 13760,
    "symbol": "runtimeNodeLabel",
    "kind": "fixed-declaration",
    "role": "literal",
@@ -323182,7 +323182,7 @@
   {
    "id": "oc-8d299dbea940d9a5cc55",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13764,
+   "line": 13766,
    "symbol": "applyRuntimeVisual",
    "kind": "fixed-declaration",
    "role": "active",
@@ -323200,7 +323200,7 @@
   {
    "id": "oc-3d006b611af4cb03b4fd",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13764,
+   "line": 13766,
    "symbol": "applyRuntimeVisual",
    "kind": "fixed-declaration",
    "role": "active",
@@ -323218,7 +323218,7 @@
   {
    "id": "oc-b632bfdc0467ef1ccb7f",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13767,
+   "line": 13769,
    "symbol": "applyRuntimeVisual",
    "kind": "fixed-declaration",
    "role": "pending",
@@ -323233,7 +323233,7 @@
   {
    "id": "oc-783b58ab6cab233a91c1",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13767,
+   "line": 13769,
    "symbol": "applyRuntimeVisual",
    "kind": "fixed-declaration",
    "role": "pending",
@@ -323248,7 +323248,7 @@
   {
    "id": "oc-fcb91f4dddde71ecb1fc",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13841,
+   "line": 13843,
    "symbol": "if",
    "kind": "inline-operational-call",
    "role": "setTimeout",
@@ -323263,7 +323263,7 @@
   {
    "id": "oc-972ccc865e3b48763650",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13921,
+   "line": 13923,
    "symbol": "syncActivityModeChrome",
    "kind": "fixed-declaration",
    "role": "tabStop",
@@ -323278,7 +323278,7 @@
   {
    "id": "oc-1a9b2c536d3a2df3d34c",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13948,
+   "line": 13950,
    "symbol": "appendActivityEvent",
    "kind": "fixed-declaration",
    "role": "type",
@@ -323293,7 +323293,7 @@
   {
    "id": "oc-c3ec84496ce042e262d6",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13949,
+   "line": 13951,
    "symbol": "appendActivityEvent",
    "kind": "fixed-declaration",
    "role": "css",
@@ -323311,7 +323311,7 @@
   {
    "id": "oc-b6724d4d08f353f01f84",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13949,
+   "line": 13951,
    "symbol": "appendActivityEvent",
    "kind": "fixed-declaration",
    "role": "css",
@@ -323329,7 +323329,7 @@
   {
    "id": "oc-754e57b9e7a7452082ae",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13950,
+   "line": 13952,
    "symbol": "appendActivityEvent",
    "kind": "fixed-declaration",
    "role": "css",
@@ -323347,7 +323347,7 @@
   {
    "id": "oc-c87ce4ce2b0c44b24947",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13950,
+   "line": 13952,
    "symbol": "appendActivityEvent",
    "kind": "fixed-declaration",
    "role": "css",
@@ -323365,7 +323365,7 @@
   {
    "id": "oc-a939dadad7d31ba932ac",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13951,
+   "line": 13953,
    "symbol": "appendActivityEvent",
    "kind": "fixed-declaration",
    "role": "css",
@@ -323383,7 +323383,7 @@
   {
    "id": "oc-206a1f9c85699de4ee77",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13951,
+   "line": 13953,
    "symbol": "appendActivityEvent",
    "kind": "fixed-declaration",
    "role": "css",
@@ -323401,7 +323401,7 @@
   {
    "id": "oc-bbed7a83c272184aa11e",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13952,
+   "line": 13954,
    "symbol": "appendActivityEvent",
    "kind": "fixed-declaration",
    "role": "css",
@@ -323419,7 +323419,7 @@
   {
    "id": "oc-1732d29229c8fcc16807",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13952,
+   "line": 13954,
    "symbol": "appendActivityEvent",
    "kind": "fixed-declaration",
    "role": "css",
@@ -323437,7 +323437,7 @@
   {
    "id": "oc-f89751d83c60b4f52a0d",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13952,
+   "line": 13954,
    "symbol": "appendActivityEvent",
    "kind": "fixed-declaration",
    "role": "css",
@@ -323455,7 +323455,7 @@
   {
    "id": "oc-04c32d0a55257542ecb4",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13962,
+   "line": 13964,
    "symbol": "appendActivityEvent",
    "kind": "fixed-declaration",
    "role": "title",
@@ -323470,7 +323470,7 @@
   {
    "id": "oc-68dd4f07ef53fadd84f2",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13963,
+   "line": 13965,
    "symbol": "appendActivityEvent",
    "kind": "fixed-declaration",
    "role": "title",
@@ -323485,7 +323485,7 @@
   {
    "id": "oc-a91bffaee3630137f1b8",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13971,
+   "line": 13973,
    "symbol": "appendActivityEvent",
    "kind": "fixed-declaration",
    "role": "diagnosticFlags",
@@ -323507,7 +323507,7 @@
   {
    "id": "oc-50440fba28e2579c4497",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13971,
+   "line": 13973,
    "symbol": "appendActivityEvent",
    "kind": "fixed-declaration",
    "role": "diagnosticFlags",
@@ -323522,7 +323522,7 @@
   {
    "id": "oc-cc6835569cef4343625b",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13972,
+   "line": 13974,
    "symbol": "appendActivityEvent",
    "kind": "fixed-declaration",
    "role": "diagnosticFlags",
@@ -323544,7 +323544,7 @@
   {
    "id": "oc-f0d93a439511ca1ba799",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13972,
+   "line": 13974,
    "symbol": "appendActivityEvent",
    "kind": "fixed-declaration",
    "role": "diagnosticFlags",
@@ -323566,7 +323566,7 @@
   {
    "id": "oc-2e007ba1c841cf922687",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13972,
+   "line": 13974,
    "symbol": "appendActivityEvent",
    "kind": "fixed-declaration",
    "role": "diagnosticFlags",
@@ -323581,7 +323581,7 @@
   {
    "id": "oc-40c3426b189a49da3174",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13973,
+   "line": 13975,
    "symbol": "appendActivityEvent",
    "kind": "fixed-declaration",
    "role": "description",
@@ -323596,7 +323596,7 @@
   {
    "id": "oc-d8429fbe4430c022c30e",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13973,
+   "line": 13975,
    "symbol": "appendActivityEvent",
    "kind": "fixed-declaration",
    "role": "description",
@@ -323611,7 +323611,7 @@
   {
    "id": "oc-3b3630a4c7b68fc31e63",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13974,
+   "line": 13976,
    "symbol": "appendActivityEvent",
    "kind": "fixed-declaration",
    "role": "publicReason",
@@ -323626,7 +323626,7 @@
   {
    "id": "oc-7bf384f8718957f126e2",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13974,
+   "line": 13976,
    "symbol": "appendActivityEvent",
    "kind": "fixed-declaration",
    "role": "publicReason",
@@ -323641,7 +323641,7 @@
   {
    "id": "oc-f590a32229672adcf282",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13976,
+   "line": 13978,
    "symbol": "appendActivityEvent",
    "kind": "fixed-declaration",
    "role": "instances",
@@ -323656,7 +323656,7 @@
   {
    "id": "oc-198ba7a8e32a617e91c2",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13977,
+   "line": 13979,
    "symbol": "appendActivityEvent",
    "kind": "fixed-declaration",
    "role": "inFlight",
@@ -323671,7 +323671,7 @@
   {
    "id": "oc-76b044413d352b404e83",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13979,
+   "line": 13981,
    "symbol": "appendActivityEvent",
    "kind": "fixed-declaration",
    "role": "initialCompleted",
@@ -323686,7 +323686,7 @@
   {
    "id": "oc-b90318e13fcedf34b2c2",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13982,
+   "line": 13984,
    "symbol": "appendActivityEvent",
    "kind": "fixed-declaration",
    "role": "detail",
@@ -323701,7 +323701,7 @@
   {
    "id": "oc-aa900fe20328382b8896",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13983,
+   "line": 13985,
    "symbol": "appendActivityEvent",
    "kind": "fixed-declaration",
    "role": "detail",
@@ -323720,7 +323720,7 @@
   {
    "id": "oc-f042a323f68ee80b9c01",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13985,
+   "line": 13987,
    "symbol": "appendActivityEvent",
    "kind": "fixed-declaration",
    "role": "detail",
@@ -323742,7 +323742,7 @@
   {
    "id": "oc-658dd9314a056908569d",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13986,
+   "line": 13988,
    "symbol": "appendActivityEvent",
    "kind": "fixed-declaration",
    "role": "detail",
@@ -323761,7 +323761,7 @@
   {
    "id": "oc-b5b594b1c811a09fdbfb",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13987,
+   "line": 13989,
    "symbol": "appendActivityEvent",
    "kind": "fixed-declaration",
    "role": "detail",
@@ -323783,7 +323783,7 @@
   {
    "id": "oc-b04540e8995235623045",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13988,
+   "line": 13990,
    "symbol": "appendActivityEvent",
    "kind": "fixed-declaration",
    "role": "detail",
@@ -323805,7 +323805,7 @@
   {
    "id": "oc-c8148f46c68cea8967bf",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13989,
+   "line": 13991,
    "symbol": "appendActivityEvent",
    "kind": "fixed-declaration",
    "role": "detail",
@@ -323824,7 +323824,7 @@
   {
    "id": "oc-9851419d76d795e7fff1",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13990,
+   "line": 13992,
    "symbol": "appendActivityEvent",
    "kind": "fixed-declaration",
    "role": "detail",
@@ -323846,7 +323846,7 @@
   {
    "id": "oc-71555a9f782c4644df5f",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 13991,
+   "line": 13993,
    "symbol": "appendActivityEvent",
    "kind": "fixed-declaration",
    "role": "detail",
@@ -323865,7 +323865,7 @@
   {
    "id": "oc-2b7f11ee534dc3a47f24",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 14058,
+   "line": 14060,
    "symbol": "appendActivity",
    "kind": "fixed-declaration",
    "role": "time",
@@ -323880,7 +323880,7 @@
   {
    "id": "oc-29f49e23b77dcd248738",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 14059,
+   "line": 14061,
    "symbol": "appendActivity",
    "kind": "fixed-declaration",
    "role": "entry",
@@ -323898,7 +323898,7 @@
   {
    "id": "oc-e84f41d0471a79ed0faa",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 14061,
+   "line": 14063,
    "symbol": "appendActivity",
    "kind": "fixed-declaration",
    "role": "timeElement",
@@ -323916,7 +323916,7 @@
   {
    "id": "oc-d2059eb57c4120d8f996",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 14065,
+   "line": 14067,
    "symbol": "appendActivity",
    "kind": "fixed-declaration",
    "role": "dot",
@@ -323934,7 +323934,7 @@
   {
    "id": "oc-f070541ad5f7f571aa9a",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 14067,
+   "line": 14069,
    "symbol": "appendActivity",
    "kind": "fixed-declaration",
    "role": "content",
@@ -323952,7 +323952,7 @@
   {
    "id": "oc-37259f0508cafa815164",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 14069,
+   "line": 14071,
    "symbol": "appendActivity",
    "kind": "fixed-declaration",
    "role": "titleElement",
@@ -323970,7 +323970,7 @@
   {
    "id": "oc-dac6779d07458eadbf7d",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 14072,
+   "line": 14074,
    "symbol": "appendActivity",
    "kind": "fixed-declaration",
    "role": "detailElement",
@@ -323988,7 +323988,7 @@
   {
    "id": "oc-fcb1e9d07f4214f6f831",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 14092,
+   "line": 14094,
    "symbol": "clearActivity",
    "kind": "fixed-declaration",
    "role": "summary",
@@ -324006,7 +324006,7 @@
   {
    "id": "oc-8ec6d3612b70d43cb309",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 14223,
+   "line": 14225,
    "symbol": "renderAssistantState",
    "kind": "fixed-declaration",
    "role": "draft",
@@ -324024,7 +324024,7 @@
   {
    "id": "oc-2e5e2a9165d21392549a",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 14224,
+   "line": 14226,
    "symbol": "renderAssistantState",
    "kind": "fixed-declaration",
    "role": "send",
@@ -324042,7 +324042,7 @@
   {
    "id": "oc-99de4c40079303e9c2cc",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 14233,
+   "line": 14235,
    "symbol": "renderAssistantState",
    "kind": "fixed-declaration",
    "role": "text",
@@ -324057,7 +324057,7 @@
   {
    "id": "oc-064ba0bbd024425880b8",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 14233,
+   "line": 14235,
    "symbol": "renderAssistantState",
    "kind": "fixed-declaration",
    "role": "text",
@@ -324072,7 +324072,7 @@
   {
    "id": "oc-61d27188c3c6daf1d377",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 14273,
+   "line": 14275,
    "symbol": "renderAssistantConnection",
    "kind": "fixed-declaration",
    "role": "step",
@@ -324090,7 +324090,7 @@
   {
    "id": "oc-513c6e64780f7cb0773d",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 14274,
+   "line": 14276,
    "symbol": "renderAssistantConnection",
    "kind": "fixed-declaration",
    "role": "connect",
@@ -324108,7 +324108,7 @@
   {
    "id": "oc-1442e78a947a95dab5f6",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 14333,
+   "line": 14335,
    "symbol": "showAssistantConnectionGrant",
    "kind": "fixed-declaration",
    "role": "uri",
@@ -324126,7 +324126,7 @@
   {
    "id": "oc-ad84a698b12a7ec66fb5",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 14359,
+   "line": 14361,
    "symbol": "showAssistantConnectionProgress",
    "kind": "fixed-declaration",
    "role": "text",
@@ -324144,7 +324144,7 @@
   {
    "id": "oc-027bb9aeba76c0d240cb",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 14434,
+   "line": 14436,
    "symbol": "abandonAssistantConnection",
    "kind": "fixed-declaration",
    "role": "step",
@@ -324162,7 +324162,7 @@
   {
    "id": "oc-74fc3906a73f2495d832",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 14478,
+   "line": 14480,
    "symbol": "renderAssistantTurn",
    "kind": "fixed-declaration",
    "role": "attached",
@@ -324184,7 +324184,7 @@
   {
    "id": "oc-808bce240dc181e26ccc",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 14478,
+   "line": 14480,
    "symbol": "renderAssistantTurn",
    "kind": "fixed-declaration",
    "role": "attached",
@@ -324199,7 +324199,7 @@
   {
    "id": "oc-43c937a4ff86b1f4709c",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 14478,
+   "line": 14480,
    "symbol": "renderAssistantTurn",
    "kind": "fixed-declaration",
    "role": "attached",
@@ -324221,7 +324221,7 @@
   {
    "id": "oc-2fdde97b23b88a36de8c",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 14479,
+   "line": 14481,
    "symbol": "renderAssistantTurn",
    "kind": "fixed-declaration",
    "role": "attached",
@@ -324243,7 +324243,7 @@
   {
    "id": "oc-0a4b449f3cd0d7f05ea5",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 14484,
+   "line": 14486,
    "symbol": "renderAssistantTurn",
    "kind": "fixed-declaration",
    "role": "id",
@@ -324261,7 +324261,7 @@
   {
    "id": "oc-5ac7f15afcce78f6f742",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 14484,
+   "line": 14486,
    "symbol": "renderAssistantTurn",
    "kind": "fixed-declaration",
    "role": "id",
@@ -324279,7 +324279,7 @@
   {
    "id": "oc-c7c2474dcdbb698c208d",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 14488,
+   "line": 14490,
    "symbol": "renderAssistantTurn",
    "kind": "fixed-declaration",
    "role": "described",
@@ -324297,7 +324297,7 @@
   {
    "id": "oc-3174af6df59a0bb49fcc",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 14488,
+   "line": 14490,
    "symbol": "renderAssistantTurn",
    "kind": "fixed-declaration",
    "role": "described",
@@ -324315,7 +324315,7 @@
   {
    "id": "oc-4efd366d63f653e9648a",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 14492,
+   "line": 14494,
    "symbol": "renderAssistantTurn",
    "kind": "fixed-declaration",
    "role": "role",
@@ -324333,7 +324333,7 @@
   {
    "id": "oc-cd637c031a8568c94f16",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 14493,
+   "line": 14495,
    "symbol": "renderAssistantTurn",
    "kind": "fixed-declaration",
    "role": "role",
@@ -324351,7 +324351,7 @@
   {
    "id": "oc-827ef53d95df64cdd16e",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 14521,
+   "line": 14523,
    "symbol": "clearAssistantConversation",
    "kind": "fixed-declaration",
    "role": "log",
@@ -324369,7 +324369,7 @@
   {
    "id": "oc-829c92e45a07e88eed6b",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 14532,
+   "line": 14534,
    "symbol": "setAssistantDraftError",
    "kind": "fixed-declaration",
    "role": "draft",
@@ -324387,7 +324387,7 @@
   {
    "id": "oc-b7c8ab923b54f7b06da0",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 14582,
+   "line": 14584,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "documentBinding",
@@ -324405,7 +324405,7 @@
   {
    "id": "oc-16ddab8dbeeb1b39f85e",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 14629,
+   "line": 14631,
    "symbol": "renderAssistantProposal",
    "kind": "fixed-declaration",
    "role": "proposalId",
@@ -324423,7 +324423,7 @@
   {
    "id": "oc-121421892af6f9209efa",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 14629,
+   "line": 14631,
    "symbol": "renderAssistantProposal",
    "kind": "fixed-declaration",
    "role": "proposalId",
@@ -324441,7 +324441,7 @@
   {
    "id": "oc-535dfd59f1ed650de726",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 14634,
+   "line": 14636,
    "symbol": "renderAssistantProposal",
    "kind": "fixed-declaration",
    "role": "card",
@@ -324459,7 +324459,7 @@
   {
    "id": "oc-b8728a595ab5131b56cc",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 14638,
+   "line": 14640,
    "symbol": "renderAssistantProposal",
    "kind": "fixed-declaration",
    "role": "title",
@@ -324477,7 +324477,7 @@
   {
    "id": "oc-0c99023628e341e60af4",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 14640,
+   "line": 14642,
    "symbol": "renderAssistantProposal",
    "kind": "fixed-declaration",
    "role": "summary",
@@ -324495,7 +324495,7 @@
   {
    "id": "oc-97e84b27e764418193b0",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 14643,
+   "line": 14645,
    "symbol": "renderAssistantProposal",
    "kind": "fixed-declaration",
    "role": "changes",
@@ -324513,7 +324513,7 @@
   {
    "id": "oc-9e2938363af4af990b76",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 14655,
+   "line": 14657,
    "symbol": "for",
    "kind": "fixed-declaration",
    "role": "actions",
@@ -324531,7 +324531,7 @@
   {
    "id": "oc-6e8dd321c996db1a3445",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 14657,
+   "line": 14659,
    "symbol": "for",
    "kind": "fixed-declaration",
    "role": "confirmButton",
@@ -324549,7 +324549,7 @@
   {
    "id": "oc-59860d6abf033234f9e2",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 14664,
+   "line": 14666,
    "symbol": "for",
    "kind": "fixed-declaration",
    "role": "rejectButton",
@@ -324567,7 +324567,7 @@
   {
    "id": "oc-c1b82b268d039c5e7294",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 14720,
+   "line": 14722,
    "symbol": "toggleAssistantPayload",
    "kind": "fixed-declaration",
    "role": "toggle",
@@ -324585,7 +324585,7 @@
   {
    "id": "oc-7d680e89d421fb486bef",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 14773,
+   "line": 14775,
    "symbol": "contextualHelpButtonHtml",
    "kind": "fixed-declaration",
    "role": "accessibleName",
@@ -324600,7 +324600,7 @@
   {
    "id": "oc-c7767b072436f5d8dd84",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 14788,
+   "line": 14790,
    "symbol": "onFileInput",
    "kind": "fixed-declaration",
    "role": "f",
@@ -324618,7 +324618,7 @@
   {
    "id": "oc-bcd30b506328b1583744",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 14795,
+   "line": 14797,
    "symbol": "onReplaceFileInput",
    "kind": "fixed-declaration",
    "role": "file",
@@ -324636,7 +324636,7 @@
   {
    "id": "oc-09830b2b3fb6dd8a6526",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 14802,
+   "line": 14804,
    "symbol": "graphConfigurationUnavailable",
    "kind": "fixed-declaration",
    "role": "detail",
@@ -324654,7 +324654,7 @@
   {
    "id": "oc-4b093a3878c55dc04564",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 14942,
+   "line": 14944,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "status",
@@ -324670,7 +324670,7 @@
   {
    "id": "oc-1a2e0252df0c206364ff",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 14942,
+   "line": 14944,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "status",
@@ -324686,7 +324686,7 @@
   {
    "id": "oc-59406436f799c4348c0e",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 14942,
+   "line": 14944,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "status",
@@ -324702,7 +324702,7 @@
   {
    "id": "oc-f8547984aef2e76b6ed9",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 14942,
+   "line": 14944,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "status",
@@ -324718,7 +324718,7 @@
   {
    "id": "oc-925ebf8c1e10e840c96c",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 14942,
+   "line": 14944,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "status",
@@ -324734,7 +324734,7 @@
   {
    "id": "oc-29562905b12182c4604c",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 14966,
+   "line": 14968,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "response",
@@ -324750,7 +324750,7 @@
   {
    "id": "oc-086031c9cbccb2c8b1d5",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15004,
+   "line": 15006,
    "symbol": "renderStartupImport",
    "kind": "fixed-declaration",
    "role": "surface",
@@ -324766,7 +324766,7 @@
   {
    "id": "oc-a3777aff50560741f6d0",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15034,
+   "line": 15036,
    "symbol": "catch",
    "kind": "fixed-declaration",
    "role": "surface",
@@ -324782,7 +324782,7 @@
   {
    "id": "oc-3e73bd625f03c8bcdba2",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15053,
+   "line": 15055,
    "symbol": "catch",
    "kind": "fixed-declaration",
    "role": "wrap",
@@ -324800,7 +324800,7 @@
   {
    "id": "oc-aa8ec1952270de74a7a0",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15071,
+   "line": 15073,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "templateId",
@@ -324815,7 +324815,7 @@
   {
    "id": "oc-ca63490f79e85a0a9cbe",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15081,
+   "line": 15083,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "behavior",
@@ -324833,7 +324833,7 @@
   {
    "id": "oc-8015014919aa409b7c6d",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15093,
+   "line": 15095,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "f",
@@ -324851,7 +324851,7 @@
   {
    "id": "oc-c791dc9e24906d763cb6",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15104,
+   "line": 15106,
    "symbol": "executeGlobalShortcut",
    "kind": "fixed-declaration",
    "role": "id",
@@ -324869,7 +324869,7 @@
   {
    "id": "oc-5fea3d216df783a6a662",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15130,
+   "line": 15132,
    "symbol": "toggleHelp",
    "kind": "fixed-declaration",
    "role": "overlay",
@@ -324887,7 +324887,7 @@
   {
    "id": "oc-5b9a2578bbebf3676a64",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15131,
+   "line": 15133,
    "symbol": "toggleHelp",
    "kind": "fixed-declaration",
    "role": "closing",
@@ -324905,7 +324905,7 @@
   {
    "id": "oc-f0b990bdfb5e6a7c28e8",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15145,
+   "line": 15147,
    "symbol": "renderShortcutHelp",
    "kind": "fixed-declaration",
    "role": "list",
@@ -324923,7 +324923,7 @@
   {
    "id": "oc-84b5a8df9fc6a617e726",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15165,
+   "line": 15167,
    "symbol": "renderShortcutHelp",
    "kind": "fixed-declaration",
    "role": "ZONE_HOSTS",
@@ -324941,7 +324941,7 @@
   {
    "id": "oc-295456088f5f8ab20d94",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15165,
+   "line": 15167,
    "symbol": "renderShortcutHelp",
    "kind": "fixed-declaration",
    "role": "ZONE_HOSTS",
@@ -324959,7 +324959,7 @@
   {
    "id": "oc-1b1aa521e4b74abcfd43",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15165,
+   "line": 15167,
    "symbol": "renderShortcutHelp",
    "kind": "fixed-declaration",
    "role": "ZONE_HOSTS",
@@ -324977,7 +324977,7 @@
   {
    "id": "oc-3ab29477be0d19e8de11",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15166,
+   "line": 15168,
    "symbol": "renderShortcutHelp",
    "kind": "fixed-declaration",
    "role": "COLUMN_ELEMENTS",
@@ -324995,7 +324995,7 @@
   {
    "id": "oc-950c8efb33693c36a519",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15166,
+   "line": 15168,
    "symbol": "renderShortcutHelp",
    "kind": "fixed-declaration",
    "role": "COLUMN_ELEMENTS",
@@ -325013,7 +325013,7 @@
   {
    "id": "oc-69deebb11d0dd81dcc57",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15167,
+   "line": 15169,
    "symbol": "renderShortcutHelp",
    "kind": "fixed-declaration",
    "role": "PALETTE_DISCLOSURE_KEY",
@@ -325028,7 +325028,7 @@
   {
    "id": "oc-0b85774ee6ceace2e746",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15173,
+   "line": 15175,
    "symbol": "storedPaletteDisclosures",
    "kind": "fixed-declaration",
    "role": "value",
@@ -325043,7 +325043,7 @@
   {
    "id": "oc-cebdd43ee449d2c6d0cf",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15182,
+   "line": 15184,
    "symbol": "applyPaletteDisclosures",
    "kind": "fixed-declaration",
    "role": "label",
@@ -325058,7 +325058,7 @@
   {
    "id": "oc-b383145592e3428a98db",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15182,
+   "line": 15184,
    "symbol": "applyPaletteDisclosures",
    "kind": "fixed-declaration",
    "role": "label",
@@ -325073,7 +325073,7 @@
   {
    "id": "oc-78926a89b8544ef2ef22",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15182,
+   "line": 15184,
    "symbol": "applyPaletteDisclosures",
    "kind": "fixed-declaration",
    "role": "label",
@@ -325088,7 +325088,7 @@
   {
    "id": "oc-63c6b416414f63eafa97",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15243,
+   "line": 15245,
    "symbol": "panelElement",
    "kind": "fixed-declaration",
    "role": "DOCK_MIN_HEIGHT",
@@ -325106,7 +325106,7 @@
   {
    "id": "oc-21d912810c9d75c0c564",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15244,
+   "line": 15246,
    "symbol": "panelElement",
    "kind": "fixed-declaration",
    "role": "PANEL_MIN_HEIGHT",
@@ -325124,7 +325124,7 @@
   {
    "id": "oc-0436dc7b9e809fe7fd18",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15252,
+   "line": 15254,
    "symbol": "panelElement",
    "kind": "fixed-declaration",
    "role": "column",
@@ -325142,7 +325142,7 @@
   {
    "id": "oc-69045e7614f1f44641e3",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15252,
+   "line": 15254,
    "symbol": "panelElement",
    "kind": "fixed-declaration",
    "role": "column",
@@ -325160,7 +325160,7 @@
   {
    "id": "oc-cdb4a518b6009adfee65",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15252,
+   "line": 15254,
    "symbol": "panelElement",
    "kind": "fixed-declaration",
    "role": "column",
@@ -325178,7 +325178,7 @@
   {
    "id": "oc-50d7149503519dc7b3d8",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15254,
+   "line": 15256,
    "symbol": "panelElement",
    "kind": "fixed-declaration",
    "role": "wasCollapsed",
@@ -325196,7 +325196,7 @@
   {
    "id": "oc-776ee22cc25f8711cb12",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15256,
+   "line": 15258,
    "symbol": "panelElement",
    "kind": "fixed-declaration",
    "role": "minimum",
@@ -325214,7 +325214,7 @@
   {
    "id": "oc-9bbf75f333ba7f8d51c0",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15276,
+   "line": 15278,
    "symbol": "createPanelSplitter",
    "kind": "fixed-declaration",
    "role": "splitter",
@@ -325232,7 +325232,7 @@
   {
    "id": "oc-1298a164cb39f1ab1f7e",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15285,
+   "line": 15287,
    "symbol": "createPanelSplitter",
    "kind": "fixed-declaration",
    "role": "label",
@@ -325247,7 +325247,7 @@
   {
    "id": "oc-d8fe28bfd5de7933ea4f",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15297,
+   "line": 15299,
    "symbol": "syncPanelSplitters",
    "kind": "fixed-declaration",
    "role": "wanted",
@@ -325265,7 +325265,7 @@
   {
    "id": "oc-4f9ce2636e3f753068a2",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15297,
+   "line": 15299,
    "symbol": "syncPanelSplitters",
    "kind": "fixed-declaration",
    "role": "wanted",
@@ -325283,7 +325283,7 @@
   {
    "id": "oc-081fe8a91ac266882b06",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15297,
+   "line": 15299,
    "symbol": "syncPanelSplitters",
    "kind": "fixed-declaration",
    "role": "wanted",
@@ -325301,7 +325301,7 @@
   {
    "id": "oc-56682947a27b91a1f3df",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15299,
+   "line": 15301,
    "symbol": "syncPanelSplitters",
    "kind": "fixed-declaration",
    "role": "existing",
@@ -325319,7 +325319,7 @@
   {
    "id": "oc-7d93c9a0069e1ebce415",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15312,
+   "line": 15314,
    "symbol": "panelWeights",
    "kind": "fixed-declaration",
    "role": "fallback",
@@ -325337,7 +325337,7 @@
   {
    "id": "oc-39262e1743f935d31c3f",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15312,
+   "line": 15314,
    "symbol": "panelWeights",
    "kind": "fixed-declaration",
    "role": "fallback",
@@ -325355,7 +325355,7 @@
   {
    "id": "oc-ec4edf45efbb4de46260",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15314,
+   "line": 15316,
    "symbol": "panelWeights",
    "kind": "fixed-declaration",
    "role": "total",
@@ -325373,7 +325373,7 @@
   {
    "id": "oc-8a449b3b29b6de315f6d",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15314,
+   "line": 15316,
    "symbol": "panelWeights",
    "kind": "fixed-declaration",
    "role": "total",
@@ -325391,7 +325391,7 @@
   {
    "id": "oc-18b5af15bdccad870119",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15351,
+   "line": 15353,
    "symbol": "syncPanelSplitterValues",
    "kind": "fixed-declaration",
    "role": "disabled",
@@ -325409,7 +325409,7 @@
   {
    "id": "oc-047d62ee77f402a64095",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15385,
+   "line": 15387,
    "symbol": "movePanelSplitter",
    "kind": "fixed-declaration",
    "role": "total",
@@ -325427,7 +325427,7 @@
   {
    "id": "oc-799d1abc065e3ce49d50",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15405,
+   "line": 15407,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "direction",
@@ -325445,7 +325445,7 @@
   {
    "id": "oc-e43811ebbe6dafd3b5ca",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15405,
+   "line": 15407,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "direction",
@@ -325463,7 +325463,7 @@
   {
    "id": "oc-ee14573b3ecb7d22900a",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15405,
+   "line": 15407,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "direction",
@@ -325481,7 +325481,7 @@
   {
    "id": "oc-3482b4aeafeb26043e6e",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15405,
+   "line": 15407,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "direction",
@@ -325499,7 +325499,7 @@
   {
    "id": "oc-929d651f7684312e4800",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15405,
+   "line": 15407,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "direction",
@@ -325517,7 +325517,7 @@
   {
    "id": "oc-ddf81a7f1dbac68e558c",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15436,
+   "line": 15438,
    "symbol": "mainAvailableWidth",
    "kind": "fixed-declaration",
    "role": "main",
@@ -325535,7 +325535,7 @@
   {
    "id": "oc-0eea311a719d7ad2c5f5",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15437,
+   "line": 15439,
    "symbol": "mainAvailableWidth",
    "kind": "fixed-declaration",
    "role": "splitters",
@@ -325553,7 +325553,7 @@
   {
    "id": "oc-cada63a7ba4395e727fe",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15442,
+   "line": 15444,
    "symbol": "applyZoneGeometry",
    "kind": "fixed-declaration",
    "role": "stage",
@@ -325571,7 +325571,7 @@
   {
    "id": "oc-17c30368083884dc0753",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15443,
+   "line": 15445,
    "symbol": "applyZoneGeometry",
    "kind": "fixed-declaration",
    "role": "left",
@@ -325589,7 +325589,7 @@
   {
    "id": "oc-bd68afe8b717b0fff003",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15444,
+   "line": 15446,
    "symbol": "applyZoneGeometry",
    "kind": "fixed-declaration",
    "role": "right",
@@ -325607,7 +325607,7 @@
   {
    "id": "oc-961badf8f48b3386cd61",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15445,
+   "line": 15447,
    "symbol": "applyZoneGeometry",
    "kind": "fixed-declaration",
    "role": "dock",
@@ -325625,7 +325625,7 @@
   {
    "id": "oc-7ab89ce96e142f847254",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15446,
+   "line": 15448,
    "symbol": "applyZoneGeometry",
    "kind": "fixed-declaration",
    "role": "dockSplitter",
@@ -325643,7 +325643,7 @@
   {
    "id": "oc-06027dc1825165c52968",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15463,
+   "line": 15465,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "maximumColumns",
@@ -325661,7 +325661,7 @@
   {
    "id": "oc-b3de509a31ea0935c9e8",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15466,
+   "line": 15468,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "rightFloor",
@@ -325679,7 +325679,7 @@
   {
    "id": "oc-2c9a2fc6c5ab57e88832",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15467,
+   "line": 15469,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "takeRight",
@@ -325697,7 +325697,7 @@
   {
    "id": "oc-4da5915184dc3733a891",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15470,
+   "line": 15472,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "leftFloor",
@@ -325715,7 +325715,7 @@
   {
    "id": "oc-5db4ec60d3986403d16f",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15480,
+   "line": 15482,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "pairHeight",
@@ -325733,7 +325733,7 @@
   {
    "id": "oc-a2ee56e57f5d15b0de33",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15484,
+   "line": 15486,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "dockHeight",
@@ -325751,7 +325751,7 @@
   {
    "id": "oc-8c23280a8216a3865c72",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15494,
+   "line": 15496,
    "symbol": "syncLayoutSplitterValues",
    "kind": "fixed-declaration",
    "role": "stage",
@@ -325769,7 +325769,7 @@
   {
    "id": "oc-f6a2a6d67bc3309e04d6",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15506,
+   "line": 15508,
    "symbol": "for",
    "kind": "fixed-declaration",
    "role": "axis",
@@ -325787,7 +325787,7 @@
   {
    "id": "oc-c7146cdf63ccdde07bdb",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15506,
+   "line": 15508,
    "symbol": "for",
    "kind": "fixed-declaration",
    "role": "axis",
@@ -325805,7 +325805,7 @@
   {
    "id": "oc-f09f1ec8d46d1d213eac",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15506,
+   "line": 15508,
    "symbol": "for",
    "kind": "fixed-declaration",
    "role": "axis",
@@ -325823,7 +325823,7 @@
   {
    "id": "oc-4836c2162e32e82e9541",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15519,
+   "line": 15521,
    "symbol": "moveLayoutSplitter",
    "kind": "fixed-declaration",
    "role": "stage",
@@ -325841,7 +325841,7 @@
   {
    "id": "oc-ad0a1e8d721d5cf5edbe",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15521,
+   "line": 15523,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "canvas",
@@ -325859,7 +325859,7 @@
   {
    "id": "oc-de94961fc309856bf085",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15522,
+   "line": 15524,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "dock",
@@ -325877,7 +325877,7 @@
   {
    "id": "oc-d83c3a38add72bb77cca",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15531,
+   "line": 15533,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "column",
@@ -325895,7 +325895,7 @@
   {
    "id": "oc-444cd6c64ace426b09c4",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15531,
+   "line": 15533,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "column",
@@ -325913,7 +325913,7 @@
   {
    "id": "oc-ec10ced559f91c897e35",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15531,
+   "line": 15533,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "column",
@@ -325931,7 +325931,7 @@
   {
    "id": "oc-43be96c82caedd0f351c",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15536,
+   "line": 15538,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "outward",
@@ -325949,7 +325949,7 @@
   {
    "id": "oc-61f4ea0289de19a33597",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15536,
+   "line": 15538,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "outward",
@@ -325967,7 +325967,7 @@
   {
    "id": "oc-13b00e0a5be9aa8b1317",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15536,
+   "line": 15538,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "outward",
@@ -325985,7 +325985,7 @@
   {
    "id": "oc-a892ea521a2b618c7af6",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15543,
+   "line": 15545,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "expanded",
@@ -326003,7 +326003,7 @@
   {
    "id": "oc-009cbd67bb6652d27c58",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15548,
+   "line": 15550,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "width",
@@ -326021,7 +326021,7 @@
   {
    "id": "oc-247d5a8435eaf44d6b42",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15554,
+   "line": 15556,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "next",
@@ -326039,7 +326039,7 @@
   {
    "id": "oc-ba2e32de43643bdf785a",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15559,
+   "line": 15561,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "columnWidth",
@@ -326057,7 +326057,7 @@
   {
    "id": "oc-7a243fd1c6fd34a16856",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15578,
+   "line": 15580,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "direction",
@@ -326075,7 +326075,7 @@
   {
    "id": "oc-4e36b1af023f4d88297c",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15597,
+   "line": 15599,
    "symbol": "onLayoutSplitterPointerDown",
    "kind": "fixed-declaration",
    "role": "current",
@@ -326093,7 +326093,7 @@
   {
    "id": "oc-d183659558655d1ae134",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15667,
+   "line": 15669,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "toggle",
@@ -326111,7 +326111,7 @@
   {
    "id": "oc-4e56ccb998e6ea8490b7",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15673,
+   "line": 15675,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "owner",
@@ -326133,7 +326133,7 @@
   {
    "id": "oc-665134d6ea138fad4c52",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15673,
+   "line": 15675,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "owner",
@@ -326148,7 +326148,7 @@
   {
    "id": "oc-1d782c76a402216d5387",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15673,
+   "line": 15675,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "owner",
@@ -326163,7 +326163,7 @@
   {
    "id": "oc-8129a3a03a48706d50d1",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15674,
+   "line": 15676,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "label",
@@ -326178,7 +326178,7 @@
   {
    "id": "oc-bb56b283e2bd762af982",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15674,
+   "line": 15676,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "label",
@@ -326193,7 +326193,7 @@
   {
    "id": "oc-1adf69a059ec74f3ee54",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15675,
+   "line": 15677,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "reason",
@@ -326208,7 +326208,7 @@
   {
    "id": "oc-a8dfa305fc5a78317c30",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15704,
+   "line": 15706,
    "symbol": "for",
    "kind": "fixed-declaration",
    "role": "host",
@@ -326226,7 +326226,7 @@
   {
    "id": "oc-7cb9414e89a7081a0a10",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15723,
+   "line": 15725,
    "symbol": "revealInspector",
    "kind": "fixed-declaration",
    "role": "entry",
@@ -326244,7 +326244,7 @@
   {
    "id": "oc-de851dfb9d72d3d67083",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15742,
+   "line": 15744,
    "symbol": "revealInspector",
    "kind": "fixed-declaration",
    "role": "DRAG_THRESHOLD",
@@ -326262,7 +326262,7 @@
   {
    "id": "oc-1deeb39c8dcd49ad9a95",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15758,
+   "line": 15760,
    "symbol": "beginPanelDrag",
    "kind": "fixed-declaration",
    "role": "panel",
@@ -326280,7 +326280,7 @@
   {
    "id": "oc-60196ff53b9e1c54144a",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15798,
+   "line": 15800,
    "symbol": "startPanelDrag",
    "kind": "fixed-declaration",
    "role": "carrier",
@@ -326298,7 +326298,7 @@
   {
    "id": "oc-caa23a3780e49402baa3",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15805,
+   "line": 15807,
    "symbol": "moveCarrier",
    "kind": "fixed-declaration",
    "role": "carrier",
@@ -326316,7 +326316,7 @@
   {
    "id": "oc-463edfe72bbb6ee218ec",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15814,
+   "line": 15816,
    "symbol": "dropTargetAt",
    "kind": "fixed-declaration",
    "role": "band",
@@ -326334,7 +326334,7 @@
   {
    "id": "oc-a13e5b1296c3e893856b",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15829,
+   "line": 15831,
    "symbol": "for",
    "kind": "fixed-declaration",
    "role": "siblings",
@@ -326352,7 +326352,7 @@
   {
    "id": "oc-ed682d7774f2bf94fbdd",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15843,
+   "line": 15845,
    "symbol": "updateDropTarget",
    "kind": "fixed-declaration",
    "role": "band",
@@ -326370,7 +326370,7 @@
   {
    "id": "oc-41c1b3a4d4404abfe19f",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15855,
+   "line": 15857,
    "symbol": "updateDropTarget",
    "kind": "fixed-declaration",
    "role": "marker",
@@ -326388,7 +326388,7 @@
   {
    "id": "oc-764d0c5d5f0934f6d01d",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15858,
+   "line": 15860,
    "symbol": "updateDropTarget",
    "kind": "fixed-declaration",
    "role": "siblings",
@@ -326406,7 +326406,7 @@
   {
    "id": "oc-a70f7ecce78e7558a8f1",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15883,
+   "line": 15885,
    "symbol": "finishPanelDrag",
    "kind": "fixed-declaration",
    "role": "band",
@@ -326424,7 +326424,7 @@
   {
    "id": "oc-5b49b2e7a2747b256084",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15910,
+   "line": 15912,
    "symbol": "syncDocumentSwitcher",
    "kind": "fixed-declaration",
    "role": "trigger",
@@ -326442,7 +326442,7 @@
   {
    "id": "oc-54b6b9b0cc94f7770cf5",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15911,
+   "line": 15913,
    "symbol": "syncDocumentSwitcher",
    "kind": "fixed-declaration",
    "role": "list",
@@ -326460,7 +326460,7 @@
   {
    "id": "oc-32fe7a61bd2d07be7cf2",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15914,
+   "line": 15916,
    "symbol": "syncDocumentSwitcher",
    "kind": "fixed-declaration",
    "role": "active",
@@ -326478,7 +326478,7 @@
   {
    "id": "oc-2ff4ce80ef8fdcbe2617",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15925,
+   "line": 15927,
    "symbol": "syncDocumentSwitcher",
    "kind": "fixed-declaration",
    "role": "states",
@@ -326496,7 +326496,7 @@
   {
    "id": "oc-8d57fe8f0841a1f70c75",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15925,
+   "line": 15927,
    "symbol": "syncDocumentSwitcher",
    "kind": "fixed-declaration",
    "role": "states",
@@ -326514,7 +326514,7 @@
   {
    "id": "oc-0a8259cb4560765cf1f5",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15925,
+   "line": 15927,
    "symbol": "syncDocumentSwitcher",
    "kind": "fixed-declaration",
    "role": "states",
@@ -326532,7 +326532,7 @@
   {
    "id": "oc-faf1d6532b4bcbc9f4bd",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15925,
+   "line": 15927,
    "symbol": "syncDocumentSwitcher",
    "kind": "fixed-declaration",
    "role": "states",
@@ -326550,7 +326550,7 @@
   {
    "id": "oc-18e84fe032760853c1ff",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15944,
+   "line": 15946,
    "symbol": "syncDocumentSwitcher",
    "kind": "fixed-declaration",
    "role": "dialog",
@@ -326568,7 +326568,7 @@
   {
    "id": "oc-8e657efa1575d094a910",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15945,
+   "line": 15947,
    "symbol": "syncDocumentSwitcher",
    "kind": "fixed-declaration",
    "role": "trigger",
@@ -326586,7 +326586,7 @@
   {
    "id": "oc-9c4c8530cd3772e1a139",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15952,
+   "line": 15954,
    "symbol": "openDocumentSwitcher",
    "kind": "fixed-declaration",
    "role": "trigger",
@@ -326604,7 +326604,7 @@
   {
    "id": "oc-cb55c18f8926f88d3676",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15953,
+   "line": 15955,
    "symbol": "openDocumentSwitcher",
    "kind": "fixed-declaration",
    "role": "dialog",
@@ -326622,7 +326622,7 @@
   {
    "id": "oc-7f2bd0e499e4b9f2622a",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15965,
+   "line": 15967,
    "symbol": "closeUnsavedDocumentDialog",
    "kind": "fixed-declaration",
    "role": "dialog",
@@ -326640,7 +326640,7 @@
   {
    "id": "oc-ea02e6a5ea678b33229e",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 15993,
+   "line": 15995,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "replacing",
@@ -326658,7 +326658,7 @@
   {
    "id": "oc-e1b7f0c3df2e6f444031",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 16001,
+   "line": 16003,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "dialog",
@@ -326676,7 +326676,7 @@
   {
    "id": "oc-5b1e58a3bffc513fd045",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 16011,
+   "line": 16013,
    "symbol": "completeCloseDocument",
    "kind": "fixed-declaration",
    "role": "trigger",
@@ -326694,7 +326694,7 @@
   {
    "id": "oc-11623afce29d69e74813",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 16044,
+   "line": 16046,
    "symbol": "renderCloseAllList",
    "kind": "fixed-declaration",
    "role": "list",
@@ -326712,7 +326712,7 @@
   {
    "id": "oc-035932851dc37c0678f7",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 16046,
+   "line": 16048,
    "symbol": "renderCloseAllList",
    "kind": "fixed-declaration",
    "role": "item",
@@ -326730,7 +326730,7 @@
   {
    "id": "oc-906f2ba9983d67f1c1e6",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 16063,
+   "line": 16065,
    "symbol": "renderCloseAllActions",
    "kind": "fixed-declaration",
    "role": "host",
@@ -326748,7 +326748,7 @@
   {
    "id": "oc-a55b6ae0265d24284466",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 16065,
+   "line": 16067,
    "symbol": "renderCloseAllActions",
    "kind": "fixed-declaration",
    "role": "button",
@@ -326766,7 +326766,7 @@
   {
    "id": "oc-64d3c39826e3b44c0c82",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 16076,
+   "line": 16078,
    "symbol": "showCloseAllStep",
    "kind": "fixed-declaration",
    "role": "title",
@@ -326784,7 +326784,7 @@
   {
    "id": "oc-a02e6fb0d66ef1616f93",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 16077,
+   "line": 16079,
    "symbol": "showCloseAllStep",
    "kind": "fixed-declaration",
    "role": "description",
@@ -326802,7 +326802,7 @@
   {
    "id": "oc-50dfcbfe87213cbf053f",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 16078,
+   "line": 16080,
    "symbol": "showCloseAllStep",
    "kind": "fixed-declaration",
    "role": "status",
@@ -326820,7 +326820,7 @@
   {
    "id": "oc-181d006637aec04ac40e",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 16125,
+   "line": 16127,
    "symbol": "showCloseAllFailure",
    "kind": "fixed-declaration",
    "role": "status",
@@ -326838,7 +326838,7 @@
   {
    "id": "oc-8db6b4dafa9792e7a4e7",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 16136,
+   "line": 16138,
    "symbol": "focusAfterCloseAll",
    "kind": "fixed-declaration",
    "role": "newDocument",
@@ -326856,7 +326856,7 @@
   {
    "id": "oc-dbb520b1a9383210eb58",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 16150,
+   "line": 16152,
    "symbol": "cancelCloseAllDocuments",
    "kind": "fixed-declaration",
    "role": "focusTarget",
@@ -326874,7 +326874,7 @@
   {
    "id": "oc-e68da355768bcae04a2c",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 16184,
+   "line": 16186,
    "symbol": "if",
    "kind": "operational-declaration",
    "role": "stage",
@@ -326892,7 +326892,7 @@
   {
    "id": "oc-c353ea22242453e08b25",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 16186,
+   "line": 16188,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "prepared",
@@ -326910,7 +326910,7 @@
   {
    "id": "oc-3b7f464ae14ce4d01719",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 16445,
+   "line": 16447,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "draft",
@@ -326926,7 +326926,7 @@
   {
    "id": "oc-da2e523f5ec810597027",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 16491,
+   "line": 16493,
    "symbol": "saveRepositoryGraph",
    "kind": "fixed-declaration",
    "role": "expected",
@@ -326942,7 +326942,7 @@
   {
    "id": "oc-7e28b3bed205a1163bb1",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 16491,
+   "line": 16493,
    "symbol": "saveRepositoryGraph",
    "kind": "fixed-declaration",
    "role": "expected",
@@ -326958,7 +326958,7 @@
   {
    "id": "oc-8d3394c18b9a9966b3ba",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 16491,
+   "line": 16493,
    "symbol": "saveRepositoryGraph",
    "kind": "fixed-declaration",
    "role": "expected",
@@ -326974,7 +326974,7 @@
   {
    "id": "oc-97249a48bf4f5c4e429e",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 16547,
+   "line": 16549,
    "symbol": "repositoryHistory",
    "kind": "fixed-declaration",
    "role": "lines",
@@ -326990,7 +326990,7 @@
   {
    "id": "oc-891af902455caeb54a69",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 16547,
+   "line": 16549,
    "symbol": "repositoryHistory",
    "kind": "fixed-declaration",
    "role": "lines",
@@ -327006,7 +327006,7 @@
   {
    "id": "oc-e3a38511180778f15301",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 16548,
+   "line": 16550,
    "symbol": "repositoryHistory",
    "kind": "fixed-declaration",
    "role": "revision",
@@ -327022,7 +327022,7 @@
   {
    "id": "oc-7bd90fbe66e98a8b27d1",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 16548,
+   "line": 16550,
    "symbol": "repositoryHistory",
    "kind": "fixed-declaration",
    "role": "revision",
@@ -327042,7 +327042,7 @@
   {
    "id": "oc-48c77f39d95aa801a88b",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 16548,
+   "line": 16550,
    "symbol": "repositoryHistory",
    "kind": "fixed-declaration",
    "role": "revision",
@@ -327062,7 +327062,7 @@
   {
    "id": "oc-ea9aff336ac584fddd29",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 16589,
+   "line": 16591,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "result",
@@ -327082,7 +327082,7 @@
   {
    "id": "oc-b3707b45cb72aec21228",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 16616,
+   "line": 16618,
    "symbol": "repositoryRelease",
    "kind": "fixed-declaration",
    "role": "saved",
@@ -327098,7 +327098,7 @@
   {
    "id": "oc-84e1b8031b3609076cf7",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 16670,
+   "line": 16672,
    "symbol": "publishedArtifacts",
    "kind": "fixed-declaration",
    "role": "choices",
@@ -327114,7 +327114,7 @@
   {
    "id": "oc-4b46c978d38b28eaa72c",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 16670,
+   "line": 16672,
    "symbol": "publishedArtifacts",
    "kind": "fixed-declaration",
    "role": "choices",
@@ -327130,7 +327130,7 @@
   {
    "id": "oc-dddd2aef5d8663d1c447",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 16671,
+   "line": 16673,
    "symbol": "publishedArtifacts",
    "kind": "fixed-declaration",
    "role": "selection",
@@ -327146,7 +327146,7 @@
   {
    "id": "oc-938efce32077b70c696d",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 16671,
+   "line": 16673,
    "symbol": "publishedArtifacts",
    "kind": "fixed-declaration",
    "role": "selection",
@@ -327166,7 +327166,7 @@
   {
    "id": "oc-b02ed134d50a80ea88c8",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 16671,
+   "line": 16673,
    "symbol": "publishedArtifacts",
    "kind": "fixed-declaration",
    "role": "selection",
@@ -327186,7 +327186,7 @@
   {
    "id": "oc-0fcd2003f510ac21643e",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 16673,
+   "line": 16675,
    "symbol": "publishedArtifacts",
    "kind": "fixed-declaration",
    "role": "match",
@@ -327206,7 +327206,7 @@
   {
    "id": "oc-9724988782ceb942633c",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 16673,
+   "line": 16675,
    "symbol": "publishedArtifacts",
    "kind": "fixed-declaration",
    "role": "match",
@@ -327222,7 +327222,7 @@
   {
    "id": "oc-a97b090172c1bcd1e2b3",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 16673,
+   "line": 16675,
    "symbol": "publishedArtifacts",
    "kind": "fixed-declaration",
    "role": "match",
@@ -327238,7 +327238,7 @@
   {
    "id": "oc-0b68067b05891cfced5f",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 16673,
+   "line": 16675,
    "symbol": "publishedArtifacts",
    "kind": "fixed-declaration",
    "role": "match",
@@ -327258,7 +327258,7 @@
   {
    "id": "oc-00951314f7d9955d5952",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 16673,
+   "line": 16675,
    "symbol": "publishedArtifacts",
    "kind": "fixed-declaration",
    "role": "match",
@@ -327278,7 +327278,7 @@
   {
    "id": "oc-6316ffed8beba88244a9",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 16673,
+   "line": 16675,
    "symbol": "publishedArtifacts",
    "kind": "fixed-declaration",
    "role": "match",
@@ -327294,7 +327294,7 @@
   {
    "id": "oc-5c0c53c777ce32e9e4d8",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 16673,
+   "line": 16675,
    "symbol": "publishedArtifacts",
    "kind": "fixed-declaration",
    "role": "match",
@@ -327310,7 +327310,7 @@
   {
    "id": "oc-87942806ec6860408156",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 16675,
+   "line": 16677,
    "symbol": "publishedArtifacts",
    "kind": "fixed-declaration",
    "role": "releaseVersion",
@@ -327326,7 +327326,7 @@
   {
    "id": "oc-2141b13efee5ff686b20",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 16676,
+   "line": 16678,
    "symbol": "publishedArtifacts",
    "kind": "fixed-declaration",
    "role": "selected",
@@ -327342,7 +327342,7 @@
   {
    "id": "oc-31a571569ff93dd89a79",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 16679,
+   "line": 16681,
    "symbol": "publishedArtifacts",
    "kind": "fixed-declaration",
    "role": "deploymentId",
@@ -327358,7 +327358,7 @@
   {
    "id": "oc-d3efb827d9453827edbc",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 16679,
+   "line": 16681,
    "symbol": "publishedArtifacts",
    "kind": "fixed-declaration",
    "role": "deploymentId",
@@ -327378,7 +327378,7 @@
   {
    "id": "oc-4e11d0dbecc4d62292a1",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 16679,
+   "line": 16681,
    "symbol": "publishedArtifacts",
    "kind": "fixed-declaration",
    "role": "deploymentId",
@@ -327398,7 +327398,7 @@
   {
    "id": "oc-f916f72f1836d37f64e8",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 16682,
+   "line": 16684,
    "symbol": "publishedArtifacts",
    "kind": "fixed-declaration",
    "role": "result",
@@ -327418,7 +327418,7 @@
   {
    "id": "oc-895d025babf415725f0b",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 16721,
+   "line": 16723,
    "symbol": "catch",
    "kind": "fixed-declaration",
    "role": "dialog",
@@ -327437,7 +327437,7 @@
   {
    "id": "oc-702dc482b10ef56530b0",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 16728,
+   "line": 16730,
    "symbol": "closeActiveDeploymentDialog",
    "kind": "fixed-declaration",
    "role": "dialog",
@@ -327455,7 +327455,7 @@
   {
    "id": "oc-eaa9c47f4124c5388725",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 16851,
+   "line": 16853,
    "symbol": "commandContext",
    "kind": "fixed-declaration",
    "role": "selectedNodes",
@@ -327473,7 +327473,7 @@
   {
    "id": "oc-83f11c5fc93909eea3b7",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 16950,
+   "line": 16952,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "focusedMenuCommand",
@@ -327488,7 +327488,7 @@
   {
    "id": "oc-25ac3afe2f833c06ce8d",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 16977,
+   "line": 16979,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "firstShortcut",
@@ -327503,7 +327503,7 @@
   {
    "id": "oc-8482cfd3ac34d0c9d5de",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 16977,
+   "line": 16979,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "firstShortcut",
@@ -327518,7 +327518,7 @@
   {
    "id": "oc-cdf9287c959c465d9ac5",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 16993,
+   "line": 16995,
    "symbol": "syncLayoutToolbarTabStop",
    "kind": "fixed-declaration",
    "role": "checked",
@@ -327536,7 +327536,7 @@
   {
    "id": "oc-b190e1aa6382ff6c5025",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 16993,
+   "line": 16995,
    "symbol": "syncLayoutToolbarTabStop",
    "kind": "fixed-declaration",
    "role": "checked",
@@ -327554,7 +327554,7 @@
   {
    "id": "oc-14c0e5e6601590d970a7",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 16995,
+   "line": 16997,
    "symbol": "syncLayoutToolbarTabStop",
    "kind": "fixed-declaration",
    "role": "tabStop",
@@ -327572,7 +327572,7 @@
   {
    "id": "oc-920bac71a322060102e3",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 16995,
+   "line": 16997,
    "symbol": "syncLayoutToolbarTabStop",
    "kind": "fixed-declaration",
    "role": "tabStop",
@@ -327590,7 +327590,7 @@
   {
    "id": "oc-44b0805377059eda4f43",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17009,
+   "line": 17011,
    "symbol": "renderApplicationMenu",
    "kind": "fixed-declaration",
    "role": "popup",
@@ -327608,7 +327608,7 @@
   {
    "id": "oc-5d681da55483e885e002",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17021,
+   "line": 17023,
    "symbol": "renderApplicationMenu",
    "kind": "fixed-declaration",
    "role": "role",
@@ -327626,7 +327626,7 @@
   {
    "id": "oc-092458c09bbb159dac01",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17021,
+   "line": 17023,
    "symbol": "renderApplicationMenu",
    "kind": "fixed-declaration",
    "role": "role",
@@ -327644,7 +327644,7 @@
   {
    "id": "oc-0da162da817d4dacbbdc",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17023,
+   "line": 17025,
    "symbol": "renderApplicationMenu",
    "kind": "fixed-declaration",
    "role": "shortcuts",
@@ -327662,7 +327662,7 @@
   {
    "id": "oc-4ee5fb6f3c352f1adda1",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17023,
+   "line": 17025,
    "symbol": "renderApplicationMenu",
    "kind": "fixed-declaration",
    "role": "shortcuts",
@@ -327680,7 +327680,7 @@
   {
    "id": "oc-ec348feff193d8758cc6",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17024,
+   "line": 17026,
    "symbol": "renderApplicationMenu",
    "kind": "fixed-declaration",
    "role": "shortcut",
@@ -327698,7 +327698,7 @@
   {
    "id": "oc-13b98c009fd9e4ddbda5",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17024,
+   "line": 17026,
    "symbol": "renderApplicationMenu",
    "kind": "fixed-declaration",
    "role": "shortcut",
@@ -327716,7 +327716,7 @@
   {
    "id": "oc-3eb6e0cae92b694aeb03",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17025,
+   "line": 17027,
    "symbol": "renderApplicationMenu",
    "kind": "fixed-declaration",
    "role": "ariaShortcut",
@@ -327734,7 +327734,7 @@
   {
    "id": "oc-a634f94d31f37fa0398c",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17025,
+   "line": 17027,
    "symbol": "renderApplicationMenu",
    "kind": "fixed-declaration",
    "role": "ariaShortcut",
@@ -327752,7 +327752,7 @@
   {
    "id": "oc-0e2453e963e8d684058b",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17025,
+   "line": 17027,
    "symbol": "renderApplicationMenu",
    "kind": "fixed-declaration",
    "role": "ariaShortcut",
@@ -327770,7 +327770,7 @@
   {
    "id": "oc-fd3b47dbc563e1a999c7",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17026,
+   "line": 17028,
    "symbol": "renderApplicationMenu",
    "kind": "fixed-declaration",
    "role": "checked",
@@ -327788,7 +327788,7 @@
   {
    "id": "oc-5ef469c917f59c02aba0",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17026,
+   "line": 17028,
    "symbol": "renderApplicationMenu",
    "kind": "fixed-declaration",
    "role": "checked",
@@ -327806,7 +327806,7 @@
   {
    "id": "oc-4039cf8517f489e7f4ab",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17027,
+   "line": 17029,
    "symbol": "renderApplicationMenu",
    "kind": "fixed-declaration",
    "role": "help",
@@ -327821,7 +327821,7 @@
   {
    "id": "oc-74dc887de3870908372b",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17027,
+   "line": 17029,
    "symbol": "renderApplicationMenu",
    "kind": "fixed-declaration",
    "role": "help",
@@ -327840,7 +327840,7 @@
   {
    "id": "oc-b2678162703d59bc70b9",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17028,
+   "line": 17030,
    "symbol": "renderApplicationMenu",
    "kind": "fixed-declaration",
    "role": "unavailableLabel",
@@ -327855,7 +327855,7 @@
   {
    "id": "oc-4ca0558b95e3c34bbd17",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17039,
+   "line": 17041,
    "symbol": "renderApplicationMenu",
    "kind": "fixed-declaration",
    "role": "dialog",
@@ -327873,7 +327873,7 @@
   {
    "id": "oc-20f29b260b034fc973c3",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17040,
+   "line": 17042,
    "symbol": "renderApplicationMenu",
    "kind": "fixed-declaration",
    "role": "activeDeploymentDialog",
@@ -327891,7 +327891,7 @@
   {
    "id": "oc-c5e1f545c31183359d22",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17045,
+   "line": 17047,
    "symbol": "renderApplicationMenu",
    "kind": "fixed-declaration",
    "role": "popup",
@@ -327909,7 +327909,7 @@
   {
    "id": "oc-642e2ee5f7c74f5d90eb",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17060,
+   "line": 17062,
    "symbol": "renderApplicationMenu",
    "kind": "fixed-declaration",
    "role": "popup",
@@ -327927,7 +327927,7 @@
   {
    "id": "oc-1f508980c4908c19083e",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17090,
+   "line": 17092,
    "symbol": "switchApplicationMenu",
    "kind": "fixed-declaration",
    "role": "triggers",
@@ -327945,7 +327945,7 @@
   {
    "id": "oc-3b9250ee66b2959e2e7b",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17102,
+   "line": 17104,
    "symbol": "resumeDocumentTabOrder",
    "kind": "fixed-declaration",
    "role": "selector",
@@ -327963,7 +327963,7 @@
   {
    "id": "oc-752e0801c3a4e7e7f1c4",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17107,
+   "line": 17109,
    "symbol": "resumeDocumentTabOrder",
    "kind": "fixed-declaration",
    "role": "offset",
@@ -327981,7 +327981,7 @@
   {
    "id": "oc-97580caaee8f6332f1a9",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17107,
+   "line": 17109,
    "symbol": "resumeDocumentTabOrder",
    "kind": "fixed-declaration",
    "role": "offset",
@@ -327999,7 +327999,7 @@
   {
    "id": "oc-74ae64ce7ce7f895f48f",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17114,
+   "line": 17116,
    "symbol": "syncCommandBarDensity",
    "kind": "fixed-declaration",
    "role": "topbar",
@@ -328017,7 +328017,7 @@
   {
    "id": "oc-7d35ca8ff19c68192e7b",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17167,
+   "line": 17169,
    "symbol": "placePopover",
    "kind": "fixed-declaration",
    "role": "left",
@@ -328035,7 +328035,7 @@
   {
    "id": "oc-68da62adc1e87ed51ae7",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17167,
+   "line": 17169,
    "symbol": "placePopover",
    "kind": "fixed-declaration",
    "role": "left",
@@ -328053,7 +328053,7 @@
   {
    "id": "oc-982882920286b0c5fe5b",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17168,
+   "line": 17170,
    "symbol": "placePopover",
    "kind": "fixed-declaration",
    "role": "top",
@@ -328071,7 +328071,7 @@
   {
    "id": "oc-020a265eee278586f2ea",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17178,
+   "line": 17180,
    "symbol": "openPanelMenu",
    "kind": "fixed-declaration",
    "role": "menu",
@@ -328089,7 +328089,7 @@
   {
    "id": "oc-4c3cb6af48ef1ce69ba0",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17192,
+   "line": 17194,
    "symbol": "openPanelsIndex",
    "kind": "fixed-declaration",
    "role": "index",
@@ -328107,7 +328107,7 @@
   {
    "id": "oc-71a0df13b66581f84ada",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17196,
+   "line": 17198,
    "symbol": "openPanelsIndex",
    "kind": "fixed-declaration",
    "role": "where",
@@ -328122,7 +328122,7 @@
   {
    "id": "oc-7b948e81f22d7bfb37e9",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17227,
+   "line": 17229,
    "symbol": "blockAriaDisabledActivation",
    "kind": "fixed-declaration",
    "role": "control",
@@ -328140,7 +328140,7 @@
   {
    "id": "oc-84afe8e72b5760365cfd",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17241,
+   "line": 17243,
    "symbol": "blockAriaDisabledActivation",
    "kind": "fixed-declaration",
    "role": "inspectorUnsavedAction",
@@ -328158,7 +328158,7 @@
   {
    "id": "oc-449c917943ce5891febd",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17246,
+   "line": 17248,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "closeAllAction",
@@ -328176,7 +328176,7 @@
   {
    "id": "oc-86eea8ec9a51b59835f4",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17251,
+   "line": 17253,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "unsavedAction",
@@ -328194,7 +328194,7 @@
   {
    "id": "oc-ffabed1d5fc10c214736",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17257,
+   "line": 17259,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "activeDeploymentAction",
@@ -328212,7 +328212,7 @@
   {
    "id": "oc-6eb6ed2cfb498947350c",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17262,
+   "line": 17264,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "applicationTrigger",
@@ -328230,7 +328230,7 @@
   {
    "id": "oc-a7ce7ba4056ed917c13c",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17269,
+   "line": 17271,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "applicationCommand",
@@ -328248,7 +328248,7 @@
   {
    "id": "oc-72bf3839aed2cd933074",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17273,
+   "line": 17275,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "fromMenu",
@@ -328266,7 +328266,7 @@
   {
    "id": "oc-7ead1d3c007c7c033903",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17279,
+   "line": 17281,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "documentActivation",
@@ -328284,7 +328284,7 @@
   {
    "id": "oc-66b4e6fb5a1383d0eb7c",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17287,
+   "line": 17289,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "documentClose",
@@ -328302,7 +328302,7 @@
   {
    "id": "oc-75296ba3fce8af462949",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17293,
+   "line": 17295,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "menuItem",
@@ -328320,7 +328320,7 @@
   {
    "id": "oc-83aebefbe2f1237b775a",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17310,
+   "line": 17312,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "railPanel",
@@ -328338,7 +328338,7 @@
   {
    "id": "oc-91bb718352da57e017e2",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17316,
+   "line": 17318,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "indexItem",
@@ -328356,7 +328356,7 @@
   {
    "id": "oc-f5087f705964e001dd43",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17334,
+   "line": 17336,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "removeProperty",
@@ -328374,7 +328374,7 @@
   {
    "id": "oc-df6d21b582f83e81e01c",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17336,
+   "line": 17338,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "form",
@@ -328392,7 +328392,7 @@
   {
    "id": "oc-df465de0c29f157362b7",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17344,
+   "line": 17346,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "removeAdditionalGroup",
@@ -328407,7 +328407,7 @@
   {
    "id": "oc-ff9c55d6b868a8a8a51f",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17349,
+   "line": 17351,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "addAdditionalGroup",
@@ -328422,7 +328422,7 @@
   {
    "id": "oc-e1a40f7e8c0c594ced23",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17351,
+   "line": 17353,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "section",
@@ -328437,7 +328437,7 @@
   {
    "id": "oc-74f848d9d3cc01bd6cdd",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17352,
+   "line": 17354,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "descriptor",
@@ -328452,7 +328452,7 @@
   {
    "id": "oc-dd0bcacdca0aba548288",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17358,
+   "line": 17360,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "addProperty",
@@ -328470,7 +328470,7 @@
   {
    "id": "oc-0939232c9a2a03f10a7d",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17363,
+   "line": 17365,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "legend",
@@ -328488,7 +328488,7 @@
   {
    "id": "oc-8e2707bfd07a4f2cdc3a",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17368,
+   "line": 17370,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "control",
@@ -328506,7 +328506,7 @@
   {
    "id": "oc-1c6cfc96af47a11fb719",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17442,
+   "line": 17444,
    "symbol": "includes",
    "kind": "fixed-declaration",
    "role": "id",
@@ -328524,7 +328524,7 @@
   {
    "id": "oc-633b7286f1ce2724c493",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17450,
+   "line": 17452,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "current",
@@ -328542,7 +328542,7 @@
   {
    "id": "oc-8c88a0c5e9093b7e3469",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17452,
+   "line": 17454,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "radios",
@@ -328560,7 +328560,7 @@
   {
    "id": "oc-f8e98220d61c6e11c7b4",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17452,
+   "line": 17454,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "radios",
@@ -328578,7 +328578,7 @@
   {
    "id": "oc-c6b1c10020820c065baf",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17480,
+   "line": 17482,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "current",
@@ -328593,7 +328593,7 @@
   {
    "id": "oc-6c6657d9b5f1a49fc20a",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17568,
+   "line": 17570,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "bytes",
@@ -328608,7 +328608,7 @@
   {
    "id": "oc-5373892e8b08cd3bdc68",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17694,
+   "line": 17696,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "trigger",
@@ -328624,7 +328624,7 @@
   {
    "id": "oc-956aba90adfa6783b0da",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17696,
+   "line": 17698,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "triggers",
@@ -328640,7 +328640,7 @@
   {
    "id": "oc-765c07dba4d3a0d6854a",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17732,
+   "line": 17734,
    "symbol": "if",
    "kind": "inline-operational-call",
    "role": "setTimeout",
@@ -328658,7 +328658,7 @@
   {
    "id": "oc-72f270cf3381a7c77623",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17732,
+   "line": 17734,
    "symbol": "if",
    "kind": "inline-operational-call",
    "role": "setTimeout",
@@ -328676,7 +328676,7 @@
   {
    "id": "oc-5e87f076d6a4e1b1fba3",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17748,
+   "line": 17750,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "activation",
@@ -328694,7 +328694,7 @@
   {
    "id": "oc-a5e2d5ec4aad865c4f78",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17750,
+   "line": 17752,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "items",
@@ -328712,7 +328712,7 @@
   {
    "id": "oc-b6d58226d585c6e2105e",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17830,
+   "line": 17832,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "command",
@@ -328730,7 +328730,7 @@
   {
    "id": "oc-07449e2d5e16f647b380",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17901,
+   "line": 17903,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "validationOwnerId",
@@ -328745,7 +328745,7 @@
   {
    "id": "oc-6b258501628c994d63c4",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17903,
+   "line": 17905,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "selectedIds",
@@ -328760,7 +328760,7 @@
   {
    "id": "oc-53c870d92ced62ce48ec",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17904,
+   "line": 17906,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "formErrors",
@@ -328775,7 +328775,7 @@
   {
    "id": "oc-2a0a53d261f9ec4352ba",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17904,
+   "line": 17906,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "formErrors",
@@ -328790,7 +328790,7 @@
   {
    "id": "oc-032fb00f4cec2a754f00",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17906,
+   "line": 17908,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "openEditor",
@@ -328805,7 +328805,7 @@
   {
    "id": "oc-4bed7dbb4ee061603ebe",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17927,
+   "line": 17929,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "programApproveButton",
@@ -328820,7 +328820,7 @@
   {
    "id": "oc-2ba413f9b1cb14afb99d",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 17961,
+   "line": 17963,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "localizedEditor",
@@ -328835,7 +328835,7 @@
   {
    "id": "oc-bdd7432507c156713ecd",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 18019,
+   "line": 18021,
    "symbol": "bootApplication",
    "kind": "fixed-declaration",
    "role": "serviceInput",
@@ -328850,7 +328850,7 @@
   {
    "id": "oc-6ece38058a25dfd9261a",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 18036,
+   "line": 18038,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "fileParam",
@@ -328872,7 +328872,7 @@
   {
    "id": "oc-fe6db8cbcf5e6d514db6",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 18080,
+   "line": 18082,
    "symbol": "sagaFieldsHtml",
    "kind": "fixed-declaration",
    "role": "enabled",
@@ -328887,7 +328887,7 @@
   {
    "id": "oc-ee55ba56c03c9c59363f",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 18090,
+   "line": 18092,
    "symbol": "bindSagaFields",
    "kind": "fixed-declaration",
    "role": "enabled",
@@ -328902,7 +328902,7 @@
   {
    "id": "oc-070547fda1426dede6cb",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 18091,
+   "line": 18093,
    "symbol": "bindSagaFields",
    "kind": "fixed-declaration",
    "role": "fields",
@@ -328917,7 +328917,7 @@
   {
    "id": "oc-32a422a1ec4749c36586",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 18107,
+   "line": 18109,
    "symbol": "showSagaScopes",
    "kind": "fixed-declaration",
    "role": "eligible",
@@ -328932,7 +328932,7 @@
   {
    "id": "oc-074cac742cea455cf56d",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 18121,
+   "line": 18123,
    "symbol": "showSagaScopes",
    "kind": "fixed-declaration",
    "role": "node",
@@ -328947,7 +328947,7 @@
   {
    "id": "oc-a0adca71aaaf91648cb0",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 18124,
+   "line": 18126,
    "symbol": "showSagaScopes",
    "kind": "fixed-declaration",
    "role": "form",
@@ -328962,7 +328962,7 @@
   {
    "id": "oc-1325eb6e6fd995f39f0a",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 18125,
+   "line": 18127,
    "symbol": "showSagaScopes",
    "kind": "fixed-declaration",
    "role": "enabled",
@@ -328977,7 +328977,7 @@
   {
    "id": "oc-d9034acd982136399eb1",
    "path": "ravenroot/ravenroot-ui/src/app.js",
-   "line": 18127,
+   "line": 18129,
    "symbol": "showSagaScopes",
    "kind": "fixed-declaration",
    "role": "scope",
@@ -355521,9 +355521,24 @@
    "rationale": "Personal UI DOM/local selector, same-origin HTTP representation or payload-envelope vocabulary; no provider token is exposed Reviewed source atom: 'div'."
   },
   {
-   "id": "oc-3ee2bc8baea9bf398daf",
+   "id": "oc-be17169dfb2a98ba49c0",
    "path": "ravenroot/ravenroot-ui/src/personal-connections.js",
    "line": 17,
+   "symbol": "module",
+   "kind": "fixed-declaration",
+   "role": "retired",
+   "expression": "'retired personal identity'",
+   "expressionDigest": "856586786dbbd45662fe396759e62a8f4f66f4a50fe720d4e612ae1291d3510d",
+   "evidenceDigest": "34918024f81202ff268d363fce3ac7e8c088043c6b20d91b1e8d96b5f08131d1",
+   "surface": "ui",
+   "status": "retained",
+   "classification": "protocol-or-format-invariant",
+   "rationale": "Private Symbol description for cancelling an obsolete panel operation before network dispatch; never a credential or an authority reference."
+  },
+  {
+   "id": "oc-3ee2bc8baea9bf398daf",
+   "path": "ravenroot/ravenroot-ui/src/personal-connections.js",
+   "line": 19,
    "symbol": "module",
    "kind": "fixed-declaration",
    "role": "connection",
@@ -355538,7 +355553,7 @@
   {
    "id": "oc-6fde0332dfaee724e6e9",
    "path": "ravenroot/ravenroot-ui/src/personal-connections.js",
-   "line": 18,
+   "line": 20,
    "symbol": "module",
    "kind": "fixed-declaration",
    "role": "mode",
@@ -355553,7 +355568,7 @@
   {
    "id": "oc-1a988dea0177c4850300",
    "path": "ravenroot/ravenroot-ui/src/personal-connections.js",
-   "line": 23,
+   "line": 25,
    "symbol": "for",
    "kind": "fixed-declaration",
    "role": "history",
@@ -355568,7 +355583,7 @@
   {
    "id": "oc-d4bcf6b2428ffa8d3ce9",
    "path": "ravenroot/ravenroot-ui/src/personal-connections.js",
-   "line": 29,
+   "line": 31,
    "symbol": "for",
    "kind": "fixed-declaration",
    "role": "purpose",
@@ -355583,7 +355598,7 @@
   {
    "id": "oc-8b053b5e112b6d0cdc50",
    "path": "ravenroot/ravenroot-ui/src/personal-connections.js",
-   "line": 36,
+   "line": 38,
    "symbol": "for",
    "kind": "fixed-declaration",
    "role": "token",
@@ -355598,7 +355613,7 @@
   {
    "id": "oc-4f69de2f4ec45b691617",
    "path": "ravenroot/ravenroot-ui/src/personal-connections.js",
-   "line": 37,
+   "line": 40,
    "symbol": "for",
    "kind": "fixed-declaration",
    "role": "response",
@@ -355613,7 +355628,7 @@
   {
    "id": "oc-f5223d05b69a2e30d668",
    "path": "ravenroot/ravenroot-ui/src/personal-connections.js",
-   "line": 37,
+   "line": 40,
    "symbol": "for",
    "kind": "fixed-declaration",
    "role": "response",
@@ -355628,7 +355643,7 @@
   {
    "id": "oc-7ee473994668801bded1",
    "path": "ravenroot/ravenroot-ui/src/personal-connections.js",
-   "line": 38,
+   "line": 41,
    "symbol": "for",
    "kind": "fixed-declaration",
    "role": "response",
@@ -355643,7 +355658,7 @@
   {
    "id": "oc-3c102ea424ba1ce37c71",
    "path": "ravenroot/ravenroot-ui/src/personal-connections.js",
-   "line": 38,
+   "line": 41,
    "symbol": "for",
    "kind": "fixed-declaration",
    "role": "response",
@@ -355658,7 +355673,7 @@
   {
    "id": "oc-50bdb50e52d6a9a31abe",
    "path": "ravenroot/ravenroot-ui/src/personal-connections.js",
-   "line": 38,
+   "line": 41,
    "symbol": "for",
    "kind": "fixed-declaration",
    "role": "response",
@@ -355673,7 +355688,7 @@
   {
    "id": "oc-84eb28da7daae3505959",
    "path": "ravenroot/ravenroot-ui/src/personal-connections.js",
-   "line": 38,
+   "line": 41,
    "symbol": "for",
    "kind": "fixed-declaration",
    "role": "response",
@@ -355688,7 +355703,7 @@
   {
    "id": "oc-d503b9c246fae1fc31e2",
    "path": "ravenroot/ravenroot-ui/src/personal-connections.js",
-   "line": 39,
+   "line": 42,
    "symbol": "for",
    "kind": "fixed-declaration",
    "role": "response",
@@ -355703,7 +355718,7 @@
   {
    "id": "oc-4e779e9ff536e7739a04",
    "path": "ravenroot/ravenroot-ui/src/personal-connections.js",
-   "line": 39,
+   "line": 42,
    "symbol": "for",
    "kind": "fixed-declaration",
    "role": "response",
@@ -355718,7 +355733,7 @@
   {
    "id": "oc-7fa5b941471bc359b912",
    "path": "ravenroot/ravenroot-ui/src/personal-connections.js",
-   "line": 39,
+   "line": 42,
    "symbol": "for",
    "kind": "fixed-declaration",
    "role": "response",
@@ -355733,7 +355748,7 @@
   {
    "id": "oc-2da09464676698f5aa03",
    "path": "ravenroot/ravenroot-ui/src/personal-connections.js",
-   "line": 39,
+   "line": 42,
    "symbol": "for",
    "kind": "fixed-declaration",
    "role": "response",
@@ -355748,7 +355763,7 @@
   {
    "id": "oc-f5e1a9d0400f9b89e6dd",
    "path": "ravenroot/ravenroot-ui/src/personal-connections.js",
-   "line": 39,
+   "line": 42,
    "symbol": "for",
    "kind": "fixed-declaration",
    "role": "response",
@@ -355761,24 +355776,9 @@
    "rationale": "Personal UI DOM/local selector, same-origin HTTP representation or payload-envelope vocabulary; no provider token is exposed Reviewed source atom: 'personal'."
   },
   {
-   "id": "oc-b860da993a5c80d524c8",
-   "path": "ravenroot/ravenroot-ui/src/personal-connections.js",
-   "line": 66,
-   "symbol": "refresh",
-   "kind": "fixed-declaration",
-   "role": "identity",
-   "expression": "''",
-   "expressionDigest": "6f49cdbd80e1b95d5e6427e1501fc217790daee87055fa5b4e71064288bddede",
-   "evidenceDigest": "e21d21951b6775ed88f76e9483d5751af86fcc64a3ac4077151f032de7edb091",
-   "surface": "ui",
-   "status": "retained",
-   "classification": "protocol-or-format-invariant",
-   "rationale": "Personal UI DOM/local selector, same-origin HTTP representation or payload-envelope vocabulary; no provider token is exposed Reviewed source atom: ''."
-  },
-  {
    "id": "oc-667602163886918636e2",
    "path": "ravenroot/ravenroot-ui/src/personal-connections.js",
-   "line": 90,
+   "line": 126,
    "symbol": "button",
    "kind": "fixed-declaration",
    "role": "registration",
@@ -355791,24 +355791,9 @@
    "rationale": "Personal UI DOM/local selector, same-origin HTTP representation or payload-envelope vocabulary; no provider token is exposed Reviewed source atom: 'input'."
   },
   {
-   "id": "oc-196d3a69b0660cd85a91",
-   "path": "ravenroot/ravenroot-ui/src/personal-connections.js",
-   "line": 93,
-   "symbol": "button",
-   "kind": "fixed-declaration",
-   "role": "data",
-   "expression": "'/sign-in'",
-   "expressionDigest": "fdfc6415e4a6ab0079f98cace2922808e818991eb6ec7b162550eecbbe5c217b",
-   "evidenceDigest": "a71bf23a74e47ed67b4ac60b271ceaf8fce2bdbd287eee54902be725554124a8",
-   "surface": "ui",
-   "status": "retained",
-   "classification": "protocol-or-format-invariant",
-   "rationale": "Personal UI DOM/local selector, same-origin HTTP representation or payload-envelope vocabulary; no provider token is exposed Reviewed source atom: '/sign-in'."
-  },
-  {
    "id": "oc-9de0c53fed58d45ee66f",
    "path": "ravenroot/ravenroot-ui/src/personal-connections.js",
-   "line": 108,
+   "line": 144,
    "symbol": "button",
    "kind": "fixed-declaration",
    "role": "deployed",
@@ -355823,7 +355808,7 @@
   {
    "id": "oc-f943d8b992f35042b238",
    "path": "ravenroot/ravenroot-ui/src/personal-connections.js",
-   "line": 109,
+   "line": 145,
    "symbol": "button",
    "kind": "fixed-declaration",
    "role": "payload",
@@ -355836,84 +355821,9 @@
    "rationale": "Personal UI DOM/local selector, same-origin HTTP representation or payload-envelope vocabulary; no provider token is exposed Reviewed source atom: 'input'."
   },
   {
-   "id": "oc-8e9abf9fa5ce28de71af",
-   "path": "ravenroot/ravenroot-ui/src/personal-connections.js",
-   "line": 115,
-   "symbol": "button",
-   "kind": "fixed-declaration",
-   "role": "result",
-   "expression": "'/executions'",
-   "expressionDigest": "e873cbd1a9940e82d4d6685b6632e6091ca203863b0070d3db694f9e52b35cda",
-   "evidenceDigest": "701803715f801e4f6c4e39d6adaa4e1887bf9a3f0a3435c57dabedf71641c9bf",
-   "surface": "ui",
-   "status": "retained",
-   "classification": "protocol-or-format-invariant",
-   "rationale": "Personal UI DOM/local selector, same-origin HTTP representation or payload-envelope vocabulary; no provider token is exposed Reviewed source atom: '/executions'."
-  },
-  {
-   "id": "oc-9fc0981c71466daa9ed7",
-   "path": "ravenroot/ravenroot-ui/src/personal-connections.js",
-   "line": 116,
-   "symbol": "button",
-   "kind": "fixed-declaration",
-   "role": "result",
-   "expression": "'1'",
-   "expressionDigest": "9a7622b24ae73586214f453f44ed438ce5c63aa07c720c2ccc29ae5bd7ec5322",
-   "evidenceDigest": "701803715f801e4f6c4e39d6adaa4e1887bf9a3f0a3435c57dabedf71641c9bf",
-   "surface": "ui",
-   "status": "retained",
-   "classification": "protocol-or-format-invariant",
-   "rationale": "Personal UI DOM/local selector, same-origin HTTP representation or payload-envelope vocabulary; no provider token is exposed Reviewed source atom: '1'."
-  },
-  {
-   "id": "oc-6802a9aa335eb5368de0",
-   "path": "ravenroot/ravenroot-ui/src/personal-connections.js",
-   "line": 116,
-   "symbol": "button",
-   "kind": "fixed-declaration",
-   "role": "result",
-   "expression": "'SCALAR'",
-   "expressionDigest": "7207a8622f2a252610e042d571dccabe7cc2dffade179a47d2e6f3b2a180158b",
-   "evidenceDigest": "701803715f801e4f6c4e39d6adaa4e1887bf9a3f0a3435c57dabedf71641c9bf",
-   "surface": "ui",
-   "status": "retained",
-   "classification": "protocol-or-format-invariant",
-   "rationale": "Personal UI DOM/local selector, same-origin HTTP representation or payload-envelope vocabulary; no provider token is exposed Reviewed source atom: 'SCALAR'."
-  },
-  {
-   "id": "oc-2f4dfe2969f5210ccfa8",
-   "path": "ravenroot/ravenroot-ui/src/personal-connections.js",
-   "line": 116,
-   "symbol": "button",
-   "kind": "fixed-declaration",
-   "role": "result",
-   "expression": "'ravenroot.payload/1'",
-   "expressionDigest": "fff8b302713db27908a0cbfe16ab19261e5ce18e41f08c55c4f60072fc018cb2",
-   "evidenceDigest": "701803715f801e4f6c4e39d6adaa4e1887bf9a3f0a3435c57dabedf71641c9bf",
-   "surface": "ui",
-   "status": "retained",
-   "classification": "protocol-or-format-invariant",
-   "rationale": "Personal UI DOM/local selector, same-origin HTTP representation or payload-envelope vocabulary; no provider token is exposed Reviewed source atom: 'ravenroot.payload/1'."
-  },
-  {
-   "id": "oc-62be6443137bd398fb18",
-   "path": "ravenroot/ravenroot-ui/src/personal-connections.js",
-   "line": 116,
-   "symbol": "button",
-   "kind": "fixed-declaration",
-   "role": "result",
-   "expression": "'ravenroot.text'",
-   "expressionDigest": "a2dca570cf8aa816770c7cf19900fd3719df29c41fb51854e468e1b4183413d6",
-   "evidenceDigest": "701803715f801e4f6c4e39d6adaa4e1887bf9a3f0a3435c57dabedf71641c9bf",
-   "surface": "ui",
-   "status": "retained",
-   "classification": "protocol-or-format-invariant",
-   "rationale": "Personal UI DOM/local selector, same-origin HTTP representation or payload-envelope vocabulary; no provider token is exposed Reviewed source atom: 'ravenroot.text'."
-  },
-  {
    "id": "oc-80da097c2603ff8f4af2",
    "path": "ravenroot/ravenroot-ui/src/personal-connections.js",
-   "line": 120,
+   "line": 156,
    "symbol": "button",
    "kind": "fixed-declaration",
    "role": "resultId",
@@ -355928,7 +355838,7 @@
   {
    "id": "oc-88d7ddab0995d1864d3f",
    "path": "ravenroot/ravenroot-ui/src/personal-connections.js",
-   "line": 121,
+   "line": 157,
    "symbol": "button",
    "kind": "fixed-declaration",
    "role": "resultText",
@@ -361458,7 +361368,7 @@
   {
    "id": "oc-236f9f7722e4cdb6d0e1",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 515,
+   "line": 516,
    "symbol": "while",
    "kind": "fixed-declaration",
    "role": "headers",
@@ -361476,7 +361386,7 @@
   {
    "id": "oc-52fc21c71c069d9fa3a6",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 518,
+   "line": 519,
    "symbol": "while",
    "kind": "fixed-declaration",
    "role": "response",
@@ -361498,7 +361408,7 @@
   {
    "id": "oc-af56defd1d8d6bc10bc3",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 521,
+   "line": 522,
    "symbol": "while",
    "kind": "fixed-declaration",
    "role": "response",
@@ -361520,7 +361430,7 @@
   {
    "id": "oc-950710c5c07cbadaf87a",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 662,
+   "line": 663,
    "symbol": "startSourceSession",
    "kind": "fixed-declaration",
    "role": "result",
@@ -361538,7 +361448,7 @@
   {
    "id": "oc-6c1cc19836a7d312aa05",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 663,
+   "line": 664,
    "symbol": "startSourceSession",
    "kind": "fixed-declaration",
    "role": "result",
@@ -361556,7 +361466,7 @@
   {
    "id": "oc-6a3e08f8d4e5b1c8115c",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 663,
+   "line": 664,
    "symbol": "startSourceSession",
    "kind": "fixed-declaration",
    "role": "result",
@@ -361574,7 +361484,7 @@
   {
    "id": "oc-643be11afb6877860769",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 663,
+   "line": 664,
    "symbol": "startSourceSession",
    "kind": "fixed-declaration",
    "role": "result",
@@ -361592,7 +361502,7 @@
   {
    "id": "oc-93d91f3c57497cffd6ea",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 673,
+   "line": 674,
    "symbol": "startSourceSession",
    "kind": "fixed-declaration",
    "role": "result",
@@ -361610,7 +361520,7 @@
   {
    "id": "oc-e49fca217ee66667859f",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 673,
+   "line": 674,
    "symbol": "startSourceSession",
    "kind": "fixed-declaration",
    "role": "result",
@@ -361628,7 +361538,7 @@
   {
    "id": "oc-bed6ade1bdbda66786ad",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 682,
+   "line": 683,
    "symbol": "stopSourceSession",
    "kind": "fixed-declaration",
    "role": "result",
@@ -361646,7 +361556,7 @@
   {
    "id": "oc-5977c4fc001714db39b3",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 682,
+   "line": 683,
    "symbol": "stopSourceSession",
    "kind": "fixed-declaration",
    "role": "result",
@@ -361664,7 +361574,7 @@
   {
    "id": "oc-59ce41580e5b74d3d58c",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 712,
+   "line": 713,
    "symbol": "registerDeployment",
    "kind": "fixed-declaration",
    "role": "result",
@@ -361682,7 +361592,7 @@
   {
    "id": "oc-42996634d584415a20ca",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 713,
+   "line": 714,
    "symbol": "registerDeployment",
    "kind": "fixed-declaration",
    "role": "result",
@@ -361700,7 +361610,7 @@
   {
    "id": "oc-6001faa7c3b6d30903da",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 713,
+   "line": 714,
    "symbol": "registerDeployment",
    "kind": "fixed-declaration",
    "role": "result",
@@ -361718,7 +361628,7 @@
   {
    "id": "oc-ecaa6b4dc878ee75c28f",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 713,
+   "line": 714,
    "symbol": "registerDeployment",
    "kind": "fixed-declaration",
    "role": "result",
@@ -361736,7 +361646,7 @@
   {
    "id": "oc-cbd62fd17e3bf35a5712",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 724,
+   "line": 725,
    "symbol": "registerDeployment",
    "kind": "fixed-declaration",
    "role": "result",
@@ -361754,7 +361664,7 @@
   {
    "id": "oc-7b87b92cf53fe34774be",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 724,
+   "line": 725,
    "symbol": "registerDeployment",
    "kind": "fixed-declaration",
    "role": "result",
@@ -361772,7 +361682,7 @@
   {
    "id": "oc-e3028f82fb73b22f621f",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 734,
+   "line": 735,
    "symbol": "registerDeployment",
    "kind": "fixed-declaration",
    "role": "result",
@@ -361787,7 +361697,7 @@
   {
    "id": "oc-2295adb9805f02c51d35",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 734,
+   "line": 735,
    "symbol": "registerDeployment",
    "kind": "fixed-declaration",
    "role": "result",
@@ -361802,7 +361712,7 @@
   {
    "id": "oc-5e6231525a2fe48670ae",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 739,
+   "line": 740,
    "symbol": "registerDeployment",
    "kind": "fixed-declaration",
    "role": "bytes",
@@ -361817,7 +361727,7 @@
   {
    "id": "oc-f4d93ae24abcbfda6f8a",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 774,
+   "line": 775,
    "symbol": "registerDeployment",
    "kind": "fixed-declaration",
    "role": "value",
@@ -361832,7 +361742,7 @@
   {
    "id": "oc-8da21b218d84caf88c3f",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 774,
+   "line": 775,
    "symbol": "registerDeployment",
    "kind": "fixed-declaration",
    "role": "value",
@@ -361847,7 +361757,7 @@
   {
    "id": "oc-44f21a30ec93242e017a",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 790,
+   "line": 791,
    "symbol": "registerDeployment",
    "kind": "fixed-declaration",
    "role": "result",
@@ -361866,7 +361776,7 @@
   {
    "id": "oc-54660887a6744990da59",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 790,
+   "line": 791,
    "symbol": "registerDeployment",
    "kind": "fixed-declaration",
    "role": "result",
@@ -361885,7 +361795,7 @@
   {
    "id": "oc-326c6b290cb77322de5b",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 790,
+   "line": 791,
    "symbol": "registerDeployment",
    "kind": "fixed-declaration",
    "role": "result",
@@ -361904,7 +361814,7 @@
   {
    "id": "oc-4377f7261efd5761cceb",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 790,
+   "line": 791,
    "symbol": "registerDeployment",
    "kind": "fixed-declaration",
    "role": "result",
@@ -361923,7 +361833,7 @@
   {
    "id": "oc-64d55c35a8d41f07b517",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 816,
+   "line": 817,
    "symbol": "newDeploymentExecution",
    "kind": "fixed-declaration",
    "role": "result",
@@ -361938,7 +361848,7 @@
   {
    "id": "oc-bdb1c10e9953f15c117f",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 816,
+   "line": 817,
    "symbol": "newDeploymentExecution",
    "kind": "fixed-declaration",
    "role": "result",
@@ -361953,7 +361863,7 @@
   {
    "id": "oc-6256814c448da9e3acb6",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 817,
+   "line": 818,
    "symbol": "newDeploymentExecution",
    "kind": "fixed-declaration",
    "role": "result",
@@ -361972,7 +361882,7 @@
   {
    "id": "oc-901c73c01ca18341c901",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 817,
+   "line": 818,
    "symbol": "newDeploymentExecution",
    "kind": "fixed-declaration",
    "role": "result",
@@ -361991,7 +361901,7 @@
   {
    "id": "oc-f3d6119b14d91267a9f8",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 851,
+   "line": 852,
    "symbol": "while",
    "kind": "operational-declaration",
    "role": "path",
@@ -362010,7 +361920,7 @@
   {
    "id": "oc-6ebc5888618850936491",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 851,
+   "line": 852,
    "symbol": "while",
    "kind": "operational-declaration",
    "role": "path",
@@ -362029,7 +361939,7 @@
   {
    "id": "oc-3b5e32451125db1a05e0",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 856,
+   "line": 857,
    "symbol": "while",
    "kind": "fixed-declaration",
    "role": "headers",
@@ -362044,7 +361954,7 @@
   {
    "id": "oc-d1b313bef33049eae629",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 857,
+   "line": 858,
    "symbol": "while",
    "kind": "fixed-declaration",
    "role": "headers",
@@ -362059,7 +361969,7 @@
   {
    "id": "oc-a71a385b817110f5a29f",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 861,
+   "line": 862,
    "symbol": "while",
    "kind": "fixed-declaration",
    "role": "response",
@@ -362078,7 +361988,7 @@
   {
    "id": "oc-5a2123ad7e2c59ced9fc",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 863,
+   "line": 864,
    "symbol": "while",
    "kind": "fixed-declaration",
    "role": "response",
@@ -362097,7 +362007,7 @@
   {
    "id": "oc-f9f34bf10828b222b8e5",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 937,
+   "line": 938,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "frame",
@@ -362112,7 +362022,7 @@
   {
    "id": "oc-bd797968729cd45cfc65",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 938,
+   "line": 939,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "frame",
@@ -362127,7 +362037,7 @@
   {
    "id": "oc-481189e6c11da3208d77",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 939,
+   "line": 940,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "frame",
@@ -362142,7 +362052,7 @@
   {
    "id": "oc-833b6a6aba1bfe07bbaa",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 939,
+   "line": 940,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "frame",
@@ -362157,7 +362067,7 @@
   {
    "id": "oc-d1024a15540ca95adcca",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 999,
+   "line": 1000,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "path",
@@ -362172,7 +362082,7 @@
   {
    "id": "oc-d1044ba08817c1893741",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1001,
+   "line": 1002,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "method",
@@ -362187,7 +362097,7 @@
   {
    "id": "oc-8cfa4465c67eedfc46b8",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1001,
+   "line": 1002,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "method",
@@ -362202,7 +362112,7 @@
   {
    "id": "oc-b8209f1e71dea095138b",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1001,
+   "line": 1002,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "method",
@@ -362217,7 +362127,7 @@
   {
    "id": "oc-fcf504cf3a1dacb62208",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1072,
+   "line": 1073,
    "symbol": "catch",
    "kind": "fixed-declaration",
    "role": "terminal",
@@ -362232,7 +362142,7 @@
   {
    "id": "oc-d434f01e00780b2b92b6",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1073,
+   "line": 1074,
    "symbol": "catch",
    "kind": "fixed-declaration",
    "role": "terminal",
@@ -362247,7 +362157,7 @@
   {
    "id": "oc-8b53a36973074e734520",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1073,
+   "line": 1074,
    "symbol": "catch",
    "kind": "fixed-declaration",
    "role": "terminal",
@@ -362262,7 +362172,7 @@
   {
    "id": "oc-48a62a70d0f18cd8779c",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1074,
+   "line": 1075,
    "symbol": "catch",
    "kind": "fixed-declaration",
    "role": "refreshOnly",
@@ -362277,7 +362187,7 @@
   {
    "id": "oc-7a44b0b80540998b0ec8",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1074,
+   "line": 1075,
    "symbol": "catch",
    "kind": "fixed-declaration",
    "role": "refreshOnly",
@@ -362292,7 +362202,7 @@
   {
    "id": "oc-023ad7accf29db452996",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1074,
+   "line": 1075,
    "symbol": "catch",
    "kind": "fixed-declaration",
    "role": "refreshOnly",
@@ -362307,7 +362217,7 @@
   {
    "id": "oc-11a2d6ea168a8080f498",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1074,
+   "line": 1075,
    "symbol": "catch",
    "kind": "fixed-declaration",
    "role": "refreshOnly",
@@ -362322,7 +362232,7 @@
   {
    "id": "oc-c2ef0a718b3ec9293703",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1075,
+   "line": 1076,
    "symbol": "catch",
    "kind": "fixed-declaration",
    "role": "refreshOnly",
@@ -362337,7 +362247,7 @@
   {
    "id": "oc-b89c2b861fd8fd5f8c56",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1077,
+   "line": 1078,
    "symbol": "catch",
    "kind": "fixed-declaration",
    "role": "attempts",
@@ -362352,7 +362262,7 @@
   {
    "id": "oc-d7652789fbcd558a49b6",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1077,
+   "line": 1078,
    "symbol": "catch",
    "kind": "fixed-declaration",
    "role": "attempts",
@@ -362367,7 +362277,7 @@
   {
    "id": "oc-0a9372b76b608cff27e1",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1078,
+   "line": 1079,
    "symbol": "catch",
    "kind": "operational-declaration",
    "role": "attempt",
@@ -362382,7 +362292,7 @@
   {
    "id": "oc-cf3c6a17c72d622bf422",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1088,
+   "line": 1089,
    "symbol": "if",
    "kind": "operational-declaration",
    "role": "settled",
@@ -362401,7 +362311,7 @@
   {
    "id": "oc-49e979a45ea036284741",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1088,
+   "line": 1089,
    "symbol": "if",
    "kind": "operational-declaration",
    "role": "settled",
@@ -362420,7 +362330,7 @@
   {
    "id": "oc-77a6142e47426cb721d6",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1088,
+   "line": 1089,
    "symbol": "if",
    "kind": "operational-declaration",
    "role": "settled",
@@ -362439,7 +362349,7 @@
   {
    "id": "oc-dd35fab8a7a31f4d10d6",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1089,
+   "line": 1090,
    "symbol": "if",
    "kind": "operational-declaration",
    "role": "settled",
@@ -362458,7 +362368,7 @@
   {
    "id": "oc-170be307b672264a729b",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1090,
+   "line": 1091,
    "symbol": "if",
    "kind": "operational-declaration",
    "role": "settled",
@@ -362473,7 +362383,7 @@
   {
    "id": "oc-806f869f73b3f3d19353",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1090,
+   "line": 1091,
    "symbol": "if",
    "kind": "operational-declaration",
    "role": "settled",
@@ -362488,7 +362398,7 @@
   {
    "id": "oc-2efb908dd09bb5036d4d",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1090,
+   "line": 1091,
    "symbol": "if",
    "kind": "operational-declaration",
    "role": "settled",
@@ -362503,7 +362413,7 @@
   {
    "id": "oc-034cfc8c889c5d39fa0b",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1090,
+   "line": 1091,
    "symbol": "if",
    "kind": "operational-declaration",
    "role": "settled",
@@ -362518,7 +362428,7 @@
   {
    "id": "oc-379d98dbaa9f4e81ab7c",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1091,
+   "line": 1092,
    "symbol": "if",
    "kind": "operational-declaration",
    "role": "settled",
@@ -362537,7 +362447,7 @@
   {
    "id": "oc-e06f7b14e195ca259450",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1091,
+   "line": 1092,
    "symbol": "if",
    "kind": "operational-declaration",
    "role": "settled",
@@ -362556,7 +362466,7 @@
   {
    "id": "oc-0138fa3053931dcec6c9",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1091,
+   "line": 1092,
    "symbol": "if",
    "kind": "operational-declaration",
    "role": "settled",
@@ -362575,7 +362485,7 @@
   {
    "id": "oc-7bca073d557f2f74d0c3",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1093,
+   "line": 1094,
    "symbol": "if",
    "kind": "inline-operational-call",
    "role": "sleep",
@@ -362590,7 +362500,7 @@
   {
    "id": "oc-72ce598c34cbb874e1f6",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1110,
+   "line": 1111,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "result",
@@ -362605,7 +362515,7 @@
   {
    "id": "oc-89f092aeaf531fa64f99",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1110,
+   "line": 1111,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "result",
@@ -362620,7 +362530,7 @@
   {
    "id": "oc-da69c26bed5b9e892af2",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1130,
+   "line": 1131,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "allowed",
@@ -362635,7 +362545,7 @@
   {
    "id": "oc-f64a76c7210232722a12",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1130,
+   "line": 1131,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "allowed",
@@ -362650,7 +362560,7 @@
   {
    "id": "oc-6a2d9e3a0050eb886d74",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1130,
+   "line": 1131,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "allowed",
@@ -362665,7 +362575,7 @@
   {
    "id": "oc-8316aba783e519a868d6",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1130,
+   "line": 1131,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "allowed",
@@ -362680,7 +362590,7 @@
   {
    "id": "oc-06266715cc22e8b7b2a0",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1130,
+   "line": 1131,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "allowed",
@@ -362695,7 +362605,7 @@
   {
    "id": "oc-6cb2f5a9c355e98121c2",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1137,
+   "line": 1138,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "result",
@@ -362710,7 +362620,7 @@
   {
    "id": "oc-d1a804c3f9812e3e2f05",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1138,
+   "line": 1139,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "result",
@@ -362725,7 +362635,7 @@
   {
    "id": "oc-cdc361975492ddc4b54d",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1138,
+   "line": 1139,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "result",
@@ -362740,7 +362650,7 @@
   {
    "id": "oc-3fac965ec8839cda11ae",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1139,
+   "line": 1140,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "result",
@@ -362755,7 +362665,7 @@
   {
    "id": "oc-ae7bd7f30581204ecc05",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1176,
+   "line": 1177,
    "symbol": "for",
    "kind": "fixed-declaration",
    "role": "result",
@@ -362770,7 +362680,7 @@
   {
    "id": "oc-4a4579ed960ce32e1f3a",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1177,
+   "line": 1178,
    "symbol": "for",
    "kind": "fixed-declaration",
    "role": "result",
@@ -362785,7 +362695,7 @@
   {
    "id": "oc-809d65e60ecff96381ec",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1178,
+   "line": 1179,
    "symbol": "for",
    "kind": "fixed-declaration",
    "role": "result",
@@ -362800,7 +362710,7 @@
   {
    "id": "oc-d66e7e5846c3f42f2733",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1208,
+   "line": 1209,
    "symbol": "for",
    "kind": "fixed-declaration",
    "role": "result",
@@ -362815,7 +362725,7 @@
   {
    "id": "oc-f89b785e8f5aa940c5a9",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1209,
+   "line": 1210,
    "symbol": "for",
    "kind": "fixed-declaration",
    "role": "result",
@@ -362830,7 +362740,7 @@
   {
    "id": "oc-bd9def8a4f6f6687ac3f",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1226,
+   "line": 1227,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "result",
@@ -362848,7 +362758,7 @@
   {
    "id": "oc-5af808fa6d6d6d0a9182",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1226,
+   "line": 1227,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "result",
@@ -362863,7 +362773,7 @@
   {
    "id": "oc-028509d2b6ca058d3748",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1262,
+   "line": 1263,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "hasDeployment",
@@ -362885,7 +362795,7 @@
   {
    "id": "oc-d0b1bf7ea69b48a42fd4",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1262,
+   "line": 1263,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "hasDeployment",
@@ -362907,7 +362817,7 @@
   {
    "id": "oc-8a3d19dafdb062f69641",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1263,
+   "line": 1264,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "hasProcess",
@@ -362929,7 +362839,7 @@
   {
    "id": "oc-9b8b5a08a0bd0c832640",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1263,
+   "line": 1264,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "hasProcess",
@@ -362951,7 +362861,7 @@
   {
    "id": "oc-985748e397bb236395dd",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1264,
+   "line": 1265,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "hasGraph",
@@ -362973,7 +362883,7 @@
   {
    "id": "oc-0a15fbe50138e4a0d8f7",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1264,
+   "line": 1265,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "hasGraph",
@@ -362995,7 +362905,7 @@
   {
    "id": "oc-d33d56b3f0e2337c3a37",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1265,
+   "line": 1266,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "hasTask",
@@ -363017,7 +362927,7 @@
   {
    "id": "oc-898f99bd198d2456c92d",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1265,
+   "line": 1266,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "hasTask",
@@ -363039,7 +362949,7 @@
   {
    "id": "oc-ea81482ecde8da13eb61",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1289,
+   "line": 1290,
    "symbol": "isSafeInteger",
    "kind": "fixed-declaration",
    "role": "result",
@@ -363057,7 +362967,7 @@
   {
    "id": "oc-cb41a018e2994ca88688",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1289,
+   "line": 1290,
    "symbol": "isSafeInteger",
    "kind": "fixed-declaration",
    "role": "result",
@@ -363075,7 +362985,7 @@
   {
    "id": "oc-b9d7c8a663608260f606",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1298,
+   "line": 1299,
    "symbol": "isSafeInteger",
    "kind": "fixed-declaration",
    "role": "id",
@@ -363093,7 +363003,7 @@
   {
    "id": "oc-86bab9075f36f0fd34f1",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1299,
+   "line": 1300,
    "symbol": "isSafeInteger",
    "kind": "fixed-declaration",
    "role": "normalizedAction",
@@ -363111,7 +363021,7 @@
   {
    "id": "oc-26c9d7426f5145f40efa",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1323,
+   "line": 1324,
    "symbol": "includes",
    "kind": "fixed-declaration",
    "role": "id",
@@ -363127,7 +363037,7 @@
   {
    "id": "oc-84eb37d996cabb2f81dd",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1324,
+   "line": 1325,
    "symbol": "includes",
    "kind": "fixed-declaration",
    "role": "normalizedAction",
@@ -363143,7 +363053,7 @@
   {
    "id": "oc-6a7ee15e088d8b61332b",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1345,
+   "line": 1346,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "result",
@@ -363163,7 +363073,7 @@
   {
    "id": "oc-765c3cb214038c1e5f42",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1345,
+   "line": 1346,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "result",
@@ -363182,7 +363092,7 @@
   {
    "id": "oc-836155f87cc18dc6a767",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1346,
+   "line": 1347,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "result",
@@ -363198,7 +363108,7 @@
   {
    "id": "oc-a432f4b4259d629b952e",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1346,
+   "line": 1347,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "result",
@@ -363214,7 +363124,7 @@
   {
    "id": "oc-edd00c7c772eba351481",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1358,
+   "line": 1359,
    "symbol": "isSafeInteger",
    "kind": "fixed-declaration",
    "role": "id",
@@ -363230,7 +363140,7 @@
   {
    "id": "oc-e944f56ab469a31c9202",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1387,
+   "line": 1388,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "document",
@@ -363246,7 +363156,7 @@
   {
    "id": "oc-0302a094c1e411f8192a",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1388,
+   "line": 1389,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "document",
@@ -363262,7 +363172,7 @@
   {
    "id": "oc-55a0bdeb48539ef159da",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1396,
+   "line": 1397,
    "symbol": "if",
    "kind": "operational-declaration",
    "role": "path",
@@ -363278,7 +363188,7 @@
   {
    "id": "oc-bea093226cc17dd89d62",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1503,
+   "line": 1504,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "language",
@@ -363296,7 +363206,7 @@
   {
    "id": "oc-45465d4bcefa7915bd5e",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1504,
+   "line": 1505,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "source",
@@ -363314,7 +363224,7 @@
   {
    "id": "oc-5ce405fe932d262f3128",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1505,
+   "line": 1506,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "testPayload",
@@ -363332,7 +363242,7 @@
   {
    "id": "oc-1c72491e7f55107fddde",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1529,
+   "line": 1530,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "result",
@@ -363348,7 +363258,7 @@
   {
    "id": "oc-414e29189acc8591db32",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1529,
+   "line": 1530,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "result",
@@ -363368,9 +363278,54 @@
    }
   },
   {
-   "id": "oc-1912eb1a00b24e9b5ac0",
+   "id": "oc-469fb77cf41011be15a4",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
    "line": 1705,
+   "symbol": "json",
+   "kind": "fixed-declaration",
+   "role": "requireCurrentIdentity",
+   "expression": "'personal'",
+   "expressionDigest": "e0e6a0a0c2336859902307abb780dfc6936af78bb1c889be92ed85d1250003fe",
+   "evidenceDigest": "4ad06bf25e0d3c0f2e34baa36fd4fee8575bb21f35762a5b348f2e2e771da5db",
+   "surface": "ui",
+   "status": "retained",
+   "classification": "protocol-or-format-invariant",
+   "rationale": "Existing execution-context header value; this guard rejects old personal response bodies while keeping system results readable."
+  },
+  {
+   "id": "oc-2f866285857f17c5b25a",
+   "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
+   "line": 1707,
+   "symbol": "json",
+   "kind": "fixed-declaration",
+   "role": "requireCurrentIdentity",
+   "expression": "'AbortError'",
+   "expressionDigest": "fac134d9302c6ddc3b5cf3d2b05b3f515845c70f516f1db385d1f6c688de47eb",
+   "evidenceDigest": "4ad06bf25e0d3c0f2e34baa36fd4fee8575bb21f35762a5b348f2e2e771da5db",
+   "surface": "ui",
+   "status": "retained",
+   "classification": "protocol-or-format-invariant",
+   "rationale": "Standard browser cancellation error name for a retired personal identity, not an operator setting."
+  },
+  {
+   "id": "oc-71d99422d0e3d675f27c",
+   "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
+   "line": 1707,
+   "symbol": "json",
+   "kind": "fixed-declaration",
+   "role": "requireCurrentIdentity",
+   "expression": "'Browser identity changed'",
+   "expressionDigest": "39f1d3f95dcd497611131c0949f55ed10423b5a0e471af6050ceaaed606d647e",
+   "evidenceDigest": "4ad06bf25e0d3c0f2e34baa36fd4fee8575bb21f35762a5b348f2e2e771da5db",
+   "surface": "ui",
+   "status": "retained",
+   "classification": "presentation-text",
+   "rationale": "Fixed cancellation diagnostic for a request whose initiating browser identity was retired."
+  },
+  {
+   "id": "oc-1912eb1a00b24e9b5ac0",
+   "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
+   "line": 1717,
    "symbol": "json",
    "kind": "fixed-declaration",
    "role": "method",
@@ -363388,7 +363343,7 @@
   {
    "id": "oc-3217bf1959e9777ddcaf",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1750,
+   "line": 1764,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "legacyCode",
@@ -363403,7 +363358,7 @@
   {
    "id": "oc-2990f54807dce18beb14",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1751,
+   "line": 1765,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "legacyCode",
@@ -363418,7 +363373,7 @@
   {
    "id": "oc-a8d271cd8ee845c17c16",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1751,
+   "line": 1765,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "legacyCode",
@@ -363433,7 +363388,7 @@
   {
    "id": "oc-7d04a896d665d4e50b39",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1751,
+   "line": 1765,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "legacyCode",
@@ -363448,7 +363403,7 @@
   {
    "id": "oc-891a0a824a554739e373",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1751,
+   "line": 1765,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "legacyCode",
@@ -363463,7 +363418,7 @@
   {
    "id": "oc-97cacf348f0cc46231f6",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1753,
+   "line": 1767,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "reason",
@@ -363478,7 +363433,7 @@
   {
    "id": "oc-3499a9964a44ce1d1a41",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1754,
+   "line": 1768,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "reason",
@@ -363493,7 +363448,7 @@
   {
    "id": "oc-7c224fe5f617d89e40a6",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1906,
+   "line": 1923,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "LIVE_EVENT_FIELDS",
@@ -363508,7 +363463,7 @@
   {
    "id": "oc-b785743b3046fd9fb2d3",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1906,
+   "line": 1923,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "LIVE_EVENT_FIELDS",
@@ -363523,7 +363478,7 @@
   {
    "id": "oc-84c56532d4775e575735",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1906,
+   "line": 1923,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "LIVE_EVENT_FIELDS",
@@ -363538,7 +363493,7 @@
   {
    "id": "oc-d2229e5745451ba2e69c",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1906,
+   "line": 1923,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "LIVE_EVENT_FIELDS",
@@ -363553,7 +363508,7 @@
   {
    "id": "oc-2ce62f0149c266981ed9",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1906,
+   "line": 1923,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "LIVE_EVENT_FIELDS",
@@ -363568,7 +363523,7 @@
   {
    "id": "oc-9ebb738701e60845c989",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1906,
+   "line": 1923,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "LIVE_EVENT_FIELDS",
@@ -363583,7 +363538,7 @@
   {
    "id": "oc-a1f87339f54c8fdf97d4",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1907,
+   "line": 1924,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "LIVE_EVENT_FIELDS",
@@ -363598,7 +363553,7 @@
   {
    "id": "oc-a0f9119eb5334d1d7da3",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1907,
+   "line": 1924,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "LIVE_EVENT_FIELDS",
@@ -363613,7 +363568,7 @@
   {
    "id": "oc-b28103b7593bbf6bad63",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1907,
+   "line": 1924,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "LIVE_EVENT_FIELDS",
@@ -363628,7 +363583,7 @@
   {
    "id": "oc-8c68253c9dd49c617e68",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1907,
+   "line": 1924,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "LIVE_EVENT_FIELDS",
@@ -363643,7 +363598,7 @@
   {
    "id": "oc-5a850ff535e8460f28f5",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1907,
+   "line": 1924,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "LIVE_EVENT_FIELDS",
@@ -363658,7 +363613,7 @@
   {
    "id": "oc-01b65888a405132850ff",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1908,
+   "line": 1925,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "LIVE_EVENT_FIELDS",
@@ -363673,7 +363628,7 @@
   {
    "id": "oc-490ac9ae7e127af779a5",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1908,
+   "line": 1925,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "LIVE_EVENT_FIELDS",
@@ -363688,7 +363643,7 @@
   {
    "id": "oc-9a807b213b2b6bd89698",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1908,
+   "line": 1925,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "LIVE_EVENT_FIELDS",
@@ -363703,7 +363658,7 @@
   {
    "id": "oc-748d5c327369ebcf6ff1",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1910,
+   "line": 1927,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "DURABLE_EVENT_FIELDS",
@@ -363718,7 +363673,7 @@
   {
    "id": "oc-9200dab2df19dd0aee44",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1910,
+   "line": 1927,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "DURABLE_EVENT_FIELDS",
@@ -363733,7 +363688,7 @@
   {
    "id": "oc-e194befbf3bbf7ef7a18",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1910,
+   "line": 1927,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "DURABLE_EVENT_FIELDS",
@@ -363748,7 +363703,7 @@
   {
    "id": "oc-909fad56e6d8f8470ec5",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1910,
+   "line": 1927,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "DURABLE_EVENT_FIELDS",
@@ -363763,7 +363718,7 @@
   {
    "id": "oc-f04853c8bbdeea3b3401",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1910,
+   "line": 1927,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "DURABLE_EVENT_FIELDS",
@@ -363778,7 +363733,7 @@
   {
    "id": "oc-bd7392b4008764a318b4",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1914,
+   "line": 1931,
    "symbol": "validateVersionedRuntimeEvent",
    "kind": "fixed-declaration",
    "role": "text",
@@ -363793,7 +363748,7 @@
   {
    "id": "oc-450039936688a480b1aa",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1914,
+   "line": 1931,
    "symbol": "validateVersionedRuntimeEvent",
    "kind": "fixed-declaration",
    "role": "text",
@@ -363808,7 +363763,7 @@
   {
    "id": "oc-fbafeb41c9c276643441",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1915,
+   "line": 1932,
    "symbol": "validateVersionedRuntimeEvent",
    "kind": "fixed-declaration",
    "role": "uuid",
@@ -363823,7 +363778,7 @@
   {
    "id": "oc-212c49a0c3c23fa75297",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 1925,
+   "line": 1942,
    "symbol": "if",
    "kind": "fixed-declaration",
    "role": "forbidden",
@@ -363838,7 +363793,7 @@
   {
    "id": "oc-e8efe132e31f801c2188",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 2007,
+   "line": 2024,
    "symbol": "memoryTokenProvider",
    "kind": "fixed-declaration",
    "role": "replace",
@@ -363856,7 +363811,7 @@
   {
    "id": "oc-23bfd55193c0b9e169a2",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 2027,
+   "line": 2044,
    "symbol": "for",
    "kind": "fixed-declaration",
    "role": "colon",
@@ -363874,7 +363829,7 @@
   {
    "id": "oc-124e5c744a5e8a973d9f",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 2028,
+   "line": 2045,
    "symbol": "for",
    "kind": "fixed-declaration",
    "role": "field",
@@ -363892,7 +363847,7 @@
   {
    "id": "oc-9c982dd517bfa677b659",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 2028,
+   "line": 2045,
    "symbol": "for",
    "kind": "fixed-declaration",
    "role": "field",
@@ -363910,7 +363865,7 @@
   {
    "id": "oc-3773ecb91b62e9fd7b05",
    "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-   "line": 2043,
+   "line": 2060,
    "symbol": "normalizeBaseUrl",
    "kind": "fixed-declaration",
    "role": "parsed",
@@ -711690,6 +711645,125 @@
    "rationale": "Issue #606 executable negative fixture for exact SOURCE/release authority and the observed RouteTable positional shape.",
    "retirementRationale": "Replaces the former route inventory count or mutation fixture with the current dev authority check.",
    "evidence": "{'methods': 144, 'path': 131, 'summary': 485, 'successStatuses': 137},"
+  },
+  {
+   "id": "oc-196d3a69b0660cd85a91",
+   "path": "ravenroot/ravenroot-ui/src/personal-connections.js",
+   "line": 93,
+   "symbol": "button",
+   "kind": "fixed-declaration",
+   "role": "data",
+   "expression": "'/sign-in'",
+   "expressionDigest": "fdfc6415e4a6ab0079f98cace2922808e818991eb6ec7b162550eecbbe5c217b",
+   "evidenceDigest": "a71bf23a74e47ed67b4ac60b271ceaf8fce2bdbd287eee54902be725554124a8",
+   "surface": "ui",
+   "status": "retained",
+   "classification": "protocol-or-format-invariant",
+   "rationale": "Personal UI DOM/local selector, same-origin HTTP representation or payload-envelope vocabulary; no provider token is exposed Reviewed source atom: '/sign-in'.",
+   "retirementRationale": "The unchanged '/sign-in' literal remains in the personal panel protocol. Its former fixed-declaration candidate is no longer emitted after the response application moved into an identity-guarded callback; neither the protocol value nor its authority changed.",
+   "evidence": "const data = await request('/sign-in', { registration: code });"
+  },
+  {
+   "id": "oc-2f4dfe2969f5210ccfa8",
+   "path": "ravenroot/ravenroot-ui/src/personal-connections.js",
+   "line": 116,
+   "symbol": "button",
+   "kind": "fixed-declaration",
+   "role": "result",
+   "expression": "'ravenroot.payload/1'",
+   "expressionDigest": "fff8b302713db27908a0cbfe16ab19261e5ce18e41f08c55c4f60072fc018cb2",
+   "evidenceDigest": "701803715f801e4f6c4e39d6adaa4e1887bf9a3f0a3435c57dabedf71641c9bf",
+   "surface": "ui",
+   "status": "retained",
+   "classification": "protocol-or-format-invariant",
+   "rationale": "Personal UI DOM/local selector, same-origin HTTP representation or payload-envelope vocabulary; no provider token is exposed Reviewed source atom: 'ravenroot.payload/1'.",
+   "retirementRationale": "The unchanged 'ravenroot.payload/1' literal remains in the personal panel protocol. Its former fixed-declaration candidate is no longer emitted after the response application moved into an identity-guarded callback; neither the protocol value nor its authority changed.",
+   "evidence": "const result = await request('/executions', { deploymentId: source.deploymentId, incarnationId: source.incarnationId, graphVersion: source.graphVersion, payload: { contract: 'ravenroot.payload/1', schema: 'ravenroot.text', schemaVersion: '1', kind: 'SCALAR', value: payload.value } });"
+  },
+  {
+   "id": "oc-62be6443137bd398fb18",
+   "path": "ravenroot/ravenroot-ui/src/personal-connections.js",
+   "line": 116,
+   "symbol": "button",
+   "kind": "fixed-declaration",
+   "role": "result",
+   "expression": "'ravenroot.text'",
+   "expressionDigest": "a2dca570cf8aa816770c7cf19900fd3719df29c41fb51854e468e1b4183413d6",
+   "evidenceDigest": "701803715f801e4f6c4e39d6adaa4e1887bf9a3f0a3435c57dabedf71641c9bf",
+   "surface": "ui",
+   "status": "retained",
+   "classification": "protocol-or-format-invariant",
+   "rationale": "Personal UI DOM/local selector, same-origin HTTP representation or payload-envelope vocabulary; no provider token is exposed Reviewed source atom: 'ravenroot.text'.",
+   "retirementRationale": "The unchanged 'ravenroot.text' literal remains in the personal panel protocol. Its former fixed-declaration candidate is no longer emitted after the response application moved into an identity-guarded callback; neither the protocol value nor its authority changed.",
+   "evidence": "const result = await request('/executions', { deploymentId: source.deploymentId, incarnationId: source.incarnationId, graphVersion: source.graphVersion, payload: { contract: 'ravenroot.payload/1', schema: 'ravenroot.text', schemaVersion: '1', kind: 'SCALAR', value: payload.value } });"
+  },
+  {
+   "id": "oc-6802a9aa335eb5368de0",
+   "path": "ravenroot/ravenroot-ui/src/personal-connections.js",
+   "line": 116,
+   "symbol": "button",
+   "kind": "fixed-declaration",
+   "role": "result",
+   "expression": "'SCALAR'",
+   "expressionDigest": "7207a8622f2a252610e042d571dccabe7cc2dffade179a47d2e6f3b2a180158b",
+   "evidenceDigest": "701803715f801e4f6c4e39d6adaa4e1887bf9a3f0a3435c57dabedf71641c9bf",
+   "surface": "ui",
+   "status": "retained",
+   "classification": "protocol-or-format-invariant",
+   "rationale": "Personal UI DOM/local selector, same-origin HTTP representation or payload-envelope vocabulary; no provider token is exposed Reviewed source atom: 'SCALAR'.",
+   "retirementRationale": "The unchanged 'SCALAR' literal remains in the personal panel protocol. Its former fixed-declaration candidate is no longer emitted after the response application moved into an identity-guarded callback; neither the protocol value nor its authority changed.",
+   "evidence": "const result = await request('/executions', { deploymentId: source.deploymentId, incarnationId: source.incarnationId, graphVersion: source.graphVersion, payload: { contract: 'ravenroot.payload/1', schema: 'ravenroot.text', schemaVersion: '1', kind: 'SCALAR', value: payload.value } });"
+  },
+  {
+   "id": "oc-8e9abf9fa5ce28de71af",
+   "path": "ravenroot/ravenroot-ui/src/personal-connections.js",
+   "line": 115,
+   "symbol": "button",
+   "kind": "fixed-declaration",
+   "role": "result",
+   "expression": "'/executions'",
+   "expressionDigest": "e873cbd1a9940e82d4d6685b6632e6091ca203863b0070d3db694f9e52b35cda",
+   "evidenceDigest": "701803715f801e4f6c4e39d6adaa4e1887bf9a3f0a3435c57dabedf71641c9bf",
+   "surface": "ui",
+   "status": "retained",
+   "classification": "protocol-or-format-invariant",
+   "rationale": "Personal UI DOM/local selector, same-origin HTTP representation or payload-envelope vocabulary; no provider token is exposed Reviewed source atom: '/executions'.",
+   "retirementRationale": "The unchanged '/executions' literal remains in the personal panel protocol. Its former fixed-declaration candidate is no longer emitted after the response application moved into an identity-guarded callback; neither the protocol value nor its authority changed.",
+   "evidence": "const result = await request('/executions', { deploymentId: source.deploymentId, incarnationId: source.incarnationId, graphVersion: source.graphVersion, payload: { contract: 'ravenroot.payload/1', schema: 'ravenroot.text', schemaVersion: '1', kind: 'SCALAR', value: payload.value } });"
+  },
+  {
+   "id": "oc-9fc0981c71466daa9ed7",
+   "path": "ravenroot/ravenroot-ui/src/personal-connections.js",
+   "line": 116,
+   "symbol": "button",
+   "kind": "fixed-declaration",
+   "role": "result",
+   "expression": "'1'",
+   "expressionDigest": "9a7622b24ae73586214f453f44ed438ce5c63aa07c720c2ccc29ae5bd7ec5322",
+   "evidenceDigest": "701803715f801e4f6c4e39d6adaa4e1887bf9a3f0a3435c57dabedf71641c9bf",
+   "surface": "ui",
+   "status": "retained",
+   "classification": "protocol-or-format-invariant",
+   "rationale": "Personal UI DOM/local selector, same-origin HTTP representation or payload-envelope vocabulary; no provider token is exposed Reviewed source atom: '1'.",
+   "retirementRationale": "The unchanged '1' literal remains in the personal panel protocol. Its former fixed-declaration candidate is no longer emitted after the response application moved into an identity-guarded callback; neither the protocol value nor its authority changed.",
+   "evidence": "const result = await request('/executions', { deploymentId: source.deploymentId, incarnationId: source.incarnationId, graphVersion: source.graphVersion, payload: { contract: 'ravenroot.payload/1', schema: 'ravenroot.text', schemaVersion: '1', kind: 'SCALAR', value: payload.value } });"
+  },
+  {
+   "id": "oc-b860da993a5c80d524c8",
+   "path": "ravenroot/ravenroot-ui/src/personal-connections.js",
+   "line": 66,
+   "symbol": "refresh",
+   "kind": "fixed-declaration",
+   "role": "identity",
+   "expression": "''",
+   "expressionDigest": "6f49cdbd80e1b95d5e6427e1501fc217790daee87055fa5b4e71064288bddede",
+   "evidenceDigest": "e21d21951b6775ed88f76e9483d5751af86fcc64a3ac4077151f032de7edb091",
+   "surface": "ui",
+   "status": "retained",
+   "classification": "protocol-or-format-invariant",
+   "rationale": "Personal UI DOM/local selector, same-origin HTTP representation or payload-envelope vocabulary; no provider token is exposed Reviewed source atom: ''.",
+   "retirementRationale": "The unchanged '' literal remains in the personal panel protocol. Its former fixed-declaration candidate is no longer emitted after the response application moved into an identity-guarded callback; neither the protocol value nor its authority changed.",
+   "evidence": "const identity = state.identity ? `${state.identity}:${(state.connections || []).find(item => item.selected)?.id || ''}` : null;"
   }
  ],
  "evidenceRecords": {
@@ -714114,6 +714188,7 @@
   "348bb1f70df38856e3eab6ab51d332cc1d514e6866b8ec9dded1edb132c2324a": "private static final Path SNAPSHOT = REPOSITORY.resolve(\"docs/reference/node-descriptor-contracts.tsv\");",
   "348d026d308622ddb3993cd40eacaf192d00a22e1d09ce92edf4b78623377f2f": "public static final String MAX_RESIDENT_ACTORS_VARIABLE = \"RAVENROOT_GRAPH_MAX_RESIDENT_ACTORS\";",
   "348d983e316dfda9fe0b2f120eb522e50eadf9ba44e4cface3b31c811ceee865": "\"RAVENROOT_RUNNER_SHARED_ARTIFACTS\", \"RAVENROOT_RUNNER_INSTANCE\", \"RAVENROOT_RUNNER_READINESS_FILE\", \"RAVENROOT_LOCAL_RUNNER_CONFIG\"}:",
+  "34918024f81202ff268d363fce3ac7e8c088043c6b20d91b1e8d96b5f08131d1": "const retired = Symbol('retired personal identity');",
   "3491c0bfc008d6789cdcd3fbf9d75eb4fc1d0478c672b3ce2db43bcba2f608bd": "private static final Duration MIN_POOL_TIMEOUT = Duration.ofMillis(250);",
   "34967bcf8fa1508b878eef7659ee6326cd018bc34b90085a5478af3a7caaad0c": "} maximumClockSkew = Objects.requireNonNull(maximumClockSkew, \"maximumClockSkew\");",
   "34985fe5f12ec10f09f0a69359652dda053a2ddd18422a18614e08e32d62a26e": "public final class ExecutionRecorder implements AutoCloseable { private static final double RENEWAL_FRACTION = 1.0 / 3.0;",
@@ -715219,6 +715294,7 @@
   "4ab630ca8ebf037272edb692137736d5f5579f0a8e72e2ad8345b1d1d7efb624": "if set(grouped) != {\"agent\", \"workspace\"}:",
   "4ab6c898be5671e0f65fff2ceaa59ac2411460b8432bcbd106f0667d0470a350": "RAVENROOT_RATELIMIT_TENANT_STREAMS: ${RAVENROOT_RATELIMIT_TENANT_STREAMS:-}",
   "4ac4e0f83bc587a0a870292f5a9e7654d33ce2d6ebd636fcb1c2ef8369dab581": "\"characters and must differ from the release branch\"",
+  "4ad06bf25e0d3c0f2e34baa36fd4fee8575bb21f35762a5b348f2e2e771da5db": "const requireCurrentIdentity = (beforeSend = false) => { if ((beforeSend || personalRequest || executionContext === 'personal') && identityGeneration !== this.browserIdentityGeneration()) throw new DOMException('Browser identity changed', 'AbortError');",
   "4ad4e2455a3d85f909d1a05fb983f740f7f677caa56bd4f995ace3076eeccee0": "const count = document.createElement('span');",
   "4ad99ec400d717665f08f47953b20fb87ca378a0fa54df3741b475900f57484a": "\"defaultAttentionPageSize\": { \"$ref\": \"#/definitions/positive100\" },",
   "4ad9d1c0bab27d87d2e768b31d5fea64519656f042d35201b4fd21402963ce22": "(path, None, 'release.releaseVersion() >= GraphReleaseMetadata.MAX_RELEASE_VERSION', 'false'),",
@@ -717039,7 +717115,6 @@
   "7010221423df08073622aa1d7b2943cfcc59b157be4db88e8c579e934e4a938a": "mock.patch.object(release_contract, \"version_at\", return_value=str(self.previous)), \\",
   "701539a68560b2bc5dc4c08a6b066fd48ed60d521df9785237b916db6215cb56": "missing[audit.ASSISTANT_LIMIT_FAMILY_ID][\"settings\"].pop()",
   "70160d773270c72513efeed05ed093f9cf5e394873055cf92c6215a76c08a7b0": "public static final String LAUNCH_PATH = \"/v1/embed/launch\";",
-  "701803715f801e4f6c4e39d6adaa4e1887bf9a3f0a3435c57dabedf71641c9bf": "const result = await request('/executions', { deploymentId: source.deploymentId, incarnationId: source.incarnationId, graphVersion: source.graphVersion, payload: { contract: 'ravenroot.payload/1', schema: 'ravenroot.text', schemaVersion: '1', kind: 'SCALAR', value: payload.value } });",
   "701dfee312bb7af07c7a24598c26a2b7db3289e07a42fb0ac7f5460f3cf65dca": "static final List<String> ALLOWED_PROTOCOLS = List.of(\"TLSv1.3\", \"TLSv1.2\");",
   "701fbe1b13b26aa060283ca19cdf770bb6ec9585ef48c931ec7a3518e2cedc86": "while IFS= read -r flag; do set -- \"$@\" \"$flag\"; done <\"$TEMP_DIR/helm-$tuple-flags\"",
   "701fd699a0fb82249db080011c00d681db2a9bb85b22cf0c014ab77e886411c1": "raise OciRegistryError(\"GHCR tag does not resolve to an OCI image index\")",
@@ -719705,7 +719780,6 @@
   "a7096cdd829b286c3675c47664f257f716683fc6e47a3c904652744586c3a9c9": "(\"description: Optional, single-replica Ravenroot deployment for Kubernetes and Minikube.\\n\", \"\"),",
   "a70fc9bf0aecad3d879c688c5c0ee5055b1ed13a831f30f39f53052fb6879639": "private static final java.util.Set<String> SAFE_DELEGATE_METHODS = java.util.Set.of( \"businessHistoryPolicy\", \"acceptDeploymentEntry\", \"deploymentEntry\", \"pendingDeploymentEntries\", \"recordCorrelatedTraversal\", \"businessHistory\", \"businessHistories\", \"uncorrelatedDeploymentTraversals\", \"executionSelectionExists\", \"executionInvocationNodeIds\", \"executionTraversals\", \"executionTraversal\", \"executionNodeSummaries\", \"executionEdgeSummaries\", \"executionVisits\", \"executionVisitAttempts\", \"executionVisitParents\", \"correlatedJoinMembers\", \"correlatedJoin\", \"compareAndSetCorrelatedJoin\", \"correlatedJoins\", \"correlatedTraversals\", \"correlatedTraversal\", \"settleCorrelatedTraversal\", \"closeBusinessHistory\", \"acceptInitialStart\", \"initialStart\", \"capabilities\", \"supports\", \"maxLeaseTtl\", \"maxPayloadBytes\", \"load\", \"renew\", \"release\", \"leases\", \"ack\", \"maxClockSkew\", \"forgottenBefore\", \"lookupIdempotency\", \"idempotencyRecordCount\", \"purgeExpiredIdempotencyRecords\", \"loadHandler\", \"findHandler\", \"handlers\", \"loadToolApproval\", \"toolApprovals\", \"loadAgentAuthorityBudget\", \"loadRunnerWorkspace\", \"runnerResources\", \"saveRunnerResource\", \"renewRunnerAvailability\", \"runnerAvailability\", \"loadAgentAuthorityControl\", \"transitionAgentAuthorityControl\", \"maxHumanTaskPageSize\", \"maxHumanTaskAttentionPageSize\", \"maxHumanTaskAttentionNodeCounts\", \"maxHumanTaskResponsePayloadBytes\", \"loadHumanTask\", \"listHumanTasks\", \"listHumanTaskAttention\", \"findHumanTaskAttention\", \"loadExecutionPause\", \"executionPauses\", \"revokeHumanTaskInteraction\", \"isHumanTaskInteractionRevoked\", \"findHeldExecutionPause\", \"journalRetention\", \"readJournal\", \"journalRetainedFrom\", \"openSourceCheckpointStore\", \"outboxCursor\", \"advanceOutboxCursor\", \"recordInboxDelivery\", \"inboxRecordCount\", \"compactJournal\", \"maxInventoryPageSize\", \"terminalRetention\", \"listProcessInstances\", \"findProcessInstance\", \"listTraversals\", \"inventoryRetainedFrom\", \"purgeExpiredProcessInstances\", \"executionResultRetention\", \"maxExecutionResultPayloadBytes\", \"recordExecutionResult\", \"loadExecutionResult\", \"executionResultsRetainedFrom\", \"purgeExpiredExecutionResults\", \"replayEvidence\", \"recordReplaySettlement\", \"replaySettlement\", \"derivedAncestry\", \"loadSaga\", \"listSagas\", \"listSagaCommands\", \"createFlowInvocation\", \"admitFlowInvocation\", \"loadFlowInvocation\", \"findFlowInvocationByCaller\", \"mutateFlowInvocation\", \"unfinishedFlowInvocations\", \"retainedFlowInvocations\", \"retainedFlowInvocationsAfter\", \"purgeExpiredFlowInvocations\", \"close\");",
   "a718e04775c51de1e263578b22634e1155e0bd343f814a5ad4be4b3c9aa8ea55": "- name: RAVENROOT_GRAPH_MAX_PAYLOAD_VALUE_COUNT",
-  "a71bf23a74e47ed67b4ac60b271ceaf8fce2bdbd287eee54902be725554124a8": "const data = await request('/sign-in', { registration: code });",
   "a71f0c64342022a64855b9b3da48e99f77f82e26247f9b2bed7358bec56fb705": "\"assistantOperationalLimitsDefaultAndTightenIndependently\"] = \\",
   "a72f21ee94769c2b19071a06be3a0edbbee56113caf371f9614c0a357feb3ccb": "mkdir -p \"$NO_MVN_BIN\"",
   "a734384b3c2b06b7920d706d8cfe51e26aab47a6e0b15127a83f1b9b10b95ef2": "RAVENROOT_RATELIMIT_MAX_TRACKED_TENANTS: ${RAVENROOT_RATELIMIT_MAX_TRACKED_TENANTS:-}",
@@ -722568,7 +722642,6 @@
   "e21390b8b36f4f2130d4257fc31c13e3a41af099e0293db10f30ea7211be0761": "\"RAVENROOT_GITHUB_\", \"RAVENROOT_GIT_WORKSPACE_\", \"RAVENROOT_IMAP_\",",
   "e2199b482e268a72861a0c6f4ad97938e505c0f8bd5b150a71f09dcb90a8b908": "public static final double DEFAULT_MULTIPLIER = 2.0;",
   "e21baf23e9a2f371add0c7472226515da7036b935ef0b932942e36752fa29ba2": "\"minio-fixture-preflight\": \"full-minio-fixture-preflight\",",
-  "e21d21951b6775ed88f76e9483d5751af86fcc64a3ac4077151f032de7edb091": "const identity = state.identity ? `${state.identity}:${(state.connections || []).find(item => item.selected)?.id || ''}` : null;",
   "e21e538296304cdbe731885ad7cc58225ade4b946ac55c94aacade16461ae631": "self.assertEqual(\"/reference/page.html\", generated_page_url(site / \"reference\" / \"page.html\", site))",
   "e220bc40fd287a3fea75459a677a3a619c8f184bdb3119df8c6da7be3fd7658c": "RAVENROOT_IMAGE_REPOSITORY=ghcr.io/acme/ravenroot \\",
   "e22dceea111274aaf906fba170314aea8f1b66cc45d402db8b410a003fd2c467": "const separator = document.createElement('div');",
@@ -1581254,6 +1581327,87 @@
    "mappings": [],
    "retirements": [],
    "additions": []
+  },
+  {
+   "id": "issue-620-browser-identity-reconciliation-v1",
+   "issue": "#620",
+   "sourceRevision": "b4cabd6c2c56a08baedbe77e8481af20b1395513",
+   "targetRevision": "e1f2b12738864551eccd6d9f008bb6b044a3bd44",
+   "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+   "sourceInventoryDigest": "3dadc3288c6555f514c99f9dc328bc75a24a6a00820ae076634e64816769960a",
+   "targetCandidateDigest": "49d47dbc4a58370288bbabf3fdf3c3b9ef99853d2776cf5dee18eee8c091d554",
+   "mappings": [],
+   "retirements": [
+    {
+     "id": "oc-196d3a69b0660cd85a91",
+     "approved": true,
+     "rationale": "The unchanged '/sign-in' literal remains in the personal panel protocol. Its former fixed-declaration candidate is no longer emitted after the response application moved into an identity-guarded callback; neither the protocol value nor its authority changed."
+    },
+    {
+     "id": "oc-2f4dfe2969f5210ccfa8",
+     "approved": true,
+     "rationale": "The unchanged 'ravenroot.payload/1' literal remains in the personal panel protocol. Its former fixed-declaration candidate is no longer emitted after the response application moved into an identity-guarded callback; neither the protocol value nor its authority changed."
+    },
+    {
+     "id": "oc-62be6443137bd398fb18",
+     "approved": true,
+     "rationale": "The unchanged 'ravenroot.text' literal remains in the personal panel protocol. Its former fixed-declaration candidate is no longer emitted after the response application moved into an identity-guarded callback; neither the protocol value nor its authority changed."
+    },
+    {
+     "id": "oc-6802a9aa335eb5368de0",
+     "approved": true,
+     "rationale": "The unchanged 'SCALAR' literal remains in the personal panel protocol. Its former fixed-declaration candidate is no longer emitted after the response application moved into an identity-guarded callback; neither the protocol value nor its authority changed."
+    },
+    {
+     "id": "oc-8e9abf9fa5ce28de71af",
+     "approved": true,
+     "rationale": "The unchanged '/executions' literal remains in the personal panel protocol. Its former fixed-declaration candidate is no longer emitted after the response application moved into an identity-guarded callback; neither the protocol value nor its authority changed."
+    },
+    {
+     "id": "oc-9fc0981c71466daa9ed7",
+     "approved": true,
+     "rationale": "The unchanged '1' literal remains in the personal panel protocol. Its former fixed-declaration candidate is no longer emitted after the response application moved into an identity-guarded callback; neither the protocol value nor its authority changed."
+    },
+    {
+     "id": "oc-b860da993a5c80d524c8",
+     "approved": true,
+     "rationale": "The unchanged '' literal remains in the personal panel protocol. Its former fixed-declaration candidate is no longer emitted after the response application moved into an identity-guarded callback; neither the protocol value nor its authority changed."
+    }
+   ],
+   "additions": [
+    {
+     "id": "oc-2f866285857f17c5b25a",
+     "metadata": {
+      "status": "retained",
+      "classification": "protocol-or-format-invariant",
+      "rationale": "Standard browser cancellation error name for a retired personal identity, not an operator setting."
+     }
+    },
+    {
+     "id": "oc-469fb77cf41011be15a4",
+     "metadata": {
+      "status": "retained",
+      "classification": "protocol-or-format-invariant",
+      "rationale": "Existing execution-context header value; this guard rejects old personal response bodies while keeping system results readable."
+     }
+    },
+    {
+     "id": "oc-71d99422d0e3d675f27c",
+     "metadata": {
+      "status": "retained",
+      "classification": "presentation-text",
+      "rationale": "Fixed cancellation diagnostic for a request whose initiating browser identity was retired."
+     }
+    },
+    {
+     "id": "oc-be17169dfb2a98ba49c0",
+     "metadata": {
+      "status": "retained",
+      "classification": "protocol-or-format-invariant",
+      "rationale": "Private Symbol description for cancelling an obsolete panel operation before network dispatch; never a credential or an authority reference."
+     }
+    }
+   ]
   }
  ],
  "semanticReviewHistory": [
@@ -1657768,7 +1657922,7 @@
     },
     {
      "path": "ravenroot/ravenroot-ui/src/app.js",
-     "digest": "2bd9236359e95fb8b1a9940af575b789e40b6b48f2ed6607481f111c60f27d07"
+     "digest": "bc9e8b3805cfd0dabf120e6628c8d6fe680218ed80ef2e940d1291bbfe6057ce"
     },
     {
      "path": "ravenroot/ravenroot-ui/src/program-language.js",
@@ -1657776,7 +1657930,7 @@
     },
     {
      "path": "ravenroot/ravenroot-ui/src/runtime-client.js",
-     "digest": "e0cf76737c6810f744d9a8a4cd70a63072b851c931047bb3cc773ac5b108e4bf"
+     "digest": "4c20b41f54fd084f514e1e5cd9919e9042bce78b92209471f0c55fabd655ec0f"
     },
     {
      "path": "scripts/check_release_configuration.py",
@@ -1665042,7 +1665196,7 @@
     "repositoryDelete": "12486c92d762174b9161c1ec5be9a3c77e54436f945bff7b673b2407507d8893",
     "repositoryRelease": "de3b913d8a4fc56ac6c5027555849b4afef40e98acb5a08ac8a6cd193a1c7e13",
     "publishedArtifacts": "21ce0b20bfb0f6bb3bab951cc5662dd2d416788bf67684ca0bc749578b1a0637",
-    "connectRuntime": "f73646cc07fa251f0eeeefedef8d1261cd0e77634974baa48137605c802ace56",
+    "connectRuntime": "6637df08b5b594e79634d9542293aa952ce477d00217fd9b834e4b65c03d85e5",
     "createStartupImportPlaceholder": "9b194ed16409f284ecdbe713a9be041d8cc60982f90a84b5d6f016c886e6feef",
     "startupImportBinding": "d6eb1a9106def1e00965ade2a2c485b422e51be0fd13641e5a2caee60a454952",
     "startupImportBindingIsCurrent": "5b79d5f6babdfab051815044c3733970c2bb9cd701915b6ac68c098e7df150d4",

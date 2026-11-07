@@ -62,7 +62,7 @@ retired historical payloads remain counted separately; an approval records ident
 Checked inventory-schema migrations: 2. Validation requires the recorded source
 revision to be present locally; CI must fetch that history before enabling this gate.
 
-Checked source reconciliations: 242.
+Checked source reconciliations: 243.
 
 The following tables are exhaustive projections of the same active inventory; each includes
 zero-count or unclassified rows as needed and sums to 35053 candidates.
@@ -127,11 +127,11 @@ identity and retirement has its own approved record in the machine-readable inve
 
 | Partition | Count |
 |---|---:|
-| Source inventory candidates | 35056 |
-| Unchanged identities | 35049 |
+| Source inventory candidates | 35053 |
+| Unchanged identities | 35053 |
 | Approved identity migrations | 0 |
-| Approved retirements | 7 |
-| Semantically classified additions | 4 |
+| Approved retirements | 0 |
+| Semantically classified additions | 0 |
 | Current candidates | 35053 |
 
 ## Final semantic review
@@ -16678,11 +16678,11 @@ The machine-readable inventory is authoritative; this table shows reviewed non-f
 | `oc-7fa5b941471bc359b912` | `ravenroot/ravenroot-ui/src/personal-connections.js:42` `for` | ui | retained | protocol-or-format-invariant | Personal UI DOM/local selector, same-origin HTTP representation or payload-envelope vocabulary; no provider token is exposed Reviewed source atom: 'application/json'. |
 | `oc-d503b9c246fae1fc31e2` | `ravenroot/ravenroot-ui/src/personal-connections.js:42` `for` | ui | retained | protocol-or-format-invariant | Personal UI DOM/local selector, same-origin HTTP representation or payload-envelope vocabulary; no provider token is exposed Reviewed source atom: 'Content-Type'. |
 | `oc-f5e1a9d0400f9b89e6dd` | `ravenroot/ravenroot-ui/src/personal-connections.js:42` `for` | ui | retained | protocol-or-format-invariant | Personal UI DOM/local selector, same-origin HTTP representation or payload-envelope vocabulary; no provider token is exposed Reviewed source atom: 'personal'. |
-| `oc-667602163886918636e2` | `ravenroot/ravenroot-ui/src/personal-connections.js:126` `button` | ui | retained | protocol-or-format-invariant | Personal UI DOM/local selector, same-origin HTTP representation or payload-envelope vocabulary; no provider token is exposed Reviewed source atom: 'input'. |
-| `oc-9de0c53fed58d45ee66f` | `ravenroot/ravenroot-ui/src/personal-connections.js:144` `button` | ui | retained | protocol-or-format-invariant | Personal UI DOM/local selector, same-origin HTTP representation or payload-envelope vocabulary; no provider token is exposed Reviewed source atom: 'select'. |
-| `oc-f943d8b992f35042b238` | `ravenroot/ravenroot-ui/src/personal-connections.js:145` `button` | ui | retained | protocol-or-format-invariant | Personal UI DOM/local selector, same-origin HTTP representation or payload-envelope vocabulary; no provider token is exposed Reviewed source atom: 'input'. |
-| `oc-80da097c2603ff8f4af2` | `ravenroot/ravenroot-ui/src/personal-connections.js:156` `button` | ui | retained | protocol-or-format-invariant | Personal UI DOM/local selector, same-origin HTTP representation or payload-envelope vocabulary; no provider token is exposed Reviewed source atom: 'input'. |
-| `oc-88d7ddab0995d1864d3f` | `ravenroot/ravenroot-ui/src/personal-connections.js:157` `button` | ui | retained | protocol-or-format-invariant | Personal UI DOM/local selector, same-origin HTTP representation or payload-envelope vocabulary; no provider token is exposed Reviewed source atom: 'pre'. |
+| `oc-667602163886918636e2` | `ravenroot/ravenroot-ui/src/personal-connections.js:127` `button` | ui | retained | protocol-or-format-invariant | Personal UI DOM/local selector, same-origin HTTP representation or payload-envelope vocabulary; no provider token is exposed Reviewed source atom: 'input'. |
+| `oc-9de0c53fed58d45ee66f` | `ravenroot/ravenroot-ui/src/personal-connections.js:145` `button` | ui | retained | protocol-or-format-invariant | Personal UI DOM/local selector, same-origin HTTP representation or payload-envelope vocabulary; no provider token is exposed Reviewed source atom: 'select'. |
+| `oc-f943d8b992f35042b238` | `ravenroot/ravenroot-ui/src/personal-connections.js:146` `button` | ui | retained | protocol-or-format-invariant | Personal UI DOM/local selector, same-origin HTTP representation or payload-envelope vocabulary; no provider token is exposed Reviewed source atom: 'input'. |
+| `oc-80da097c2603ff8f4af2` | `ravenroot/ravenroot-ui/src/personal-connections.js:157` `button` | ui | retained | protocol-or-format-invariant | Personal UI DOM/local selector, same-origin HTTP representation or payload-envelope vocabulary; no provider token is exposed Reviewed source atom: 'input'. |
+| `oc-88d7ddab0995d1864d3f` | `ravenroot/ravenroot-ui/src/personal-connections.js:158` `button` | ui | retained | protocol-or-format-invariant | Personal UI DOM/local selector, same-origin HTTP representation or payload-envelope vocabulary; no provider token is exposed Reviewed source atom: 'pre'. |
 | `oc-ac0e6aa02111bc76df32` | `ravenroot/ravenroot-ui/src/program-language.js:45` `programLanguageOptionsHtml` | ui | retained | presentation-text | The token renders selected-state presentation for a program language option. |
 | `oc-c090287ff1a11e1b79dd` | `ravenroot/ravenroot-ui/src/program-language.js:45` `programLanguageOptionsHtml` | ui | retained | presentation-text | The token renders selected-state presentation for a program language option. |
 | `oc-d540493d3f9443f7c379` | `ravenroot/ravenroot-ui/src/register-machine-presets.js:23` `preset` | ui | retained | derived | This numeric value derives editor insertion geometry or a local default and does not control runtime operation. |

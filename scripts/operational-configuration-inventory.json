@@ -355778,7 +355778,7 @@
   {
    "id": "oc-667602163886918636e2",
    "path": "ravenroot/ravenroot-ui/src/personal-connections.js",
-   "line": 126,
+   "line": 127,
    "symbol": "button",
    "kind": "fixed-declaration",
    "role": "registration",
@@ -355793,7 +355793,7 @@
   {
    "id": "oc-9de0c53fed58d45ee66f",
    "path": "ravenroot/ravenroot-ui/src/personal-connections.js",
-   "line": 144,
+   "line": 145,
    "symbol": "button",
    "kind": "fixed-declaration",
    "role": "deployed",
@@ -355808,7 +355808,7 @@
   {
    "id": "oc-f943d8b992f35042b238",
    "path": "ravenroot/ravenroot-ui/src/personal-connections.js",
-   "line": 145,
+   "line": 146,
    "symbol": "button",
    "kind": "fixed-declaration",
    "role": "payload",
@@ -355823,7 +355823,7 @@
   {
    "id": "oc-80da097c2603ff8f4af2",
    "path": "ravenroot/ravenroot-ui/src/personal-connections.js",
-   "line": 156,
+   "line": 157,
    "symbol": "button",
    "kind": "fixed-declaration",
    "role": "resultId",
@@ -355838,7 +355838,7 @@
   {
    "id": "oc-88d7ddab0995d1864d3f",
    "path": "ravenroot/ravenroot-ui/src/personal-connections.js",
-   "line": 157,
+   "line": 158,
    "symbol": "button",
    "kind": "fixed-declaration",
    "role": "resultText",
@@ -1581408,6 +1581408,18 @@
      }
     }
    ]
+  },
+  {
+   "id": "issue-620-retired-personal-status-reconciliation-v1",
+   "issue": "#620",
+   "sourceRevision": "ef4fd8e850807e1ab28838bf4a19ed3cfcb80c74",
+   "targetRevision": "39042718a94a9af89b85b646aac650805ae08f6b",
+   "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+   "sourceInventoryDigest": "41a1cd5ef8619fa6616d9a9f9f258fb835e6037977c2f7198bce2152b6a781b8",
+   "targetCandidateDigest": "49d47dbc4a58370288bbabf3fdf3c3b9ef99853d2776cf5dee18eee8c091d554",
+   "mappings": [],
+   "retirements": [],
+   "additions": []
   }
  ],
  "semanticReviewHistory": [

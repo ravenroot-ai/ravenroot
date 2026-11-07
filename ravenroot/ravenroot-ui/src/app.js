@@ -12286,8 +12286,10 @@ async function connectRuntime(atBoot = false) {
   if (runtimeDisconnect) runtimeDisconnect();
   runtimeClient = new RavenrootRuntimeClient(baseUrl, {
     tokenProvider: runtimeTokenProvider, browserSessions: true,
+    browserIdentityGeneration: () => personalIdentityGeneration,
     onExecutionAccepted: result => {
-      if (result.executionContext === 'personal') personalConnections?.showExecution(result.executionId);
+      if (connectionGeneration === runtimeConnectionGeneration && result.executionContext === 'personal')
+        personalConnections?.showExecution(result.executionId);
     },
   });
   graphAuthoringClient = new GraphAuthoringClient(baseUrl, { tokenProvider: runtimeTokenProvider });

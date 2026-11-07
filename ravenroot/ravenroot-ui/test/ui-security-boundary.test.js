@@ -26,6 +26,69 @@ function transport() {
 }
 
 describe('UI browser security boundary', () => {
+  it.each([['headers', false], ['body', false], ['headers', true], ['body', true]])(
+    'discards an old personal execution response held at %s after identity replacement (personal request=%s)', async (boundary, personalRequest) => {
+    let generation = 1;
+    const held = Promise.withResolvers(); const started = Promise.withResolvers();
+    const onExecutionAccepted = vi.fn();
+    const fetchImpl = vi.fn(async () => {
+      if (boundary === 'headers') { started.resolve(); await held.promise; }
+      return { ok: true, status: 200, headers: new Headers({ 'X-Ravenroot-Execution-Context': 'personal' }),
+        text: async () => {
+          if (boundary === 'body') { started.resolve(); await held.promise; }
+          return JSON.stringify({ executionId: 'execution-A', output: 'private A' });
+        } };
+    });
+    const runtime = new RavenrootRuntimeClient('', { fetchImpl, browserSessions: true, onExecutionAccepted,
+      browserIdentityGeneration: () => generation });
+    runtime.personalContext = personalRequest;
+    const pending = runtime.execution('execution-A').then(value => ({ value }), error => ({ error }));
+    await started.promise; generation += 1; runtime.personalContext = false; held.resolve();
+    const outcome = await pending;
+    expect(outcome.value).toBeUndefined();
+    expect(outcome.error?.name).toBe('AbortError');
+    expect(onExecutionAccepted).not.toHaveBeenCalled();
+    expect(runtime.personalContext).toBe(false);
+  });
+
+  it('does not send a runtime request whose browser identity retired during credential lookup', async () => {
+    let generation = 1;
+    const token = Promise.withResolvers(); const started = Promise.withResolvers();
+    const fetchImpl = transport();
+    const runtime = new RavenrootRuntimeClient('', { fetchImpl, browserIdentityGeneration: () => generation,
+      tokenProvider: { getAccessToken() { started.resolve(); return token.promise; } } });
+    const pending = runtime.execution('execution-A').then(value => ({ value }), error => ({ error }));
+    await started.promise; generation += 1; token.resolve('perimeter-token');
+    expect((await pending).error?.name).toBe('AbortError');
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('accepts a current runtime execution and records its personal context', async () => {
+    const onExecutionAccepted = vi.fn();
+    const body = { executionId: 'execution-A', output: 'private A' };
+    const runtime = new RavenrootRuntimeClient('', { browserIdentityGeneration: () => 1, onExecutionAccepted,
+      fetchImpl: async () => ({ ok: true, status: 200,
+        headers: new Headers({ 'X-Ravenroot-Execution-Context': 'personal' }), text: async () => JSON.stringify(body) }) });
+    await expect(runtime.execution('execution-A')).resolves.toEqual(body);
+    expect(runtime.personalContext).toBe(true);
+    expect(onExecutionAccepted).toHaveBeenCalledExactlyOnceWith({ ...body, executionContext: 'personal' });
+  });
+
+  it('preserves an in-flight system read without overwriting the new personal presentation context', async () => {
+    let generation = 1;
+    const held = Promise.withResolvers(); const started = Promise.withResolvers();
+    const onExecutionAccepted = vi.fn(); const body = { executionId: 'system-execution' };
+    const runtime = new RavenrootRuntimeClient('', { browserIdentityGeneration: () => generation, onExecutionAccepted,
+      fetchImpl: async () => ({ ok: true, status: 200,
+        headers: new Headers({ 'X-Ravenroot-Execution-Context': 'system' }),
+        text: async () => { started.resolve(); await held.promise; return JSON.stringify(body); } }) });
+    const reading = runtime.execution('system-execution'); await started.promise;
+    generation += 1; runtime.personalContext = true; held.resolve();
+    await expect(reading).resolves.toEqual(body);
+    expect(runtime.personalContext).toBe(true);
+    expect(onExecutionAccepted).not.toHaveBeenCalled();
+  });
+
   it('exposes accessible authentication and revocation controls with explicit storage disclosure', async () => {
     const html = await readFile('index.html', 'utf8');
 

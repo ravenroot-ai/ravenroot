@@ -8623,7 +8623,7 @@ PROGRAM_GITHUB_SOURCE_PROOFS = [('ravenroot/ravenroot-core/src/main/java/ai/rave
   'file',
   '',
   '',
-  '52787b668084e67ee8e2027e0431ab3d3e928dc7d7776fd1e9a8c6be1f014eb4',
+  '3d1280f6b2f1d5b82df74e536a3b02bd8df23ef4f6c47b3e8c399d98ce7fe733',
   1),
  ('scripts/tests/test_program_authoring_platform_configuration.sh',
   'file',
@@ -15250,7 +15250,7 @@ GRAPH_AUTHORING_UI_METHOD_PROOFS = {
     "repositoryDelete": "12486c92d762174b9161c1ec5be9a3c77e54436f945bff7b673b2407507d8893",
     "repositoryRelease": "de3b913d8a4fc56ac6c5027555849b4afef40e98acb5a08ac8a6cd193a1c7e13",
     "publishedArtifacts": "21ce0b20bfb0f6bb3bab951cc5662dd2d416788bf67684ca0bc749578b1a0637",
-    "connectRuntime": 'f73646cc07fa251f0eeeefedef8d1261cd0e77634974baa48137605c802ace56',
+    "connectRuntime": '6637df08b5b594e79634d9542293aa952ce477d00217fd9b834e4b65c03d85e5',
     "createStartupImportPlaceholder": "9b194ed16409f284ecdbe713a9be041d8cc60982f90a84b5d6f016c886e6feef",
 
     "startupImportBinding": "d6eb1a9106def1e00965ade2a2c485b422e51be0fd13641e5a2caee60a454952",

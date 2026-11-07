@@ -486,6 +486,7 @@ export class RavenrootRuntimeClient {
     this.fetchImpl = options.fetchImpl || globalThis.fetch?.bind(globalThis);
     this.browserSessions = options.browserSessions === true;
     this.onExecutionAccepted = options.onExecutionAccepted || (() => {});
+    this.browserIdentityGeneration = options.browserIdentityGeneration || (() => 0);
     this.tokenProvider = options.tokenProvider || memoryTokenProvider(options.accessToken);
     this.maxFrameBytes = options.maxFrameBytes || DEFAULT_MAX_FRAME_BYTES;
     this.maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
@@ -1697,7 +1698,18 @@ export class RavenrootRuntimeClient {
 
   async #json(path, options, initialAdmissionCheck) {
     if (!this.fetchImpl) throw runtimeClientValidationError('Fetch API is not supported by this browser');
+    const identityGeneration = this.browserIdentityGeneration();
+    const personalRequest = this.personalContext === true;
+    let executionContext;
+    const requireCurrentIdentity = (beforeSend = false) => {
+      if ((beforeSend || personalRequest || executionContext === 'personal')
+          && identityGeneration !== this.browserIdentityGeneration())
+        throw new DOMException('Browser identity changed', 'AbortError');
+    };
     const credential = await this.#requestCredential();
+    // Do not send an old action using a replacement browser's cookies. Already-sent system
+    // requests remain readable, but cannot change the new browser's personal presentation.
+    requireCurrentIdentity(true);
     // Only initial deployment admission supplies this guard. Credentials may resolve after the
     // observer disconnected; no asynchronous boundary may separate this check from fetch.
     if (initialAdmissionCheck && !initialAdmissionCheck())
@@ -1712,10 +1724,11 @@ export class RavenrootRuntimeClient {
         headers: this.#headers(options.headers, credential.accessToken),
       });
     } catch {
+      requireCurrentIdentity();
       throw new RuntimeRequestError('Service request failed', { method, path, uiReasonKey: 'workspace.runtime.request.failed' });
     }
-    const executionContext = response.headers?.get?.('X-Ravenroot-Execution-Context');
-    if (executionContext === 'personal' || executionContext === 'system') this.personalContext = executionContext === 'personal';
+    executionContext = response.headers?.get?.('X-Ravenroot-Execution-Context');
+    requireCurrentIdentity();
     if (response.status === 401 || response.status === 403) {
       if (response.status === 401) await this.#clearAccessTokenIfCurrent(credential);
       throw new RuntimeAuthorizationError(response.status === 401 ? 'Authentication expired' : 'Insufficient permissions',
@@ -1737,6 +1750,7 @@ export class RavenrootRuntimeClient {
     } catch {
       readFailed = true;
     }
+    requireCurrentIdentity();
     let body = null;
     if (!readFailed) {
       try {
@@ -1763,7 +1777,10 @@ export class RavenrootRuntimeClient {
     if (body === null) {
       throw new RuntimeRequestError('Service response is not valid JSON', { status: response.status, method, path, uiReasonKey: 'workspace.runtime.request.invalidJson' });
     }
-    if (executionContext && body?.executionId) this.onExecutionAccepted({ ...body, executionContext });
+    if (identityGeneration === this.browserIdentityGeneration()) {
+      if (executionContext === 'personal' || executionContext === 'system') this.personalContext = executionContext === 'personal';
+      if (executionContext && body?.executionId) this.onExecutionAccepted({ ...body, executionContext });
+    }
     return body;
   }
 

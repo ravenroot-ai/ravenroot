@@ -87,6 +87,12 @@ public final class DefaultAuthorizationService implements AuthorizationService {
                 && context.principalType() != PrincipalType.USER) {
             return deny("embed registration administration requires an operator principal");
         }
+        // Personal execution partitions cannot be selected through an inherited perimeter admin
+        // role. This also covers artifacts and downstream Human Task/approval resources.
+        String targetTenant = resource.tenantId().orElseThrow();
+        if (targetTenant.matches("personal-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}") && !(context.principalType() == PrincipalType.USER && context.issuer().equals("urn:ravenroot:personal:v1")
+                && targetTenant.equals(context.tenantId()) && targetTenant.equals("personal-" + context.subject())))
+            return deny("personal execution ownership required");
         boolean platformAdmin = context.roles().contains(Role.PLATFORM_ADMIN);
         if (!platformAdmin && !resource.tenantId().get().equals(context.tenantId())) {
             return deny("cross-tenant access denied");

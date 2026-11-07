@@ -164,6 +164,9 @@ public final class RavenrootServerMain {
                 System.getenv().getOrDefault("RAVENROOT_ARTIFACT_STORE_DIR",
                         "/opt/ravenroot/data/artifact-store")),
                 artifactProvenance.verifier());
+        var personalConfiguration = ai.ravenroot.server.personal.PersonalOAuthConfiguration.fromEnvironment(System.getenv());
+        var personalOAuth = personalConfiguration == null ? null : new ai.ravenroot.server.personal.PersonalOAuthService(
+                personalConfiguration, new DeploymentGlobalTenantCredentials(credentialResolver));
         var environment = new BehaviorEnvironment(new ModelProviderRegistry(), new AgentRuntimeRegistry(),
                 durableArtifacts, programRuntime,
                 credentialResolver,
@@ -225,12 +228,14 @@ public final class RavenrootServerMain {
                 ? null : ai.ravenroot.server.approval.ToolApprovalConfiguration
                         .fromEnvironment(System.getenv());
         PluginActivationOrchestrator.Registration registration = registerNodePackagesOrRefuse(
-                environment, credentialResolver, pluginActivationAuditSink,
+                environment, credentialResolver, personalOAuth, pluginActivationAuditSink,
                 new ai.ravenroot.server.audit.AuditTrailToolCallSink(auditTrail),
                 new ai.ravenroot.server.audit.AuditTrailPublicationSink(auditTrail),
                 toolApprovals, toolApprovalSettings, agentBudgets, humanTasks, humanTaskPolicy);
         PluginActivationOrchestrator.Registered registered = registration.registered();
         var behaviors = registered.registry();
+        if (personalOAuth != null) behaviors.withPersonalConnectionAuthority(personalOAuth::requireExecutionAuthority)
+                .withPersonalDefinitionTenant(personalOAuth::definitionTenant);
         if (activityCaptureConfiguration.policy().enabled()) {
             behaviors.withActivityCapture(new ai.ravenroot.core.activity.ActivityCapture(
                     activityCaptureConfiguration.policy(), executionStoreOwner.activityArchive()));
@@ -556,6 +561,7 @@ public final class RavenrootServerMain {
                         new AuditTrailExecutionControlSink(auditTrail),
                         assistantComposition.service(),
                         embedConfiguration, userCredentials, graphExecutionLimits.graphMl());
+                if (personalOAuth != null) server.installPersonalOAuth(personalOAuth);
                 server.configureGraphAuthoring(embeddedGraphAuthoring);
                 // No null check on approvalRecovery: both services are composed only when the
                 // execution store is, which is the same condition that composes the loop.
@@ -840,6 +846,7 @@ public final class RavenrootServerMain {
      */
     private static PluginActivationOrchestrator.Registration registerNodePackagesOrRefuse(
             BehaviorEnvironment environment, CredentialResolver credentials,
+            ai.ravenroot.server.personal.PersonalOAuthService personalOAuth,
             AuditTrailPluginActivationSink auditSink,
             ai.ravenroot.api.security.ToolCallAuditSink toolAuditSink,
             ai.ravenroot.api.publication.PublicationAuditSink publicationAuditSink,
@@ -850,7 +857,7 @@ public final class RavenrootServerMain {
             ai.ravenroot.api.persistence.HumanTaskPolicy humanTaskPolicy) {
         try {
             var services = EnvironmentNodePackageServiceGrants.fromEnvironment(System.getenv(),
-                    new DeploymentGlobalTenantCredentials(credentials), environment.toolPolicy(),
+                    personalOAuth == null ? new DeploymentGlobalTenantCredentials(credentials) : personalOAuth, environment.toolPolicy(),
                     toolAuditSink, toolApprovals, toolApprovalSettings, agentBudgets);
             return PluginActivationOrchestrator.registerWithInventory(
                     BehaviorRegistry.standard(environment,

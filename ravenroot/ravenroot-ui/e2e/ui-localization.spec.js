@@ -12,11 +12,11 @@ const mapMessages = transform => Object.fromEntries(Object.entries(ENGLISH_MESSA
     : Object.fromEntries(Object.entries(message).map(([category, value]) => [category, transform(value, key)])),
 ]));
 
-const pseudo = (locale, direction, marker) => ({
+const pseudo = (locale, direction, marker, compact = value => value) => ({
   schema: 'ravenroot.ui-catalog/v1',
   locale,
   direction,
-  messages: mapMessages(value => `${marker}${value}${marker}`),
+  messages: mapMessages(value => `${marker}${compact(value)}${marker}`),
 });
 
 const italian = pseudo('it', 'ltr', '⟦IT⟧');
@@ -36,13 +36,15 @@ Object.assign(italian.messages, {
   'workspace.workflow.validation.edgeId': '⟦IT-EDGE-ID⟧ {reason}',
   'workspace.edge.validation.stableId.nonblank': '⟦IT-NONBLANK⟧',
 });
-// Two complete synthetic catalogs share the production 512 KiB configuration ceiling.
-// Keep long RTL labels while omitting redundant English prose from long messages.
+// Complete synthetic catalogs share the production 512 KiB configuration ceiling.
+// Compact long prose while preserving every named parameter. Palette labels are set below.
+const compactMessage = value => value.length > 32
+  ? (value.match(/\{[A-Za-z][A-Za-z0-9_]*\}/gu) || []).join(' ')
+  : value;
 const arabic = { schema: 'ravenroot.ui-catalog/v1', locale: 'ar', direction: 'rtl',
-  messages: mapMessages(value => '⟦نص واجهة طويل للاختبار⟧'
-    + (value.length > 32 ? (value.match(/\{[A-Za-z][A-Za-z0-9_]*\}/gu) || []).join(' ') : value)),
+  messages: mapMessages(value => '⟦نص واجهة طويل للاختبار⟧' + compactMessage(value)),
 };
-const german = pseudo('de', 'ltr', '⟦DE⟧');
+const german = pseudo('de', 'ltr', '⟦DE⟧', compactMessage);
 Object.assign(german.messages, {
   'workspace.node.palette.action.saveSelected': 'AusgewähltenKonfigurationsknotenInDerPersönlichenWiederverwendungspaletteSpeichern',
   'workspace.node.palette.view.rename': 'PersönlicheWiederverwendungspaletteUmbenennen',

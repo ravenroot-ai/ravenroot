@@ -118,7 +118,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260",
+          "digest": "a6a9bb21af76d640d2b8140a2a555cafcaae09461d640d520213b8f1955d4b70",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -175,7 +175,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260",
+          "digest": "a6a9bb21af76d640d2b8140a2a555cafcaae09461d640d520213b8f1955d4b70",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -231,7 +231,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260",
+          "digest": "a6a9bb21af76d640d2b8140a2a555cafcaae09461d640d520213b8f1955d4b70",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -289,7 +289,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260",
+          "digest": "a6a9bb21af76d640d2b8140a2a555cafcaae09461d640d520213b8f1955d4b70",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -349,7 +349,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260",
+          "digest": "a6a9bb21af76d640d2b8140a2a555cafcaae09461d640d520213b8f1955d4b70",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -409,7 +409,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260",
+          "digest": "a6a9bb21af76d640d2b8140a2a555cafcaae09461d640d520213b8f1955d4b70",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -469,7 +469,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260",
+          "digest": "a6a9bb21af76d640d2b8140a2a555cafcaae09461d640d520213b8f1955d4b70",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -529,7 +529,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260",
+          "digest": "a6a9bb21af76d640d2b8140a2a555cafcaae09461d640d520213b8f1955d4b70",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -589,7 +589,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260",
+          "digest": "a6a9bb21af76d640d2b8140a2a555cafcaae09461d640d520213b8f1955d4b70",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -649,7 +649,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260",
+          "digest": "a6a9bb21af76d640d2b8140a2a555cafcaae09461d640d520213b8f1955d4b70",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -709,7 +709,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260",
+          "digest": "a6a9bb21af76d640d2b8140a2a555cafcaae09461d640d520213b8f1955d4b70",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -769,7 +769,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260",
+          "digest": "a6a9bb21af76d640d2b8140a2a555cafcaae09461d640d520213b8f1955d4b70",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -829,7 +829,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260",
+          "digest": "a6a9bb21af76d640d2b8140a2a555cafcaae09461d640d520213b8f1955d4b70",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -889,7 +889,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260",
+          "digest": "a6a9bb21af76d640d2b8140a2a555cafcaae09461d640d520213b8f1955d4b70",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -949,7 +949,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260",
+          "digest": "a6a9bb21af76d640d2b8140a2a555cafcaae09461d640d520213b8f1955d4b70",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -1009,7 +1009,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260",
+          "digest": "a6a9bb21af76d640d2b8140a2a555cafcaae09461d640d520213b8f1955d4b70",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -1067,7 +1067,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260",
+          "digest": "a6a9bb21af76d640d2b8140a2a555cafcaae09461d640d520213b8f1955d4b70",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -1125,7 +1125,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260",
+          "digest": "a6a9bb21af76d640d2b8140a2a555cafcaae09461d640d520213b8f1955d4b70",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -1185,7 +1185,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260",
+          "digest": "a6a9bb21af76d640d2b8140a2a555cafcaae09461d640d520213b8f1955d4b70",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -1243,7 +1243,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260",
+          "digest": "a6a9bb21af76d640d2b8140a2a555cafcaae09461d640d520213b8f1955d4b70",
           "assertion": "Packaged startup composes the policy from the process environment. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -1788,7 +1788,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260",
+          "digest": "a6a9bb21af76d640d2b8140a2a555cafcaae09461d640d520213b8f1955d4b70",
           "assertion": "Registration-store and route composition call the shared parser only after packaged startup validation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         },
         {
@@ -1813,7 +1813,7 @@
         },
         {
           "path": "docs/reference/configuration.md",
-          "digest": "8db4183c4264036159093492f2d1a6c8c887886c6af30fbea4036285b914db9d",
+          "digest": "269fdecc1d4fc9c7fe87b9d53be9d42dda456273b7a74ff6eaef6ed91b11b01c",
           "assertion": "The operator reference publishes strict Boolean syntax and false default. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #575 adds only the separately owned Workbench framing binding and preserves this group’s prior semantics. Rechecked for #590 source alignment: the retained atom keeps its reviewed meaning alongside explicit deployment, business history and correlation additions; new candidates have separate row-level review."
         }
       ],
@@ -4521,7 +4521,7 @@
         },
         {
           "path": "ravenroot/ravenroot-extensions/ravenroot-ai/src/main/java/ai/ravenroot/extensions/ai/AgentException.java",
-          "digest": "783c4a109d50ecbb072cc862c8323bbedd77f9b8d8c02048745f75177bd8a2b6",
+          "digest": "5d0afae8adc9f647c1f00b40754c77cc39442fb1bb89d62f7d0ab758047f9ce3",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory."
         }
       ],
@@ -5472,7 +5472,7 @@
         },
         {
           "path": "docs/reference/configuration.md",
-          "digest": "8db4183c4264036159093492f2d1a6c8c887886c6af30fbea4036285b914db9d",
+          "digest": "269fdecc1d4fc9c7fe87b9d53be9d42dda456273b7a74ff6eaef6ed91b11b01c",
           "assertion": "Operator reference publishes supported extension bindings. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #575 adds only the separately owned Workbench framing binding and preserves this group’s prior semantics. Rechecked for #590 source alignment: the retained atom keeps its reviewed meaning alongside explicit deployment, business history and correlation additions; new candidates have separate row-level review."
         }
       ],
@@ -5658,12 +5658,12 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "82ff591b701b121ea85d7ef753eb175e7f6363e6b1e73e205306d787882445dd",
+          "digest": "4d795ae19b57d05188540800ef687fdeb578ad9112dc825a4fa6a92c6d45c01c",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #550 preserves this reviewed authority while adding bounded Git graph authoring, immutable publication evidence, dependency revalidation, and explicit UI persistence capabilities. Rechecked for #590 source alignment: the retained atom keeps its reviewed meaning alongside explicit deployment, business history and correlation additions; new candidates have separate row-level review. #605 adds strict pinned source/execution handlers and typed projection errors; existing route authentication, limits, environment and resource consumers remain intact. #605 observation correction removes drawing dependency solely from scoped stream initial, lease and per-frame validation, and issues lifecycle replay anchors at the existing scoped position; route, cursor and diagnostic security bounds are unchanged. #606 Adds strict trigger input and truthful custody response mapping; existing monitoring/history/source/START/lifecycle handlers remain."
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java",
-          "digest": "c482d193549378a4e65136838b0511604b93f417481e753bcedf9cc18bd79260",
+          "digest": "a6a9bb21af76d640d2b8140a2a555cafcaae09461d640d520213b8f1955d4b70",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation."
         }
       ],
@@ -5688,7 +5688,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "82ff591b701b121ea85d7ef753eb175e7f6363e6b1e73e205306d787882445dd",
+          "digest": "4d795ae19b57d05188540800ef687fdeb578ad9112dc825a4fa6a92c6d45c01c",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #550 preserves this reviewed authority while adding bounded Git graph authoring, immutable publication evidence, dependency revalidation, and explicit UI persistence capabilities. Rechecked for #590 source alignment: the retained atom keeps its reviewed meaning alongside explicit deployment, business history and correlation additions; new candidates have separate row-level review. #605 adds strict pinned source/execution handlers and typed projection errors; existing route authentication, limits, environment and resource consumers remain intact. #605 observation correction removes drawing dependency solely from scoped stream initial, lease and per-frame validation, and issues lifecycle replay anchors at the existing scoped position; route, cursor and diagnostic security bounds are unchanged. #606 Adds strict trigger input and truthful custody response mapping; existing monitoring/history/source/START/lifecycle handlers remain."
         },
         {
@@ -5761,12 +5761,12 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "82ff591b701b121ea85d7ef753eb175e7f6363e6b1e73e205306d787882445dd",
+          "digest": "4d795ae19b57d05188540800ef687fdeb578ad9112dc825a4fa6a92c6d45c01c",
           "assertion": "Server composition consumes exact process environment keys. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #550 preserves this reviewed authority while adding bounded Git graph authoring, immutable publication evidence, dependency revalidation, and explicit UI persistence capabilities. Rechecked for #590 source alignment: the retained atom keeps its reviewed meaning alongside explicit deployment, business history and correlation additions; new candidates have separate row-level review. #605 adds strict pinned source/execution handlers and typed projection errors; existing route authentication, limits, environment and resource consumers remain intact. #605 observation correction removes drawing dependency solely from scoped stream initial, lease and per-frame validation, and issues lifecycle replay anchors at the existing scoped position; route, cursor and diagnostic security bounds are unchanged. #606 Adds strict trigger input and truthful custody response mapping; existing monitoring/history/source/START/lifecycle handlers remain."
         },
         {
           "path": "docs/reference/configuration.md",
-          "digest": "8db4183c4264036159093492f2d1a6c8c887886c6af30fbea4036285b914db9d",
+          "digest": "269fdecc1d4fc9c7fe87b9d53be9d42dda456273b7a74ff6eaef6ed91b11b01c",
           "assertion": "Operator reference publishes supported server bindings. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #575 adds only the separately owned Workbench framing binding and preserves this group’s prior semantics. Rechecked for #590 source alignment: the retained atom keeps its reviewed meaning alongside explicit deployment, business history and correlation additions; new candidates have separate row-level review."
         }
       ],
@@ -6223,7 +6223,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "82ff591b701b121ea85d7ef753eb175e7f6363e6b1e73e205306d787882445dd",
+          "digest": "4d795ae19b57d05188540800ef687fdeb578ad9112dc825a4fa6a92c6d45c01c",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #550 preserves this reviewed authority while adding bounded Git graph authoring, immutable publication evidence, dependency revalidation, and explicit UI persistence capabilities. Rechecked for #590 source alignment: the retained atom keeps its reviewed meaning alongside explicit deployment, business history and correlation additions; new candidates have separate row-level review. #605 adds strict pinned source/execution handlers and typed projection errors; existing route authentication, limits, environment and resource consumers remain intact. #605 observation correction removes drawing dependency solely from scoped stream initial, lease and per-frame validation, and issues lifecycle replay anchors at the existing scoped position; route, cursor and diagnostic security bounds are unchanged. #606 Adds strict trigger input and truthful custody response mapping; existing monitoring/history/source/START/lifecycle handlers remain."
         },
         {
@@ -6364,7 +6364,7 @@
         },
         {
           "path": "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java",
-          "digest": "82ff591b701b121ea85d7ef753eb175e7f6363e6b1e73e205306d787882445dd",
+          "digest": "4d795ae19b57d05188540800ef687fdeb578ad9112dc825a4fa6a92c6d45c01c",
           "assertion": "Digest-pinned representative source; every member also retains its full lexical evidence and evidence digest in the inventory. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #550 preserves this reviewed authority while adding bounded Git graph authoring, immutable publication evidence, dependency revalidation, and explicit UI persistence capabilities. Rechecked for #590 source alignment: the retained atom keeps its reviewed meaning alongside explicit deployment, business history and correlation additions; new candidates have separate row-level review. #605 adds strict pinned source/execution handlers and typed projection errors; existing route authentication, limits, environment and resource consumers remain intact. #605 observation correction removes drawing dependency solely from scoped stream initial, lease and per-frame validation, and issues lifecycle replay anchors at the existing scoped position; route, cursor and diagnostic security bounds are unchanged. #606 Adds strict trigger input and truthful custody response mapping; existing monitoring/history/source/START/lifecycle handlers remain."
         }
       ],
@@ -8378,7 +8378,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "scripts/publish_environment_reference.py",
-          "digest": "c42ed0efa122eee0018fa119846a3fbfde2e6e459494795a37370caa2160e718",
+          "digest": "a3a9d4d07f3d86ec12255d22e500d6f8726a95f3a60c02a7a438505c588b349b",
           "assertion": "Reference publisher enumerates environment vocabulary. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds only explicit native attestation and readiness vocabulary; existing binding authority is unchanged. Issue #552 adds the exact optional System One dynamic profile family while preserving every existing binding identity. Issue #555 preserves the existing reviewed member identities and semantics while adding explicit browser connection persistence and the independent UI server token reference; unrelated settings, defaults and consumers remain unchanged. Issue #575 adds only the separately owned Workbench framing binding and preserves this group’s prior semantics. Issue #590 publication correction reviews the closed eighteen-key history loader separately; the prior tooling vocabulary and this historical cohort remain unchanged. #606 Documents the optional JSON policy without installation identities; existing environment vocabulary remains. #606 Documents the optional JSON policy without installation identities; existing environment vocabulary remains."
         },
         {
@@ -8669,7 +8669,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-          "digest": "7d23823608c4e40a3aaf8de04e3e5b06a4ee1a9fcd51bd3efba0ef0576d3580f",
+          "digest": "f878c18ccda89899c5e8ab12aa889db6b90ccfd6a34346cdde882cee6bac87f3",
           "assertion": "Frozen catalog declares exact lookup-key and presentation-value pairs. Issue #588 preserves this reviewed cohort through exact same-atom source migrations; new repository lookup keys and presentation copy are separately classified, and successor authority, binding, permission and confirmation behavior has independent semantic and negative tests. Issue #588 preserves this historical atom cohort while protecting scoped managed reopening and restored unsaved work; changed managed source behavior is separately guarded and tested. Issue #593 preserves this historical reviewed cohort through exact source-atom identity mappings while adding explicit opt-in saga authoring. New saga lookup keys, presentation copy, participant/adapter identities and DOM controls are separately classified; existing rendering, resource and timing atoms retain their reviewed semantics. Rechecked for #590 source alignment: the retained atom keeps its reviewed meaning alongside explicit deployment, business history and correlation additions; new candidates have separate row-level review. #605 adds monitoring/recovery/repository presentation text and localization keys; prior presentation ownership and protocol-key classification remain intact. #606 Adds release progress/reconciliation messages only; existing key/value semantics remain."
         }
       ],
@@ -8824,7 +8824,7 @@
       "sourceAndConsumerProof": [
         {
           "path": "ravenroot/ravenroot-ui/src/ui-text.js",
-          "digest": "7d23823608c4e40a3aaf8de04e3e5b06a4ee1a9fcd51bd3efba0ef0576d3580f",
+          "digest": "f878c18ccda89899c5e8ab12aa889db6b90ccfd6a34346cdde882cee6bac87f3",
           "assertion": "Frozen catalog declares exact lookup-key and presentation-value pairs. Issue #588 preserves this reviewed cohort through exact same-atom source migrations; new repository lookup keys and presentation copy are separately classified, and successor authority, binding, permission and confirmation behavior has independent semantic and negative tests. Issue #588 preserves this historical atom cohort while protecting scoped managed reopening and restored unsaved work; changed managed source behavior is separately guarded and tested. Issue #593 preserves this historical reviewed cohort through exact source-atom identity mappings while adding explicit opt-in saga authoring. New saga lookup keys, presentation copy, participant/adapter identities and DOM controls are separately classified; existing rendering, resource and timing atoms retain their reviewed semantics. Rechecked for #590 source alignment: the retained atom keeps its reviewed meaning alongside explicit deployment, business history and correlation additions; new candidates have separate row-level review. #605 adds monitoring/recovery/repository presentation text and localization keys; prior presentation ownership and protocol-key classification remain intact. #606 Adds release progress/reconciliation messages only; existing key/value semantics remain."
         },
         {
@@ -11498,12 +11498,12 @@
         },
         {
           "path": "docs/reference/configuration.md",
-          "digest": "8db4183c4264036159093492f2d1a6c8c887886c6af30fbea4036285b914db9d",
+          "digest": "269fdecc1d4fc9c7fe87b9d53be9d42dda456273b7a74ff6eaef6ed91b11b01c",
           "assertion": "The operator table publishes the timeout types, bounds, and defaults. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #575 adds only the separately owned Workbench framing binding and preserves this group’s prior semantics. Rechecked for #590 source alignment: the retained atom keeps its reviewed meaning alongside explicit deployment, business history and correlation additions; new candidates have separate row-level review."
         },
         {
           "path": "docs/reference/environment-variables.md",
-          "digest": "5a5eaccbf7d60f3897a1743a785a91c4cab477bfdab0ef58aab0eb2daf078184",
+          "digest": "fe661f6a783623957219b86cc1efd1ec8a7b7d8ade64426349f510a3a62cfe3d",
           "assertion": "The environment reference publishes each exact binding name. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds native runner rows; all existing JWKS binding names, ranges, defaults and consumers remain unchanged. Issue #552 adds only the unrelated optional System One profile row; the JWKS bindings and boundaries remain unchanged. Issue #555 preserves the existing reviewed member identities and semantics while adding explicit browser connection persistence and the independent UI server token reference; unrelated settings, defaults and consumers remain unchanged. Issue #575 adds only the separately owned Workbench framing binding and preserves this group’s prior semantics. Rechecked for #590 source alignment: the retained atom keeps its reviewed meaning alongside explicit deployment, business history and correlation additions; new candidates have separate row-level review. Issue #590 publication correction regenerates only the separate history section; all original JWKS rows, defaults, bounds and consumers remain exact. #606 Adds the generated optional policy description; existing JWKS and other settings remain unchanged. #606 Adds the generated optional policy description; existing JWKS and other settings remain unchanged."
         }
       ],
@@ -11572,12 +11572,12 @@
         },
         {
           "path": "docs/reference/configuration.md",
-          "digest": "8db4183c4264036159093492f2d1a6c8c887886c6af30fbea4036285b914db9d",
+          "digest": "269fdecc1d4fc9c7fe87b9d53be9d42dda456273b7a74ff6eaef6ed91b11b01c",
           "assertion": "The operator table publishes the timeout types, bounds, and defaults. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #575 adds only the separately owned Workbench framing binding and preserves this group’s prior semantics. Rechecked for #590 source alignment: the retained atom keeps its reviewed meaning alongside explicit deployment, business history and correlation additions; new candidates have separate row-level review."
         },
         {
           "path": "docs/reference/environment-variables.md",
-          "digest": "5a5eaccbf7d60f3897a1743a785a91c4cab477bfdab0ef58aab0eb2daf078184",
+          "digest": "fe661f6a783623957219b86cc1efd1ec8a7b7d8ade64426349f510a3a62cfe3d",
           "assertion": "The environment reference publishes each exact binding name. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds native runner rows; all existing JWKS binding names, ranges, defaults and consumers remain unchanged. Issue #552 adds only the unrelated optional System One profile row; the JWKS bindings and boundaries remain unchanged. Issue #555 preserves the existing reviewed member identities and semantics while adding explicit browser connection persistence and the independent UI server token reference; unrelated settings, defaults and consumers remain unchanged. Issue #575 adds only the separately owned Workbench framing binding and preserves this group’s prior semantics. Rechecked for #590 source alignment: the retained atom keeps its reviewed meaning alongside explicit deployment, business history and correlation additions; new candidates have separate row-level review. Issue #590 publication correction regenerates only the separate history section; all original JWKS rows, defaults, bounds and consumers remain exact. #606 Adds the generated optional policy description; existing JWKS and other settings remain unchanged. #606 Adds the generated optional policy description; existing JWKS and other settings remain unchanged."
         }
       ],
@@ -11643,12 +11643,12 @@
         },
         {
           "path": "docs/reference/configuration.md",
-          "digest": "8db4183c4264036159093492f2d1a6c8c887886c6af30fbea4036285b914db9d",
+          "digest": "269fdecc1d4fc9c7fe87b9d53be9d42dda456273b7a74ff6eaef6ed91b11b01c",
           "assertion": "The operator table publishes the timeout types, bounds, and defaults. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #456 preserves this reviewed authority while adding bounded Human Task authorization, presentation, and interaction controls. Issue #575 adds only the separately owned Workbench framing binding and preserves this group’s prior semantics. Rechecked for #590 source alignment: the retained atom keeps its reviewed meaning alongside explicit deployment, business history and correlation additions; new candidates have separate row-level review."
         },
         {
           "path": "docs/reference/environment-variables.md",
-          "digest": "5a5eaccbf7d60f3897a1743a785a91c4cab477bfdab0ef58aab0eb2daf078184",
+          "digest": "fe661f6a783623957219b86cc1efd1ec8a7b7d8ade64426349f510a3a62cfe3d",
           "assertion": "The environment reference publishes each exact binding name. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #423 source review preserves this existing authority while adding typed Workspace controls/documentation. Issue #446 adds native runner rows; all existing JWKS binding names, ranges, defaults and consumers remain unchanged. Issue #552 adds only the unrelated optional System One profile row; the JWKS bindings and boundaries remain unchanged. Issue #555 preserves the existing reviewed member identities and semantics while adding explicit browser connection persistence and the independent UI server token reference; unrelated settings, defaults and consumers remain unchanged. Issue #575 adds only the separately owned Workbench framing binding and preserves this group’s prior semantics. Rechecked for #590 source alignment: the retained atom keeps its reviewed meaning alongside explicit deployment, business history and correlation additions; new candidates have separate row-level review. Issue #590 publication correction regenerates only the separate history section; all original JWKS rows, defaults, bounds and consumers remain exact. #606 Adds the generated optional policy description; existing JWKS and other settings remain unchanged. #606 Adds the generated optional policy description; existing JWKS and other settings remain unchanged."
         }
       ],

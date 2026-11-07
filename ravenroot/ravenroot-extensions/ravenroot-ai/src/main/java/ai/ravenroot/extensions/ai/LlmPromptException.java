@@ -24,6 +24,10 @@ public final class LlmPromptException extends RuntimeException {
         CREDENTIAL_UNAVAILABLE,
         /** The endpoint answered with a status this bundle does not accept. */
         ENDPOINT_REJECTED,
+        /** Personal provider requires renewed authentication, permission, quota, or availability. */
+        PROVIDER_LOGIN_REQUIRED, PROVIDER_PERMISSION_DENIED, PROVIDER_QUOTA_EXCEEDED, PROVIDER_UNAVAILABLE,
+        /** A personal Responses stream ended without a successful completed lifecycle. */
+        RESPONSE_INCOMPLETE,
         /** The response could not be read as an OpenAI-compatible chat completion. */
         RESPONSE_UNREADABLE,
         /** The response was larger than the profile's ceiling. */

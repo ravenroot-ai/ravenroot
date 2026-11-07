@@ -1256,6 +1256,7 @@ public final class GraphRunner implements AutoCloseable {
             GraphExecutionLimits executionGraphLimits, ai.ravenroot.api.persistence.DerivedExecutionWork preparedRoot,
             boolean calledExecution, ai.ravenroot.api.persistence.DeploymentEntryCheckpoint retainedEntry) {
         java.util.Objects.requireNonNull(security, "security");
+        behaviors.requirePersonalConnections(security, graph);
         java.util.Objects.requireNonNull(executionGraphLimits, "executionGraphLimits");
         if (processInstanceId == null) throw new IllegalArgumentException("processInstanceId cannot be null");
         if (traversalId == null) throw new IllegalArgumentException("traversalId cannot be null");
@@ -2092,6 +2093,7 @@ public final class GraphRunner implements AutoCloseable {
                                                                        UUID traversalId,
                                                                        String graphVersion,
                                                                        ExecutionRecorder recorder) {
+        behaviors.requirePersonalConnections(security, graph);
         ExecutionOrigin origin = recorder.origin();
         return new ExecutionMonitor.ExecutionIdentity(security, engine.id(), graphVersion,
                 processInstanceId, traversalId, nodeCatalogKeys,
@@ -2442,7 +2444,9 @@ public final class GraphRunner implements AutoCloseable {
             // been read of a traversal that is no longer single-branch. Re-read rather than
             // re-implemented: two spellings of one rule drift, and a guard that exists twice is a
             // guard a test can pin in one place while the other quietly stops being consulted.
-            if (hold.durable != null
+            // A cancellation or resume may have removed the hold while this hop prepared its checkpoint.
+            if (pausedTraversals.get(identity.traversalId()) != hold
+                    || hold.durable != null
                     || !boundaryAt(node, parentInvocationIds, state, coordinator, iteration).writable()) {
                 return;
             }
@@ -5013,7 +5017,7 @@ public final class GraphRunner implements AutoCloseable {
                 }
                 if (message.command().directive() == NodeDirective.APPLICATION) {
                     boolean admitted = ("workspace".equals(node.behavior()) || ai.ravenroot.core.runner.GovernedAgent.isNamed(node)) && behaviors.runnerJobs() != null
-                            ? behaviors.runnerJobs().declaresCommand(message.security().tenantId(), node, message.command().name())
+                            ? behaviors.runnerJobs().declaresCommand(behaviors.definitionTenantFor(message.security()), node, message.command().name())
                             : behaviors.descriptor(node)
                             .map(descriptor -> descriptor.commands().contains(message.command().name()))
                             .orElse(false);

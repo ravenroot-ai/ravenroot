@@ -125,9 +125,11 @@ for (const mode of ['normal', 'slow', 'first-failure', 'drawing-unavailable', 'r
     await expect.poll(() => initial, { timeout: 15000 }).not.toBeNull();
     expect(initial.status).toBe(202);
     await expect.poll(async () => (await owner()).events.includes('EXECUTION_COMPLETED')).toBe(true);
+    // The event list updates before the next animation frame paints the canvas.
+    await expect.poll(async () => (await owner()).nodes).toEqual(
+      [{ id: 'start', state: 'completed', observed: true }, { id: 'end', state: 'completed', observed: true }]);
     const final = await owner();
     expect(final.events).toHaveLength(7);
-    expect(final.nodes).toEqual([{ id: 'start', state: 'completed', observed: true }, { id: 'end', state: 'completed', observed: true }]);
     expect(final.binding).toMatchObject({ deploymentId: binding.deploymentId, graphVersion: binding.graphVersion,
       initialStartRequestId: binding.initialStartRequestId, inputJson: binding.inputJson, graphMl: binding.graphMl,
       processInstanceId: initial.body.processInstanceId, traversalId: initial.body.traversalId });

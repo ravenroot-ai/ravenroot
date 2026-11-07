@@ -2471,15 +2471,14 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             self.assertTrue(any("not the supported direct RouteDescriptor table" in error
                                 for error in errors), errors)
 
-            final_descriptor = (
-                "                            ErrorCode.UNKNOWN_RESOURCE.code(), "
-                "ErrorCode.CONFLICT.code()), NEVER, false));"
-            )
-            chained = original_route.replace(
-                final_descriptor,
-                final_descriptor[:-2] + ").stream().filter(route -> false).toList();",
-                1,
-            )
+            route_code = audit.strip_c_comments_and_literals(original_route)
+            initializer = re.search(r"\bALL\s*=\s*List\s*\.\s*of\s*\(", route_code)
+            self.assertIsNotNone(initializer)
+            table = audit.split_java_arguments(original_route, route_code, initializer.end() - 1)
+            self.assertIsNotNone(table)
+            _, closing = table
+            chained = (original_route[:closing + 1] + ".stream().filter(route -> false).toList()"
+                       + original_route[closing + 1:])
             self.assertNotEqual(original_route, chained)
             route_path.write_text(chained, encoding="utf-8")
             refreshed_candidates = {

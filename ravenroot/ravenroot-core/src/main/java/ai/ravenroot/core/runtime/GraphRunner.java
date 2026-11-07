@@ -2444,7 +2444,9 @@ public final class GraphRunner implements AutoCloseable {
             // been read of a traversal that is no longer single-branch. Re-read rather than
             // re-implemented: two spellings of one rule drift, and a guard that exists twice is a
             // guard a test can pin in one place while the other quietly stops being consulted.
-            if (hold.durable != null
+            // A cancellation or resume may have removed the hold while this hop prepared its checkpoint.
+            if (pausedTraversals.get(identity.traversalId()) != hold
+                    || hold.durable != null
                     || !boundaryAt(node, parentInvocationIds, state, coordinator, iteration).writable()) {
                 return;
             }

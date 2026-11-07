@@ -4,16 +4,19 @@ import ai.ravenroot.api.application.ExecutionEvent;
 import ai.ravenroot.api.application.ExecutionEventType;
 import ai.ravenroot.api.application.ExecutionIdentitySource;
 import ai.ravenroot.api.application.ExecutionTerminationReason;
+import ai.ravenroot.api.application.NodeInvocationStatus;
 import ai.ravenroot.api.application.ProcessInstanceStatus;
 import ai.ravenroot.api.application.TraversalStatus;
 import ai.ravenroot.api.execution.ExecutionEngine;
 import ai.ravenroot.api.execution.NodeResult;
 import ai.ravenroot.api.persistence.DurableExecutionPause;
 import ai.ravenroot.api.persistence.ExecutionKey;
+import ai.ravenroot.api.persistence.ExecutionManifestReferences;
 import ai.ravenroot.api.persistence.ExecutionPauseStatus;
 import ai.ravenroot.api.persistence.ExecutionStore;
 import ai.ravenroot.api.persistence.StoreCapability;
 import ai.ravenroot.api.persistence.StoredProcessInstance;
+import ai.ravenroot.core.persistence.InMemoryExecutionManifestStore;
 import ai.ravenroot.core.persistence.InMemoryExecutionStore;
 import ai.ravenroot.core.persistence.InMemoryGraphDefinitionStore;
 import ai.ravenroot.core.programming.DisabledProgramRuntime;
@@ -24,7 +27,10 @@ import ai.ravenroot.core.recovery.RepeatabilityDeclarations;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayInputStream;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -35,7 +41,9 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -758,6 +766,60 @@ final class DurablePausedExecutionRecoveryTest {
                     "and a later cancellation settles it");
             assertEquals(ExecutionPauseStatus.CANCELLED,
                     stores.pause(key, stores.anyPauseId(key)).status());
+        }
+    }
+
+    @Test
+    void cancellationPreventsAnInFlightPauseFromBecomingDurable() throws Exception {
+        var stores = new DurableStores();
+        var upgradeStarted = new CountDownLatch(1);
+        var releaseUpgrade = new CountDownLatch(1);
+        var firstPauseCheck = new AtomicBoolean(true);
+        var store = (ExecutionStore) Proxy.newProxyInstance(ExecutionStore.class.getClassLoader(),
+                new Class<?>[]{ExecutionStore.class}, (proxy, method, args) -> {
+                    if (method.getName().equals("supports") && args[0] == StoreCapability.EXECUTION_PAUSES
+                            && firstPauseCheck.compareAndSet(true, false)) {
+                        // The hop captured the in-memory hold. Its durable upgrade has yet to take the control lock.
+                        upgradeStarted.countDown();
+                        assertTrue(releaseUpgrade.await(BOUND.toMillis(), TimeUnit.MILLISECONDS));
+                    }
+                    try {
+                        return method.invoke(stores.executions(), args);
+                    } catch (InvocationTargetException failure) {
+                        throw failure.getCause();
+                    }
+                });
+        var effects = Collections.synchronizedList(new ArrayList<String>());
+        var traversalId = UUID.randomUUID();
+        try (var manifests = new InMemoryExecutionManifestStore(Clock.systemUTC(), ExecutionManifestReferences.NONE);
+             var running = new Restarted(store, stores.definitions, effects, TWO_EFFECTS, manifests);
+             var executor = Executors.newSingleThreadExecutor()) {
+            running.pauseFromFirstNode(traversalId);
+            var submission = executor.submit(() -> running.application().startGraphMl(TestIdentities.TENANT_A,
+                    traversalId, running.graph(), "payload"));
+            ExecutionKey key;
+            try {
+                assertTrue(upgradeStarted.await(BOUND.toMillis(), TimeUnit.MILLISECONDS));
+                key = stores.keyOf(traversalId);
+                var before = stores.load(key).state().traversals().get(traversalId);
+                assertTrue(before.invocations().values().stream().anyMatch(invocation ->
+                        invocation.nodeId().equals("first") && invocation.status() == NodeInvocationStatus.COMPLETED));
+                assertTrue(stores.heldPause(traversalId).isEmpty());
+                assertTrue(running.application().cancelTraversal(TENANT, traversalId));
+            } finally {
+                releaseUpgrade.countDown();
+            }
+            submission.get(BOUND.toMillis(), TimeUnit.MILLISECONDS);
+            assertTrue(running.awaitTerminal(BOUND));
+            var process = stores.load(key).state();
+            assertEquals(ProcessInstanceStatus.FAILED, process.status());
+            assertEquals(ExecutionTerminationReason.CANCELLED, process.terminationReason());
+            var traversal = process.traversals().get(traversalId);
+            assertEquals(TraversalStatus.FAILED, traversal.status());
+            assertEquals(ExecutionTerminationReason.CANCELLED, traversal.terminationReason());
+            assertTrue(stores.executions().executionPauses(key).toCompletableFuture().join().isEmpty());
+            assertTrue(stores.executions().replaySettlement(key).toCompletableFuture().join().isPresent());
+            assertEquals(List.of("first"), running.effects());
         }
     }
 

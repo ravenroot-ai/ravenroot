@@ -131513,7 +131513,7 @@
   {
    "id": "oc-481e0be42f6b79e724b3",
    "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphRunner.java",
-   "line": 3069,
+   "line": 3071,
    "symbol": "RetainedEntryPendingException",
    "kind": "fixed-declaration",
    "role": "literal",
@@ -131528,7 +131528,7 @@
   {
    "id": "oc-d2c0fc18f6caf2eacd18",
    "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphRunner.java",
-   "line": 4063,
+   "line": 4065,
    "symbol": "if",
    "kind": "inline-operational-call",
    "role": "sleep",
@@ -131546,7 +131546,7 @@
   {
    "id": "oc-aac4215e47dde74a1b37",
    "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphRunner.java",
-   "line": 4537,
+   "line": 4539,
    "symbol": "VerifiedToolApprovalSuspension",
    "kind": "fixed-declaration",
    "role": "serialVersionUID",
@@ -131564,7 +131564,7 @@
   {
    "id": "oc-d126524ec42302344c2f",
    "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphRunner.java",
-   "line": 4552,
+   "line": 4554,
    "symbol": "VerifiedExternalWorkSuspension",
    "kind": "fixed-declaration",
    "role": "serialVersionUID",
@@ -131586,7 +131586,7 @@
   {
    "id": "oc-fb590bfa087985fc685c",
    "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphRunner.java",
-   "line": 4928,
+   "line": 4930,
    "symbol": "if",
    "kind": "inline-operational-call",
    "role": "getOrDefault",
@@ -131604,7 +131604,7 @@
   {
    "id": "oc-273d9f80db40b51c594a",
    "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphRunner.java",
-   "line": 5202,
+   "line": 5204,
    "symbol": "if",
    "kind": "property-binding",
    "role": "ravenroot.defaultedNode",
@@ -131622,7 +131622,7 @@
   {
    "id": "oc-07ac3e33b219f8c6a822",
    "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphRunner.java",
-   "line": 5814,
+   "line": 5816,
    "symbol": "ExecutionState",
    "kind": "fixed-declaration",
    "role": "EVENT_CONTENT_TYPE",
@@ -131640,7 +131640,7 @@
   {
    "id": "oc-f8c6e6bfc9c04cbfda0a",
    "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphRunner.java",
-   "line": 6188,
+   "line": 6190,
    "symbol": "CalledEndOutput",
    "kind": "operational-declaration",
    "role": "limits",
@@ -131655,7 +131655,7 @@
   {
    "id": "oc-ae5b3e2a63b3a32b3780",
    "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphRunner.java",
-   "line": 6222,
+   "line": 6224,
    "symbol": "CalledEndOutput",
    "kind": "operational-declaration",
    "role": "limits",
@@ -1581242,6 +1581242,18 @@
    "mappings": [],
    "retirements": [],
    "additions": []
+  },
+  {
+   "id": "issue-620-stale-pause-authority-reconciliation-v1",
+   "issue": "#620",
+   "sourceRevision": "2ded64ef6e19acaf2dcb409ff6c9ddd412c03968",
+   "targetRevision": "c45259be435e6dd0c280cdda63b9ca90935b70ce",
+   "sourceInventoryPath": "scripts/operational-configuration-inventory.json",
+   "sourceInventoryDigest": "a8d06cc533ab0e6aa5032856990b01765f961f13bea679d7829da42bead2b14f",
+   "targetCandidateDigest": "0ceef9767753f0d21e7396a4bfe1f2f15328cc674037415acc75cfc59d22c6cf",
+   "mappings": [],
+   "retirements": [],
+   "additions": []
   }
  ],
  "semanticReviewHistory": [
@@ -1652412,7 +1652424,7 @@
     },
     {
      "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphRunner.java",
-     "digest": "77803c65a88dbc0657b60502258d18c69ca9722271b761a46d71f98736ebadd2"
+     "digest": "da4e6d2dabdabb81d2acb96d60014b8f223227204f2a44b38800c0855ffc5938"
     },
     {
      "path": "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/NodePackages.java",

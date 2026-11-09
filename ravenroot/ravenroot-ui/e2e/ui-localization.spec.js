@@ -38,7 +38,7 @@ Object.assign(italian.messages, {
 });
 // Complete synthetic catalogs share the production 512 KiB configuration ceiling.
 // Compact long prose while preserving every named parameter. Palette labels are set below.
-const compactMessage = value => value.length > 32
+const compactMessage = value => value.length > 28
   ? (value.match(/\{[A-Za-z][A-Za-z0-9_]*\}/gu) || []).join(' ')
   : value;
 const arabic = { schema: 'ravenroot.ui-catalog/v1', locale: 'ar', direction: 'rtl',

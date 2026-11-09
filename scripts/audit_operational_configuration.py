@@ -3122,6 +3122,27 @@ FINAL_REVIEW_UI_PERSONAL_INSERTIONS = (
     "let personalConnections = null;\nlet personalAccountModels = [];\n"
     "let personalAssistantMode = false;\nlet personalIdentityGeneration = 0;\n",
 )
+# The deployment Inspector is a separate read path. Reverse its bounded source delta
+# before applying the established personal and repository-save correspondences.
+FINAL_REVIEW_UI_INSPECTOR_BASE = "11769d419678a178280b315d169042f36a35388f"
+FINAL_REVIEW_UI_INSPECTOR_AFTER = "bafb4fdc6e233b4377e072bf09acec97fc984bc6394e9166f30a120df47f53b4"
+FINAL_REVIEW_UI_INSPECTOR_METHODS = (
+    "beginWorkspaceAuthority", "openDeploymentDocument", "attachDeploymentDocument",
+    "teardownDocument", "showNodeInfo", "renderNodeForm", "catalogPropertyFieldsHtml",
+    "programWorkspaceContentHtml", "additionalPropertyGroupFieldControlHtml",
+    "propertyRowHtml", "showReadOnlyElement", "connectRuntime",
+)
+FINAL_REVIEW_UI_INSPECTOR_HELPERS = (
+    "retireDeploymentInspector", "refreshDeploymentInspector", "showDeploymentNodeInspector",
+    "loadDeploymentInspector", "renderDeploymentNodeFields",
+)
+FINAL_REVIEW_UI_INSPECTOR_CATALOG_BEFORE = "f878c18ccda89899c5e8ab12aa889db6b90ccfd6a34346cdde882cee6bac87f3"
+FINAL_REVIEW_UI_INSPECTOR_CATALOG_INSERTION = (
+    "  'workspace.deployment.inspectorLoading': 'Loading the deployed node configuration…',\n"
+    "  'workspace.deployment.inspectorReadOnly': 'Read-only node configuration',\n"
+    "  'workspace.deployment.inspectorUnavailable': "
+    "'The deployed node configuration could not be loaded. The drawing remains available.',\n"
+)
 # These reviewed replacements are independent of inventory or refreshable method proof metadata.
 FINAL_REVIEW_UI_SAVE_METHODS = {
     "setRenderMode": "7959c6e6b5bfc85bffc8f79977e9c30ef3fac63ed5e74920c31a6ba1d07c5150",
@@ -3129,6 +3150,40 @@ FINAL_REVIEW_UI_SAVE_METHODS = {
     "saveRepositoryGraph": "4c2ac003000fd7dd07d4d0ef14c8213395fc08501c2ade467108e722f256c3cc",
     "repositoryPresentationSnapshot": "c4bb9b77bcde66b9ae41a9b601feb7b043e76bb84c44bf83814ae4341a03a735",
 }
+
+
+def final_review_ui_inspector_inverse(source: str, baseline: str) -> str | None:
+    for method in FINAL_REVIEW_UI_INSPECTOR_METHODS:
+        current = _javascript_function_span(source, method)
+        prior = _javascript_function_span(baseline, method)
+        if current is None or prior is None:
+            return None
+        source = source[:current[0]] + baseline[slice(*prior)] + source[current[1]:]
+    for method in FINAL_REVIEW_UI_INSPECTOR_HELPERS:
+        added = _javascript_function_span(source, method)
+        if added is None or source[added[1]:added[1] + 2] != "\n\n":
+            return None
+        source = source[:added[0]] + source[added[1] + 2:]
+    insertion = "  parseGraphML,\n"
+    if source.count(insertion) != 1:
+        return None
+    source = source.replace(insertion, "", 1)
+    return source if source == baseline else None
+
+
+def final_review_ui_inspector_catalog_correspondence(
+        root: Path, group: str, relative: Path, expected_digest: str) -> bool:
+    if group not in {"ui-message-catalog-copy", "ui-message-catalog-keys"} \
+            or relative != Path("ravenroot/ravenroot-ui/src/ui-text.js") \
+            or expected_digest != FINAL_REVIEW_UI_INSPECTOR_CATALOG_BEFORE:
+        return False
+    try:
+        source = (root / relative).read_bytes()
+    except OSError:
+        return False
+    insertion = FINAL_REVIEW_UI_INSPECTOR_CATALOG_INSERTION.encode("utf-8")
+    return source.count(insertion) == 1 \
+        and hashlib.sha256(source.replace(insertion, b"", 1)).hexdigest() == expected_digest
 
 
 def final_review_ui_save_correspondence(
@@ -3143,7 +3198,17 @@ def final_review_ui_save_correspondence(
         head = subprocess.run(["git", "rev-parse", "--verify", "HEAD^{commit}"],
                               cwd=root, check=True, capture_output=True, text=True).stdout.strip()
         source = raw.decode("utf-8")
-        if hashlib.sha256(raw).hexdigest() == FINAL_REVIEW_UI_PERSONAL_AFTER:
+        if _source_digest(source) == FINAL_REVIEW_UI_INSPECTOR_AFTER:
+            if not revision_is_ancestor(root, FINAL_REVIEW_UI_INSPECTOR_BASE, head):
+                return False
+            baseline = committed_source(root, FINAL_REVIEW_UI_INSPECTOR_BASE, relative.as_posix())
+            if baseline is None:
+                return False
+            inverse = final_review_ui_inspector_inverse(source, baseline)
+            if inverse is None:
+                return False
+            source = inverse
+        if _source_digest(source) == FINAL_REVIEW_UI_PERSONAL_AFTER:
             if not revision_is_ancestor(root, FINAL_REVIEW_UI_PERSONAL_BASE, head):
                 return False
             baseline = committed_source(root, FINAL_REVIEW_UI_PERSONAL_BASE, relative.as_posix())
@@ -3328,6 +3393,8 @@ def final_review_authority_errors(
                     or not proof_path.is_file() \
                     or (hashlib.sha256(proof_path.read_bytes()).hexdigest() != item["digest"]
                         and not final_review_ui_save_correspondence(
+                            root, identifier, relative, str(item["digest"]))
+                        and not final_review_ui_inspector_catalog_correspondence(
                             root, identifier, relative, str(item["digest"]))):
                 errors.append(f"final review group {identifier} source proof has drifted: {item['path']}")
         foreign = set(str(candidate) for candidate in candidates) - reviewable
@@ -15250,7 +15317,7 @@ GRAPH_AUTHORING_UI_METHOD_PROOFS = {
     "repositoryDelete": "12486c92d762174b9161c1ec5be9a3c77e54436f945bff7b673b2407507d8893",
     "repositoryRelease": "de3b913d8a4fc56ac6c5027555849b4afef40e98acb5a08ac8a6cd193a1c7e13",
     "publishedArtifacts": "21ce0b20bfb0f6bb3bab951cc5662dd2d416788bf67684ca0bc749578b1a0637",
-    "connectRuntime": '6637df08b5b594e79634d9542293aa952ce477d00217fd9b834e4b65c03d85e5',
+    "connectRuntime": '5218b6856bf4628b6eca38ccc90d8afea0ad8e29b6f07fcfe3843e1af23f1a49',
     "createStartupImportPlaceholder": "9b194ed16409f284ecdbe713a9be041d8cc60982f90a84b5d6f016c886e6feef",
 
     "startupImportBinding": "d6eb1a9106def1e00965ade2a2c485b422e51be0fd13641e5a2caee60a454952",

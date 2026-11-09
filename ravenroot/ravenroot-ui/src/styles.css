@@ -334,13 +334,14 @@
     }
     .command-field { display: flex; align-items: center; gap: 6px; color: var(--tx-3); font-size: 10px; }
     .command-field input, .editor-field input, .editor-field select, .editor-field textarea,
-    .property-row input, .property-row select {
+    .property-row input, .property-row select, .property-row textarea {
       background: var(--bg-2); border: 1px solid var(--bd); border-radius: 5px;
       color: var(--tx-1); outline: none; font: inherit;
     }
     .command-field input { height: 28px; padding: 4px 8px; font-size: 11px; }
     .command-field input:focus, .editor-field input:focus, .editor-field select:focus,
-    .editor-field textarea:focus, .property-row input:focus, .property-row select:focus { border-color: var(--acc); }
+    .editor-field textarea:focus, .property-row input:focus, .property-row select:focus,
+    .property-row textarea:focus { border-color: var(--acc); }
     .service-field input { width: 180px; font-family: 'SFMono-Regular', Consolas, monospace; }
     .token-field input { width: 150px; font-family: 'SFMono-Regular', Consolas, monospace; }
     .payload-field input { width: 180px; }
@@ -2348,6 +2349,9 @@
     .property-add { color: var(--acc); background: none; border: 0; cursor: pointer; font-size: 10px; }
     .property-row { display: grid; grid-template-columns: 1fr 72px 1fr 24px; gap: 5px; margin-bottom: 6px; }
     .property-row input, .property-row select { min-width: 0; height: 28px; padding: 4px 6px; font-size: 10px; }
+    .property-row textarea { min-width: 0; resize: vertical; padding: 4px 6px; font-size: 10px; }
+    .deployment-inspector-mode { margin: 0 0 12px; color: var(--tx-2); font-size: 12px; }
+    [data-deployment-inspector-node] .property-row { grid-template-columns: 1fr 72px 1fr; }
     .property-remove { padding: 0; height: 28px; }
     /* ── The editor's action row, PINNED ──────────────────────────────────────────────────────
        The bottom dock takes the ORDINARY node editor's overflow to zero, but the PROGRAMMABLE

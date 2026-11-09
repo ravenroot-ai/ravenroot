@@ -23,7 +23,10 @@ the whole deployment.
 3. Match the intended deployment by durable ID, graph version, and observed state. Display names are
    useful labels, not durable identity.
 4. Choose **Open read-only view** to inspect the registered graph without changing the authoring
-   document.
+   document. Select a node to see its configuration in the Inspector for the exact deployed version.
+   You can open field help and inspect long values. Configuration requires deployment observation
+   and graph read access. If the source is unavailable or access is denied, the drawing remains
+   available.
 5. Choose the deployment for process inspection, then select a process and execution explicitly.
 6. Record the current revision before sending a lifecycle intent. A later retry of the same intent
    keeps its idempotency key; a new intent gets a new key.

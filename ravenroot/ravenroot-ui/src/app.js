@@ -3916,11 +3916,11 @@ function showDeploymentNodeInspector(owner, projectedNode) {
   const model = graph && Object.hasOwn(graph.nodeMap, projectedNode.id) ? graph.nodeMap[projectedNode.id] : null;
   document.getElementById('info-title').textContent = model?.name || projectedNode.name || projectedNode.id;
   if (model) {
-    renderNodeForm(model, false, { deploymentGraph: graph });
+    renderNodeForm(model, false, graph);
     return;
   }
   contextualHelp.dismiss();
-  showReadOnlyElement(projectedNode, uiText("workspace.app.workflow.node"), { showHint: false });
+  showReadOnlyElement(projectedNode, uiText("workspace.app.workflow.node"), false);
   const notice = document.createElement('p');
   notice.className = 'info-empty';
   notice.dataset.deploymentInspectorNode = projectedNode.id;
@@ -7537,7 +7537,7 @@ function renderDeploymentNodeFields(panel, nodeId) {
   document.getElementById('info-body').replaceChildren(panel);
 }
 
-function renderNodeForm(model, creating, { deploymentGraph } = {}) {
+function renderNodeForm(model, creating, deploymentGraph = null) {
   contextualHelp.dismiss();
   const readOnly = Boolean(deploymentGraph);
   const configurationGraph = deploymentGraph || graphData;
@@ -7601,7 +7601,7 @@ function renderNodeForm(model, creating, { deploymentGraph } = {}) {
       <div id="catalog-properties">${catalogPropertyFieldsHtml(
         sagaOrdinaryDescriptor(catalogEditorDescriptor), model.properties || {}, catalogFieldOwner)}</div>
       <div id="node-saga-section">${sagaFieldsHtml(catalogEditorDescriptor, model, catalogFieldOwner)}</div>
-      <div id="program-workspace">${programWorkspaceContentHtml(descriptor, model, { readOnly })}</div>
+      <div id="program-workspace">${programWorkspaceContentHtml(descriptor, model, readOnly)}</div>
       <div id="additional-property-groups">${additionalPropertyGroupsHtml(additionalGroups.groups)}</div>
       <section id="node-correlation-preview"></section>
       ${propertyEditorHtml('node-properties', extras)}`;
@@ -9338,7 +9338,7 @@ function scheduleProgramGraphReadiness(owner) {
 // assignments elsewhere in this file (the starter fill, the language-switch replacement) are not
 // subject to this rule at all -- it only fires while the browser parses literal HTML text, which
 // is only this one render, never a later JS assignment.
-function programWorkspaceContentHtml(descriptor, model, { readOnly = false } = {}) {
+function programWorkspaceContentHtml(descriptor, model, readOnly = false) {
   if (descriptor?.behavior !== 'program') return '';
   const artifactId = model?.properties?.artifactId || '';
   const storedLanguage = model?.properties?.language || '';
@@ -10065,7 +10065,7 @@ function readPropertyEditor(form) {
   return { properties, propertyTypes };
 }
 
-function showReadOnlyElement(model, label, { showHint = true } = {}) {
+function showReadOnlyElement(model, label, showHint = true) {
   const isNode = graphData?.nodes?.some(node => node.id === model.id);
   const definitions = isNode ? KNOWN_NODE_FIELDS : KNOWN_EDGE_FIELDS;
   const valueFor = name => name === 'nodeType' ? model.nodeType

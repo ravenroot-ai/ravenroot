@@ -3913,7 +3913,7 @@ function showDeploymentNodeInspector(owner, projectedNode) {
   }
   const inspector = canRequest ? view.inspector : null;
   const graph = inspector?.graph;
-  const model = graph && Object.hasOwn(graph.nodeMap, projectedNode.id) ? graph.nodeMap[projectedNode.id] : null;
+  const model = graph?.readNodeConfiguration(projectedNode.id);
   document.getElementById('info-title').textContent = model?.name || projectedNode.name || projectedNode.id;
   if (model) {
     renderNodeForm(model, false, graph);
@@ -3940,7 +3940,7 @@ async function loadDeploymentInspector(owner, view, inspector, client) {
     const source = await client.deploymentSource(binding, { signal: inspector.controller.signal });
     if (!current()) return;
     // This graph is only Inspector data. The canvas and workspace snapshot keep the drawing projection.
-    inspector.graph = parseGraphML(source.graphMl);
+    inspector.graph = parseGraphML(source.graphMl, { inspectNodeDefaults: true });
   } catch {
     // A missing source, denied read, or invalid document leaves the restricted drawing usable.
   }
@@ -7517,6 +7517,25 @@ function nodeEditorCatalogDescriptor(descriptor, kind) {
   return kind === 'START' ? null : descriptor;
 }
 
+function preserveDeploymentInputValue(input) {
+  const value = input.getAttribute('value');
+  if (value === null || input.value === value) return input;
+  if (!/[\r\n]/.test(value)) {
+    input.type = 'text';
+    input.value = value;
+    return input;
+  }
+  const textarea = document.createElement('textarea');
+  for (const attribute of input.attributes) {
+    if (attribute.name !== 'type' && attribute.name !== 'value') {
+      textarea.setAttribute(attribute.name, attribute.value);
+    }
+  }
+  textarea.value = value;
+  input.replaceWith(textarea);
+  return textarea;
+}
+
 function renderDeploymentNodeFields(panel, nodeId) {
   panel.className = 'editor-form';
   panel.dataset.tooltipExempt = 'persistent-form-labels';
@@ -7528,7 +7547,9 @@ function renderDeploymentNodeFields(panel, nodeId) {
   panel.querySelectorAll('button:not([data-contextual-help]), .program-lifecycle').forEach(action => action.remove());
   panel.querySelectorAll('input, select, textarea').forEach(control => {
     control.required = false;
-    if (control.matches('textarea, input:not([type]), input[type="text"], input[type="number"]')) {
+    if (control.matches('input:not([type]), input[type="text"], input[type="number"]')) {
+      preserveDeploymentInputValue(control).readOnly = true;
+    } else if (control.matches('textarea')) {
       control.readOnly = true;
     } else {
       control.disabled = true;
@@ -7544,7 +7565,7 @@ function renderNodeForm(model, creating, deploymentGraph = null) {
   const descriptor = catalogDescriptor(model.behavior);
   const catalogEditorDescriptor = programCatalogEditorDescriptor(nodeEditorCatalogDescriptor(descriptor, model.kind));
   const startMapping = startCorrelationDescriptor(model.kind);
-  const catalogFieldOwner = { documentId: workspace.activeId, nodeId: model.id, graph: configurationGraph };
+  const catalogFieldOwner = { documentId: workspace.activeId, nodeId: model.id, graph: configurationGraph, readOnly };
   const catalogNames = new Set((descriptor?.properties || []).map(property => property.name));
   for (const property of startMapping?.properties || []) catalogNames.add(property.name);
   // `runtime.nature` (or whatever `descriptor.natureProperty` names) is platform-owned, never a
@@ -7962,6 +7983,8 @@ function catalogPropertyFieldsHtml(descriptor, values, owner) {
     // telling a document that declares nothing at all apart from a document that declares a non-empty
     // value the allowed values do not recognise -- `mismatchedOption` needs exactly that second case.
     const present = values[property.name] != null;
+    const explicitBlank = owner?.readOnly && present && String(value) === '';
+    const blankLabel = explicitBlank ? '' : escapeHtml(uiText("workspace.template.app.not.declared"));
     // The sentence follows the control. It used to end "never paste a secret" because the
     // control was a text box that would have taken one; the control now cannot, so the hint says
     // where the choices come from and what the document actually stores instead.
@@ -8058,8 +8081,8 @@ function catalogPropertyFieldsHtml(descriptor, values, owner) {
       // for a control the document never declared (the "Not declared" option's own `value=""`), so
       // `String(value) === ''` reads as "not declared" here before and after the container is
       // rerendered, regardless of what `present` says after that rerender.
-      const undeclaredOption = undeclarable
-        ? `<option value="" ${!declared && (!present || String(value) === '') ? 'selected' : ''}>${escapeHtml(uiText("workspace.template.app.not.declared"))}</option>` : '';
+      const undeclaredOption = undeclarable || explicitBlank
+        ? `<option value="" ${!declared && (!present || String(value) === '') ? 'selected' : ''}>${blankLabel}</option>` : '';
       const mismatchedOption = !declared && present && String(value) !== ''
         ? `<option value="${escapeAttribute(value)}" selected>${escapeHtml(uiText("workspace.template.app.current.value.not.among.the.declared.alternatives"))} ${escapeHtml(value)}</option>` : '';
       // a non-empty, non-conforming value deliberately leaves the fail-closed
@@ -8130,7 +8153,8 @@ function catalogPropertyFieldsHtml(descriptor, values, owner) {
       const recognized = !present || stringValue === '' || stringValue === 'true' || stringValue === 'false';
       const unrecognizedOption = recognized ? ''
         : `<option value="${escapeAttribute(value)}" selected>${escapeHtml(uiText("workspace.template.app.current.value.not.recognized"))} ${escapeHtml(value)}</option>`;
-      control = `<select data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="BOOLEAN"${accessibility}>${property.name.startsWith('saga.') ? `<option value="" ${stringValue === '' ? 'selected' : ''}>${escapeHtml(uiText("workspace.template.app.not.declared"))}</option>` : ''}${unrecognizedOption}<option value="false" ${recognized && stringValue !== 'true' && (!property.name.startsWith('saga.') || stringValue !== '') ? 'selected' : ''}>${escapeHtml(uiText("workspace.template.app.false"))}</option><option value="true" ${stringValue === 'true' ? 'selected' : ''}>${escapeHtml(uiText("workspace.template.app.true"))}</option></select>`;
+      const showBlank = property.name.startsWith('saga.') || explicitBlank;
+      control = `<select data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="BOOLEAN"${accessibility}>${showBlank ? `<option value="" ${stringValue === '' ? 'selected' : ''}>${blankLabel}</option>` : ''}${unrecognizedOption}<option value="false" ${recognized && stringValue !== 'true' && (!showBlank || stringValue !== '') ? 'selected' : ''}>${escapeHtml(uiText("workspace.template.app.false"))}</option><option value="true" ${stringValue === 'true' ? 'selected' : ''}>${escapeHtml(uiText("workspace.template.app.true"))}</option></select>`;
     } else {
       const inputType = property.type === 'INTEGER' || property.type === 'DECIMAL' ? 'number' : 'text';
       const step = property.type === 'DECIMAL' ? ' step="any"' : '';

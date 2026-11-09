@@ -122,6 +122,45 @@ describe('GraphML compatibility', () => {
     expect(serialized).toContain('<y:Resources/>');
   });
 
+  it('resolves deployed scalar node defaults without materializing them in authoring XML', () => {
+    const xml = `<graphml xmlns="http://graphml.graphdrawing.org/xmlns" xmlns:x="urn:extension">
+      <key id="flag" for="node" attr.name="flag" attr.type="boolean"><default>true</default></key>
+      <key id="count" for="node" attr.name="count" attr.type="int"><default> 0 </default></key>
+      <key id="text" for="all" attr.name="text" attr.type="string"><default> text </default></key>
+      <key id="edgeOnly" for="edge" attr.type="string"><default>edge</default></key>
+      <key id="complex" for="node" attr.type="string"><default><x:opaque/></default></key>
+      <graph id="g" edgedefault="directed">
+        <node id="defaults"/>
+        <node id="overrides"><data key="flag">false</data><data key="text"/></node>
+        <node id="opaque"><data key="text"><x:opaque/></data></node>
+      </graph>
+    </graphml>`;
+
+    const authoring = parseGraphML(xml);
+    expect(authoring.readNodeConfiguration).toBeUndefined();
+    expect(authoring.nodeMap.defaults.properties).toEqual({});
+    expect(authoring.nodeMap.overrides.properties.text).toBe('');
+    const serialized = serializeGraphML(authoring);
+    const roundTrip = parseGraphML(serialized);
+    expect(roundTrip.nodeMap.defaults.properties).not.toHaveProperty('count');
+    expect(roundTrip.keyDefinitions.count.defaultValue).toBe(' 0 ');
+    expect(roundTrip.nodeMap.overrides.properties.flag).toBe('false');
+
+    const inspection = parseGraphML(xml, { inspectNodeDefaults: true });
+    expect(inspection.readNodeConfiguration('defaults')).toMatchObject({
+      properties: { flag: 'true', count: '0', text: ' text ' },
+      propertyTypes: { flag: 'boolean', count: 'int', text: 'string' },
+    });
+    expect(inspection.readNodeConfiguration('overrides').properties).toEqual({
+      flag: 'false', count: '0', text: '',
+    });
+    expect(inspection.readNodeConfiguration('opaque').properties).toEqual({ flag: 'true', count: '0' });
+    expect(inspection.readNodeConfiguration('defaults').properties).not.toHaveProperty('complex');
+    expect(inspection.readNodeConfiguration('defaults').properties).not.toHaveProperty('edgeOnly');
+    expect(inspection.readNodeConfiguration('toString')).toBeNull();
+    expect(inspection.nodeMap.defaults.properties).toEqual({});
+  });
+
   it('materialises canonical kind and outcome when loading a legacy executable graph', () => {
     const doc = '<graphml xmlns="http://graphml.graphdrawing.org/xmlns" '
       + 'xmlns:y="http://www.yworks.com/xml/graphml">'

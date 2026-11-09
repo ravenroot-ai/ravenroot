@@ -61,8 +61,12 @@ const deployedGraph = `<graphml xmlns="http://graphml.graphdrawing.org/xmlns">
 const graphVersion = createHash('sha256').update(deployedGraph).digest('hex');
 const binding = { deploymentId, incarnationId, graphVersion };
 
-async function setup(page, { denied = false, wrongVersion = false } = {}) {
+async function setup(page, {
+  denied = false, wrongVersion = false, sourceGraph = deployedGraph, catalog = [descriptor],
+} = {}) {
   const backend = await deploymentService(page);
+  const graphVersion = createHash('sha256').update(sourceGraph).digest('hex');
+  const binding = { deploymentId, incarnationId, graphVersion };
   const status = {
     deploymentId, tenantId: 'tenant', graphVersion, state: 'READY', sourceCount: 1,
     runtimeIncarnationId: incarnationId, registrationIdentity: 'registered-configuration',
@@ -90,10 +94,10 @@ async function setup(page, { denied = false, wrongVersion = false } = {}) {
     if (denied) return route.fulfill({ status: 403, json: { code: 'FORBIDDEN' } });
     return route.fulfill({ json: {
       ...binding, graphVersion: wrongVersion ? 'unrelated-version' : graphVersion,
-      graphMlBase64: Buffer.from(deployedGraph).toString('base64'),
+      graphMlBase64: Buffer.from(sourceGraph).toString('base64'),
     } });
   });
-  await page.route('**/v1/node-types', route => route.fulfill({ json: [descriptor] }));
+  await page.route('**/v1/node-types', route => route.fulfill({ json: catalog }));
   await page.route('**/v1/credentials', route => route.fulfill({ json: { credentials: [{
     reference, label: credentialLabel, scheme: 'api-key', username: '', createdAt: '2026-10-25T12:00:00Z',
   }] } }));
@@ -185,6 +189,73 @@ test('deployed Inspector matches editor controls and retains values across draft
       draftName: window.ravenroot.workspace.find(id).graph.nodeMap.source.name };
   }, draftId)).toEqual({ properties: {}, nodes: 3, history: 0, draftName: 'Edited draft source' });
   expect(calls.every(call => call.method === 'GET')).toBe(true);
+});
+
+test('deployed defaults drive catalog visibility and preserve explicit empty and false overrides', async ({ page }) => {
+  const sourceGraph = deployedGraph
+    .replace('<key id="mode" for="node" attr.name="mode" attr.type="string"/>',
+      '<key id="mode" for="all" attr.name="mode" attr.type="string"><default>advanced</default></key>')
+    .replace('<key id="enabled" for="node" attr.name="enabled" attr.type="boolean"/>',
+      '<key id="enabled" for="node" attr.name="enabled" attr.type="boolean"><default>true</default></key>')
+    .replace('<key id="count" for="node" attr.name="count" attr.type="int"/>',
+      '<key id="count" for="node" attr.name="count" attr.type="int"><default>0</default></key>')
+    .replace('<key id="custom" for="node" attr.name="custom.routing" attr.type="string"/>',
+      `<key id="custom" for="all" attr.name="custom.routing" attr.type="string"><default>${custom}</default></key>
+       <key id="emptyChoice" for="node" attr.name="emptyChoice" attr.type="string"><default>graph</default></key>`)
+    .replace('<data key="mode">basic</data>', '<data key="emptyChoice"/>')
+    .replace('<data key="count">0</data>', '')
+    .replace(`<data key="custom">${custom}</data>`, '');
+  const properties = [...descriptor.properties,
+    property('emptyChoice', 'Optional choice', 'STRING', { allowedValues: ['graph', 'catalog'], defaultValue: 'catalog' })];
+  await setup(page, { sourceGraph, catalog: [{ ...descriptor, properties }] });
+  await openReadOnlyView(page);
+  await selectSource(page);
+  const inspector = page.locator('section[data-deployment-inspector-node="source"]');
+  await expect(field(inspector, 'mode')).toHaveValue('advanced');
+  await expect(field(inspector, 'optional')).toBeVisible();
+  await expect(field(inspector, 'optional')).toHaveValue('retained but irrelevant');
+  await expect(field(inspector, 'count')).toHaveValue('0');
+  await expect(field(inspector, 'enabled')).toHaveValue('false');
+  await expect(field(inspector, 'emptyChoice')).toHaveValue('');
+  await expect(inspector.locator('textarea[data-property-value]')).toHaveValue(custom);
+});
+
+test('deployed catalog retains multiline strings and an exact signed integer', async ({ page }, testInfo) => {
+  const multiline = '\nfirst line\nsecond line\n';
+  const sourceGraph = deployedGraph
+    .replace('<key id="optional"', '<key id="multiline" for="node" attr.name="multiline" attr.type="string"/>\n  <key id="optional"')
+    .replace('<data key="optional">', `<data key="multiline">${multiline}</data><data key="optional">`)
+    .replace('<data key="count">0</data>', '<data key="count">+7</data>');
+  const properties = [...descriptor.properties, property('multiline', 'Multiline string', 'STRING')];
+  await setup(page, { sourceGraph, catalog: [{ ...descriptor, properties }] });
+  await openReadOnlyView(page);
+  await selectSource(page);
+  const inspector = page.locator('section[data-deployment-inspector-node="source"]');
+  const text = field(inspector, 'multiline');
+  await expect(text).toHaveValue(multiline);
+  await expect(text).toHaveAccessibleName('Multiline string');
+  await expect(text).toHaveAttribute('readonly', '');
+  await expect(field(inspector, 'count')).toHaveValue('+7');
+  await expect(field(inspector, 'count')).toHaveAttribute('readonly', '');
+  await expect(field(inspector, 'credentialRef')).toBeDisabled();
+  await text.focus();
+  await page.screenshot({ path: testInfo.outputPath('deployed-multiline-and-signed.png') });
+});
+
+test('deployed governed program retains its multiline test payload', async ({ page }) => {
+  const payload = '{\n  "approved": true\n}';
+  const sourceGraph = deployedGraph
+    .replace('<key id="optional"', '<key id="testPayload" for="node" attr.name="testPayload" attr.type="string"/>\n  <key id="optional"')
+    .replace('<data key="optional">', `<data key="testPayload">${payload}</data><data key="optional">`)
+    .replace('<data key="behavior">external.consume</data>', '<data key="behavior">program</data>');
+  const program = { ...descriptor, behavior: 'program', displayName: 'Program', properties: [] };
+  await setup(page, { sourceGraph, catalog: [descriptor, program] });
+  await openReadOnlyView(page);
+  await selectSource(page);
+  const inspector = page.locator('section[data-deployment-inspector-node="source"]');
+  await expect(field(inspector, 'testPayload')).toHaveValue(payload);
+  await expect(field(inspector, 'testPayload')).toHaveAttribute('readonly', '');
+  await expect(inspector.locator('[data-program-operation]')).toHaveCount(0);
 });
 
 for (const result of ['denied', 'wrongVersion']) {

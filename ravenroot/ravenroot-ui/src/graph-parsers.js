@@ -540,7 +540,7 @@ export function assertGraphMLWithinLimits(xmlText) {
   }
 }
 
-export function parseGraphML(xmlText) {
+export function parseGraphML(xmlText, options) {
   assertGraphMLWithinLimits(xmlText);
   // Browser DOMParser implementations do not expose secure-processing controls.
   // Reject DTDs before parsing so entity declarations are never resolved.
@@ -715,6 +715,7 @@ export function parseGraphML(xmlText) {
     return Number.isFinite(parsed) ? parsed : null;
   }
 
+  const complexNodeData = options?.inspectNodeDefaults ? new Map() : null;
   function simpleProperties(el) {
     // Object.create(null): `name` is definition.name, itself the document-authored attr.name --
     // same reasoning as keyDefinitions/nodeMap above.
@@ -737,6 +738,10 @@ export function parseGraphML(xmlText) {
         if (['node', 'edge'].includes(el.localName)
             && ['kind', 'behavior', 'outcome'].includes(definition.name.toLowerCase())) {
           throw productError("workspace.error.graph.parsers.complex.graphml.data.key.collides.with.executable.property", new Error(`Complex GraphML data key '${keyId}' collides with executable property '${definition.name}'`), { value1: keyId, value2: definition.name });
+        }
+        if (complexNodeData && el.localName === 'node') {
+          if (!complexNodeData.has(el.id)) complexNodeData.set(el.id, new Set());
+          complexNodeData.get(el.id).add(keyId);
         }
         continue;
       }
@@ -1064,9 +1069,30 @@ export function parseGraphML(xmlText) {
   // the canvas will draw, rather than the pre-classification ones. `classifyFailureRoutes` mutates
   // and returns the same object it is given, so `graphProperties` rides through untouched --
   // it must, since this is exactly the field a distracted conflict resolution here would drop.
-  return classifyFailureRoutes(
-    { nodes, edges, nodeMap, format: 'graphml', sourceXml: xmlText, keyDefinitions, graphProperties,
-      ...(visualGroupsMetadata?.invalid ? { _visualGroupsMetadata: visualGroupsMetadata } : {}) });
+  const graph = { nodes, edges, nodeMap, format: 'graphml', sourceXml: xmlText, keyDefinitions, graphProperties,
+    ...(visualGroupsMetadata?.invalid ? { _visualGroupsMetadata: visualGroupsMetadata } : {}) };
+  if (complexNodeData) {
+    const defaults = Object.values(keyDefinitions).filter(definition => definition.defaultValue !== null
+      && ['node', 'all'].includes(definition.scope));
+    // Resolve defaults on demand for the selected node. The authoring bag keeps only explicit
+    // data, and a graph with many nodes and defaults does not expand their Cartesian product.
+    graph.readNodeConfiguration = id => {
+      const node = nodeMap[id];
+      if (!node) return null;
+      if (!defaults.length) return node;
+      const properties = Object.assign(Object.create(null), node.properties);
+      const propertyTypes = Object.assign(Object.create(null), node.propertyTypes);
+      const complex = complexNodeData.get(id);
+      for (const definition of defaults) {
+        if (Object.hasOwn(properties, definition.name) || complex?.has(definition.id)) continue;
+        properties[definition.name] = definition.type === 'string'
+          ? definition.defaultValue : definition.defaultValue.trim();
+        propertyTypes[definition.name] = definition.type;
+      }
+      return { ...node, properties, propertyTypes };
+    };
+  }
+  return classifyFailureRoutes(graph);
 }
 
 // ═══════════════════════════════════════════════════════════════

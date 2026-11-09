@@ -3125,7 +3125,7 @@ FINAL_REVIEW_UI_PERSONAL_INSERTIONS = (
 # The deployment Inspector is a separate read path. Reverse its bounded source delta
 # before applying the established personal and repository-save correspondences.
 FINAL_REVIEW_UI_INSPECTOR_BASE = "11769d419678a178280b315d169042f36a35388f"
-FINAL_REVIEW_UI_INSPECTOR_AFTER = "bafb4fdc6e233b4377e072bf09acec97fc984bc6394e9166f30a120df47f53b4"
+FINAL_REVIEW_UI_INSPECTOR_AFTER = "8be611dccb2685bf510d6ff30c2c1305bd6743c2fcf0d54903deff53c461943c"
 FINAL_REVIEW_UI_INSPECTOR_METHODS = (
     "beginWorkspaceAuthority", "openDeploymentDocument", "attachDeploymentDocument",
     "teardownDocument", "showNodeInfo", "renderNodeForm", "catalogPropertyFieldsHtml",
@@ -3134,7 +3134,7 @@ FINAL_REVIEW_UI_INSPECTOR_METHODS = (
 )
 FINAL_REVIEW_UI_INSPECTOR_HELPERS = (
     "retireDeploymentInspector", "refreshDeploymentInspector", "showDeploymentNodeInspector",
-    "loadDeploymentInspector", "renderDeploymentNodeFields",
+    "loadDeploymentInspector", "preserveDeploymentInputValue", "renderDeploymentNodeFields",
 )
 FINAL_REVIEW_UI_INSPECTOR_CATALOG_BEFORE = "f878c18ccda89899c5e8ab12aa889db6b90ccfd6a34346cdde882cee6bac87f3"
 FINAL_REVIEW_UI_INSPECTOR_CATALOG_INSERTION = (

@@ -10343,6 +10343,7 @@ class PristineSaveFinalReviewCorrespondenceTest(unittest.TestCase):
                     source.replace(" && (owner.authoring.providerDocumentId || owner.authoring.saveFlight)", "", 1),
                     source.replace("owner.authoring.localChanges = true;", "owner.visualGroupPresentationDirty = true;", 1),
                     source.replace("await client.deploymentSource(binding,", "await client.deploymentSource(null,", 1),
+                    source.replace("textarea.value = value;", "textarea.value = '';", 1),
                 ]
                 helper = audit._javascript_function_span(source, "repositoryPresentationSnapshot")
                 self.assertIsNotNone(helper)

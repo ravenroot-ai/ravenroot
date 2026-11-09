@@ -111,7 +111,9 @@ async function openReadOnlyView(page) {
   await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().graph.format)).toBe('deployment');
 }
 
-const selectSource = page => page.evaluate(() => window.cy.getElementById('source').select());
+const selectSource = page => page.evaluate(() => {
+  window.cy.getElementById('source').select();
+});
 const formHeadings = panel => panel.locator('label:visible, .editor-section-title:visible')
   .evaluateAll(elements => elements.map(element => {
     const copy = element.cloneNode(true);

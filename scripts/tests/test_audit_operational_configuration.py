@@ -10297,6 +10297,14 @@ class PristineSaveFinalReviewCorrespondenceTest(unittest.TestCase):
         self.assertIsNotNone(anchor)
         baseline = audit.committed_source(ROOT, audit.FINAL_REVIEW_UI_PERSONAL_BASE, relative.as_posix())
         self.assertIsNotNone(baseline)
+        inspector_base = audit.committed_source(
+            ROOT, audit.FINAL_REVIEW_UI_INSPECTOR_BASE, relative.as_posix())
+        self.assertIsNotNone(inspector_base)
+        revisions = {
+            audit.FINAL_REVIEW_UI_SAVE_ANCHOR: anchor,
+            audit.FINAL_REVIEW_UI_PERSONAL_BASE: baseline,
+            audit.FINAL_REVIEW_UI_INSPECTOR_BASE: inspector_base,
+        }
         for group in audit.FINAL_REVIEW_UI_SAVE_GROUPS:
             self.assertTrue(audit.final_review_ui_save_correspondence(
                 ROOT, group, relative, audit.FINAL_REVIEW_UI_SAVE_BEFORE))
@@ -10318,7 +10326,7 @@ class PristineSaveFinalReviewCorrespondenceTest(unittest.TestCase):
                 return audit.final_review_ui_save_correspondence(root, group, path, digest)
             with mock.patch.object(audit, "revision_is_ancestor", return_value=True), \
                     mock.patch.object(audit, "committed_source", side_effect=lambda _root, revision, _path:
-                                      baseline if revision == audit.FINAL_REVIEW_UI_PERSONAL_BASE else anchor):
+                                      revisions.get(revision)):
                 for group in audit.FINAL_REVIEW_UI_SAVE_GROUPS:
                     self.assertTrue(matches(group), group)
                 self.assertFalse(matches("unknown-group"))
@@ -10334,6 +10342,8 @@ class PristineSaveFinalReviewCorrespondenceTest(unittest.TestCase):
                     source.replace(" || owner.authoring.saveFlight", "", 1),
                     source.replace(" && (owner.authoring.providerDocumentId || owner.authoring.saveFlight)", "", 1),
                     source.replace("owner.authoring.localChanges = true;", "owner.visualGroupPresentationDirty = true;", 1),
+                    source.replace("await client.deploymentSource(binding,", "await client.deploymentSource(null,", 1),
+                    source.replace("textarea.value = value;", "textarea.value = '';", 1),
                 ]
                 helper = audit._javascript_function_span(source, "repositoryPresentationSnapshot")
                 self.assertIsNotNone(helper)
@@ -10370,3 +10380,25 @@ class PristineSaveFinalReviewCorrespondenceTest(unittest.TestCase):
             with mock.patch.object(audit, "revision_is_ancestor", return_value=True), \
                     mock.patch.object(audit, "committed_source", return_value=source):
                 self.assertFalse(matches())
+
+    def test_inspector_catalog_inverse_preserves_only_exact_frozen_catalog_proofs(self):
+        relative = Path("ravenroot/ravenroot-ui/src/ui-text.js")
+        source = (ROOT / relative).read_text()
+        digest = audit.FINAL_REVIEW_UI_INSPECTOR_CATALOG_BEFORE
+        correspondence = audit.final_review_ui_inspector_catalog_correspondence
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / relative
+            target.parent.mkdir(parents=True)
+            target.write_text(source)
+            for group in ("ui-message-catalog-copy", "ui-message-catalog-keys"):
+                self.assertTrue(correspondence(root, group, relative, digest))
+            self.assertFalse(correspondence(root, "ui-presentation-copy", relative, digest))
+            self.assertFalse(correspondence(root, "ui-message-catalog-copy", relative, "0" * 64))
+            for changed in (
+                    source.replace("Loading the deployed node configuration", "Loading graph source", 1),
+                    source.replace("'Application correlation preview'", "'Unreviewed preview'", 1),
+                    source + audit.FINAL_REVIEW_UI_INSPECTOR_CATALOG_INSERTION):
+                self.assertNotEqual(source, changed)
+                target.write_text(changed)
+                self.assertFalse(correspondence(root, "ui-message-catalog-copy", relative, digest))

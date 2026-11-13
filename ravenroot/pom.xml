@@ -167,7 +167,7 @@
           The Python language level is distinct from the component version: on this component,
           `sys.version` reports 3.12.8. That is the level artifacts are written against.
         -->
-        <graalvm.polyglot.version>25.2.4</graalvm.polyglot.version>
+        <graalvm.polyglot.version>25.3.4.1</graalvm.polyglot.version>
         <nimbus-jose-jwt.version>10.9.1</nimbus-jose-jwt.version>
         <!-- Jetty is used only by the optional, independently bound interaction WebSocket listener. -->
         <jetty.version>12.1.12</jetty.version>

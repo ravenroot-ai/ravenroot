@@ -171,7 +171,7 @@
         <nimbus-jose-jwt.version>10.9.1</nimbus-jose-jwt.version>
         <!-- Jetty is used only by the optional, independently bound interaction WebSocket listener. -->
         <jetty.version>12.1.12</jetty.version>
-        <sqlite-jdbc.version>3.53.2.1</sqlite-jdbc.version>
+        <sqlite-jdbc.version>3.53.4.0</sqlite-jdbc.version>
         <!--
             The PostgreSQL driver ravenroot-persistence-postgresql ships at runtime; ravenroot-server
             depends on the adapter at compile scope, so the distribution bundles it. 42.7.12 is the
